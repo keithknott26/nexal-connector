@@ -11,7 +11,8 @@ Full deployment, commands, security model and validation:
 Prerequisites: coordinator code and migration 0006 installed, both Macs enrolled
 in the same reachable coordinator, valid host credentials, M4 donor still running.
 Two separate loopback coordinators do not constitute a shared service.
-No remote deployment or native two-Mac acceptance has been performed.
+The shared-dev coordinator and migration 0006 were deployed September 19, 2026.
+Native two-Mac acceptance remains pending; deployment does not enroll either Mac.
 
 ## Reusable platform enrollment
 

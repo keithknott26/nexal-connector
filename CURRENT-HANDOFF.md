@@ -4,14 +4,16 @@ Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
 engineering preview, not a production-approved distributed cloud.
 
-## Concise documentation and shared dashboard blocker
+## Concise documentation and shared dashboard deployment
 
 Owner prefers a concise, current README with minimal full-path M4/M2 commands.
 Detailed setup remains in `DEVELOPER-GUIDE.md` and the linked lab guides.
-`SETUP-TROUBLESHOOTING.md` records the reproduced shared homepage HTTP 401 JSON
-instead of dashboard HTML. Health is reachable; owner dashboard, live relay
-deployment and two-Mac transfer remain unverified. No remote deployment was
-performed; Workers deployment access is currently unavailable in this session.
+The shared dashboard was repaired September 19, 2026 by attaching its missing
+assets. The encrypted relay and migration 0006 are deployed to the shared-dev
+Worker/database, retaining its existing owner secret and enrolled host.
+Root HTML, assets, health, unauthenticated API rejection and browser login-screen
+rendering pass. Owner login and native two-Mac delivery remain unverified.
+See `SETUP-TROUBLESHOOTING.md`; this supersedes older no-deployment statements.
 
 ## Network labeling checkpoint
 
@@ -35,8 +37,8 @@ now prepares the Go connector and prompts privately for a one-use invitation.
 coordinator mismatches refused, and saved host IDs skip re-enrollment without
 claiming live credential verification. Defaults target the shared HTTPS
 `nexal-coordinator-dev.nexal.systems` and the normal Nexal Keychain profile.
-No donor/agent/jobs start, no deployment occurs, and the live relay still needs
-its coordinator update/migration. See the pager `PLATFORM-DELIVERY.md`.
+No donor/agent/jobs start and no deployment occurs from the enrollment script.
+The shared-dev relay is now deployed separately. See `PLATFORM-DELIVERY.md`.
 Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pending.
 
 ## Product and owner decisions

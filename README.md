@@ -46,11 +46,11 @@ Enrollment preserves existing profiles. Add `--prepare-only` to stop before
 invitation entry. Use `--network-info` instead of enrollment/donor flags to list
 numbered connections without starting a listener.
 
-**Current shared-service blocker (2026-09-19):** the configured HTTPS homepage
-returns owner-auth JSON rather than the dashboard. Health is reachable, but
-invitation creation through that homepage is blocked. See
-[setup troubleshooting](SETUP-TROUBLESHOOTING.md); never disable authentication.
-The relay update and migration 0006 have not been deployed by this work.
+**Shared pilot ready for owner acceptance (2026-09-19):**
+[Open the dashboard](https://nexal-coordinator-dev.nexal.systems/) and use its
+Nexal owner credential, not a Cloudflare API token, to authorize the tab.
+Dashboard assets, relay and migration 0006 are deployed. Owner login and the
+two-Mac transfer still need testing; see [troubleshooting](SETUP-TROUBLESHOOTING.md).
 
 ## More
 

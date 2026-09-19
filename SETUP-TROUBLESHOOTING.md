@@ -35,6 +35,19 @@ Do not paste owner/host tokens or invitations into chat, URLs or GitHub. Do not
 reset profiles, reuse a localhost invitation on another coordinator, or expose
 an anonymous local development server to the network.
 
+## Enrollment HTTP 409 or wrong credential pasted
+
+The owner token signs into the browser; it is **not** the enrollment invitation.
+In the shared dashboard, use **Hosts > Enroll host > Generate invitation** and
+copy the newly generated `enr_` code into Terminal. Each invitation is one-use
+and expires after ten minutes. HTTP 409 means invalid, expired or already used.
+
+Update the checkout and rerun the same enrollment command with the same
+`--profile private-lan`; do not delete the configuration. The script now rejects
+incorrect invitation formats locally without echoing or submitting the value.
+Format validation does not establish validity: the coordinator still verifies
+the invitation. If another error occurs, resolve that error before retrying.
+
 ## “An enrollment is already recorded”
 
 This means the selected local configuration contains a host ID. The wrapper

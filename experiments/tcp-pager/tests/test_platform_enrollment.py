@@ -14,6 +14,7 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts"
 ORIGIN = "https://nexal-coordinator-dev.nexal.systems"
+INVITATION = "enr_" + "a" * 64
 
 
 class EnrollmentTests(unittest.TestCase):
@@ -73,7 +74,7 @@ if args[0] == "init":
     path.write_text(json.dumps({"coordinator": args[args.index("--coordinator")+1], "name": args[args.index("--name")+1]}))
 elif args[0] == "enroll":
     code = sys.stdin.read().strip()
-    if code != "test-secret-invitation": sys.exit(1)
+    if code != "enr_" + "a" * 64: sys.exit(1)
     if os.environ.get("TEST_ENROLL_FAIL"): sys.exit(1)
     data = json.loads(path.read_text())
     data["hostId"] = "host_test"
@@ -259,9 +260,11 @@ else: sys.exit(1)
                 self.env["TEST_ENROLL_FAIL"] = "1"
             else:
                 self.env.pop("TEST_ENROLL_FAIL", None)
-            status, output = self.run_terminal(invitation="test-secret-invitation")
+            status, output = self.run_terminal(invitation=INVITATION)
             self.assertEqual(status == 0, not fail, output)
-            self.assertNotIn("test-secret-invitation", self.log.read_text())
+            self.assertNotIn(INVITATION, self.log.read_text())
+            if fail:
+                self.assertIn(b"HTTP 409 means", output)
             data = json.loads(self.config.read_text())
             self.assertEqual("hostId" in data, not fail)
         self.assertEqual([json.loads(line) for line in self.browser_log.read_text().splitlines()],
@@ -269,14 +272,14 @@ else: sys.exit(1)
 
     def test_browser_failure_is_nonfatal(self):
         self.env["TEST_OPEN_FAIL"] = "1"
-        status, output = self.run_terminal(invitation="test-secret-invitation")
+        status, output = self.run_terminal(invitation=INVITATION)
         self.assertEqual(status, 0, output)
         self.assertIn(b"Could not open the default browser", output)
         self.assertIn((ORIGIN + "/#/hosts").encode(), output)
         self.assertEqual(json.loads(self.config.read_text())["hostId"], "host_test")
 
     def test_no_browser_still_allows_enrollment(self):
-        status, output = self.run_terminal("--no-browser", invitation="test-secret-invitation")
+        status, output = self.run_terminal("--no-browser", invitation=INVITATION)
         self.assertEqual(status, 0, output)
         self.assertIn(b"opening disabled", output)
         self.assertFalse(self.browser_log.exists())
@@ -296,6 +299,21 @@ else: sys.exit(1)
         status, output = self.run_terminal("--prepare-only")
         self.assertEqual(status, 0, output)
         self.assertFalse(self.browser_log.exists())
+
+    def test_wrong_credential_never_reaches_enrollment(self):
+        self.existing(name="M4 mini")
+        before = self.config.read_bytes()
+        for credential in ("owner_" + "b" * 64, "b" * 64,
+                           "enr_short", "enr_" + "g" * 64,
+                           INVITATION + " "):
+            status, output = self.run_terminal(invitation=credential)
+            self.assertNotEqual(status, 0, output)
+            self.assertIn(b"Nothing was submitted", output)
+            self.assertIn(b"Generate invitation", output)
+            self.assertEqual(before, self.config.read_bytes())
+            self.assertFalse(self.log.exists())
+        status, output = self.run_terminal(invitation=INVITATION)
+        self.assertEqual(status, 0, output)
 
 
 if __name__ == "__main__":

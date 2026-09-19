@@ -147,7 +147,7 @@ open_dashboard
 printf 'After signing in, use Hosts > Enroll host > Generate invitation, then return to this Terminal.\n'
 printf 'Use that shared dashboard, not localhost. Do not paste the invitation into chat.\n'
 printf 'The Terminal prompt accepts the ONE-USE INVITATION, not the owner credential.\n'
-printf 'Paste one-use code, then press Return (input hidden): '
+printf 'Paste the generated enr_ invitation, NOT the owner token (input hidden): '
 CODE=""
 if ! IFS= read -r -s CODE; then
   printf '\nNo complete code received; configuration preserved.\n' >&2
@@ -157,8 +157,23 @@ printf '\n'
 [[ -n "$CODE" && ${#CODE} -le 256 ]] || {
   printf 'Empty or oversized invitation; no enrollment attempted.\n' >&2; exit 1;
 }
-printf '%s\n' "$CODE" | "$BIN" enroll --code-stdin --config "$CONFIG"
-unset CODE
+# Current coordinator invitations are enr_ followed by 32 bytes in hex.
+# This catches accidental owner-token pastes without transmitting or echoing them.
+[[ "$CODE" =~ ^enr_[0-9a-f]{64}$ ]] || {
+  unset CODE
+  printf 'Not a Nexal enrollment invitation. Nothing was submitted.\n' >&2
+  printf 'Use the owner token only in the browser. In Hosts > Enroll host > Generate invitation, copy the generated enr_ code, then rerun this same command.\n' >&2
+  exit 1
+}
+if printf '%s\n' "$CODE" | "$BIN" enroll --code-stdin --config "$CONFIG"; then
+  unset CODE
+else
+  STATUS=$?
+  unset CODE
+  printf 'Enrollment did not complete. HTTP 409 means the invitation is invalid, expired, or already used; generate a fresh invitation in the same coordinator dashboard and rerun this command.\n' >&2
+  printf 'For other errors, resolve the reported cause first. Do not delete the profile or paste the owner token here.\n' >&2
+  exit "$STATUS"
+fi
 printf 'Enrollment complete. No agent or job started; existing donor was left alone.\n'
 printf 'Use this configuration for bundle transfer: %s\n' "$CONFIG"
 printf 'Refresh Hosts in the shared dashboard and match the hostId printed above before enrolling the next Mac.\n'

@@ -6,6 +6,14 @@ engineering preview, not a production-approved distributed cloud.
 
 ## Named enrollment and iPhone repository checkpoint
 
+Owner accidentally pasted dashboard owner token into enrollment Terminal input
+and received HTTP 409 on an earlier checkout. Wrapper now validates the current
+`enr_` + 64 lowercase hex format before submission, never echoes rejected input,
+and gives invitation-specific recovery instructions on command failure.
+No profile reset or credential rotation is performed.
+Validation: 16 enrollment mock tests and 12 setup tests pass; native retry
+with a real invitation remains owner acceptance.
+
 Enrollment opens the secret-free coordinator `/#/hosts` URL with `/usr/bin/open`
 in interactive mode before invitation input, including interactive inspection of
 an already-enrolled profile. Owner credentials go only in the browser;

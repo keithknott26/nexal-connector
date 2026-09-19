@@ -16,7 +16,8 @@ bash "$S" --donor
 
 Enrollment opens the Hosts page in your default browser. Enter the Nexal owner
 credential there, generate a one-use invitation, then paste the invitation into
-Terminal's hidden prompt. No credential is put in the browser URL.
+Terminal's hidden prompt. The invitation starts with `enr_`; **do not paste
+the owner token into Terminal**. No credential is put in the browser URL.
 Donor mode shows numbered IP,
 Ethernet/Wi-Fi and interface labels; choose a number and leave its terminal open.
 Stop an existing donor before starting another. Restarting produces a new bundle.

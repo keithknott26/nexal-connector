@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"strings"
@@ -58,6 +59,41 @@ func (a *Agent) Handler(adminToken string) (http.Handler, error) {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		if r.URL.RawQuery != "" {
 			apiError(w, 400, "query_not_allowed")
+			return
+		}
+		if r.URL.Path == "/v1/policy" {
+			switch r.Method {
+			case http.MethodGet:
+				if r.ContentLength != 0 {
+					apiError(w, 400, "body_not_allowed")
+					return
+				}
+				writeJSON(w, 200, a.Snapshot().ResourcePolicy)
+			case http.MethodPut:
+				mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+				if err != nil || mediaType != "application/json" {
+					apiError(w, 415, "json_required")
+					return
+				}
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					apiError(w, 413, "body_too_large")
+					return
+				}
+				policy, err := config.DecodeResourcePolicy(body)
+				if err != nil {
+					apiError(w, 400, "invalid_resource_policy")
+					return
+				}
+				if err = a.SetResourcePolicy(policy); err != nil {
+					apiError(w, 500, "policy_persistence_failed_host_paused")
+					return
+				}
+				writeJSON(w, 200, a.Snapshot().ResourcePolicy)
+			default:
+				w.Header().Set("Allow", "GET, PUT")
+				apiError(w, 405, "method_not_allowed")
+			}
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/v1/attempts") || strings.HasPrefix(r.URL.Path, "/v1/jobs") {

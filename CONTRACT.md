@@ -1,7 +1,8 @@
 # Nexal implementation contract v1
 
-This repository is a release-candidate implementation, not a certified production service.
-Canonical scope: ../nexal-coordinator-tunnel-mac-architecture.md v0.6 and ../nexal-quant-exchange-handoff.md.
+This repository is an engineering preview, not a production-approved service.
+Canonical scope lives in the platform repository's docs/scope/architecture-v0.6.md
+and docs/scope/requirements-v5.md. Current code and release gates take precedence.
 
 ## Layout and ownership
 - apps/coordinator: Cloudflare Worker, D1 database, R2 objects. Coordinator team owns.
@@ -16,12 +17,14 @@ Canonical scope: ../nexal-coordinator-tunnel-mac-architecture.md v0.6 and ../nex
 ## HTTP v1 (all JSON)
 Dates are ISO8601 UTC strings. Durations seconds. Money integer USD cents. Memory/storage bytes.
 Error shape {error:{code,message},requestId?}. No stack traces/secrets.
-Bearer authentication for owner API in pilot; production token must be long random, supplied server-side,
-hashed at rest and never embedded in frontend. Dev preview deliberately isolated with fake fixtures and zero external spending.
+Bearer authentication for owner API in pilot; production token must be long random,
+supplied through a server-side secret binding and never embedded in frontend source.
+Host tokens and enrollment codes are hashed in D1; the owner secret is supplied by
+the runtime, not stored in D1. Dev preview is isolated with synthetic fixtures and zero external spending.
 No unrestricted CORS in production. Explicit DEVELOPMENT environment for preview only.
 
 GET /api/health -> {status:"ok",mode:"development"|"production",version:"0.1.0"}
-GET /api/overview -> {hosts:Host[],jobs:Job[],datasets:Dataset[],ledger:LedgerEntry[],budget:Budget,capabilities:object}
+GET /api/overview -> {hosts:Host[],jobs:Job[],datasets:Dataset[],ledger:LedgerEntry[],budget:Budget,usageBudget:object,capabilities:object,listLimits:object}
 POST /api/enrollment -> {code,expiresAt}; owner authorized, one-use, ten-minute enrollment invitation.
 POST /api/hosts/enroll {code,name,platform,arch,cpuCores,memoryBytes,storageBytes} -> {hostId,token}
 POST /api/hosts/:id/heartbeat (host Bearer) {ownerActive:boolean,availableMemoryBytes:number,pq:{configured:boolean,verified:boolean,protocol:string},version:string} -> {ok:true,leaseSeconds:60}
@@ -37,12 +40,19 @@ GET /api/datasets -> {datasets:Dataset[]}
 GET /api/ledger -> {entries:LedgerEntry[]}
 GET /api/budget -> Budget
 PUT /api/budget {coreMonthlyCents,founderMonthlyCents,engineeringMonthlyCents,reserveMonthlyCents,memberCount,usageContributionCents} -> Budget
-GET /api/usage-budget -> {month,monthlyLimitCents,reservedCents,settledCents,availableCents,mode,cashSpendingEnabled}
+GET /api/usage-budget -> {month,configured,monthlyLimitCents,reservedCents,settledCents,availableCents,mode,cashSpendingEnabled}
 PUT /api/usage-budget {monthlyLimitCents} -> usage-budget object
 
 The shared funding budget is a pricing forecast, not spending authorization.
 Nonzero job reservations require the independently configured usage budget.
 POST /mcp -> standard JSON-RPC initialize/tools/list/tools/call (pilot token auth, NOT full OAuth interoperability).
+The stateless MCP JSON subset supports POST only, with a 16 KiB body ceiling
+(declared and streamed bytes). The Worker authenticates before MCP parsing.
+Malformed JSON uses JSON-RPC -32700; valid non-request JSON uses -32600.
+Valid notifications return HTTP 202 and never execute tool calls. An optional
+MCP-Protocol-Version header is validated and permitted in MCP-specific preflight.
+No persistent sessions, SSE, automatic client onboarding or Claude compatibility
+certification is implied. Quote delivery and paid execution remain disabled.
 
 Host {id,name,platform,arch,cpuCores,memoryBytes,storageBytes,marketplaceEnabled,paused,approved,revoked,ownerActive,pqConfigured,pqVerified,lastSeenAt,createdAt}
 Job {id,template,samples,maxCostCents,execution,targetHostId,status:"queued"|"leased"|"running"|"completed"|"cancelled"|"failed",createdAt,updatedAt,result?:object,attemptId?:string}
@@ -55,7 +65,9 @@ Budget {coreMonthlyCents,founderMonthlyCents,engineeringMonthlyCents,reserveMont
 - Private-by-default host membership; public opts in separately and requires approved host plus fresh PQ verification.
 - Host-reported PQ is not remote attestation. Owner review is separate; never claim malicious host secrecy.
 - For end-to-end pilot the connector pulls jobs via outbound HTTPS; this is NOT protected by its incoming cloudflared tunnel.
-  Mark pull-transport prototype clearly and gate production marketplace dispatch until the tunnel path is integrated and verified.
+  Production marketplace dispatch remains disabled pending authenticated signed
+  grants, replay/revocation enforcement, independently verified tunnel behavior
+  and reviewed job isolation.
 - Default prod marketplace disabled by FEATURE_MARKETPLACE=false. Never fake readiness/earnings/live quotes.
 - D1 conditional updates/batches + unique keys guard leases, one-use invites, idempotency and exactly-once ledger effects.
 - Only fixed built-in Monte Carlo job is enabled initially; no arbitrary shell, URLs, Python or model downloads from jobs.

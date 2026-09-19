@@ -17,6 +17,17 @@ marketplace connector. Preserve all release gates and both repositories' privacy
 
 ## Immediate acceptance work
 
+Latest source increment adds `nexal policy` and `nexal set-policy` through the
+authenticated loopback API. Resource-policy updates persist atomically, cancel
+active work and invalidate prior observations without enabling public execution.
+Consent generations and per-observation sequences reject stale/out-of-order
+telemetry and heartbeat completions. A native SwiftUI settings form is not added.
+106 named Go test passes (63 top-level), race/vet, repeated race tests and a Darwin
+ARM64 cross-build passed locally. The shared contract now documents additive
+usage-budget configuration and bounded MCP protocol behavior.
+The platform's `scripts/verify-local.sh` checks both sibling repositories and can
+run the actual CLI/Worker integration using `--integration-port 8787`.
+
 The owner has an M4 Mac mini (10 cores, 24 GB RAM, 512 GB) and an M2 Mac.
 Compile and test the SwiftUI application, Keychain integration, setup scripts and
 container coordinator on real macOS before claiming native acceptance. The Go

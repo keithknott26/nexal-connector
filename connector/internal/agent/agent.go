@@ -24,18 +24,19 @@ type Record struct {
 	LeaseExpiresAt time.Time      `json:"leaseExpiresAt"`
 }
 type Status struct {
-	Version                    string    `json:"version"`
-	HostID                     string    `json:"hostId"`
-	Mode                       string    `json:"mode"`
-	Transport                  string    `json:"transport"`
-	Paused                     bool      `json:"paused"`
-	MarketplaceEnabled         bool      `json:"marketplaceEnabled"`
-	ProductionDispatchVerified bool      `json:"productionDispatchVerified"`
-	Telemetry                  Telemetry `json:"telemetry"`
-	ActiveAttempt              string    `json:"activeAttempt,omitempty"`
-	LastOutcome                string    `json:"lastOutcome,omitempty"`
-	PQ                         client.PQ `json:"pq"`
-	CoordinatorHealthy         bool      `json:"coordinatorHealthy"`
+	Version                    string                `json:"version"`
+	HostID                     string                `json:"hostId"`
+	Mode                       string                `json:"mode"`
+	Transport                  string                `json:"transport"`
+	Paused                     bool                  `json:"paused"`
+	MarketplaceEnabled         bool                  `json:"marketplaceEnabled"`
+	ProductionDispatchVerified bool                  `json:"productionDispatchVerified"`
+	Telemetry                  Telemetry             `json:"telemetry"`
+	ActiveAttempt              string                `json:"activeAttempt,omitempty"`
+	LastOutcome                string                `json:"lastOutcome,omitempty"`
+	PQ                         client.PQ             `json:"pq"`
+	CoordinatorHealthy         bool                  `json:"coordinatorHealthy"`
+	ResourcePolicy             config.ResourcePolicy `json:"resourcePolicy"`
 }
 type Agent struct {
 	mu            sync.Mutex
@@ -52,6 +53,11 @@ type Agent struct {
 	records       map[string]Record
 	lastHeartbeat time.Time
 	heartbeatWake chan struct{}
+	// A consent change fences asynchronous observations started under the old
+	// policy. Per-operation sequence numbers also prevent out-of-order results.
+	stateGeneration     uint64
+	probeGeneration     uint64
+	heartbeatGeneration uint64
 	// Only explicit development pull can execute. Production dispatch has no
 	// bypass flag and remains closed even if a tunnel reports a QUIC connection.
 	devPull bool
@@ -110,13 +116,41 @@ func (a *Agent) Snapshot() Status {
 	}
 	return Status{Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
+		ResourcePolicy:     a.cfg.ResourcePolicy(),
 		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
+}
+
+// SetResourcePolicy persists consent before making it effective. Any change
+// cancels running work and requires a fresh probe before new admission. Failure
+// to persist still stops work, but does not apply an unsaved policy or resume.
+func (a *Agent) SetResourcePolicy(p config.ResourcePolicy) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if p == a.cfg.ResourcePolicy() {
+		return nil
+	}
+	a.invalidateConsentLocked()
+	next := a.cfg.WithResourcePolicy(p)
+	if err := config.Save(a.path, next); err != nil {
+		// Persistence failure must not silently permit more execution under
+		// assumptions the owner intended to change.
+		a.cfg.Paused = true
+		return err
+	}
+	a.cfg = next
+	return nil
 }
 func (a *Agent) SetPaused(paused bool) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	next := a.cfg
 	next.Paused = paused
+	if a.cfg.Paused != paused {
+		a.invalidateConsentLocked()
+	}
 	// Owner stop takes effect even if persistence fails; resume does not.
 	if paused {
 		a.cfg.Paused = true
@@ -131,6 +165,18 @@ func (a *Agent) SetPaused(paused bool) error {
 	a.cfg = next
 	a.wakeHeartbeatLocked()
 	return nil
+}
+func (a *Agent) invalidateConsentLocked() {
+	a.stateGeneration++
+	a.lastHeartbeat = time.Time{}
+	a.telemetryAt = time.Time{}
+	a.telemetry.Known = false
+	a.telemetry.OwnerActive = true
+	a.telemetry.AvailableMemoryBytes = 0
+	if a.cancel != nil {
+		a.cancel()
+	}
+	a.wakeHeartbeatLocked()
 }
 func (a *Agent) wakeHeartbeatLocked() {
 	select {
@@ -153,6 +199,11 @@ func (a *Agent) SetPQ(p client.PQ) {
 	a.pq = p
 }
 func (a *Agent) Refresh(ctx context.Context) {
+	a.mu.Lock()
+	generation := a.stateGeneration
+	a.probeGeneration++
+	probe := a.probeGeneration
+	a.mu.Unlock()
 	t := a.probe(ctx)
 	if !t.Known {
 		t.OwnerActive = true
@@ -160,6 +211,12 @@ func (a *Agent) Refresh(ctx context.Context) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if ctx.Err() != nil || generation != a.stateGeneration || probe != a.probeGeneration {
+		return
+	}
+	// The live policy, not a threshold captured when the process started,
+	// decides admission. A probe may additionally force OwnerActive true.
+	t.OwnerActive = t.OwnerActive || t.IdleSeconds < a.cfg.IdleSeconds
 	if a.telemetry.OwnerActive != t.OwnerActive || a.telemetry.Known != t.Known {
 		a.wakeHeartbeatLocked()
 	}
@@ -358,21 +415,36 @@ func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
 }
 
 func (a *Agent) hostHeartbeat(ctx context.Context) error {
-	s := a.Snapshot()
-	h := client.Heartbeat{OwnerActive: s.Paused || !s.Telemetry.Known || s.Telemetry.OwnerActive,
-		AvailableMemoryBytes: s.Telemetry.AvailableMemoryBytes, PQ: s.PQ, Version: config.Version}
-	if err := a.api.Heartbeat(ctx, s.HostID, h); err != nil {
-		a.mu.Lock()
+	a.mu.Lock()
+	generation := a.stateGeneration
+	a.heartbeatGeneration++
+	heartbeat := a.heartbeatGeneration
+	known := a.telemetry.Known && time.Since(a.telemetryAt) <= 10*time.Second
+	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || a.telemetry.OwnerActive,
+		PQ: a.pq, Version: config.Version}
+	if known {
+		h.AvailableMemoryBytes = a.telemetry.AvailableMemoryBytes
+	}
+	hostID := a.cfg.HostID
+	a.mu.Unlock()
+	err := a.api.Heartbeat(ctx, hostID, h)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if generation != a.stateGeneration || heartbeat != a.heartbeatGeneration {
+		// A current heartbeat is already scheduled by the consent change.
+		return err
+	}
+	if err != nil || ctx.Err() != nil {
 		a.lastHeartbeat = time.Time{}
 		if a.cancel != nil {
 			a.cancel()
 		}
-		a.mu.Unlock()
+		if err == nil {
+			err = ctx.Err()
+		}
 		return err
 	}
-	a.mu.Lock()
 	a.lastHeartbeat = time.Now()
-	a.mu.Unlock()
 	return nil
 }
 

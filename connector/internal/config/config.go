@@ -119,16 +119,7 @@ func (c Config) Validate() error {
 	if len(strings.TrimSpace(c.Name)) < 1 || len(c.Name) > 80 {
 		return errors.New("host name must contain 1–80 bytes and not be blank")
 	}
-	if c.MemoryLimitBytes < 64<<20 || c.MemoryLimitBytes > 8<<30 {
-		return errors.New("approved memory limit must be 64 MiB–8 GiB")
-	}
-	if c.ReserveMemoryBytes < 128<<20 || c.ReserveMemoryBytes > 1<<40 {
-		return errors.New("owner memory reserve must be 128 MiB–1 TiB")
-	}
-	if c.IdleSeconds < 30 || c.IdleSeconds > 86400 {
-		return errors.New("idle threshold must be 30–86400 seconds")
-	}
-	return nil
+	return c.ResourcePolicy().Validate()
 }
 
 func Load(path string) (Config, error) {

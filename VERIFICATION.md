@@ -6,19 +6,24 @@ in older workstream handoffs. It is not production certification.
 ## Completed locally after rename
 
 - Platform strict TypeScript check and dashboard build passed.
-- 310 TypeScript tests passed, including three new production-header tests.
+- 354 TypeScript tests passed in the sibling platform, including usage-budget
+  controls and authenticated MCP error/size-boundary coverage.
 - 18 setup-policy checks passed; shell syntax checks passed.
-- 83 named Go connector test passes; race detector and vet passed.
+- 106 named Go connector test passes (63 top-level plus named subtests); race
+  detector and vet passed. Agent/config suites passed five repeated race runs.
 - Go MLX command bridge race tests and vet passed.
 - 34 Python policy/integrity tests passed with regenerated Nexal source hashes.
 - Darwin ARM64 Go cross-build passed; not executed on a Mac here.
 - Locked npm dependency audit reported zero known vulnerabilities at test time.
 - Gitleaks 8.30.1 clean-export scan reported no unhandled findings. Its archive
   checksum was verified. Narrow test-only annotations document two false positives.
-- Renamed Go connector plus renamed Wrangler/D1 platform passed a 25-check
+- Updated Go connector plus Wrangler/D1 platform passed an integration run with 38 checks
   end-to-end run: completed fixed CPU job, duplicate handling, metering, pause,
-  cancellation and gated services. Hardware telemetry was explicitly synthetic;
+  cancellation, policy read/write/restore, MCP errors and gated services.
+  Polling can change the check count. Hardware telemetry was explicitly synthetic;
   no external spending occurred.
+- The platform's `scripts/verify-local.sh` checks both repositories together.
+  It does not install software, deploy, enable billing or prove native Mac behavior.
 
 ## Not completed
 

@@ -26,6 +26,9 @@ func TestStrictCLIRejectsUnknownAndUnsafeOptions(t *testing.T) {
 		{"init", "--config", path, "--coordinator", "http://127.0.0.1:8787", "--dev-loopback", "--dev-secrets", "--listen", "0.0.0.0:8788"},
 		{"run", "--config", path, "--disable-security"},
 		{"enroll", "--config", path, "--code", "secret-must-not-echo"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "18446744073709551615"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024", "--idle-seconds", "29"},
 	} {
 		err := run(context.Background(), args)
 		if err == nil {
@@ -187,6 +190,16 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 	}
 	if command("POST", "/v1/pause") != 200 {
 		t.Fatal("pause failed")
+	}
+	if err := run(ctx, []string{"set-policy", "--config", path, "--memory-limit-mib", "128", "--reserve-memory-mib", "512", "--idle-seconds", "600"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(ctx, []string{"policy", "--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(path)
+	if err != nil || saved.MemoryLimitBytes != 128<<20 || saved.ReserveMemoryBytes != 512<<20 || saved.IdleSeconds != 600 || !saved.Paused {
+		t.Fatal("CLI policy change did not preserve paused state and persist limits")
 	}
 	if command("POST", "/v1/attempts") != 403 {
 		t.Fatal("unverified dispatch enabled")

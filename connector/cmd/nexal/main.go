@@ -58,7 +58,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|run|status|pause|resume|cancel|tunnel-check [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|run|status|policy|set-policy|pause|resume|cancel|tunnel-check [--config absolute-path]")
 	}
 	switch args[0] {
 	case "init":
@@ -67,8 +67,10 @@ func run(ctx context.Context, args []string) error {
 		return enrollCommand(ctx, args[1:])
 	case "run":
 		return runCommand(ctx, args[1:])
-	case "status", "pause", "resume", "cancel":
+	case "status", "policy", "pause", "resume", "cancel":
 		return localCommand(ctx, args[0], args[1:])
+	case "set-policy":
+		return policyCommand(ctx, args[1:])
 	case "tunnel-check":
 		return tunnelCommand(ctx, args[1:])
 	case "self-test":
@@ -230,7 +232,8 @@ func runCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	probe := agent.MacProbe(c.IdleSeconds)
+	// Agent.Refresh applies the current mutable idle threshold.
+	probe := agent.MacProbe(0)
 	if *idle {
 		probe = func(context.Context) agent.Telemetry {
 			return agent.Telemetry{Known: true, Synthetic: true, IdleSeconds: 86400,
@@ -278,11 +281,46 @@ func localCommand(ctx context.Context, command string, args []string) error {
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
-	c, err := config.Load(*path)
+	method := "POST"
+	if command == "status" || command == "policy" {
+		method = "GET"
+	}
+	return localRequest(ctx, *path, method, command, nil)
+}
+
+func policyCommand(ctx context.Context, args []string) error {
+	f, path, err := flags("set-policy")
 	if err != nil {
 		return err
 	}
-	secrets, err := config.NewSecrets(*path, c)
+	memory := f.Uint64("memory-limit-mib", 0, "workload cap, 64–8192 MiB")
+	reserve := f.Uint64("reserve-memory-mib", 0, "owner reserve, 128–1048576 MiB")
+	idle := f.Uint64("idle-seconds", 0, "idle threshold, 30–86400 seconds")
+	if err := parse(f, args, path); err != nil {
+		return err
+	}
+	// Require all fields; never accidentally reset an omitted consent limit.
+	if *memory > 8192 || *reserve > 1<<20 {
+		return errors.New("memory limits are outside safe bounds")
+	}
+	policy := config.ResourcePolicy{MemoryLimitBytes: *memory << 20,
+		ReserveMemoryBytes: *reserve << 20, IdleSeconds: *idle}
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+	body, err := json.Marshal(policy)
+	if err != nil {
+		return errors.New("cannot encode resource policy")
+	}
+	return localRequest(ctx, *path, "PUT", "policy", body)
+}
+
+func localRequest(ctx context.Context, path, method, command string, body []byte) error {
+	c, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	secrets, err := config.NewSecrets(path, c)
 	if err != nil {
 		return err
 	}
@@ -290,15 +328,14 @@ func localCommand(ctx context.Context, command string, args []string) error {
 	if err != nil {
 		return err
 	}
-	method := "POST"
-	if command == "status" {
-		method = "GET"
-	}
-	req, err := http.NewRequestWithContext(ctx, method, "http://"+c.Listen+"/v1/"+command, nil)
+	req, err := http.NewRequestWithContext(ctx, method, "http://"+c.Listen+"/v1/"+command, bytes.NewReader(body))
 	if err != nil {
 		return errors.New("cannot construct local command")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	httpClient := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: nil,
 		DialContext: (&net.Dialer{Timeout: 2 * time.Second}).DialContext},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("local redirect forbidden") }}

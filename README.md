@@ -10,8 +10,9 @@ production-ready marketplace worker, certified sandbox or verified PQ system.
 ## Components
 
 - `experiments/tcp-pager/`: isolated [bounded TCP paging prototype](experiments/tcp-pager/README.md),
-  with a tested Go transport/cache and a native C Hypervisor helper awaiting
-  real-Mac acceptance. It is not imported by the installed connector.
+  with a tested Go transport/cache and owner-reported native C Hypervisor
+  loopback acceptance. Two-Mac acceptance remains open.
+  It is not imported by the installed connector.
 - `connector/`: Go 1.26 CLI, owner policies, credentials, heartbeat, fixed CPU
   prototype, private-pool primitives and strict tunnel configuration.
 - `macos/`: SwiftUI menu-bar app and unsigned source-build packaging.

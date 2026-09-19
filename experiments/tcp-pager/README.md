@@ -1,8 +1,10 @@
 # Nexal bounded TCP-backed CPU-paging prototype
 
 This is a separate research module, not a feature in the installed Nexal Connector.
-It contains a tested Go page transport/cache and a Mac-only C Hypervisor helper
-whose native compilation and execution still require owner acceptance.
+It contains a tested Go page transport/cache and a Mac-only C Hypervisor helper.
+The owner reported successful native build, signature verification and CPU-fault
+loopback acceptance on September 19, 2026; see [VALIDATION.md](VALIDATION.md).
+Paging between two separate Macs remains untested.
 
 ## What it does
 
@@ -63,7 +65,7 @@ Ad-hoc signing is for this local development experiment, not notarized distribut
 If a compiler, entitlement or Hypervisor operation fails, stop and share its error;
 do not disable security to get past it.
 
-Expected native result, only after a successful real Mac run:
+Native result reported by the owner after a successful real Mac run:
 
 ```json
 {
@@ -90,8 +92,9 @@ Expected native result, only after a successful real Mac run:
 }
 ```
 
-This is an expected schema, NOT evidence that native acceptance has passed.
-The portable test must instead report `nativeHVFExecuted: false`.
+This is transcribed owner-reported loopback evidence, not an independently
+executed agent test or a two-Mac result. The portable test correctly reported
+`nativeHVFExecuted: false`. Exact hardware/OS/revision were not included.
 
 ## Use a donor on another private-LAN computer
 

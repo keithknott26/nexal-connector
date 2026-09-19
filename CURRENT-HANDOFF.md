@@ -62,8 +62,13 @@ Isolated memory research increment:
 [bounded TCP CPU-paging prototype](experiments/tcp-pager/README.md).
 The Go transport/cache and CLI passed Linux race, integrity, cancellation and
 subprocess tests; tiny guest instructions passed independent ARM emulation.
-The C Hypervisor helper still needs native Mac compilation/execution.
-Start with `bash scripts/accept-macos.sh` inside that separate module.
+The owner subsequently reported passing `bash scripts/accept-macos.sh` on
+Darwin ARM64 with Go 1.26.8: native build/signature verification and actual
+HVF CPU-fault loopback paging passed. The 1 MiB logical dataset was verified
+with a 64 KiB cache payload, 128 faults and 120 evictions. Exact hardware,
+OS version and checkout revision were not included in that output.
+See the module's VALIDATION.md and transcribed acceptance JSON.
+The next gate is the same bounded workload between two separate private-LAN Macs.
 This does not change production enrollment, sharing or memory accounting and
 does not establish macOS guest boot, host RAM expansion or additional VRAM.
 

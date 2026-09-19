@@ -1,7 +1,39 @@
 # Bounded TCP pager validation
 
 Checkpoint: September 19, 2026. This evidence covers the isolated research
-module, not production OS memory expansion or successful native Mac execution.
+module, including owner-reported native loopback acceptance. It does not establish
+production OS memory expansion or paging between separate computers.
+
+## Owner-reported native Mac acceptance: passed
+
+The owner supplied successful output from `bash scripts/accept-macos.sh`.
+The reported toolchain was Go 1.26.8 on darwin/arm64. The output shows passing
+Go tests, native helper build completion, valid local code signature, and
+successful portable and native loopback workloads. This was run on the owner's
+Mac, not independently executed in the Linux development environment. The exact
+Mac model, macOS version and checkout revision are not established by this output.
+
+Both workloads reported:
+
+- Logical dataset and verified bytes: 1,048,576 (1 MiB).
+- Cache payload limit: 65,536 bytes (64 KiB); peak resident pages: 4.
+- Faults/cache misses: 128; evictions: 120.
+- TCP GETs: 128; PUTs: 64.
+- Page bytes received: 2,097,152; sent: 1,048,576.
+- Verification: true.
+
+The native result reports `nativeHVFExecuted: true`; the portable result correctly
+reports false. Both report `macOSGuestBooted`, `hostRAMExpanded` and
+`gpuMemoryExpanded` as false. Counts match the expected bounded workload.
+The native path exercises CPU-fault exits, mapping replacement, writeback,
+refetch and fixed-guest data verification. Passing process completion is not
+an exhaustive cleanup, resource-leak or fault-injection acceptance result.
+
+This passes the small native CPU-pager loopback gate only. The donor ran on the
+same computer; the 16:1 logical-dataset/cache-payload ratio is not a 16x increase
+in system RAM, and additional runtime allocations are outside the cache cap.
+See [the transcribed acceptance record](validation/native-owner-acceptance.json)
+for provenance and the reported JSON results.
 
 ## Executed in the Linux development environment
 
@@ -49,28 +81,29 @@ Both runs used a loopback donor in the Go process. They establish transport/cach
 correctness for the tested workload, not extra available host RAM, remote physical
 LAN performance, latency targets or protection against every failure.
 
-## Native implementation awaiting acceptance
+## Remaining acceptance
 
 The C helper implements a fixed guest workload, public Hypervisor VM creation,
 one vCPU, bounded page mappings, translation-fault handling, stopped-vCPU eviction,
-remote writeback, refetch and guest-side data comparison. Its first real Mac build
-may expose SDK, entitlement or runtime differences; those must be fixed from actual
-compiler/error output, not bypassed by disabling security.
+remote writeback, refetch and guest-side data comparison. Its first owner-reported
+Mac acceptance passed as recorded above. Other machines and SDK versions still
+require their own acceptance; errors must not be bypassed by disabling security.
 
 Not performed:
 
-- Native C compilation/link/signing on Apple's SDK.
-- Real `hv_vcpu_run`, page-fault exits, mapping replacement or cleanup.
 - Actual private-LAN two-computer paging.
+- Native donor-loss, stalled-network, cancellation and resource-leak acceptance.
+- Native larger bounded runs and measured private-LAN latency/throughput.
 - macOS guest boot, arbitrary native application support, Metal/VRAM expansion,
   DMA integration, concurrent vCPUs or a 100 GB guest.
 - Signed/notarized distribution or production connector integration.
 
-Next owner acceptance command, from this module:
+Reproduce the passed loopback gate, from this module:
 
 ```sh
 bash scripts/accept-macos.sh
 ```
 
-Share the output, especially the native JSON or the first compiler/Hypervisor error.
-No security downgrade is part of this acceptance plan.
+Next, follow the README's two-computer instructions with the same 64-page dataset
+and four-page cache. Record donor/receiver models, OS versions, source revision,
+actual link type and result. No security downgrade is part of this acceptance plan.

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "owner-reported terminal output, transcribed",
+    "checkpointDate": "2026-09-19",
+    "command": "bash scripts/accept-macos.sh",
+    "goVersion": "go1.26.8 darwin/arm64",
+    "exactHardwareModel": null,
+    "macOSVersion": null,
+    "checkoutRevision": null,
+    "independentlyExecutedByAgent": false,
+    "nativeHelperBuildReportedSuccessful": true,
+    "nativeHelperSignatureVerificationReportedSuccessful": true,
+    "donorPlacement": "loopback on receiver computer"
+  },
+  "portable": {
+    "mode": "portable TCP pager; not CPU-fault-driven",
+    "verified": true,
+    "logicalBytes": 1048576,
+    "cachePayloadLimitBytes": 65536,
+    "verifiedBytes": 1048576,
+    "cache": {"faults": 128, "evictions": 120, "peakResidentPages": 4},
+    "transport": {"gets": 128, "puts": 64, "pageBytesReceived": 2097152, "pageBytesSent": 1048576},
+    "nativeHVFExecuted": false,
+    "macOSGuestBooted": false,
+    "hostRAMExpanded": false,
+    "gpuMemoryExpanded": false
+  },
+  "native": {
+    "mode": "native HVF CPU-fault pager",
+    "verified": true,
+    "logicalBytes": 1048576,
+    "cachePayloadLimitBytes": 65536,
+    "verifiedBytes": 1048576,
+    "cache": {"faults": 128, "evictions": 120, "peakResidentPages": 4},
+    "transport": {"gets": 128, "puts": 64, "pageBytesReceived": 2097152, "pageBytesSent": 1048576},
+    "nativeHVFExecuted": true,
+    "macOSGuestBooted": false,
+    "hostRAMExpanded": false,
+    "gpuMemoryExpanded": false
+  },
+  "nextGate": "same bounded native workload with donor on a separate private-LAN computer",
+  "limitations": [
+    "No separate-computer paging demonstrated",
+    "No measured LAN performance or native failure-injection acceptance",
+    "Cache payload limit is not total process resident memory",
+    "No macOS guest boot or transparent application memory expansion",
+    "No host RAM or GPU memory expansion"
+  ]
+}

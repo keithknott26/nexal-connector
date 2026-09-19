@@ -58,6 +58,15 @@ engineering preview, not a production-approved distributed cloud.
 
 ## Implemented and tested boundaries
 
+Isolated memory research increment:
+[bounded TCP CPU-paging prototype](experiments/tcp-pager/README.md).
+The Go transport/cache and CLI passed Linux race, integrity, cancellation and
+subprocess tests; tiny guest instructions passed independent ARM emulation.
+The C Hypervisor helper still needs native Mac compilation/execution.
+Start with `bash scripts/accept-macos.sh` inside that separate module.
+This does not change production enrollment, sharing or memory accounting and
+does not establish macOS guest boot, host RAM expansion or additional VRAM.
+
 Native update: the owner subsequently supplied successful native build output for
 platform `d601629` and connector `76345d9`: 424 TypeScript tests, Go vet/race
 package tests, Swift compilation, seven XCTest cases, migrations 0001–0004

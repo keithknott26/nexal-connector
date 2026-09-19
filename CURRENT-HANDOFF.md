@@ -7,6 +7,7 @@ marketplace connector. Preserve all release gates and both repositories' privacy
 
 - [Connector verification](VERIFICATION.md).
 - [Connector security boundaries](SECURITY.md).
+- [Cloudflare/cloudflared trust and deployment status](CLOUDFLARED-TRUST.md).
 - [Rename and configuration migration](MIGRATION.md).
 - [Go CLI contract](connector/CLI-CONTRACT.md).
 - [Native UI setup](macos/README.md).
@@ -17,14 +18,23 @@ marketplace connector. Preserve all release gates and both repositories' privacy
 
 ## Immediate acceptance work
 
+Latest installation pass adds `nexal doctor` / `doctor --probe`, a sanitized
+read-only configuration/optional telemetry report. No credentials or network
+connections are accessed. Native app packaging stages a complete replacement
+before publishing it, with locks and preservation of the prior app on ordinary
+failure. Power-loss recovery and successful packaging still need real Mac tests.
+The platform supplies easier double-click setup/start, a supervised readiness
+launcher and installer fault-injection tests. See its INSTALLATION-BUGCHECK.md.
+
 Latest source increment adds `nexal policy` and `nexal set-policy` through the
 authenticated loopback API. Resource-policy updates persist atomically, cancel
 active work and invalidate prior observations without enabling public execution.
 Consent generations and per-observation sequences reject stale/out-of-order
 telemetry and heartbeat completions. A native SwiftUI settings form is not added.
-106 named Go test passes (63 top-level), race/vet, repeated race tests and a Darwin
+134 named Go test passes (72 top-level), race/vet, repeated race tests and a Darwin
 ARM64 cross-build passed locally. The shared contract now documents additive
-usage-budget configuration and bounded MCP protocol behavior.
+usage-budget configuration, bounded MCP protocol behavior and the new owner-only
+transactional audit endpoint. Migration 0003 is required in the coordinator.
 The platform's `scripts/verify-local.sh` checks both sibling repositories and can
 run the actual CLI/Worker integration using `--integration-port 8787`.
 

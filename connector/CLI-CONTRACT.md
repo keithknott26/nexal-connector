@@ -14,6 +14,18 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   host heartbeat and optional pinned strict tunnel supervision. It does not install
   software, ask for root, or enable public work.
 - `nexal status` queries the running local API using the admin credential.
+- `nexal doctor` emits a versioned, read-only JSON setup report without requiring
+  the agent to be running. It reads only the nonsecret configuration file and
+  omits host names/IDs, endpoints, paths and raw errors. It never reads Keychain,
+  admin/host credentials or tunnel token files, changes settings, installs
+  software, starts workloads or makes network requests.
+  `nexal doctor --probe` explicitly opts into the three bounded local macOS
+  telemetry commands and reports point-in-time memory/idle checks, not execution
+  authorization. Default output marks telemetry, connectivity and credentials
+  as not checked. A missing/invalid configuration produces a blocked check in
+  the report, not a raw filesystem error. Exit 0 means a report was produced,
+  NOT that all checks passed; inspect `checks[].status`. Invalid flags or an
+  output failure exit nonzero. `productionReady` is always false in this release.
 - `nexal pause` persists paused state and cancels active work; requires the running API.
 - `nexal resume` persists resumed state; requires the running API.
 - `nexal policy` reads the running agent's effective resource limits.

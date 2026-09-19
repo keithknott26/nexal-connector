@@ -22,6 +22,7 @@ import (
 	"nexal/connector/internal/agent"
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/diagnostics"
 	"nexal/connector/internal/tunnel"
 )
 
@@ -58,7 +59,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|run|status|policy|set-policy|pause|resume|cancel|tunnel-check [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|run|status|policy|set-policy|pause|resume|cancel|doctor|tunnel-check [--config absolute-path]")
 	}
 	switch args[0] {
 	case "init":
@@ -73,6 +74,8 @@ func run(ctx context.Context, args []string) error {
 		return policyCommand(ctx, args[1:])
 	case "tunnel-check":
 		return tunnelCommand(ctx, args[1:])
+	case "doctor":
+		return doctorCommand(ctx, args[1:])
 	case "self-test":
 		return selfTestCommand(ctx, args[1:])
 	case "version":
@@ -80,6 +83,17 @@ func run(ctx context.Context, args []string) error {
 	default:
 		return errors.New("unknown command")
 	}
+}
+func doctorCommand(ctx context.Context, args []string) error {
+	f, path, err := flags("doctor")
+	if err != nil {
+		return err
+	}
+	probe := f.Bool("probe", false, "explicitly run bounded local Mac telemetry checks")
+	if err := parse(f, args, path); err != nil {
+		return err
+	}
+	return emit(diagnostics.Inspect(ctx, *path, *probe))
 }
 func initCommand(ctx context.Context, args []string) error {
 	f, path, err := flags("init")

@@ -1,5 +1,11 @@
 # Nexal Connector for macOS
 
+The platform repository now includes double-click `Setup Nexal.command` and
+`Start Nexal.command` launchers. See its `docs/MAC-SETUP.md` for the recommended
+native setup. Packaging builds into a separate staging directory and preserves
+the previous complete app on ordinary build failure; quit the app before updates.
+This is still an unsigned source-build workflow, not a notarized installer.
+
 Native SwiftUI menu-bar shell for **macOS 14 or newer**. Swift owns presentation
 and process lifecycle only; the **Go connector** owns enrollment, Keychain
 credentials, owner policies, limits, telemetry, heartbeat, pause/cancellation,

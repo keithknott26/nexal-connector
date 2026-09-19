@@ -42,6 +42,20 @@ GET /api/budget -> Budget
 PUT /api/budget {coreMonthlyCents,founderMonthlyCents,engineeringMonthlyCents,reserveMonthlyCents,memberCount,usageContributionCents} -> Budget
 GET /api/usage-budget -> {month,configured,monthlyLimitCents,reservedCents,settledCents,availableCents,mode,cashSpendingEnabled}
 PUT /api/usage-budget {monthlyLimitCents} -> usage-budget object
+GET /api/audit?limit=50&before=123&entityType=host&entityId=host_id -> {events,nextBefore,limit,provenance,actorAttribution,integrity}
+
+Audit is owner-only under the same pilot authentication. Optional limit is 1–100;
+before is an exclusive positive integer sequence cursor. entityType accepts
+budget, usage_budget, host, job, attempt; entityId requires entityType. Unknown,
+duplicate or malformed parameters are rejected. Events have sequence, occurredAt,
+entityType, entityId, action, before (object or null), after (object). Newest first;
+nextBefore is null at the end. Keep filters unchanged when following a cursor.
+Curated D1 triggers record committed state changes atomically with mutations,
+starting with migration 0003. There is no historical backfill, secret/request
+logging, heartbeat sampling or authenticated actor attribution. This is not a
+cryptographically tamper-proof ledger or an immutable external archive. No audit
+write/delete API exists. Operational retention/export and database-admin controls
+remain production gates; see docs/AUDIT-HISTORY.md.
 
 The shared funding budget is a pricing forecast, not spending authorization.
 Nonzero job reservations require the independently configured usage budget.

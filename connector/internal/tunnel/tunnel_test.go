@@ -94,6 +94,27 @@ func TestQUICIsNotPQAttestation(t *testing.T) {
 		t.Fatal("diagnostic turned into attestation")
 	}
 }
+
+func TestLookalikeAndAmbiguousPublisherSourcesRejected(t *testing.T) {
+	for name, source := range map[string]string{
+		"missing_letter_owner": "https://github.com/cloudfare/cloudflared/releases/download/2026.1.0/binary",
+		"missing_letter_repo":  "https://github.com/cloudflare/cloudfared/releases/download/2026.1.0/binary",
+		"lookalike_host":       "https://github.com.attacker.invalid/cloudflare/cloudflared/releases/download/2026.1.0/binary",
+		"userinfo_trick":       "https://github.com@attacker.invalid/cloudflare/cloudflared/releases/download/2026.1.0/binary",
+		"plaintext":            "http://github.com/cloudflare/cloudflared/releases/download/2026.1.0/binary",
+		"encoded_owner":        "https://github.com/%63loudflare/cloudflared/releases/download/2026.1.0/binary",
+		"unpinned_latest":      "https://github.com/cloudflare/cloudflared/releases/latest/download/binary",
+		"query_redirect":       "https://github.com/cloudflare/cloudflared/releases/download/2026.1.0/binary?redirect=attacker",
+	} {
+		t.Run(name, func(t *testing.T) {
+			pin := fixture(t)
+			pin.SourceURL = source
+			if err := Validate(pin, "127.0.0.1:8788"); err == nil {
+				t.Fatal("ambiguous or unofficial provenance record accepted")
+			}
+		})
+	}
+}
 func TestNoDowngradeAndQuarantineSticky(t *testing.T) {
 	for _, line := range []string{
 		`{"message":"Registered tunnel connection","protocol":"http2"}`,

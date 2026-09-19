@@ -25,6 +25,9 @@ func TestStrictCLIRejectsUnknownAndUnsafeOptions(t *testing.T) {
 		{"init", "--config", path, "--coordinator", "https://example.test", "--token", "secret-must-not-echo"},
 		{"init", "--config", path, "--coordinator", "http://127.0.0.1:8787", "--dev-loopback", "--dev-secrets", "--listen", "0.0.0.0:8788"},
 		{"run", "--config", path, "--disable-security"},
+		{"doctor", "--config", path, "--token", "secret-must-not-echo"},
+		{"doctor", "--config", "relative-path"},
+		{"doctor", "--config", path, "unexpected-positional-argument"},
 		{"enroll", "--config", path, "--code", "secret-must-not-echo"},
 		{"set-policy", "--config", path, "--memory-limit-mib", "18446744073709551615"},
 		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024"},
@@ -38,6 +41,41 @@ func TestStrictCLIRejectsUnknownAndUnsafeOptions(t *testing.T) {
 			t.Fatal("secret argument echoed")
 		}
 	}
+}
+
+func TestDoctorCommandProducesSanitizedMissingConfigReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private-path-must-not-echo", "config.json")
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = original; _ = reader.Close(); _ = writer.Close() }()
+	err = run(context.Background(), []string{"doctor", "--config", path})
+	_ = writer.Close()
+	os.Stdout = original
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil || strings.Contains(string(output), path) {
+		t.Fatal("private path disclosed or report unreadable")
+	}
+	var report struct {
+		SchemaVersion   int  `json:"schemaVersion"`
+		ProductionReady bool `json:"productionReady"`
+		Checks          []struct{ ID, Status string }
+	}
+	if json.Unmarshal(output, &report) != nil || report.SchemaVersion != 1 || report.ProductionReady {
+		t.Fatal("invalid report")
+	}
+	for _, check := range report.Checks {
+		if check.ID == "configuration" && check.Status == "blocked" {
+			return
+		}
+	}
+	t.Fatal("missing blocked configuration check")
 }
 
 // Complete CLI -> credential store -> host REST -> local control -> workload ->

@@ -20,6 +20,11 @@ The owner created `keithknott26/nexal-ios` for the free nexal@home iPhone app.
 It initially reported public; changed to private and verified before app upload.
 App source is separate; SMS backend, Mac QR pairing and App Store release
 remain gated, not deployed. No fabricated App Store QR/link.
+Owner requires no second approval prompt on the Macs: starting setup authorizes
+short-lived pairing; verified phone login, donor scans, receiver scan and Link
+are the complete intended flow. QR codes will carry scoped one-use claim tokens;
+they are sensitive until expiry/consumption. Backend and Mac QR mode are not yet
+implemented. Keep resource scope within the Mac's initial configured limits.
 
 ## Concise documentation and shared dashboard deployment
 

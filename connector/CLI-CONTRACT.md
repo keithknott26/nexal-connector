@@ -89,3 +89,19 @@ also requires fresh observations, and stale memory observations are not advertis
 The CLI/API policy controls are implemented; a native SwiftUI policy form is not.
 Local job-dispatch endpoints deliberately fail closed until Access JWT + signed
 grant + verified tunnel dispatch integration is implemented and reviewed.
+# Private pager bundle relay
+
+Opt-in CLI additions (not native menu controls):
+
+- `bundle-receive --config ABSOLUTE_PATH --from-host HOST_ID [--path-only]`
+- `bundle-send --config ABSOLUTE_PATH --transfer ID --receiver-key-sha256 PUBLIC_HASH --bundle ABSOLUTE_CLIENT_FOLDER`
+
+Receiver generates an ephemeral ML-KEM-768 key, prints public pairing metadata
+to stderr and waits up to ten minutes. Sender reads only a private four-file
+pager client folder, validates it and uploads ciphertext for that named receiver.
+Receiver writes a fresh private application-support folder, acknowledges the
+relay and outputs a JSON receipt or path only. Neither command starts jobs,
+changes enrollment, pauses the running agent or requires its exclusive config lock.
+Keychain authorization may prompt on macOS. No bearer tokens or private keys
+are accepted in command arguments. Full platform protocol, prerequisites and
+limits: `experiments/tcp-pager/PLATFORM-DELIVERY.md` in the repository.

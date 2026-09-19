@@ -241,3 +241,17 @@ Current code, current verification and explicit release gates take precedence
 over historical handoffs. Architecture and requirement files describe the target
 system; financial models are illustrative assumptions rather than a business
 forecast. Consult the document index for every preserved product artifact.
+# Private pager bundle relay checkpoint
+
+New opt-in commands bundle-send/bundle-receive and
+experiments/tcp-pager/scripts/platform-bundle-macos.sh implement encrypted
+delivery of a selected donor client folder through the coordinator to a
+fresh private receiver application-support folder. No AirDrop dependency.
+Requires platform migration 0006 and both Macs enrolled in the same reachable
+coordinator. See experiments/tcp-pager/PLATFORM-DELIVERY.md.
+
+Full connector race tests/vet and Darwin ARM64 cross-build pass; a cross-language
+E2E test through the actual Worker handler and real local D1 passed. No owner
+Mac delivery, new Keychain acceptance or remote deployment performed. User
+still chooses donor bundle and compares public fingerprints; background automatic
+folder collection and a dashboard transfer button are not implemented.

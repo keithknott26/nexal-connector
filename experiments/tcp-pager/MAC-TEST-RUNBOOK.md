@@ -1,6 +1,9 @@
 # Nexal Mac memory acceptance runbook
 
 Status: scripted research acceptance, not production memory expansion.
+For encrypted delivery through the coordinator instead of AirDrop, see
+[platform delivery](PLATFORM-DELIVERY.md). It requires the updated coordinator,
+migration 0006 and both Macs enrolled in the same reachable service.
 The original native CPU pager passed on the owner's M2 Mac mini. The owner
 subsequently passed the observation-window and Core Foundation diagnostics at
 revision `78bae3a` on an 8 GiB Mac. The guided separate-Mac LAN workflow remains

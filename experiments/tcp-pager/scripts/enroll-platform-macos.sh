@@ -13,10 +13,11 @@ CONFIG="$HOME/Library/Application Support/Nexal/config.json"
 NAME="Nexal Mac"
 NAME_EXPLICIT=false
 PREPARE=false
+NO_BROWSER=false
 PROFILE=""
 CONFIG_EXPLICIT=false
 usage() {
-  printf 'Usage: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--profile NAME | --config ABSOLUTE_PATH] [--coordinator HTTPS_ORIGIN] [--prepare-only]\n'
+  printf 'Usage: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--profile NAME | --config ABSOLUTE_PATH] [--coordinator HTTPS_ORIGIN] [--prepare-only] [--no-browser]\n'
   printf 'A named profile preserves the default configuration and uses separate Keychain credentials.\n'
 }
 while [[ $# -gt 0 ]]; do
@@ -31,6 +32,7 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2;;
     --prepare-only) PREPARE=true; shift;;
+    --no-browser) NO_BROWSER=true; shift;;
     --help|-h) usage; exit 0;;
     *) usage >&2; exit 2;;
   esac
@@ -47,6 +49,22 @@ fi
   printf 'An absolute config path and HTTPS coordinator are required.\n' >&2; exit 2;
 }
 COORDINATOR="${COORDINATOR%/}"
+# Only an HTTPS origin may be opened. Never forward credentials, query strings,
+# fragments or paths from arguments/configuration to the default browser.
+[[ "$COORDINATOR" =~ ^https://([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:]+\])(:[0-9]{1,5})?$ ]] || {
+  printf 'Coordinator must be an HTTPS origin without credentials, paths, query strings or fragments.\n' >&2
+  exit 2
+}
+DASHBOARD="$COORDINATOR/#/hosts"
+open_dashboard() {
+  printf '\nDashboard: %s\n' "$DASHBOARD"
+  printf 'Enter your Nexal OWNER credential in the browser sign-in form, not in Terminal.\n'
+  if [[ "$NO_BROWSER" == true ]]; then
+    printf 'Automatic browser opening disabled; open the dashboard address manually.\n'
+  elif ! /usr/bin/open "$DASHBOARD"; then
+    printf 'Could not open the default browser. Open the dashboard address above manually; setup can continue.\n' >&2
+  fi
+}
 [[ ! -L "$CONFIG" ]] || { printf 'Refusing a symlink configuration.\n' >&2; exit 1; }
 # Reject symlink parents too: profiles must not alias another profile/Keychain path.
 PARENT="$(dirname -- "$CONFIG")"
@@ -109,6 +127,10 @@ if [[ -n "$HOST_ID" ]]; then
     printf 'Requested name differs from the saved identity; stopping without changes.\n' >&2
     exit 1
   fi
+  if [[ "$PREPARE" == false && -t 0 ]]; then
+    open_dashboard
+    printf 'An identity is already saved; compare its host ID in Hosts. No new invitation is needed for this rerun.\n'
+  fi
   exit 0
 fi
 printf '\nPrepared coordinator: %s\nConfiguration: %s\n' "$COORDINATOR" "$CONFIG"
@@ -121,8 +143,10 @@ fi
   printf 'Enrollment needs a terminal for hidden input. Rerun interactively or append </dev/tty.\n' >&2
   exit 1
 }
-printf '\nOpen %s in your browser and use Hosts > Enroll host > Generate invitation.\n' "$COORDINATOR"
+open_dashboard
+printf 'After signing in, use Hosts > Enroll host > Generate invitation, then return to this Terminal.\n'
 printf 'Use that shared dashboard, not localhost. Do not paste the invitation into chat.\n'
+printf 'The Terminal prompt accepts the ONE-USE INVITATION, not the owner credential.\n'
 printf 'Paste one-use code, then press Return (input hidden): '
 CODE=""
 if ! IFS= read -r -s CODE; then

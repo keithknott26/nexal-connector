@@ -14,7 +14,10 @@ bash "$S" --enroll-platform --profile private-lan --name "M4 mini" &&
 bash "$S" --donor
 ```
 
-Enrollment uses a hidden invitation prompt. Donor mode shows numbered IP,
+Enrollment opens the Hosts page in your default browser. Enter the Nexal owner
+credential there, generate a one-use invitation, then paste the invitation into
+Terminal's hidden prompt. No credential is put in the browser URL.
+Donor mode shows numbered IP,
 Ethernet/Wi-Fi and interface labels; choose a number and leave its terminal open.
 Stop an existing donor before starting another. Restarting produces a new bundle.
 
@@ -49,8 +52,11 @@ configuration on each Mac at
 Original profiles and Keychain credentials remain untouched; old dashboard
 entries are not automatically revoked. Rerunning the same profile does not
 create another host. Use this exact config path for bundle transfer.
-Add `--prepare-only` to stop before
-invitation entry. Use `--network-info` instead of enrollment/donor flags to list
+Add `--prepare-only` to stop before browser opening and invitation entry, or
+`--no-browser` to open the printed dashboard address yourself. Browser-opening
+failure is nonfatal. An interactive rerun of an enrolled profile opens Hosts
+for inspection without requesting another invitation.
+Use `--network-info` instead of enrollment/donor flags to list
 numbered connections without starting a listener.
 
 **Shared pilot ready for owner acceptance (2026-09-19):**

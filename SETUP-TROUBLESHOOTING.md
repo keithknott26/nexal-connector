@@ -16,6 +16,13 @@ The UI keeps owner authorization only in the current tab's memory. Use
 **Hosts > Enroll host** to generate a one-use invitation. Connector enrollment
 consumes that invitation, not an owner token or Cloudflare token.
 
+Enrollment now opens the dashboard's Hosts page in the Mac's default browser.
+After owner sign-in, generate an invitation and return to Terminal to paste it.
+If the browser does not open, use the printed address manually; the script
+continues. `--no-browser` disables automatic opening. `--prepare-only` and
+noninteractive runs never launch the browser. An interactive enrolled-profile
+rerun opens Hosts for ID comparison without requesting a new invitation.
+
 The owner reports successful dashboard login and an M4 host entry. Fresh
 two-Mac enrollment and native M4-to-M2 delivery still need owner acceptance.
 See the [deployment evidence](https://github.com/keithknott26/nexal-platform/blob/main/docs/SHARED-DEPLOYMENT-STATUS.md).

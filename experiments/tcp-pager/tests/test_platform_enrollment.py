@@ -31,8 +31,10 @@ class EnrollmentTests(unittest.TestCase):
         self.home.mkdir()
         self.config = self.home / "Library/Application Support/Nexal/config.json"
         self.log = self.root / "actions"
+        self.browser_log = self.root / "browser-actions"
         self.env = {**os.environ, "HOME": str(self.home),
-                    "PATH": f"{self.bin}:/usr/bin:/bin", "TEST_LOG": str(self.log)}
+                    "PATH": f"{self.bin}:/usr/bin:/bin", "TEST_LOG": str(self.log),
+                    "TEST_BROWSER_LOG": str(self.browser_log)}
         for key in ("BASH_ENV", "ENV", "NEXAL_PAGER_GO"):
             self.env.pop(key, None)
         for name in ("setup-lan-macos.sh", "toolchain-lib.sh", "enroll-platform-macos.sh"):
@@ -40,7 +42,15 @@ class EnrollmentTests(unittest.TestCase):
         # The release uses Apple's absolute plutil. Replace only in this isolated
         # fixture, so Linux can exercise its return values without native claims.
         helper = self.scripts / "enroll-platform-macos.sh"
-        helper.write_text(helper.read_text().replace("/usr/bin/plutil", shlex.quote(str(self.bin / "plutil"))))
+        helper.write_text(helper.read_text()
+                          .replace("/usr/bin/plutil", shlex.quote(str(self.bin / "plutil")))
+                          .replace("/usr/bin/open", shlex.quote(str(self.bin / "open"))))
+        self.python("open", """
+import json, os, sys
+with open(os.environ["TEST_BROWSER_LOG"], "a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+sys.exit(1 if os.environ.get("TEST_OPEN_FAIL") else 0)
+""")
         self.script("uname", 'case "$1" in -s) echo Darwin;; -m) echo arm64;; esac')
         self.script("xcrun", "echo /mock/sdk")
         self.script("codesign", "exit 0")
@@ -114,6 +124,7 @@ else: sys.exit(1)
         self.assertEqual(len(actions.splitlines()), 1)
         self.assertIn("M4 mini", actions)
         self.assertEqual([json.loads(line)[0] for line in actions.splitlines()], ["init"])
+        self.assertFalse(self.browser_log.exists())
 
     def test_recorded_enrollment_does_not_consume_code(self):
         self.existing(hostId="host_existing", paused=False)
@@ -136,6 +147,7 @@ else: sys.exit(1)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("terminal", result.stderr)
         self.assertEqual(len(self.log.read_text().splitlines()), 1)
+        self.assertFalse(self.browser_log.exists())
 
     def test_build_failure_preserves_config(self):
         self.existing()
@@ -158,9 +170,14 @@ else: sys.exit(1)
         for args in (("--config", "relative"), ("--coordinator", "http://host"),
                      ("--name",), ("--unknown",), ("--profile", "../escape"),
                      ("--profile", ".hidden"), ("--profile", "a" * 49),
-                     ("--profile", "bad name"), ("--profile", "lan", "--config", "/tmp/config")):
+                     ("--profile", "bad name"), ("--profile", "lan", "--config", "/tmp/config"),
+                     ("--coordinator", "https://user:secret@example.com"),
+                     ("--coordinator", ORIGIN + "/?token=secret"),
+                     ("--coordinator", ORIGIN + "/path"),
+                     ("--coordinator", ORIGIN + "#secret")):
             self.assertNotEqual(self.run_script(*args).returncode, 0)
         self.assertFalse(self.log.exists())
+        self.assertFalse(self.browser_log.exists())
 
     def test_named_profile_preserves_default_identity(self):
         self.existing(hostId="host_original", name="Original Mac")
@@ -200,48 +217,85 @@ else: sys.exit(1)
         self.assertFalse((target / "config.json").exists())
         self.assertFalse(self.log.exists())
 
+    def run_terminal(self, *args, invitation=None):
+        master, slave = pty.openpty()
+        process = subprocess.Popen(self.command(*args), stdin=slave, stdout=slave,
+                                   stderr=slave, env=self.env)
+        os.close(slave)
+        output = b""
+        sent = False
+        deadline = time.monotonic() + 10
+        try:
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    output += chunk
+                if invitation is not None and b"input hidden): " in output and not sent:
+                    import termios
+                    if not termios.tcgetattr(master)[3] & termios.ECHO:
+                        os.write(master, invitation.encode() + b"\n")
+                        sent = True
+                if process.poll() is not None:
+                    break
+            status = process.wait(timeout=2)
+            if invitation is not None:
+                self.assertTrue(sent, output)
+                self.assertNotIn(invitation.encode(), output)
+            return status, output
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+
     def test_hidden_terminal_enrollment_and_failure_retry(self):
         for fail in (True, False):
             if fail:
                 self.env["TEST_ENROLL_FAIL"] = "1"
             else:
                 self.env.pop("TEST_ENROLL_FAIL", None)
-            master, slave = pty.openpty()
-            process = subprocess.Popen(self.command(), stdin=slave, stdout=slave,
-                                       stderr=slave, env=self.env)
-            os.close(slave)
-            output = b""
-            sent = False
-            deadline = time.monotonic() + 10
-            try:
-                while time.monotonic() < deadline:
-                    if select.select([master], [], [], 0.1)[0]:
-                        try:
-                            chunk = os.read(master, 65536)
-                        except OSError:
-                            break
-                        if not chunk:
-                            break
-                        output += chunk
-                    if b"input hidden): " in output and not sent:
-                        # Wait for bash read -s to change terminal echo.
-                        import termios
-                        if not termios.tcgetattr(master)[3] & termios.ECHO:
-                            os.write(master, b"test-secret-invitation\n")
-                            sent = True
-                    if process.poll() is not None:
-                        break
-                self.assertEqual(process.wait(timeout=2) == 0, not fail, output)
-                self.assertTrue(sent)
-                self.assertNotIn(b"test-secret-invitation", output)
-                self.assertNotIn("test-secret-invitation", self.log.read_text())
-                data = json.loads(self.config.read_text())
-                self.assertEqual("hostId" in data, not fail)
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait()
-                os.close(master)
+            status, output = self.run_terminal(invitation="test-secret-invitation")
+            self.assertEqual(status == 0, not fail, output)
+            self.assertNotIn("test-secret-invitation", self.log.read_text())
+            data = json.loads(self.config.read_text())
+            self.assertEqual("hostId" in data, not fail)
+        self.assertEqual([json.loads(line) for line in self.browser_log.read_text().splitlines()],
+                         [[ORIGIN + "/#/hosts"]] * 2)
+
+    def test_browser_failure_is_nonfatal(self):
+        self.env["TEST_OPEN_FAIL"] = "1"
+        status, output = self.run_terminal(invitation="test-secret-invitation")
+        self.assertEqual(status, 0, output)
+        self.assertIn(b"Could not open the default browser", output)
+        self.assertIn((ORIGIN + "/#/hosts").encode(), output)
+        self.assertEqual(json.loads(self.config.read_text())["hostId"], "host_test")
+
+    def test_no_browser_still_allows_enrollment(self):
+        status, output = self.run_terminal("--no-browser", invitation="test-secret-invitation")
+        self.assertEqual(status, 0, output)
+        self.assertIn(b"opening disabled", output)
+        self.assertFalse(self.browser_log.exists())
+
+    def test_recorded_enrollment_opens_dashboard_without_new_invitation(self):
+        self.existing(hostId="host_existing", name="M2 mini")
+        before = self.config.read_bytes()
+        status, output = self.run_terminal("--name", "M2 mini")
+        self.assertEqual(status, 0, output)
+        self.assertEqual(json.loads(self.browser_log.read_text()), [ORIGIN + "/#/hosts"])
+        self.assertNotIn(b"input hidden", output)
+        self.assertFalse(self.log.exists())
+        self.assertEqual(before, self.config.read_bytes())
+
+    def test_prepare_recorded_enrollment_does_not_open_browser(self):
+        self.existing(hostId="host_existing")
+        status, output = self.run_terminal("--prepare-only")
+        self.assertEqual(status, 0, output)
+        self.assertFalse(self.browser_log.exists())
 
 
 if __name__ == "__main__":

@@ -6,6 +6,15 @@ engineering preview, not a production-approved distributed cloud.
 
 ## Named enrollment and iPhone repository checkpoint
 
+Enrollment opens the secret-free coordinator `/#/hosts` URL with `/usr/bin/open`
+in interactive mode before invitation input, including interactive inspection of
+an already-enrolled profile. Owner credentials go only in the browser;
+one-use invitations go in the hidden Terminal prompt. `--prepare-only` and
+noninteractive runs do not open; `--no-browser` opts out, and opening failures
+are nonfatal. HTTPS origin validation rejects userinfo/query/fragment/path.
+Validation: 15 Linux mock enrollment tests plus 12 setup tests; native default
+browser opening is still owner acceptance, not tested from this Linux sandbox.
+
 Owner reports dashboard login succeeds and M4 appears, but the M2 script
 skips because its selected profile already records a host ID. The setup now
 supports `--profile private-lan`, a separate on-disk/Keychain namespace on each

@@ -34,13 +34,19 @@ Do not use the localhost preview profile for a cross-Mac relay.
 
 This mode checks prerequisites using the existing consent-based installer,
 builds the CLI, and initializes a private, paused profile only if none exists.
-After the build it prompts for a one-use invitation with terminal echo disabled.
+After the build it opens `<coordinator>/#/hosts` using macOS's default browser,
+then prompts for a one-use invitation with terminal echo disabled. Enter the
+Nexal owner credential only in the browser sign-in form; the Terminal prompt
+accepts the generated invitation, not the owner credential. URLs contain no
+credentials. `--no-browser` skips opening; failed opening prints manual guidance
+without aborting enrollment. Interactive already-enrolled reruns also open Hosts
+for inspection, without consuming another invitation.
 Generate that invitation in the shared dashboard under **Hosts > Enroll host**.
 No invitation is accepted as an argument, environment variable or saved file.
 Keychain may request approval. Enrollment does not start the agent or pager,
 enable jobs/public sharing, deploy the coordinator, or apply remote migrations.
 
-Use `--prepare-only` to stop before the invitation prompt. Rerun without it when
+Use `--prepare-only` to stop before browser opening and the invitation prompt. Rerun without it when
 ready; reruns preserve configuration, resource policy and credentials. A saved
 host ID skips re-enrollment but does **not** prove that credentials are still
 valid. Saved identity details are printed; an explicitly requested name mismatch
@@ -54,9 +60,11 @@ Run from an interactive Terminal. If invoking inside a here-document, append
 `</dev/tty` to give the hidden prompt a terminal. No reboot or login task is
 installed. The underlying standalone `--donor` and `--receiver` modes are unchanged.
 
-Validation: 12 setup tests plus 11 enrollment orchestration tests,
+Validation: 12 setup tests plus 15 enrollment orchestration tests,
 including hidden-input pseudo-terminal success/failure/retry, safe reruns,
 coordinator mismatch, no-terminal refusal, build failure and symlink rejection.
+Browser success/failure, explicit opt-out, already-enrolled reopening and
+preparation-only suppression are covered without launching a real browser.
 These are Linux mocks, not native macOS/Keychain acceptance.
 
 ## Deliver the pager bundle

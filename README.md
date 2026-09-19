@@ -70,9 +70,10 @@ numbered connections without starting a listener.
 **Shared pilot ready for owner acceptance (2026-09-19):**
 [Open the dashboard](https://nexal-coordinator-dev.nexal.systems/) and use its
 Nexal owner credential, not a Cloudflare API token, to authorize the tab.
-Dashboard assets, relay and migration 0006 are deployed. The owner reports
-successful login and an M4 entry; fresh two-Mac enrollment and LAN transfer
-still need testing. See [troubleshooting](SETUP-TROUBLESHOOTING.md).
+Dashboard assets, relay and confirmed host deletion are deployed. Both Macs
+have saved identities, currently both labeled `M4 mini`; compare IDs and CPU/RAM
+before enrolling again or deleting. Native LAN transfer still needs testing.
+See [troubleshooting](SETUP-TROUBLESHOOTING.md).
 
 ## iPhone pairing app
 

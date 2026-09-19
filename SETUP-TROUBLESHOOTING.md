@@ -9,10 +9,17 @@ macOS `hw.memsize`; changing `--name` does not rename a saved identity or update
 its stored inventory. Do not overwrite RAM/CPU values to match an expected model.
 
 If two cards have the same name, preserve both until their IDs are identified.
-The platform's confirmed Delete host feature requires its migration/deployment;
+The shared dashboard now includes confirmed **Delete host** (migration 0007);
 deletion revokes platform access, retains history and does not stop an existing
 local pager. A deleted profile remains local and must not silently be reused as
 a new identity.
+
+Read-only inspection on September 19 identified `host_f01b747c-8f43-4e43-96f9-b49262ee6703`
+as the earlier M2 saved identity: 8 cores, 8 GiB, recent heartbeats, mislabeled
+`M4 mini`. The newer `host_8b8a0250-95dc-449a-b829-13d773b9f9e2` reports
+12 cores and 24 GiB, matching the expected M4 inventory, with no heartbeat yet.
+No identities were renamed or deleted. The M2 default profile already has an
+active enrollment; its failed new `private-lan` enrollment is separate.
 
 ## Shared dashboard and owner credentials
 
@@ -37,8 +44,8 @@ continues. `--no-browser` disables automatic opening. `--prepare-only` and
 noninteractive runs never launch the browser. An interactive enrolled-profile
 rerun opens Hosts for ID comparison without requesting a new invitation.
 
-The owner reports successful dashboard login and an M4 host entry. Fresh
-two-Mac enrollment and native M4-to-M2 delivery still need owner acceptance.
+The owner reports successful dashboard login. Both saved identities were found;
+native M4-to-M2 delivery still needs owner acceptance.
 See the [deployment evidence](https://github.com/keithknott26/nexal-platform/blob/main/docs/SHARED-DEPLOYMENT-STATUS.md).
 
 If raw JSON still appears at the homepage, reload and check the exact URL.

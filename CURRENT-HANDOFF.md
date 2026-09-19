@@ -6,13 +6,24 @@ engineering preview, not a production-approved distributed cloud.
 
 ## Named enrollment and iPhone repository checkpoint
 
+Connector checkpoint `b8079a8` is pushed. Go race tests and vet, Darwin arm64
+cross-compilation, 17 enrollment mock tests and 12 setup tests passed.
+Shared platform source `4632d60` and migration 0007 are deployed, including
+confirmed host deletion; no live hosts were deleted or renamed.
+Read-only inventory confirms the M2 default profile's ID ending `6703` has
+8 cores / 8 GiB and recent heartbeats, but is mislabeled `M4 mini`.
+The newer ID ending `f9e2` reports 12 cores / 24 GiB and no heartbeat yet.
+Prefer reusing the existing M2 identity over another enrollment. Its failed
+new `private-lan` profile is separate; native LAN delivery remains untested.
+
 M4 owner reports successful enrollment. M2 private-lan enrollment produced the
 old generic `coordinator request failed`, not a recorded HTTP response. Its
 underlying network cause is still unknown and needs the owner's native retry.
 Added credential-free `coordinator-check` and preflight before invitation input;
 fixed-message network error classification and enrollment-only HTTP 409 advice.
-No automatic POST retry, TLS bypass, proxy forwarding, identity reset or remote
-deployment. Platform relay still requires separate enrolled receiver identity;
+No automatic POST retry, TLS bypass, proxy forwarding or identity reset.
+No updated connector was installed on either Mac from this sandbox.
+Platform relay still requires separate enrolled receiver identity;
 pager certificates do not supply platform enrollment. Phone/QR end-to-end flow
 remains unimplemented.
 

@@ -187,9 +187,9 @@ func (a *Agent) wakeHeartbeatLocked() {
 func (a *Agent) Cancel() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cancel != nil {
-		a.cancel()
-	}
+	// Also fence a pending pull; cancelling between Next and Execute must not
+	// let a response obtained under the old owner decision start new work.
+	a.invalidateConsentLocked()
 }
 func (a *Agent) SetPQ(p client.PQ) {
 	a.mu.Lock()
@@ -204,6 +204,7 @@ func (a *Agent) Refresh(ctx context.Context) {
 	a.probeGeneration++
 	probe := a.probeGeneration
 	a.mu.Unlock()
+	started := time.Now()
 	t := a.probe(ctx)
 	if !t.Known {
 		t.OwnerActive = true
@@ -221,7 +222,8 @@ func (a *Agent) Refresh(ctx context.Context) {
 		a.wakeHeartbeatLocked()
 	}
 	a.telemetry = t
-	a.telemetryAt = time.Now()
+	// Freshness starts when sampling started, not when a stalled probe returns.
+	a.telemetryAt = started
 	if a.admitLocked(false) != nil && a.cancel != nil {
 		a.cancel()
 	}
@@ -276,10 +278,21 @@ func (a *Agent) finish(id, state string, r *client.Result, usage float64, expiry
 // Execute validates and journals before starting, and rejects stale/conflicting
 // duplicate attempts. No caller can enable a production path.
 func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
+	return a.execute(ctx, at, nil)
+}
+
+func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := ValidateAttempt(at, a.Snapshot().HostID, time.Now()); err != nil {
 		return err
 	}
 	a.mu.Lock()
+	if a.api == nil || (generation != nil && *generation != a.stateGeneration) {
+		a.mu.Unlock()
+		return errors.New("attempt admission invalidated")
+	}
 	if old, ok := a.records[at.ID]; ok {
 		if old.Fingerprint != fingerprint(at) {
 			a.mu.Unlock()
@@ -315,43 +328,49 @@ func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
 	var leaseMu sync.Mutex
 	expiry := at.LeaseExpiresAt
 	deadline := func() time.Time { leaseMu.Lock(); defer leaseMu.Unlock(); return expiry }
-	// Deadline watcher runs separately from renewal I/O, so a stalled network
-	// cannot extend execution. The workload checks the same deadline itself.
-	done := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(2)
+	// Reclaim runs independently of probes and renewal I/O: a stalled monitor
+	// cannot keep work alive after its resource/coordinator observations expire.
+	// Keep watching through completion I/O as well as computation.
+	var watchWG, renewWG sync.WaitGroup
+	watchWG.Add(1)
+	defer func() { cancel(); watchWG.Wait() }()
 	go func() {
-		defer wg.Done()
+		defer watchWG.Done()
 		tick := time.NewTicker(50 * time.Millisecond)
 		defer tick.Stop()
 		for {
 			select {
 			case <-workCtx.Done():
 				return
-			case <-done:
-				return
 			case <-tick.C:
-				if !time.Now().Before(deadline()) {
+				a.mu.Lock()
+				allowed := a.admitLocked(false) == nil
+				a.mu.Unlock()
+				if !allowed || !time.Now().Before(deadline()) {
 					cancel()
 					return
 				}
 			}
 		}
 	}()
+	renewCtx, stopRenewal := context.WithCancel(workCtx)
+	defer stopRenewal()
+	renewWG.Add(1)
 	go func() {
-		defer wg.Done()
+		defer renewWG.Done()
 		tick := time.NewTicker(15 * time.Second)
 		defer tick.Stop()
 		for {
 			select {
-			case <-workCtx.Done():
-				return
-			case <-done:
+			case <-renewCtx.Done():
 				return
 			case <-tick.C:
-				reqCtx, stop := context.WithDeadline(workCtx, deadline())
+				reqCtx, stop := boundedRequest(renewCtx, deadline())
 				r, err := a.api.Renew(reqCtx, at.ID)
 				stop()
+				if renewCtx.Err() != nil {
+					return
+				}
 				if err != nil || r.CancelRequested || !r.OK {
 					cancel()
 					return
@@ -371,9 +390,14 @@ func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
 	start := time.Now()
 	result, err := MonteCarlo(workCtx, at, deadline)
 	seconds := time.Since(start).Seconds()
-	close(done)
-	wg.Wait()
-	if err != nil || workCtx.Err() != nil || !time.Now().Before(deadline()) {
+	// Cancelling only renewal I/O prevents a finished workload waiting for a
+	// blocked Renew until lease expiry, without cancelling result submission.
+	stopRenewal()
+	renewWG.Wait()
+	a.mu.Lock()
+	allowed := a.admitLocked(false) == nil
+	a.mu.Unlock()
+	if err != nil || workCtx.Err() != nil || !allowed || !time.Now().Before(deadline()) {
 		_ = a.finish(at.ID, "cancelled-or-lease-expired", nil, seconds, deadline())
 		if err != nil {
 			return err
@@ -389,7 +413,7 @@ func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
 		if workCtx.Err() != nil || !time.Now().Before(deadline()) {
 			break
 		}
-		reqCtx, stop := context.WithDeadline(workCtx, deadline())
+		reqCtx, stop := boundedRequest(workCtx, deadline())
 		accepted, callErr := a.api.Complete(reqCtx, at.ID, result, seconds)
 		stop()
 		if callErr == nil {
@@ -414,7 +438,17 @@ func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
 	return errors.New("completion unconfirmed; no automatic re-execution")
 }
 
+func boundedRequest(ctx context.Context, lease time.Time) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(10 * time.Second)
+	if !lease.IsZero() && lease.Before(deadline) {
+		deadline = lease
+	}
+	return context.WithDeadline(ctx, deadline)
+}
+
 func (a *Agent) hostHeartbeat(ctx context.Context) error {
+	ctx, stop := boundedRequest(ctx, time.Time{})
+	defer stop()
 	a.mu.Lock()
 	generation := a.stateGeneration
 	a.heartbeatGeneration++
@@ -484,15 +518,19 @@ func (a *Agent) Run(ctx context.Context) error {
 			case <-t.C:
 				a.mu.Lock()
 				allowed := a.admitLocked(true) == nil
+				generation := a.stateGeneration
 				a.mu.Unlock()
 				if !allowed {
 					continue
 				}
-				at, err := a.api.Next(ctx, hostID)
-				if err != nil || at == nil {
+				reqCtx, stop := boundedRequest(ctx, time.Time{})
+				at, err := a.api.Next(reqCtx, hostID)
+				expired := reqCtx.Err() != nil
+				stop()
+				if expired || err != nil || at == nil {
 					continue
 				}
-				_ = a.Execute(ctx, *at)
+				_ = a.execute(ctx, *at, &generation)
 			}
 		}
 	}()

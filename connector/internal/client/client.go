@@ -77,8 +77,13 @@ func New(base, token string, dev bool) (*Client, error) {
 	if err := config.ValidateURL(base, dev); err != nil {
 		return nil, err
 	}
-	if strings.ContainsAny(token, "\r\n") {
+	if len(token) > 4096 {
 		return nil, errors.New("invalid host credential")
+	}
+	for _, r := range token {
+		if r <= 32 || r > 126 {
+			return nil, errors.New("invalid host credential")
+		}
 	}
 	tr := &http.Transport{
 		Proxy:                 nil, // avoid ambient proxy settings forwarding host credentials
@@ -136,6 +141,9 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if err != nil || len(b) > 64<<10 {
 		return errors.New("coordinator response too large or unreadable")
+	}
+	if err := config.CheckJSONObject(b); err != nil {
+		return errors.New("invalid coordinator response schema")
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()

@@ -82,6 +82,11 @@ func Validate(t config.Tunnel, listen string) error {
 		return errors.New("cannot read pinned binary")
 	}
 	defer f.Close()
+	actual, err := f.Stat()
+	if err != nil || !os.SameFile(st, actual) || !actual.Mode().IsRegular() ||
+		actual.Mode().Perm()&0022 != 0 || actual.Mode().Perm()&0111 == 0 || actual.Size() > 256<<20 {
+		return errors.New("pinned binary changed during open")
+	}
 	hash := sha256.New()
 	if _, err = io.Copy(hash, io.LimitReader(f, (256<<20)+1)); err != nil {
 		return errors.New("cannot hash pinned binary")
@@ -173,24 +178,44 @@ func (w *limitWriter) Write(b []byte) (int, error) {
 // proof of PQ negotiation. Even a reported hybrid group is just local evidence,
 // never remote attestation or eligibility for production dispatch.
 func Observe(e Evidence, line []byte, now time.Time) Evidence {
+	// No input, including invalid diagnostics or an inherited Evidence value,
+	// can promote local observations to deployment verification/attestation.
+	e.Verified = false
+	e.Attestation = false
+	if e.Quarantined {
+		e.Connected = false
+	}
 	if len(line) > 64<<10 {
 		e.Quarantined = true
 		e.Connected = false
 		return e
 	}
 	var event map[string]json.RawMessage
+	if config.CheckJSONObject(line) != nil {
+		e.Quarantined = true
+		e.Connected = false
+		return e
+	}
 	if json.Unmarshal(line, &event) != nil {
 		return e
 	}
 	field := func(k string) string { var s string; _ = json.Unmarshal(event[k], &s); return s }
 	message := strings.ToLower(field("message"))
 	protocol := strings.ToLower(field("protocol"))
-	if protocol == "http2" || protocol == "http/2" || strings.Contains(message, "switching to http2") ||
+	var protocolValue string
+	rawProtocol, hasProtocol := event["protocol"]
+	invalidProtocol := hasProtocol && (json.Unmarshal(rawProtocol, &protocolValue) != nil || protocol == "")
+	if invalidProtocol || (protocol != "" && protocol != "quic") || strings.Contains(message, "switching to http2") ||
 		strings.Contains(message, "fallback to http2") || strings.Contains(message, "post-quantum disabled") ||
 		strings.Contains(message, "post quantum disabled") {
 		e.Quarantined = true
 		e.Connected = false
-		e.ObservedProtocol = protocol
+		// Diagnostics may contain tokens or paths. Only fixed protocol names
+		// may be copied into user-visible evidence.
+		e.ObservedProtocol = ""
+		if protocol == "http2" || protocol == "http/2" {
+			e.ObservedProtocol = "http2"
+		}
 		e.LastObservation = now
 		return e
 	}
@@ -201,12 +226,18 @@ func Observe(e Evidence, line []byte, now time.Time) Evidence {
 	}
 	for _, k := range []string{"curve", "keyAgreement", "key_agreement"} {
 		switch field(k) {
-		case "X25519MLKEM768", "X25519Kyber768Draft00":
-			e.ObservedKeyAgreement = field(k)
-			e.LastObservation = now
-		case "X25519", "P256", "P-256":
+		case "":
+			// A non-string explicit group cannot be interpreted safely.
+			if raw, exists := event[k]; !exists || string(raw) == `""` {
+				continue
+			}
+			fallthrough
+		default:
 			e.Quarantined = true
 			e.Connected = false
+			e.LastObservation = now
+		case "X25519MLKEM768", "X25519Kyber768Draft00":
+			e.ObservedKeyAgreement = field(k)
 			e.LastObservation = now
 		}
 	}

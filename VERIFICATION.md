@@ -6,12 +6,13 @@ in older workstream handoffs. It is not production certification.
 ## Completed locally after rename
 
 - Platform strict TypeScript check and dashboard build passed.
-- 381 TypeScript tests passed in the sibling platform, including transactional
-  audit, usage-budget and authenticated MCP error/size-boundary coverage.
-- 24 setup-policy checks, 11 mocked installer scenarios and 9 subprocess launcher
+- 424 TypeScript tests passed in the sibling platform across 11 files, including
+  transactional audit, admission integrity and MCP/provider resilience coverage.
+- 24 setup-policy checks, 20 mocked installer scenarios and 18 subprocess launcher
   tests passed in the platform; shell syntax checks passed.
-- 134 named Go connector test passes (72 top-level plus named subtests); race
-  detector and vet passed. Agent/config suites passed five repeated race runs.
+- 190 named Go connector test passes (89 top-level plus named subtests); race
+  detector and vet passed. Agent/client/config/tunnel/diagnostics suites passed
+  five repeated race runs.
 - Go MLX command bridge race tests and vet passed.
 - 34 Python policy/integrity tests passed with regenerated Nexal source hashes.
 - Darwin ARM64 Go cross-build passed; not executed on a Mac here.
@@ -29,6 +30,11 @@ in older workstream handoffs. It is not production certification.
 - Failed Swift packaging preserved an existing app in a fault-injected test.
   Successful native compilation/plist validation and bundle publication have
   not been tested here. Do not treat simulated tool outputs as Mac acceptance.
+- Saved configuration now requires explicit, non-null `paused`; generated
+  configurations already comply. Pending-pull cancellation, observation expiry,
+  private-file handling and tunnel evidence have new regressions.
+- Coordinator migration 0004 is required for this source revision. The platform
+  applied it locally and tested upgrades, not remotely in Cloudflare.
 
 ## Not completed
 

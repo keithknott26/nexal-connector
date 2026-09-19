@@ -31,12 +31,20 @@ authenticated loopback API. Resource-policy updates persist atomically, cancel
 active work and invalidate prior observations without enabling public execution.
 Consent generations and per-observation sequences reject stale/out-of-order
 telemetry and heartbeat completions. A native SwiftUI settings form is not added.
-134 named Go test passes (72 top-level), race/vet, repeated race tests and a Darwin
+190 named Go test passes (89 top-level), race/vet, repeated race tests and a Darwin
 ARM64 cross-build passed locally. The shared contract now documents additive
 usage-budget configuration, bounded MCP protocol behavior and the new owner-only
-transactional audit endpoint. Migration 0003 is required in the coordinator.
+transactional audit endpoint. Coordinator migrations through 0004 are required.
 The platform's `scripts/verify-local.sh` checks both sibling repositories and can
 run the actual CLI/Worker integration using `--integration-port 8787`.
+
+The latest safety pass adds an independent stale-observation reclaim watcher,
+pending-pull cancellation fencing, bounded network contexts, strict JSON
+ambiguity checks and safer private-file reads. Saved configuration must include
+explicit, non-null `paused`; generated configurations already comply.
+Tunnel diagnostics remain local observations, never verification or attestation.
+See the platform's `docs/PRODUCTION-HARDENING-PASS.md` for the full integrated
+report. Its 424 TypeScript tests and 62 installer/startup checks passed locally.
 
 The owner has an M4 Mac mini (10 cores, 24 GB RAM, 512 GB) and an M2 Mac.
 Compile and test the SwiftUI application, Keychain integration, setup scripts and
@@ -63,3 +71,8 @@ The owner's explicit next-session resume point is to finish DNS for
 `nexal.systems` and link Claude with Cloudflare. Neither is complete. Confirm
 which Claude client and whether the desired connection is developer/infrastructure
 access or end-user access to Nexal's MCP before granting permissions.
+
+Public registration evidence does not establish who owns `cloudfare.com`;
+the registrar redacts registrant identity. No spelling-variant publisher was
+trusted and no live tunnel was enabled. Preserve the owner's dirty
+`cloudflare-staging` worktree when updating; do not reset or overwrite it.

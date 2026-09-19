@@ -4,7 +4,6 @@ package config
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -12,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 )
 
 const Version = "0.1.0"
@@ -61,7 +61,7 @@ func ValidateURL(raw string, dev bool) error {
 	if err != nil || u == nil {
 		return errors.New("invalid coordinator URL")
 	}
-	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
 		u.Opaque != "" || u.RawPath != "" || (u.Path != "" && u.Path != "/") ||
 		strings.ContainsAny(raw, "\\\r\n\t ") {
 		return errors.New("coordinator must be an origin URL without credentials, path, query or fragment")
@@ -127,6 +127,30 @@ func Load(path string) (Config, error) {
 	b, err := ReadPrivate(path, 64<<10)
 	if err != nil {
 		return c, err
+	}
+	if err := CheckJSONObject(b); err != nil {
+		return c, errors.New("invalid configuration JSON")
+	}
+	// Null scalar values otherwise silently become Go zero values, including
+	// paused=false. An omitted pause decision must never imply owner consent.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return c, errors.New("invalid configuration JSON")
+	}
+	hasPause := false
+	for key, value := range fields {
+		if strings.EqualFold(key, "paused") {
+			hasPause = true
+		}
+		if strings.EqualFold(key, "tunnel") {
+			continue
+		}
+		if strings.TrimSpace(string(value)) == "null" {
+			return c, errors.New("null configuration field")
+		}
+	}
+	if !hasPause {
+		return c, errors.New("explicit saved pause policy required")
 	}
 	d := json.NewDecoder(strings.NewReader(string(b)))
 	d.DisallowUnknownFields()
@@ -197,20 +221,26 @@ func AtomicPrivate(path string, data []byte) error {
 }
 
 func ReadPrivate(path string, limit int64) ([]byte, error) {
+	if !filepath.IsAbs(path) || limit < 0 || limit == 1<<63-1 {
+		return nil, errors.New("absolute private path and bounded limit required")
+	}
 	st, err := os.Lstat(path)
 	if err != nil {
-		return nil, fmt.Errorf("private file unavailable: %w", err)
+		return nil, privateReadError{err}
 	}
 	if !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() > limit {
 		return nil, errors.New("private file must be regular, bounded and mode 0600")
 	}
-	f, err := os.Open(path)
+	// O_NOFOLLOW closes the leaf-symlink race. O_NONBLOCK prevents a file
+	// replaced with a FIFO between inspection and open from hanging the agent.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, errors.New("cannot read private file")
 	}
 	defer f.Close()
 	actual, err := f.Stat()
-	if err != nil || !os.SameFile(st, actual) {
+	if err != nil || !os.SameFile(st, actual) || !actual.Mode().IsRegular() ||
+		actual.Mode().Perm()&0077 != 0 || actual.Size() > limit {
 		return nil, errors.New("private file changed during open")
 	}
 	b, err := io.ReadAll(io.LimitReader(f, limit+1))
@@ -219,3 +249,10 @@ func ReadPrivate(path string, limit int64) ([]byte, error) {
 	}
 	return b, nil
 }
+
+// Preserve errors.Is (especially ErrNotExist for first startup), without
+// exposing the configured path or an OS diagnostic through CLI JSON errors.
+type privateReadError struct{ cause error }
+
+func (privateReadError) Error() string   { return "private file unavailable" }
+func (e privateReadError) Unwrap() error { return e.cause }

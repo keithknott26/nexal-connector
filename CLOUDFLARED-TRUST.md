@@ -24,6 +24,33 @@ This first-party confirmation establishes the project's provenance. It does not
 certify that any arbitrary file named `cloudflared` is authentic, vulnerability-free
 or safe under an incorrect tunnel configuration.
 
+## Exact-domain ownership investigation
+
+On September 19, 2026, an isolated browser navigating to `https://cloudfare.com`
+ended at `https://www.cloudflare.com/`. A redirect establishes a navigation
+destination, not common ownership, publisher identity or proof of safety.
+
+The independent .com registry identifies Cloudflare, Inc., IANA 1910, as the
+**registrar** of `cloudfare.com`, with registration dated August 6, 2009,
+nameservers `fish.ns.cloudflare.com` and `wells.ns.cloudflare.com`, and
+`delegationSigned: false`
+([Verisign RDAP](https://rdap.verisign.com/com/v1/domain/cloudfare.com)).
+The registrar's record explicitly redacts both the registrant's name and
+organization as `DATA REDACTED`
+([registrar RDAP](https://rdap.cloudflare.com/rdap/v1/domain/CLOUDFARE.COM)).
+An independent WHOIS display corroborates the registrar and nameservers
+([WHOIS](https://www.whois.com/whois/cloudfare.com)).
+
+By contrast, `cloudflare.com` has nameservers `ns3` through `ns7.cloudflare.com`
+and a signed delegation
+([Verisign RDAP](https://rdap.verisign.com/com/v1/domain/cloudflare.com)).
+These records do NOT establish that the two registrants are identical.
+Registrar, hosting provider, DNS operator and domain owner are separate roles.
+No verified registrant identity for `cloudfare.com` was established in this review.
+That uncertainty is not evidence that it is a scam, nor permission to trust it.
+Use the canonical documented publisher path and independently verified artifacts;
+do not add the alternate spelling to a software-source allowlist.
+
 ## What is implemented in Nexal
 
 The Go connector has an optional supervisor for an operator-provisioned binary.

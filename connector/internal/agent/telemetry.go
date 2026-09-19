@@ -37,6 +37,9 @@ func diagnostic(ctx context.Context, path string, args ...string) ([]byte, error
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
+	// Bound inherited output pipes even if a child retains them after the
+	// diagnostic process exits or is killed by its context deadline.
+	cmd.WaitDelay = time.Second
 	b := &boundedBuffer{max: 256 << 10}
 	cmd.Stdout = b
 	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C"}
@@ -73,10 +76,11 @@ func ParseFreeMemory(b []byte) (uint64, error) {
 	if len(b) > 256<<10 {
 		return 0, errors.New("memory telemetry too large")
 	}
-	p, f, s := pageRE.FindSubmatch(b), freeRE.FindSubmatch(b), speculativeRE.FindSubmatch(b)
-	if p == nil || f == nil || s == nil {
+	pages, frees, specs := pageRE.FindAllSubmatch(b, -1), freeRE.FindAllSubmatch(b, -1), speculativeRE.FindAllSubmatch(b, -1)
+	if len(pages) != 1 || len(frees) != 1 || len(specs) != 1 {
 		return 0, errors.New("memory telemetry unavailable")
 	}
+	p, f, s := pages[0], frees[0], specs[0]
 	page, e1 := strconv.ParseUint(string(p[1]), 10, 64)
 	free, e2 := strconv.ParseUint(string(f[1]), 10, 64)
 	spec, e3 := strconv.ParseUint(string(s[1]), 10, 64)

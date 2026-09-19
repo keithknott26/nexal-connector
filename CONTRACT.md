@@ -59,9 +59,16 @@ remain production gates; see docs/AUDIT-HISTORY.md.
 
 The shared funding budget is a pricing forecast, not spending authorization.
 Nonzero job reservations require the independently configured usage budget.
+Migration 0004 is required: missing authorization state fails closed with 503,
+and nonzero reservations require configured=1. Admission month, current-month
+usage checks, lease deadlines and invitation expiry use the database clock at
+execution. Existing reservations retain their original admission month.
 POST /mcp -> standard JSON-RPC initialize/tools/list/tools/call (pilot token auth, NOT full OAuth interoperability).
 The stateless MCP JSON subset supports POST only, with a 16 KiB body ceiling
 (declared and streamed bytes). The Worker authenticates before MCP parsing.
+The total body-read deadline defaults to 10 seconds. A timeout or aborted request
+returns HTTP 408 before dispatch, with a sanitized JSON-RPC -32600 error.
+Body-read cancellation does not roll back tools that have already started.
 Malformed JSON uses JSON-RPC -32700; valid non-request JSON uses -32600.
 Valid notifications return HTTP 202 and never execute tool calls. An optional
 MCP-Protocol-Version header is validated and permitted in MCP-specific preflight.

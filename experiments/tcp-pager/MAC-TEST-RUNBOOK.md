@@ -228,9 +228,26 @@ Illustrative output only (actual interfaces and IPs depend on the Mac):
 
 ```text
 IP address | Connection type | Interface | macOS hardware port
-192.168.1.20 | Ethernet (wired) | en0 | Ethernet
-192.168.1.30 | Wi-Fi | en1 | Wi-Fi
+1) 192.168.1.20 | Ethernet (wired) | en0 | Ethernet
+2) 192.168.1.30 | Wi-Fi | en1 | Wi-Fi
 ```
+
+To choose and start a donor, run:
+
+```sh
+bash experiments/tcp-pager/scripts/setup-lan-macos.sh --donor
+```
+
+The donor always asks `Choose a connection (1-N), or q to cancel:`, including
+when there is only one option. Enter `1` for Ethernet in the illustrative list
+above, or the actual number beside Ethernet on your Mac. Invalid entries
+prompt again; `q` or end-of-input stops without starting a donor. The
+`--network-info` mode remains a numbered diagnostic list, not an interactive
+listener launcher. Numbering reflects the current address list and is not
+persisted; one interface can have separate IPv4 and IPv6 options.
+An explicit `nexal-pager-lab donor --listen IP:PORT` still bypasses the menu.
+An already running donor is not updated in place. Stop it deliberately before
+starting another donor; a new run produces a new client bundle.
 
 On macOS, hardware-port labels come from the bounded, read-only
 `/usr/sbin/networksetup -listallhardwareports` command. Interface numbering is

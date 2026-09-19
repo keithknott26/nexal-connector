@@ -13,6 +13,10 @@ a listener; `--donor` displays labels during selection and after binding.
 Wi-Fi, Ethernet, Thunderbolt bridge, virtual/VPN and unknown are distinguished.
 No automatic failover, interface-speed claim or remote-interface inference.
 Full instructions and validation limits are in the pager `MAC-TEST-RUNBOOK.md`.
+The donor now always requires a numbered interface/address choice, even with
+one candidate. Invalid entries retry; q/EOF cancel before donor state creation.
+The network-info list is numbered too but remains non-listening. Three additional
+Go selection tests cover multiple/single addresses, IPv6, retry, EOF and cancel.
 
 ## Reusable enrollment setup checkpoint
 

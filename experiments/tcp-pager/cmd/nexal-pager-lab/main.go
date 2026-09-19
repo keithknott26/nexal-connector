@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -89,28 +90,37 @@ func endpoint() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return chooseEndpoint(ips, os.Stdin, os.Stderr)
+}
+
+func chooseEndpoint(ips []lab.NetworkAddress, input io.Reader, output io.Writer) (string, error) {
 	if len(ips) == 0 {
 		return "", errors.New("no active private Ethernet or Wi-Fi LAN address found; connect to the intended private network")
 	}
-	if len(ips) == 1 {
-		fmt.Fprintf(os.Stderr, "Selected donor connection: %s\n", ips[0].Label())
-		return net.JoinHostPort(ips[0].IP, "9443"), nil
-	}
-	fmt.Fprintln(os.Stderr, "Choose the private donor address reachable by the receiver. Ethernet and Wi-Fi are supported.")
-	fmt.Fprintln(os.Stderr, "Labels describe local interfaces, not measured speed or verified reachability. Avoid VPN/virtual interfaces.")
+	fmt.Fprintln(output, "Choose the private donor address reachable by the receiver. Ethernet and Wi-Fi are supported.")
+	fmt.Fprintln(output, "Labels describe local interfaces, not measured speed or verified reachability. Avoid VPN/virtual interfaces.")
 	for i, ip := range ips {
-		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, ip.Label())
+		fmt.Fprintf(output, "  %d) %s\n", i+1, ip.Label())
 	}
-	answer, err := promptLine("Interface number: ")
-	if err != nil {
-		return "", err
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, 1024), 4096)
+	for {
+		fmt.Fprintf(output, "Choose a connection (1-%d), or q to cancel: ", len(ips))
+		if !scanner.Scan() {
+			return "", errors.New("interface selection ended without a choice; no donor started")
+		}
+		answer := strings.TrimSpace(scanner.Text())
+		if strings.EqualFold(answer, "q") {
+			return "", errors.New("interface selection cancelled; no donor started")
+		}
+		n, err := strconv.Atoi(answer)
+		if err != nil || n < 1 || n > len(ips) {
+			fmt.Fprintf(output, "Enter a number from 1 to %d, or q.\n", len(ips))
+			continue
+		}
+		fmt.Fprintf(output, "Selected donor connection: %s\n", ips[n-1].Label())
+		return net.JoinHostPort(ips[n-1].IP, "9443"), nil
 	}
-	n, err := strconv.Atoi(answer)
-	if err != nil || n < 1 || n > len(ips) {
-		return "", errors.New("invalid interface choice")
-	}
-	fmt.Fprintf(os.Stderr, "Selected donor connection: %s\n", ips[n-1].Label())
-	return net.JoinHostPort(ips[n-1].IP, "9443"), nil
 }
 
 func run() error {
@@ -119,7 +129,7 @@ func run() error {
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	state := f.String("state", "", "new donor directory; defaults to private per-run storage")
-	listen := f.String("listen", "", "numeric private IP:port; prompts if multiple interfaces")
+	listen := f.String("listen", "", "numeric private IP:port; numbered selection when omitted")
 	bundle := f.String("bundle", "", "transferred client folder")
 	output := f.String("output", "", "new receiver directory; defaults to private per-run storage")
 	helper := f.String("native-helper", "", "explicit locally built HVF helper")
@@ -202,13 +212,14 @@ func run() error {
 			return err
 		}
 		fmt.Fprintln(os.Stdout, "IP address | Connection type | Interface | macOS hardware port")
-		for _, a := range addresses {
-			fmt.Fprintln(os.Stdout, a.Label())
+		for i, a := range addresses {
+			fmt.Fprintf(os.Stdout, "%d) %s\n", i+1, a.Label())
 		}
 		if len(addresses) == 0 {
 			fmt.Fprintln(os.Stdout, "No active private IP addresses found.")
 		}
 		fmt.Fprintln(os.Stdout, "Interface labels do not verify peer reachability, speed or routing. Unknown means metadata unavailable.")
+		fmt.Fprintln(os.Stdout, "Listing only. Run setup-lan-macos.sh --donor to choose a connection and start the donor.")
 		return nil
 	case "addresses":
 		if *details {

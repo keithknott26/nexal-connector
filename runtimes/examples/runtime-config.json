@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "model_directory": "/ABSOLUTE/OWNER/APPROVED/READ_ONLY/MODEL",
+  "model_manifest_sha256": "REPLACE_WITH_REVIEWED_MODEL_MANIFEST_SHA256",
+  "dependency_receipt": "/ABSOLUTE/OWNER/APPROVED/dependency-receipt.json",
+  "dependency_receipt_sha256": "REPLACE_WITH_REVIEWED_DEPENDENCY_RECEIPT_SHA256"
+}

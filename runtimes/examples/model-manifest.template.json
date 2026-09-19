@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "model_id": "OWNER_APPROVED_LOCAL_LLAMA_MODEL",
+  "revision": "REPLACE_WITH_IMMUTABLE_40_TO_64_HEX_REVISION",
+  "license": "REPLACE_WITH_REVIEWED_MODEL_LICENSE",
+  "model_type": "llama",
+  "files": {
+    "config.json": "REPLACE_WITH_SHA256",
+    "tokenizer_config.json": "REPLACE_WITH_SHA256",
+    "tokenizer.json": "REPLACE_WITH_SHA256",
+    "model.safetensors": "REPLACE_WITH_SHA256"
+  },
+  "memory": {
+    "weights_bytes": 0,
+    "kv_bytes_per_token": 0,
+    "activation_bytes": 0,
+    "buffer_bytes": 0,
+    "load_peak_bytes": 0,
+    "safety_bytes": 0
+  }
+}

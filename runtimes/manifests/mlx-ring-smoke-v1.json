@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "template": "mlx-ring-smoke-v1",
+  "template_version": "1.0.0",
+  "runtime_version": "0.1.0",
+  "entrypoint": "nexal_mlx_entry.py",
+  "entrypoint_sha256": "a7de43620d79d2b0401062db7ed58c490fea2373d6ed8ba486b603870a57dfc2",
+  "implementation": "nexal_mlx/ring.py",
+  "implementation_sha256": "6b0051759e1cdee5fe5e14a667093512801ba8469a94ca31ed57e764a752072e",
+  "shared_runtime_manifest": "mlx-local-text-v1.json",
+  "command": "ring-smoke",
+  "coordinator_dispatch_enabled": false,
+  "production_approved": false,
+  "experimental_opt_in_required": true,
+  "trusted_lan_required": true,
+  "backend_allowlist": [
+    "ring"
+  ],
+  "jaccl_enabled": false,
+  "distributed_inference_enabled": false,
+  "max_ranks": 8,
+  "timeout_seconds": 30,
+  "payload": "fixed-integer-rank-all-sum-no-model-data"
+}

@@ -1,0 +1,8 @@
+# Research evidence is not an installed runtime dependency or release artifact.
+pplx_sdk_*.json
+__pycache__/
+*.pyc
+.venv*/
+wheelhouse/
+requirements.macos-arm64.lock
+dependency-receipt.json

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "template": "mlx-local-text-v1",
+  "template_version": "1.0.0",
+  "runtime_version": "0.1.0",
+  "execution_class": "apple-silicon-local-mlx",
+  "entrypoint": "nexal_mlx_entry.py",
+  "command": "infer",
+  "coordinator_dispatch_enabled": false,
+  "production_approved": false,
+  "model_type_allowlist": [
+    "llama"
+  ],
+  "model_source": "owner-configured-local-manifest-pinned-directory-only",
+  "remote_code": false,
+  "remote_downloads": false,
+  "max_tokens": 512,
+  "max_context_tokens": 4096,
+  "max_prompt_bytes": 16384,
+  "candidate_dependencies": {
+    "mlx": "0.29.3",
+    "mlx-lm": "0.28.4"
+  },
+  "dependency_release_gate": "RELEASE-GATES.md",
+  "requirements_input_sha256": "1c54956135babd413a749f6319d9029402daf3e9d8457745fbddc7db2edce26e",
+  "source_sha256": {
+    "nexal_mlx/__init__.py": "574b717cc6298edfb0dd204cc775fa6db1b654dfd8a15a3891baa83db1cc8539",
+    "nexal_mlx/__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
+    "nexal_mlx/cli.py": "f465347cc8a76078768ad0bc1ecfc3deb550e3f649c75a9a1a64a4f8669df72b",
+    "nexal_mlx/ring.py": "6b0051759e1cdee5fe5e14a667093512801ba8469a94ca31ed57e764a752072e",
+    "nexal_mlx/runtime.py": "40569ecbe05f5bf20efe66178f66e8d2881317b3acf5dfffc03071e780f117b8",
+    "nexal_mlx/security.py": "faebfe7315a7020627e429c77ec89305e10d1475f76bf60a14c106ac708dbcf5",
+    "nexal_mlx_entry.py": "a7de43620d79d2b0401062db7ed58c490fea2373d6ed8ba486b603870a57dfc2"
+  }
+}

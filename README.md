@@ -1,5 +1,8 @@
 # Nexal Connector
 
+For a resumable engineering checkpoint and the full platform document archive,
+read [CURRENT-HANDOFF.md](CURRENT-HANDOFF.md).
+
 Native Mac connector for the Nexal Platform, intended for nexal.systems.
 Prepared for KWK, LLC. Private proprietary engineering preview, not a
 production-ready marketplace worker, certified sandbox or verified PQ system.

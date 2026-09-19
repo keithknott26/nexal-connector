@@ -4,6 +4,18 @@ Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
 engineering preview, not a production-approved distributed cloud.
 
+## Reusable enrollment setup checkpoint
+
+`experiments/tcp-pager/scripts/setup-lan-macos.sh --enroll-platform --name "M4 mini"`
+now prepares the Go connector and prompts privately for a one-use invitation.
+`--prepare-only` stops before enrollment. Existing profiles are preserved,
+coordinator mismatches refused, and saved host IDs skip re-enrollment without
+claiming live credential verification. Defaults target the shared HTTPS
+`nexal-coordinator-dev.nexal.systems` and the normal Nexal Keychain profile.
+No donor/agent/jobs start, no deployment occurs, and the live relay still needs
+its coordinator update/migration. See the pager `PLATFORM-DELIVERY.md`.
+Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pending.
+
 ## Product and owner decisions
 
 - Product: Nexal Platform and Nexal Connector; entity: KWK, LLC.

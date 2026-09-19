@@ -13,6 +13,49 @@ in the same reachable coordinator, valid host credentials, M4 donor still runnin
 Two separate loopback coordinators do not constitute a shared service.
 No remote deployment or native two-Mac acceptance has been performed.
 
+## Reusable platform enrollment
+
+From the connector repository root, on either Mac:
+
+```sh
+bash experiments/tcp-pager/scripts/setup-lan-macos.sh \
+  --enroll-platform --name "M4 mini"
+```
+
+For the M2 use `--name "M2 mini"`. The default shared coordinator is
+`https://nexal-coordinator-dev.nexal.systems`; the default configuration is
+`~/Library/Application Support/Nexal/config.json`. Use `--coordinator HTTPS_ORIGIN`
+and/or `--config ABSOLUTE_PATH` to select a different deployment explicitly.
+Do not use the localhost preview profile for a cross-Mac relay.
+
+This mode checks prerequisites using the existing consent-based installer,
+builds the CLI, and initializes a private, paused profile only if none exists.
+After the build it prompts for a one-use invitation with terminal echo disabled.
+Generate that invitation in the shared dashboard under **Hosts > Enroll host**.
+No invitation is accepted as an argument, environment variable or saved file.
+Keychain may request approval. Enrollment does not start the agent or pager,
+enable jobs/public sharing, deploy the coordinator, or apply remote migrations.
+
+Use `--prepare-only` to stop before the invitation prompt. Rerun without it when
+ready; reruns preserve configuration, resource policy and credentials. A saved
+host ID skips re-enrollment but does **not** prove that credentials are still
+valid. A different saved coordinator is rejected instead of silently replacing
+the profile. Interrupted or rejected invitations can be retried; an ambiguous
+server-side success may require a fresh invitation and dashboard review.
+The wrapper does not provide transactional recovery for the underlying enrollment
+API if connectivity or Keychain persistence fails after the server commits.
+
+Run from an interactive Terminal. If invoking inside a here-document, append
+`</dev/tty` to give the hidden prompt a terminal. No reboot or login task is
+installed. The underlying standalone `--donor` and `--receiver` modes are unchanged.
+
+Validation: 11 existing setup tests plus 8 enrollment orchestration tests,
+including hidden-input pseudo-terminal success/failure/retry, safe reruns,
+coordinator mismatch, no-terminal refusal, build failure and symlink rejection.
+These are Linux mocks, not native macOS/Keychain acceptance.
+
+## Deliver the pager bundle
+
 From this module on the M2:
 
 ```sh

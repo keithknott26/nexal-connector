@@ -5,6 +5,10 @@ unset CDPATH GOROOT NODE_OPTIONS NODE_PATH GOFLAGS GOENV
 unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH LD_PRELOAD LD_LIBRARY_PATH
 export GOTOOLCHAIN=local
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if [[ "${1:-}" == --enroll-platform ]]; then
+  shift
+  exec bash "$ROOT/scripts/enroll-platform-macos.sh" "$@"
+fi
 . "$ROOT/scripts/toolchain-lib.sh"
 MODE=""
 BUNDLE=""
@@ -12,6 +16,7 @@ CHECK=false
 START=true
 usage() {
   printf 'Usage: bash setup-lan-macos.sh --donor|--receiver "/path/to/client" [--check] [--no-start]\n'
+  printf '   or: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--coordinator HTTPS_ORIGIN] [--config ABSOLUTE_PATH] [--prepare-only]\n'
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in

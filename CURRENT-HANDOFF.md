@@ -4,6 +4,16 @@ Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
 engineering preview, not a production-approved distributed cloud.
 
+## Network labeling checkpoint
+
+The pager donor now labels each active private address with interface name and
+connection type from macOS hardware-port metadata, not en0/en1 guesses.
+`setup-lan-macos.sh --network-info` lists the same information without starting
+a listener; `--donor` displays labels during selection and after binding.
+Wi-Fi, Ethernet, Thunderbolt bridge, virtual/VPN and unknown are distinguished.
+No automatic failover, interface-speed claim or remote-interface inference.
+Full instructions and validation limits are in the pager `MAC-TEST-RUNBOOK.md`.
+
 ## Reusable enrollment setup checkpoint
 
 `experiments/tcp-pager/scripts/setup-lan-macos.sh --enroll-platform --name "M4 mini"`

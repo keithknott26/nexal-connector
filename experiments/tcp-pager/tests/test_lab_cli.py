@@ -65,6 +65,7 @@ class LabCLI(unittest.TestCase):
             root = Path(temp)
             state, m, process, diagnostic = self.start(root)
             self.assertNotIn(b"PRIVATE KEY", diagnostic)
+            self.assertIn(b"Donor connection: Loopback", diagnostic)
             for n in range(2):
                 out = root / f"receiver-{n}"
                 result = self.receive(state, m, out)
@@ -114,6 +115,22 @@ class LabCLI(unittest.TestCase):
             result = self.receive(state, m, out)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(marker.read_text(), "preserve")
+
+    def test_network_address_details(self):
+        human = self.cli("networks")
+        self.assertEqual(human.returncode, 0, human.stderr)
+        self.assertIn("Connection type | Interface", human.stdout)
+        result = self.cli("addresses", "--details")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = json.loads(result.stdout)
+        self.assertIsInstance(rows, list)
+        for row in rows:
+            self.assertTrue(row["ip"])
+            self.assertTrue(row["interface"])
+            self.assertTrue(row["connectionType"])
+        legacy = self.cli("addresses")
+        self.assertEqual(legacy.returncode, 0, legacy.stderr)
+        self.assertTrue(all(isinstance(ip, str) for ip in json.loads(legacy.stdout) or []))
 
     def test_invalid_flags(self):
         for args in [

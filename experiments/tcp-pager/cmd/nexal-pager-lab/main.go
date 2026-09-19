@@ -85,19 +85,21 @@ func promptLine(label string) (string, error) {
 }
 
 func endpoint() (string, error) {
-	ips, err := lab.Addresses()
+	ips, err := lab.NetworkAddresses()
 	if err != nil {
 		return "", err
 	}
 	if len(ips) == 0 {
-		return "", errors.New("no private LAN address found; connect to the intended private network")
+		return "", errors.New("no active private Ethernet or Wi-Fi LAN address found; connect to the intended private network")
 	}
 	if len(ips) == 1 {
-		return net.JoinHostPort(ips[0], "9443"), nil
+		fmt.Fprintf(os.Stderr, "Selected donor connection: %s\n", ips[0].Label())
+		return net.JoinHostPort(ips[0].IP, "9443"), nil
 	}
-	fmt.Fprintln(os.Stderr, "Choose the M4/private donor interface reachable by the M2 (not a VPN):")
+	fmt.Fprintln(os.Stderr, "Choose the private donor address reachable by the receiver. Ethernet and Wi-Fi are supported.")
+	fmt.Fprintln(os.Stderr, "Labels describe local interfaces, not measured speed or verified reachability. Avoid VPN/virtual interfaces.")
 	for i, ip := range ips {
-		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, ip)
+		fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, ip.Label())
 	}
 	answer, err := promptLine("Interface number: ")
 	if err != nil {
@@ -107,12 +109,13 @@ func endpoint() (string, error) {
 	if err != nil || n < 1 || n > len(ips) {
 		return "", errors.New("invalid interface choice")
 	}
-	return net.JoinHostPort(ips[n-1], "9443"), nil
+	fmt.Fprintf(os.Stderr, "Selected donor connection: %s\n", ips[n-1].Label())
+	return net.JoinHostPort(ips[n-1].IP, "9443"), nil
 }
 
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("commands: donor | serve | receive | local-ram-test | addresses")
+		return errors.New("commands: donor | serve | receive | local-ram-test | addresses | networks")
 	}
 	f := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
 	state := f.String("state", "", "new donor directory; defaults to private per-run storage")
@@ -125,6 +128,7 @@ func run() error {
 	loopback := f.Bool("loopback-test", false, "explicit development-only same-computer acceptance")
 	requireOS := f.Bool("require-os-ram", false, "require unimplemented OS-visible RAM; exit 3 after successful paging")
 	show := f.Bool("show-folder", false, "reveal client transfer folder in Finder on macOS")
+	details := f.Bool("details", false, "addresses only: include interface and connection type")
 	lifetime := f.Duration("lifetime", 30*time.Minute, "donor maximum lifetime, 1s..30m")
 	sessions := f.Int("sessions", 16, "maximum authenticated disposable sessions, 1..16")
 	if err := f.Parse(os.Args[2:]); err != nil {
@@ -132,6 +136,9 @@ func run() error {
 	}
 	if f.NArg() != 0 {
 		return errors.New("unexpected arguments; quote paths containing spaces")
+	}
+	if *details && os.Args[1] != "addresses" {
+		return errors.New("--details is only valid with addresses")
 	}
 	if *lifetime < time.Second || *lifetime > 30*time.Minute || *sessions < 1 || *sessions > 16 {
 		return errors.New("invalid lifetime or session limit")
@@ -189,7 +196,28 @@ func run() error {
 		}
 		fmt.Fprintln(os.Stderr, "CPU paging passed; the OS-visible RAM requirement has not passed.")
 		return errOSRAM
+	case "networks":
+		addresses, err := lab.NetworkAddresses()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stdout, "IP address | Connection type | Interface | macOS hardware port")
+		for _, a := range addresses {
+			fmt.Fprintln(os.Stdout, a.Label())
+		}
+		if len(addresses) == 0 {
+			fmt.Fprintln(os.Stdout, "No active private IP addresses found.")
+		}
+		fmt.Fprintln(os.Stdout, "Interface labels do not verify peer reachability, speed or routing. Unknown means metadata unavailable.")
+		return nil
 	case "addresses":
+		if *details {
+			addresses, err := lab.NetworkAddresses()
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(os.Stdout).Encode(addresses)
+		}
 		ips, err := lab.Addresses()
 		if err != nil {
 			return err
@@ -236,6 +264,7 @@ func run() error {
 			return fmt.Errorf("bind failed; do not kill other applications: %w", err)
 		}
 		defer ln.Close()
+		fmt.Fprintf(os.Stderr, "Donor connection: %s\n", lab.EndpointConnection(m.Endpoint))
 		fmt.Fprintf(os.Stderr, "\nPRIVATE DISPOSABLE PAGER LAB\nEndpoint: %s\nPayload per session: %d bytes\nMaximum lifetime: %s; authenticated sessions: %d\n",
 			m.Endpoint, lab.Pages*pager.PageSize, *lifetime, *sessions)
 		fmt.Fprintf(os.Stderr, "State directory: %s\nTransfer ONLY this client folder to your other Mac:\n%s\n",
@@ -265,7 +294,7 @@ func run() error {
 			return err
 		}
 		if *fingerprint == "" {
-			fmt.Fprintf(os.Stderr, "Bundle endpoint: %s\nConfirm the donor using its terminal, not this transferred folder.\n", m.Endpoint)
+			fmt.Fprintf(os.Stderr, "Bundle endpoint: %s\nDonor connection type: see donor terminal (not inferable from remote IP alone).\nConfirm the donor using its terminal, not this transferred folder.\n", m.Endpoint)
 			*fingerprint, err = promptLine("Paste the PUBLIC CA fingerprint printed on the donor: ")
 			if err != nil {
 				return err

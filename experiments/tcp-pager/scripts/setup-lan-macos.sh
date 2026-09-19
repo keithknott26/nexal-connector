@@ -16,6 +16,7 @@ CHECK=false
 START=true
 usage() {
   printf 'Usage: bash setup-lan-macos.sh --donor|--receiver "/path/to/client" [--check] [--no-start]\n'
+  printf '   or: bash setup-lan-macos.sh --network-info [--check]\n'
   printf '   or: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--coordinator HTTPS_ORIGIN] [--config ABSOLUTE_PATH] [--prepare-only]\n'
 }
 while [[ $# -gt 0 ]]; do
@@ -23,6 +24,9 @@ while [[ $# -gt 0 ]]; do
     --donor)
       [[ -z "$MODE" ]] || { usage >&2; exit 2; }
       MODE=donor; shift ;;
+    --network-info)
+      [[ -z "$MODE" ]] || { usage >&2; exit 2; }
+      MODE=network-info; shift ;;
     --receiver)
       [[ -z "$MODE" && $# -ge 2 && "$2" != --* ]] || { usage >&2; exit 2; }
       MODE=receiver
@@ -98,6 +102,13 @@ printf '\nUsing Go only for this setup and its child processes:\n'
 if [[ "$START" == false ]]; then
   printf 'Prerequisites ready. No build or network listener started. Rerun without --no-start when ready.\n'
   exit 0
+fi
+if [[ "$MODE" == network-info ]]; then
+  printf '\nListing active private IP addresses and connection types. No listener will start.\n'
+  umask 077
+  mkdir -p "$ROOT/build"
+  (cd "$ROOT" && "$GO" build -trimpath -o build/nexal-pager-network-info ./cmd/nexal-pager-lab)
+  exec "$ROOT/build/nexal-pager-network-info" networks
 fi
 printf '\nStarting the bounded private test. After any donor restart, transfer its NEW client folder.\n'
 if [[ "$MODE" == donor ]]; then

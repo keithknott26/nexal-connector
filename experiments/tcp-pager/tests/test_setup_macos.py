@@ -109,6 +109,25 @@ esac
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.actions(), f"receiver:{bundle}\n")
 
+    def test_network_info_never_starts_donor(self):
+        cli = self.root / "mock network cli"
+        self.write(cli, 'printf "network-info:%s\\n" "$*" >> "$TEST_LOG"')
+        self.env["TEST_NETWORK_CLI"] = str(cli)
+        self.write(self.prefix / "bin/go", '''
+if [[ "$1" == version ]]; then
+  echo "go version go1.26.8 darwin/arm64"
+elif [[ "$1" == build && "$3" == -o ]]; then
+  cp "$TEST_NETWORK_CLI" "$4"
+else
+  exit 1
+fi
+''')
+        self.env["NEXAL_PAGER_GO"] = str(self.prefix / "bin/go")
+        result = self.run_setup("--network-info")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.actions(), "network-info:networks\n")
+        self.assertIn("No listener will start", result.stdout)
+
     def test_platform_and_argument_guards(self):
         for args in ((), ("--wat",), ("--donor", "--receiver", "/tmp")):
             self.assertNotEqual(self.run_setup(*args).returncode, 0)

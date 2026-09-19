@@ -209,3 +209,57 @@ then exits 3 if paging passed but the missing OS integration remains.
 The full acceptance contract and assessment of the owner's Apple API link are
 in [OS-VISIBLE-RAM-ACCEPTANCE.md](OS-VISIBLE-RAM-ACCEPTANCE.md). Passing CPU paging
 or a custom allocator test does not close the host OS, full guest OS or GPU gates.
+# Ethernet and Wi-Fi address labels
+
+From the connector repository root, list addresses without starting a donor:
+
+```sh
+git pull --ff-only
+bash experiments/tcp-pager/scripts/setup-lan-macos.sh --network-info
+```
+
+This uses the existing consent-based Go prerequisites, builds a separate
+network-information executable, and lists active private addresses. It does not
+start a listener, change network settings, or interrupt an existing donor.
+The usual `--donor` command now shows the same connection labels during address
+selection and prints the connection beside the final donor endpoint.
+
+Illustrative output only (actual interfaces and IPs depend on the Mac):
+
+```text
+IP address | Connection type | Interface | macOS hardware port
+192.168.1.20 | Ethernet (wired) | en0 | Ethernet
+192.168.1.30 | Wi-Fi | en1 | Wi-Fi
+```
+
+On macOS, hardware-port labels come from the bounded, read-only
+`/usr/sbin/networksetup -listallhardwareports` command. Interface numbering is
+not used to guess Ethernet versus Wi-Fi. If metadata is unavailable or
+unrecognized, the output says **Unknown connection type**. VPN/tunnel, virtual
+bridge and Apple peer-to-peer interfaces are labeled separately; a configured
+Thunderbolt bridge is not evidence of Thunderbolt 5, RDMA or measured link speed.
+Down interfaces, loopback, public addresses and link-local addresses are excluded
+from the private candidate list. Private IPv4 and IPv6 ULA addresses are included.
+
+The TCP pager can use a reachable Ethernet or Wi-Fi private address. Select the
+donor address reachable from the receiver; labels do not prove firewall
+permission, routing, absence of wireless client isolation, or physical LAN
+membership. The receiver may use a different connection type from the donor.
+The donor binds one selected IP, not all interfaces, and does not implement
+Wi-Fi/Ethernet bonding or automatic failover. If the address changes, stop and
+restart the donor and deliver the new client bundle. Selecting an IP is not
+an OS routing/interface pin, especially if the same IP is assigned twice.
+
+The remote donor's physical connection type cannot be inferred from its IP
+alone; the receiver directs the owner to the donor's terminal rather than
+inventing that label. Cloud coordinator enrollment still uses ordinary OS
+routing and is separate from the selected private pager endpoint.
+
+Machine-readable interface metadata is available through
+`build/nexal-pager-lab addresses --details`; the existing `addresses` command
+without flags preserves its original bare-IP JSON shape.
+
+Validation: six new Go network tests; full module race tests and vet;
+seven real portable CLI tests; 12 setup and eight enrollment mock tests;
+Darwin ARM64 cross-build. Actual M4/M2 interface detection and physical
+Wi-Fi/Ethernet connectivity remain owner acceptance tests.

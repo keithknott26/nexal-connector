@@ -19,4 +19,11 @@ printf 'This resumes its existing certificates for at most 30 minutes, with TLS 
 printf 'No processes will be killed. No system settings or enrollment will change.\n'
 printf 'The endpoint must still belong to this Mac and certificates must remain valid.\n'
 bash "$ROOT/scripts/build-macos.sh"
-exec "$ROOT/build/nexal-pager-lab" serve --state "$STATE" --lifetime 30m --sessions 16
+umask 077
+LOG="$(mktemp "$STATE/donor-diagnostics.XXXXXX")"
+printf '\nDonor diagnostics will also be saved here:\n%s\n' "$LOG"
+printf 'After one receiver attempt, read this log from another Terminal window.\n'
+# Fixed-label TLS events and startup information only; never copy key files.
+# pipefail preserves donor failure rather than reporting tee's success.
+"$ROOT/build/nexal-pager-lab" serve --state "$STATE" --lifetime 30m --sessions 16 2>&1 |
+  /usr/bin/tee "$LOG"

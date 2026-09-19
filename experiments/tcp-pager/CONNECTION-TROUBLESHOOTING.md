@@ -53,6 +53,13 @@ firewall settings, re-enrolls, or starts on login. Bind conflicts fail safely.
 Existing credentials must remain valid and the endpoint must still belong to M4.
 The store is fresh per session; this does not recover old remote memory.
 
+The resume script saves startup output and fixed-label connection diagnostics to
+a new mode-0600 `donor-diagnostics.*` file in the existing donor state directory.
+The exact path is printed before serving. Keep that donor terminal open; after
+one receiver attempt, read the printed log from another terminal. Send only its
+diagnostic text, not the state directory or any private key files. An empty log
+or absence of `tcp_accept` during the attempt is useful evidence too.
+
 On M2, update the repository and rerun against the previously imported credentials:
 
 ```sh

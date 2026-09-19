@@ -6,6 +6,15 @@ The owner reported successful native build, signature verification and CPU-fault
 loopback acceptance on September 19, 2026; see [VALIDATION.md](VALIDATION.md).
 Paging between two separate Macs remains untested.
 
+**New scripted workflow:** read [the Mac test runbook](MAC-TEST-RUNBOOK.md).
+`bash scripts/accept-memory-macos.sh` runs the baseline tests, a real
+CFAllocatorCreate scope diagnostic, and before/during/after host RAM observations.
+The OS-visible RAM requirement intentionally remains unimplemented; a successful
+lower-level run ends with exit 3 rather than falsely claiming that requirement
+passed. New native observation/CF code still needs owner acceptance.
+The guided LAN scripts automate setup, short-lived credentials and repeated fresh
+test sessions; they do not integrate with the production connector.
+
 ## What it does
 
 - Uses 16 KiB pages, 64 pages by default (1 MiB logical dataset), and a four-page
@@ -97,6 +106,10 @@ executed agent test or a two-Mac result. The portable test correctly reported
 `nativeHVFExecuted: false`. Exact hardware/OS/revision were not included.
 
 ## Use a donor on another private-LAN computer
+
+Prefer the guided donor/receiver scripts in [the runbook](MAC-TEST-RUNBOOK.md).
+The low-level commands below remain supported for a single workload; unlike the
+separate lab fixture, this original donor does NOT reset between connections.
 
 First pass native loopback acceptance. Then build the Go tool on each machine;
 only the receiving Mac needs the native helper.

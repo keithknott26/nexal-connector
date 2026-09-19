@@ -18,6 +18,7 @@ mkdir -p build
 "$GO" test -race ./...
 "$GO" vet ./...
 "$GO" build -trimpath -o build/nexal-pager ./cmd/nexal-pager
+"$GO" build -trimpath -o build/nexal-pager-lab ./cmd/nexal-pager-lab
 xcrun clang -std=c11 -O2 -Wall -Wextra -Werror -arch arm64 \
   -mmacosx-version-min=13.0 -framework Hypervisor native/hvf_pager.c -o build/hvf-pager
 codesign --force --sign - --entitlements native/entitlements.plist build/hvf-pager

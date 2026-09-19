@@ -17,6 +17,17 @@ import (
 // Native runs only the explicitly selected, locally built research helper.
 // The helper owns cache frames; this broker owns the authenticated page session.
 func Native(ctx context.Context, c *Client, slots int, helper string) (Report, error) {
+	return native(ctx, c, slots, helper, 0)
+}
+
+// NativeObserved keeps the final guest cache mapped for one second while the
+// lab observes host counters. The vCPU is stopped during this window. It is not
+// a guest OS and does not register those pages as additional host RAM.
+func NativeObserved(ctx context.Context, c *Client, slots int, helper string) (Report, error) {
+	return native(ctx, c, slots, helper, 1000)
+}
+
+func native(ctx context.Context, c *Client, slots int, helper string, holdMS int) (Report, error) {
 	r := Report{Mode: "native HVF CPU-fault pager", LogicalBytes: c.Pages() * PageSize, CachePayloadLimitBytes: slots * PageSize}
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		return r, errors.New("native mode requires an Apple-silicon Mac")
@@ -37,7 +48,11 @@ func Native(ctx context.Context, c *Client, slots int, helper string) (Report, e
 	}
 	childCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cmd := exec.CommandContext(childCtx, path, strconv.Itoa(c.Pages()), strconv.Itoa(slots))
+	args := []string{strconv.Itoa(c.Pages()), strconv.Itoa(slots)}
+	if holdMS != 0 {
+		args = append(args, strconv.Itoa(holdMS))
+	}
+	cmd := exec.CommandContext(childCtx, path, args...)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C"}
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Stderr = os.Stderr

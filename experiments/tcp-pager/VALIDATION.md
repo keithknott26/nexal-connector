@@ -39,6 +39,31 @@ for provenance and the reported JSON results.
 
 ## Executed in the Linux development environment
 
+### Guided lab and OS-observation increment
+
+The new increment was tested separately after the owner's original native pass:
+
+- `go test -race -count=3 ./...`: passed.
+- One uncached JSON run: 36 top-level tests, 59 named passes including subtests.
+- `go vet ./...`: passed.
+- Six new Python CLI process tests passed, including repeated fresh donor
+  sessions, fingerprint rejection before connection, preservation of existing
+  output, and exit 3 rather than false OS-visible RAM acceptance.
+- Four original Python CLI tests and three ARM assembly/emulation tests passed.
+- Portable C allocator tests passed with AddressSanitizer and UndefinedBehaviorSanitizer.
+- Shell syntax passed for all Mac scripts.
+- Go lab CLI cross-built for Darwin ARM64.
+- Statement coverage: lab package 71.7%, pager package 79.4%; not native Mac,
+  Core Foundation, the CLI package or whole-product coverage.
+
+The revised C helper's optional observation hold, native host counter sampler,
+Core Foundation API calls, Finder reveal and new full Mac script were NOT
+executed here. The original M2 result is not evidence for these new additions.
+No separate-Mac LAN test, full guest OS or host/GPU RAM expansion was performed.
+See [the runbook](MAC-TEST-RUNBOOK.md) and [RAM acceptance contract](OS-VISIBLE-RAM-ACCEPTANCE.md).
+
+### Original prototype evidence
+
 - Go 1.26.0: `go test -race -count=5 ./...` passed.
 - One uncached JSON test run: 21 top-level Go tests, 29 named passes including
   subtests. They cover cache limits, TCP round trips, page versions, corruption,

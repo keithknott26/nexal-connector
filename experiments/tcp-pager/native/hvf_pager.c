@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #include "guest_code.h"
 
@@ -127,8 +128,9 @@ static unsigned parse(const char *s, unsigned max) {
     return (unsigned)n;
 }
 int main(int argc, char **argv) {
-    if (argc!=3) die("launch via nexal-pager, not directly");
+    if (argc!=3 && argc!=4) die("launch via nexal-pager, not directly");
     page_count=parse(argv[1],256); slot_count=parse(argv[2],MAX_SLOTS);
+    unsigned hold_ms=argc==4?parse(argv[3],2000):0;
     if (page_count<=slot_count || sysconf(_SC_PAGESIZE)!=PAGE) die("unsupported page/cache configuration");
     signal(SIGPIPE,SIG_IGN);
     alarm(90); /* Independent fail-stop watchdog, including a stuck guest. */
@@ -148,6 +150,14 @@ int main(int argc, char **argv) {
     /* Flush and unmap every frame: verification must fetch every page over TCP. */
     for (unsigned i=0;i<slot_count;i++) remove_slot(&slots[i]);
     for (unsigned p=page_count;p>0;p--) run_page(p-1,false);
+    /* Optional acceptance observation window: vCPU is stopped, final cache
+     * pages remain mapped. This does not add memory to any OS allocator. */
+    if (hold_ms) {
+        struct timespec remaining = { (time_t)(hold_ms/1000), (long)(hold_ms%1000)*1000000L };
+        while (nanosleep(&remaining,&remaining)<0) {
+            if (errno!=EINTR) die("observation wait failed");
+        }
+    }
     for (unsigned i=0;i<slot_count;i++) remove_slot(&slots[i]);
     hvcheck(hv_vcpu_destroy(cpu),"destroy vCPU");
     hvcheck(hv_vm_unmap(CODE_GPA,PAGE),"unmap code");

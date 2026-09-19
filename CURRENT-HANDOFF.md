@@ -69,6 +69,17 @@ with a 64 KiB cache payload, 128 faults and 120 evictions. Exact hardware,
 OS version and checkout revision were not included in that output.
 See the module's VALIDATION.md and transcribed acceptance JSON.
 The next gate is the same bounded workload between two separate private-LAN Macs.
+Follow-up: `experiments/tcp-pager/MAC-TEST-RUNBOOK.md` now provides guided
+donor/receiver scripts, repeated fresh-store acceptance and one-command Mac
+memory diagnostics. The owner clarified the accepted original host is an M2
+Mac mini. The new Core Foundation probe and optional native observation hold
+need their own Mac run. Linux validation: 36 top-level/59 named Go passes,
+race/vet, six lab CLI tests, four prior CLI tests, three ARM-emulation tests,
+portable C sanitizers and Darwin Go cross-build passed.
+`accept-memory-macos.sh` explicitly ends with exit 3 if paging passes but the
+requested OS-visible RAM backend remains unimplemented. CFAllocatorCreate is
+an opt-in application allocator hook, not a completed remote-memory backend;
+see OS-VISIBLE-RAM-ACCEPTANCE.md. No claims of additional system RAM are permitted.
 This does not change production enrollment, sharing or memory accounting and
 does not establish macOS guest boot, host RAM expansion or additional VRAM.
 

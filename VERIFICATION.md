@@ -38,7 +38,9 @@ in older workstream handoffs. It is not production certification.
 
 ## Not completed
 
-- Actual macOS Swift compilation, the new local-preview UI and Keychain behavior.
+- Actual local-preview UI and Keychain behavior. Subsequent owner-supplied M4
+  output confirms native Swift compilation, seven XCTest cases and initial app
+  packaging passed; see MAC-ACCEPTANCE.md for provenance and remaining checks.
 - Docker image runtime acceptance on the target Mac.
 - GitHub-hosted CI: Actions intentionally disabled pending owner review.
 - Signed/notarized distribution, actual PQ negotiation, distributed MLX, real

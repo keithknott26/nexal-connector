@@ -18,6 +18,13 @@ marketplace connector. Preserve all release gates and both repositories' privacy
 
 ## Immediate acceptance work
 
+Native update: owner-supplied M4 output for connector `76345d9` confirms Go
+vet/race package tests, Swift compilation, seven XCTest cases and initial app
+packaging passed. Read MAC-ACCEPTANCE.md before repeating build-only checks.
+App launch, Keychain, telemetry and recovery are still pending. The Swift local
+preview is fixed to port 8787, which an existing Docker service occupies;
+identify that service before stopping it or attaching the app.
+
 Latest installation pass adds `nexal doctor` / `doctor --probe`, a sanitized
 read-only configuration/optional telemetry report. No credentials or network
 connections are accessed. Native app packaging stages a complete replacement

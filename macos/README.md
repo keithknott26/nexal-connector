@@ -12,9 +12,11 @@ credentials, owner policies, limits, telemetry, heartbeat, pause/cancellation,
 resource admission, tunnel verification and workload execution. There is no
 second scheduler, direct coordinator client, browser wrapper or credential store.
 
-**Status:** source implementation, not compiled or hardware-tested in the Linux
-authoring environment. No signed/notarized binary is included. Do not describe
-this as production-ready or as a tested M4/M2 application.
+**Status:** owner-supplied M4 output now confirms native compilation, seven
+XCTest cases and initial app packaging for connector `76345d9`. Interactive UI,
+Keychain and runtime hardware acceptance are not yet complete; see
+[`../MAC-ACCEPTANCE.md`](../MAC-ACCEPTANCE.md). No Developer ID signed/notarized
+binary is included. This is not production-ready or M2-validated.
 
 ## What the shell does
 

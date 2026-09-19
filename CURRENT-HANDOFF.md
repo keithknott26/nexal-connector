@@ -87,6 +87,15 @@ see OS-VISIBLE-RAM-ACCEPTANCE.md. No claims of additional system RAM are permitt
 This does not change production enrollment, sharing or memory accounting and
 does not establish macOS guest boot, host RAM expansion or additional VRAM.
 
+LAN bootstrap follow-up: the M4 selected Go 1.23.1 and stopped before donor
+startup. `experiments/tcp-pager/scripts/setup-lan-macos.sh --donor` now checks
+prerequisites, offers consent-based installation of Homebrew `go@1.26`, and
+starts the existing donor workflow. `--receiver "/path/to/client"` prepares the
+receiver. `--check` and `--no-start` are available; explicit rerun commands
+support restarts without boot-time services or persistent resume flags.
+11 mock-toolchain tests and Bash syntax checks pass; actual M4 setup and LAN
+acceptance remain pending. No reboot is requested by the script.
+
 Native update: the owner subsequently supplied successful native build output for
 platform `d601629` and connector `76345d9`: 424 TypeScript tests, Go vet/race
 package tests, Swift compilation, seven XCTest cases, migrations 0001–0004

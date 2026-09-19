@@ -8,6 +8,38 @@ untested. Both Macs are on the same owner-reported LAN.
 
 ## Test everything locally on the M4 or M2
 
+### Guided prerequisites and restart-safe LAN setup
+
+From this module, run `bash scripts/setup-lan-macos.sh --donor` on the M4.
+It checks native Apple-silicon architecture, Apple build tools/SDK and stable
+Go 1.26+ before starting. If Go is missing or outdated, it asks for approval to
+install `go@1.26` through existing Homebrew. Dependencies may also change.
+It does not install Homebrew itself, change global Go links or shell profiles,
+accept Apple licenses, weaken security, reboot or register a login task.
+
+On the M2, after transferring the NEW donor client folder, use:
+
+```sh
+bash scripts/setup-lan-macos.sh --receiver "$HOME/Downloads/client"
+```
+
+Use `--check` for read-only prerequisites (nonzero if missing), or `--no-start`
+to prepare prerequisites without building or listening. Each invocation prints
+its absolute rerun command. If Apple tooling requests a restart, complete it
+and rerun that command; setup rechecks installed prerequisites, not saved flags.
+The Go version mismatch itself is not a reboot instruction. A restarted donor
+creates fresh credentials; transfer its new client folder rather than reusing
+the previous session's bundle. Nothing resumes automatically during boot.
+
+`NEXAL_PAGER_GO` can explicitly select an absolute path to a stable Go 1.26+
+darwin/arm64 executable. Invalid overrides stop setup rather than silently
+installing or selecting a different compiler. Direct build scripts remain
+non-installing and now reject old Go before attempting compilation.
+
+The wrapper has Linux mock-toolchain regression coverage, not actual native
+Homebrew installation/reboot acceptance. Run the checks on your Macs to establish
+that separate acceptance.
+
 From `experiments/tcp-pager` in the updated connector checkout:
 
 ```sh

@@ -71,6 +71,21 @@ remain outstanding; repeating this same loopback test will not implement them.
 
 ## Executed in the Linux development environment
 
+### Guided prerequisite bootstrap
+
+The M4 owner reported Go 1.23.1 rejected by the module's Go 1.26 requirement.
+Added `setup-lan-macos.sh` with consent-based versioned Homebrew installation,
+read-only checks, no-start mode, and explicit rerun commands after interruption.
+The shared toolchain selector now rejects incompatible Go before building.
+
+- 11 Python mock-toolchain regression tests passed, including declined/EOF
+  consent, install failure, invalid installed version, missing Apple tools,
+  repeated prerequisite setup, receiver paths with spaces, architecture and
+  version guards, and invalid explicit overrides.
+- All Mac script Bash syntax checks and `git diff --check` passed.
+- No actual Homebrew installation, macOS reboot, new native build or separate-Mac
+  network run was performed in the Linux development environment.
+
 ### Guided lab and OS-observation increment
 
 The new increment was tested separately after the owner's original native pass:

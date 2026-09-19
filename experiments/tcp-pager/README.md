@@ -7,6 +7,10 @@ loopback acceptance on September 19, 2026; see [VALIDATION.md](VALIDATION.md).
 Paging between two separate Macs remains untested.
 
 **New scripted workflow:** read [the Mac test runbook](MAC-TEST-RUNBOOK.md).
+For prerequisite detection and consent-based Go installation, start the donor
+with `bash scripts/setup-lan-macos.sh --donor`; use `--receiver "/path/to/client"`
+on the other Mac. The wrapper prints a restart-safe rerun command and never
+reboots or starts sharing automatically at login.
 `bash scripts/accept-memory-macos.sh` runs the baseline tests, a real
 CFAllocatorCreate scope diagnostic, and before/during/after host RAM observations.
 The OS-visible RAM requirement intentionally remains unimplemented; a successful

@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
-unset CDPATH GOROOT NODE_OPTIONS NODE_PATH
+unset CDPATH GOROOT NODE_OPTIONS NODE_PATH GOFLAGS GOENV
 unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH LD_PRELOAD LD_LIBRARY_PATH
 export GOTOOLCHAIN=local
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -8,9 +8,12 @@ cd "$ROOT"
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
   printf 'Native probe requires an Apple-silicon Mac.\n' >&2; exit 1;
 }
-GO="$(command -v go || true)"
-if [[ -x /opt/homebrew/opt/go@1.26/bin/go ]]; then GO=/opt/homebrew/opt/go@1.26/bin/go; fi
-[[ -n "$GO" ]] || { printf 'Go 1.26+ is required; nothing installed automatically.\n' >&2; exit 1; }
+. "$ROOT/scripts/toolchain-lib.sh"
+GO="$(pager_select_go)" || {
+  printf 'Stable Go 1.26+ for darwin/arm64 is required; no automatic download attempted.\n' >&2
+  printf 'For guided setup run: bash scripts/setup-lan-macos.sh --donor\n' >&2
+  exit 1
+}
 printf 'Building isolated research tools. No system settings or Nexal configuration will change.\n'
 "$GO" version
 umask 077

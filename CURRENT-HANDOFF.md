@@ -79,7 +79,7 @@ Validation: 11 enrollment orchestration tests on Linux mocks, native pending.
 
 The owner created `keithknott26/nexal-ios` for the free nexal@home iPhone app.
 It initially reported public; changed to private and verified before app upload.
-App source is separate; SMS backend, Mac QR pairing and App Store release
+App source is separate; live Postmark email authentication, Mac QR pairing and App Store release
 remain gated, not deployed. No fabricated App Store QR/link.
 Owner requires no second approval prompt on the Macs: starting setup authorizes
 short-lived pairing; verified phone login, donor scans, receiver scan and Link

@@ -1,9 +1,10 @@
 # Nexal Mac memory acceptance runbook
 
 Status: scripted research acceptance, not production memory expansion.
-The original native CPU pager passed on the owner's M2 Mac mini. The newer
-observation window, Core Foundation diagnostic and guided LAN workflow still
-need native Mac acceptance. Both Macs are on the same owner-reported LAN.
+The original native CPU pager passed on the owner's M2 Mac mini. The owner
+subsequently passed the observation-window and Core Foundation diagnostics at
+revision `78bae3a` on an 8 GiB Mac. The guided separate-Mac LAN workflow remains
+untested. Both Macs are on the same owner-reported LAN.
 
 ## Test everything locally on the M4 or M2
 

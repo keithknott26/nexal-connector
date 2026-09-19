@@ -56,8 +56,11 @@ writeback, exception, lifetime and failure semantics would be separate work.
   automatic acceptance.
 
 These are tests of implemented components and their boundary, not a hidden
-complete RAM-expansion feature. Native results for these new components must
-come from the owner; Linux unit tests are not substitutes.
+complete RAM-expansion feature. The owner supplied passing native results at
+revision `78bae3a`: the CF callbacks and observed paging suite passed, while
+32 available host memory samples remained 8,589,934,592 bytes. The
+`NOT_IMPLEMENTED` verdict is a programmed capability gate, not experimental
+proof that every possible OS integration is impossible. See VALIDATION.md.
 
 ## Separate pass criteria
 

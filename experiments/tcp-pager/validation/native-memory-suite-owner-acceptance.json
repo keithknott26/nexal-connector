@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "summary_transcribed_from_owner_terminal_output",
+    "independentlyExecutedByAgent": false,
+    "date": "2026-09-19",
+    "checkoutRevision": "78bae3a",
+    "command": "bash scripts/accept-memory-macos.sh",
+    "goVersion": "go1.26.8",
+    "os": "darwin",
+    "architecture": "arm64",
+    "exactModel": null,
+    "macOSVersion": null,
+    "numericShellExitStatusObserved": false
+  },
+  "buildAndBaselineChecksPassed": true,
+  "cfAllocator": {
+    "callbackAndDataTestsPassed": true,
+    "remoteMemoryTested": false,
+    "defaultAllocatorChanged": false,
+    "allocationCalls": 3,
+    "deallocationCalls": 3,
+    "reallocationCalls": 1,
+    "peakCustomPayloadBytes": 12368,
+    "finalLiveCustomPayloadBytes": 0,
+    "physicalBytesBefore": 8589934592,
+    "physicalBytesDuring": 8589934592,
+    "physicalBytesAfter": 8589934592,
+    "hostCounterUnchanged": true
+  },
+  "observedPaging": {
+    "startedAt": "2026-09-19T14:34:05.79671Z",
+    "loopbackDonor": true,
+    "separatePhysicalMachinesAttested": false,
+    "pagingSuitePassed": true,
+    "nativeSuiteExecuted": true,
+    "availableHostMemorySamples": 32,
+    "allAvailableHostMemorySamplesBytes": 8589934592,
+    "hostPhysicalMemoryCounterUnchanged": true,
+    "commonPerCaseResults": {
+      "verified": true,
+      "logicalBytes": 1048576,
+      "verifiedBytes": 1048576,
+      "faults": 128,
+      "gets": 128,
+      "puts": 64,
+      "pageBytesReceived": 2097152,
+      "pageBytesSent": 1048576
+    },
+    "cases": [
+      {"name": "portable-baseline", "workloadDurationMs": 22, "cachePayloadLimitBytes": 65536, "peakResidentPages": 4, "evictions": 120, "nativeHVFExecuted": false, "mappedCacheObservationWindowMs": 0},
+      {"name": "native-4-page-cache", "workloadDurationMs": 1037, "cachePayloadLimitBytes": 65536, "peakResidentPages": 4, "evictions": 120, "nativeHVFExecuted": true, "mappedCacheObservationWindowMs": 1000},
+      {"name": "native-1-page-cache-stress", "workloadDurationMs": 1042, "cachePayloadLimitBytes": 16384, "peakResidentPages": 1, "evictions": 126, "nativeHVFExecuted": true, "mappedCacheObservationWindowMs": 1000},
+      {"name": "native-repeat-fresh-store", "workloadDurationMs": 1051, "cachePayloadLimitBytes": 65536, "peakResidentPages": 4, "evictions": 120, "nativeHVFExecuted": true, "mappedCacheObservationWindowMs": 1000}
+    ]
+  },
+  "osMemoryRequirement": "NOT_IMPLEMENTED",
+  "hostRAMExpansionPassed": false,
+  "guestOSRAMExpansionPassed": false,
+  "gpuMemoryExpansionPassed": false,
+  "limitations": [
+    "Summary, not the original complete report or all timestamped samples",
+    "Native measurements supplied by owner, not independently rerun",
+    "Model of this 8 GiB Mac not explicitly identified in this run",
+    "Loopback donor uses this same computer; no separate-Mac test",
+    "One-second observation holds are included in native workload durations",
+    "Payload cache cap does not bound total process RSS or donor memory",
+    "CF allocator test uses local allocations only",
+    "OS verdict is a programmed gate, not proof against future implementations"
+  ]
+}

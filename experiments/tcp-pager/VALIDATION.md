@@ -37,6 +37,38 @@ in system RAM, and additional runtime allocations are outside the cache cap.
 See [the transcribed acceptance record](validation/native-owner-acceptance.json)
 for provenance and the reported JSON results.
 
+## Owner-reported full memory suite at 78bae3a: component tests passed
+
+On September 19, 2026, the owner supplied terminal output from
+`bash scripts/accept-memory-macos.sh` in a fresh detached checkout at `78bae3a`,
+using Go 1.26.8 on darwin/arm64. This run reports 8 GiB physical memory; its
+exact Mac model and macOS version were not supplied. Do not count it as M4
+acceptance. This evidence was supplied by the owner, not executed by the agent.
+
+- Build, Go tests, native helper signature, portable and native baselines passed.
+- Real CFAllocator callbacks passed allocation, reallocation, CFData and release
+  checks: 3 allocation calls, 3 deallocation calls, 1 reallocation call,
+  12,368 peak custom payload bytes and zero final tracked live payload bytes.
+  This is local-only allocation, not remote backing or a whole-process leak test.
+- The four-case observed suite passed: portable baseline, native four-page
+  cache, native one-page cache stress and native repeat with fresh donor store.
+- Every case verified 1 MiB with 128 GETs, 64 PUTs, 2 MiB received and 1 MiB sent.
+  Native one-page stress used a 16 KiB payload cache and recorded 126 evictions;
+  four-page cases recorded 120. Cache payload does not bound process RSS.
+- All 32 available host memory samples stayed at 8,589,934,592 bytes.
+- Native case durations (1,037 / 1,042 / 1,051 ms) include deliberate 1,000 ms
+  observation holds. They are not network latency benchmarks.
+
+The donor was loopback, not the other Mac. No full guest OS booted and no
+host RAM or GPU expansion was demonstrated. `NOT_IMPLEMENTED` is the explicit
+programmed OS-integration gate, not proof that every future OS-level approach
+is impossible. The terminal's final message matches the expected gate; it did
+not separately print the numeric shell exit status.
+
+See [the owner-output summary](validation/native-memory-suite-owner-acceptance.json).
+Separate-Mac transport, donor withdrawal acceptance, and actual OS integration
+remain outstanding; repeating this same loopback test will not implement them.
+
 ## Executed in the Linux development environment
 
 ### Guided lab and OS-observation increment
@@ -58,7 +90,8 @@ The new increment was tested separately after the owner's original native pass:
 
 The revised C helper's optional observation hold, native host counter sampler,
 Core Foundation API calls, Finder reveal and new full Mac script were NOT
-executed here. The original M2 result is not evidence for these new additions.
+executed here. The later owner run documented above covers the new native
+observation and CF tests; it does not cover Finder reveal or separate-Mac LAN use.
 No separate-Mac LAN test, full guest OS or host/GPU RAM expansion was performed.
 See [the runbook](MAC-TEST-RUNBOOK.md) and [RAM acceptance contract](OS-VISIBLE-RAM-ACCEPTANCE.md).
 

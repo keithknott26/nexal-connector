@@ -72,8 +72,12 @@ The next gate is the same bounded workload between two separate private-LAN Macs
 Follow-up: `experiments/tcp-pager/MAC-TEST-RUNBOOK.md` now provides guided
 donor/receiver scripts, repeated fresh-store acceptance and one-command Mac
 memory diagnostics. The owner clarified the accepted original host is an M2
-Mac mini. The new Core Foundation probe and optional native observation hold
-need their own Mac run. Linux validation: 36 top-level/59 named Go passes,
+Mac mini. The owner subsequently passed the new Core Foundation probe and
+observed native suite at `78bae3a` on an 8 GiB Mac, with 32 unchanged host RAM
+samples. This run's exact model was not supplied; do not count it as M4
+acceptance. Separate-Mac LAN testing is still pending. The final
+NOT_IMPLEMENTED message is a programmed capability gate, not proof that all
+possible OS integrations are impossible. Linux validation: 36 top-level/59 named Go passes,
 race/vet, six lab CLI tests, four prior CLI tests, three ARM-emulation tests,
 portable C sanitizers and Darwin Go cross-build passed.
 `accept-memory-macos.sh` explicitly ends with exit 3 if paging passes but the

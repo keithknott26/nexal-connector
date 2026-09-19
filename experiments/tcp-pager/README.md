@@ -11,7 +11,9 @@ Paging between two separate Macs remains untested.
 CFAllocatorCreate scope diagnostic, and before/during/after host RAM observations.
 The OS-visible RAM requirement intentionally remains unimplemented; a successful
 lower-level run ends with exit 3 rather than falsely claiming that requirement
-passed. New native observation/CF code still needs owner acceptance.
+passed. The owner subsequently passed the native observation and CF callback
+tests at revision `78bae3a` on an 8 GiB Mac; 32 host memory samples stayed
+unchanged. Separate-Mac LAN acceptance remains pending.
 The guided LAN scripts automate setup, short-lived credentials and repeated fresh
 test sessions; they do not integrate with the production connector.
 

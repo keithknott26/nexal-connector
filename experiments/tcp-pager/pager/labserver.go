@@ -14,6 +14,12 @@ import (
 // attempts do not allocate a store or consume the authenticated-session budget.
 // The caller must supply a deadline, and must not expose this fixture publicly.
 func ServeLab(ctx context.Context, ln net.Listener, conf *tls.Config, pages, sessions int) error {
+	return ServeLabObserved(ctx, ln, conf, pages, sessions, nil)
+}
+
+// ServeLabObserved reports at most 32 fixed-label events plus a suppression
+// notice. The synchronous callback must return promptly. No peer data is emitted.
+func ServeLabObserved(ctx context.Context, ln net.Listener, conf *tls.Config, pages, sessions int, report func(string, string)) error {
 	if pages < 2 || pages > MaxPages || sessions < 1 || sessions > 16 {
 		return errors.New("invalid lab capacity/session bound")
 	}
@@ -21,6 +27,20 @@ func ServeLab(ctx context.Context, ln net.Listener, conf *tls.Config, pages, ses
 		return errors.New("lab server requires a lifetime deadline")
 	}
 	defer ln.Close()
+	events := 0
+	emit := func(phase, result string) {
+		if report == nil {
+			return
+		}
+		if events < 32 {
+			report(phase, result)
+		} else if events == 32 {
+			report("diagnostics", "further_events_suppressed")
+		}
+		if events <= 32 {
+			events++
+		}
+	}
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -38,6 +58,7 @@ func ServeLab(ctx context.Context, ln net.Listener, conf *tls.Config, pages, ses
 			}
 			return err
 		}
+		emit("tcp_accept", "accepted")
 		err = func() error {
 			connDone := make(chan struct{})
 			defer close(connDone)
@@ -52,8 +73,10 @@ func ServeLab(ctx context.Context, ln net.Listener, conf *tls.Config, pages, ses
 			c := tls.Server(raw, conf)
 			_ = c.SetDeadline(time.Now().Add(Timeout))
 			if err := c.HandshakeContext(ctx); err != nil {
+				emit("tls_handshake", ConnectionErrorCode(err))
 				return nil
 			}
+			emit("tls_handshake", "authenticated")
 			accepted++
 			store, err := NewStore(pages)
 			if err != nil {

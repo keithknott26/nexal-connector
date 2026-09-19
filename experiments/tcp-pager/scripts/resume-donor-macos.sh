@@ -1,0 +1,22 @@
+#!/bin/bash
+# Explicit, bounded diagnostic restart with existing credentials. No re-enrollment.
+set -euo pipefail
+unset CDPATH GOROOT NODE_OPTIONS NODE_PATH GOFLAGS GOENV
+unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH LD_PRELOAD LD_LIBRARY_PATH
+export GOTOOLCHAIN=local
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if [[ $# -ne 1 || "$1" != /* ]]; then
+  printf 'Usage: bash resume-donor-macos.sh "/absolute/existing/donor-state/run"\n' >&2
+  exit 2
+fi
+STATE="$1"
+[[ -f "$STATE/donor/connection.json" && -f "$STATE/client/connection.json" ]] || {
+  printf 'Existing donor state is missing; no keys generated or overwritten.\n' >&2
+  exit 1
+}
+printf 'Stop only the previous pager donor with Ctrl+C before continuing.\n'
+printf 'This resumes its existing certificates for at most 30 minutes, with TLS diagnostics.\n'
+printf 'No processes will be killed. No system settings or enrollment will change.\n'
+printf 'The endpoint must still belong to this Mac and certificates must remain valid.\n'
+bash "$ROOT/scripts/build-macos.sh"
+exec "$ROOT/build/nexal-pager-lab" serve --state "$STATE" --lifetime 30m --sessions 16

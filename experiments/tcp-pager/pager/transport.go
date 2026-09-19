@@ -179,16 +179,23 @@ func Dial(ctx context.Context, addr string, conf *tls.Config) (*Client, error) {
 	if err := PrivateAddress(addr); err != nil {
 		return nil, err
 	}
-	d := tls.Dialer{NetDialer: &net.Dialer{Timeout: Timeout}, Config: conf}
-	c, err := d.DialContext(ctx, "tcp", addr)
+	// Preserve the original combined TCP+TLS time budget, but report its phase.
+	connectCtx, cancel := context.WithTimeout(ctx, Timeout)
+	defer cancel()
+	raw, err := (&net.Dialer{}).DialContext(connectCtx, "tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("authenticated connection failed: %w", err)
+		return nil, fmt.Errorf("TCP connect failed [%s]", ConnectionErrorCode(err))
+	}
+	c := tls.Client(raw, conf)
+	if err = c.HandshakeContext(connectCtx); err != nil {
+		raw.Close()
+		return nil, fmt.Errorf("TLS handshake failed [%s]; check donor diagnostics", ConnectionErrorCode(err))
 	}
 	_ = c.SetDeadline(time.Now().Add(Timeout))
 	var h [24]byte
 	if _, err = io.ReadFull(c, h[:]); err != nil {
 		c.Close()
-		return nil, err
+		return nil, fmt.Errorf("authenticated donor greeting failed [%s]", ConnectionErrorCode(err))
 	}
 	n := int(binary.BigEndian.Uint32(h[20:]))
 	if string(h[:4]) != "NXP1" || n < 2 || n > MaxPages {

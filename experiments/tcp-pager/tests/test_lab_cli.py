@@ -60,6 +60,37 @@ class LabCLI(unittest.TestCase):
                         "--output", str(out), "--portable-only", "--loopback-test",
                         "--ca-fingerprint", manifest["caSHA256"], *extra)
 
+    def test_resume_existing_state_preserves_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state, m, process, _ = self.start(root)
+            before = {str(p.relative_to(state)): p.read_bytes()
+                      for p in state.rglob("*") if p.is_file()}
+            self.stop(process)
+            resumed = subprocess.Popen(
+                [str(BIN), "serve", "--state", str(state), "--loopback-test",
+                 "--lifetime", "20s", "--sessions", "1"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.addCleanup(self.stop, resumed)
+            transcript = b""
+            with selectors.DefaultSelector() as sel:
+                sel.register(resumed.stderr, selectors.EVENT_READ)
+                while b"Keep this terminal open." not in transcript:
+                    self.assertTrue(sel.select(5), "resume readiness timed out")
+                    chunk = os.read(resumed.stderr.fileno(), 4096)
+                    self.assertTrue(chunk, transcript.decode())
+                    transcript += chunk
+            result = self.receive(state, m, root / "resumed-result")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(json.loads(result.stdout)["pagingSuitePassed"])
+            _, tail = resumed.communicate(timeout=5)
+            self.assertIn(b'"phase":"tls_handshake"', tail)
+            self.assertIn(b'"result":"authenticated"', tail)
+            after = {str(p.relative_to(state)): p.read_bytes()
+                     for p in state.rglob("*") if p.is_file()}
+            self.assertEqual(before, after)
+
     def test_repeated_process_workloads_and_report(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

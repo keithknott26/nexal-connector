@@ -86,5 +86,6 @@ after the actual listing exists; no placeholder store link is presented as real.
 
 - [Mac app and developer setup](DEVELOPER-GUIDE.md)
 - [LAN test runbook](experiments/tcp-pager/MAC-TEST-RUNBOOK.md)
+- [Pager connection troubleshooting](experiments/tcp-pager/CONNECTION-TROUBLESHOOTING.md)
 - [CLI contract](connector/CLI-CONTRACT.md) · [Security](SECURITY.md)
 - [Engineering handoff and release limits](CURRENT-HANDOFF.md)

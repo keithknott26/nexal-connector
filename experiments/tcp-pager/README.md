@@ -4,7 +4,9 @@ This is a separate research module, not a feature in the installed Nexal Connect
 It contains a tested Go page transport/cache and a Mac-only C Hypervisor helper.
 The owner reported successful native build, signature verification and CPU-fault
 loopback acceptance on September 19, 2026; see [VALIDATION.md](VALIDATION.md).
-Paging between two separate Macs remains untested.
+Two-Mac bundle delivery was reported successful, but LAN paging failed during
+connection setup (timeout, then reset); no pages or native cases ran.
+See [connection troubleshooting](CONNECTION-TROUBLESHOOTING.md).
 
 **New scripted workflow:** read [the Mac test runbook](MAC-TEST-RUNBOOK.md).
 For prerequisite detection and consent-based Go installation, start the donor

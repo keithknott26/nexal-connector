@@ -4,7 +4,30 @@ Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
 engineering preview, not a production-approved distributed cloud.
 
-## Named enrollment and iPhone repository checkpoint
+## Latest private LAN connection checkpoint
+
+Owner-confirmed physical hardware: M4 Pro mini / 24 GiB donor and M2 / 8 GiB
+receiver. M4 uses `Nexal-Profiles/private-lan/config.json`, ID ending `f9e2`;
+M2 uses `Nexal/config.json`, ID ending `6703`. The default M4 profile is not enrolled.
+The original M2 dashboard name was corrected with owner approval; its local
+config label still says M4 mini. Owner subsequently enrolled then deleted a
+duplicate M2 ID ending `fab5`; its private-lan profile must not be used.
+Read-only audit confirmed no M4 deletion.
+
+Owner reported successful encrypted bundle delivery/import. Two LAN attempts
+failed before paging: connection timeout then TLS-phase connection reset.
+Raw TCP probes on both Macs succeeded; the underlying fault remains unknown.
+No native LAN case executed and no pages transferred.
+
+Added bounded, fixed-label donor diagnostics and split receiver TCP/TLS/greeting
+errors while retaining the existing deadline and strict mutual hybrid TLS.
+`resume-donor-macos.sh` explicitly resumes existing valid donor certificates for
+a new bounded session, without changing keys, enrollment or system settings.
+See `experiments/tcp-pager/CONNECTION-TROUBLESHOOTING.md`.
+Go race/vet, eight actual CLI tests, shell syntax and Darwin cross-build passed.
+Owner native retest remains pending. Earlier checkpoints below are historical.
+
+## Earlier named enrollment and iPhone repository checkpoint
 
 Connector checkpoint `b8079a8` is pushed. Go race tests and vet, Darwin arm64
 cross-compilation, 17 enrollment mock tests and 12 setup tests passed.

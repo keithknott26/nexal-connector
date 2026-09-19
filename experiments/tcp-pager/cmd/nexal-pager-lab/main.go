@@ -293,7 +293,11 @@ func run() error {
 		}
 		dctx, cancel := context.WithTimeout(ctx, *lifetime)
 		defer cancel()
-		err = pager.ServeLab(dctx, ln, config, lab.Pages, *sessions)
+		err = pager.ServeLabObserved(dctx, ln, config, lab.Pages, *sessions, func(phase, result string) {
+			_ = json.NewEncoder(os.Stderr).Encode(map[string]string{
+				"event": "donor_connection", "phase": phase, "result": result,
+			})
+		})
 		fmt.Fprintln(os.Stderr, "Donor stopped. Each completed lab connection used a fresh disposable page store.")
 		return err
 	case "receive":

@@ -38,6 +38,14 @@ final class AppModel: ObservableObject {
         return status.paused ? "Paused" : "Private resources enabled"
     }
     var contributes: Bool { status.map { !$0.paused } ?? false }
+    var manualAcceptance: ManualAcceptancePresentation {
+        ManualAcceptancePresentation(status: status)
+    }
+    var manualAcceptanceUnavailableReason: String? {
+        ManualAcceptancePresentation.unavailableReason(
+            localPreview: localPreview, hasExecutable: selection != nil,
+            configurationExists: configurationExists, status: status)
+    }
     var showsEnrollmentConfirmation: Bool {
         enrollmentPresentation.showsConfirmation(for: selectedConfig)
     }
@@ -115,10 +123,16 @@ final class AppModel: ObservableObject {
     }
 
     func start() async {
-        guard !busy, child == nil else { return }
+        guard !busy else { return }
         busy = true
         defer { busy = false }
         do {
+            // An app-owned daemon may still be starting after a failed first
+            // status read. Retry that daemon; never launch a second process.
+            if child != nil {
+                try await updateStatus()
+                return
+            }
             // Attach to an existing Go service rather than launch a duplicate.
             if let data = try? await invoke(.status),
                let existing = try? ConnectorStatus.decode(data) {
@@ -167,9 +181,14 @@ final class AppModel: ObservableObject {
 
     func acceptJobsNow() async {
         guard !busy, localPreview else { return }
+        if let reason = manualAcceptanceUnavailableReason {
+            message = reason
+            return
+        }
         if status == nil { await start() }
-        guard status?.manualAcceptanceSupported == true else {
-            message = "Accept jobs now requires the updated development connector. Stop the old connector before launching the updated app."
+        guard status != nil else { return } // Preserve the actual startup failure.
+        if let reason = manualAcceptanceUnavailableReason {
+            message = reason
             return
         }
         busy = true
@@ -177,8 +196,16 @@ final class AppModel: ObservableObject {
         do {
             _ = try await invoke(.acceptJobs)
             try await updateStatus()
-            message = "Private zero-cost CPU jobs are permitted while you use this Mac for ten minutes. Memory, lease and connection checks remain required. Pause cancels this permission and active work."
-        } catch { message = error.localizedDescription }
+            guard manualAcceptance.isActive else {
+                message = "The connector has not confirmed an active acceptance window. Refresh and check its status; no permission is assumed."
+                return
+            }
+            message = "The connector confirmed private zero-cost CPU permission until the displayed time. Memory, lease and connection checks still apply. Pause cancels this permission and active work."
+        } catch {
+            status = nil
+            lastUpdated = nil
+            message = "Could not confirm private-job permission. \(error.localizedDescription) Refresh before retrying; the connector may already have received the request."
+        }
     }
 
     func setContribution(_ enabled: Bool) async {

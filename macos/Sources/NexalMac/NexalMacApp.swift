@@ -85,8 +85,25 @@ private struct ConnectorPanel: View {
                 }
                 GroupBox("Owner controls") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Button("Accept jobs now") { Task { await model.acceptJobsNow() } }
-                            .disabled(!model.localPreview || model.selection == nil || !model.configurationExists)
+                        Button {
+                            Task { await model.acceptJobsNow() }
+                        } label: {
+                            Label(model.manualAcceptance.buttonTitle,
+                                  systemImage: model.manualAcceptance.isActive ? "checkmark.circle" : "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("accept-jobs-now")
+                        .disabled(model.manualAcceptanceUnavailableReason != nil || model.manualAcceptance.isActive)
+                        if let reason = model.manualAcceptanceUnavailableReason {
+                            Text(reason).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let until = model.manualAcceptance.activeUntil {
+                            Text("Permitted until \(until, style: .time).")
+                                .font(.caption)
+                            Text("An active permission window is not extended by repeated clicks.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Text("No idle wait: permits zero-cost private CPU jobs while you use this Mac for ten minutes. Requires the updated local preview coordinator. Memory limits still apply. Pause stops work and removes this permission.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Contribute private resources", isOn: Binding(

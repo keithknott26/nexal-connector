@@ -38,19 +38,31 @@ binary is included. This is not production-ready or M2-validated.
   transport and real/synthetic/unknown telemetry without inventing readiness.
 - Map the private resource toggle to `resume` / `pause`, with a separate explicit
   **Pause and cancel work** action. Only confirmed status changes the toggle.
+- Offer a prominent **Accept jobs now** button in Owner controls for an enrolled
+  local-preview connector. This invokes `nexal accept-jobs` through the same
+  authenticated CLI, starts or attaches to the existing daemon, and does not
+  launch a separate executor. Its ten-minute permission allows zero-cost private
+  CPU work while the owner is active, without bypassing memory or lease checks.
+  Confirmed status changes the label to **Accepting private jobs**, shows the
+  local expiry time and disables repeat clicks. Failure to confirm does not
+  display success. Pause cancels work and clears permission.
 - Keep cloud/marketplace contribution visibly gated. Private membership never
   constitutes public consent; this build does not simulate an unsupported public
   toggle, configure folder sharing, advertise payouts, or buy cloud compute.
 
-The app only enables ordinary `run`. It cannot silently opt into development
-pull transport or synthetic telemetry. Production dispatch remains closed in the
-Go core. A resumed policy is not evidence of running work.
+Starting the app enables only ordinary `run`. It cannot silently opt into
+development pull transport or synthetic telemetry. **Accept jobs now** is the
+separate explicit permission for development private execution. Production
+dispatch remains closed in the Go core. A resumed policy or acceptance window
+is not evidence of running work.
 
 Nexal revision: an explicit **Use local development preview** option now creates
 the fixed numeric-loopback configuration in a separate `Nexal-Local-Preview`
 directory. Its file credentials are disclosed in the UI. It does not enable
-synthetic telemetry or development pull execution. The new native UI tests are
-provided but have not been run in the Linux authoring environment.
+synthetic telemetry or, by itself, development pull execution. The new native UI
+tests are provided but have not been run in the Linux authoring environment.
+See [ACCEPT-JOBS-UI-ACCEPTANCE.md](ACCEPT-JOBS-UI-ACCEPTANCE.md) before marking
+the updated button accepted on a Mac.
 
 ## Exact Go CLI integration (v1)
 
@@ -65,6 +77,7 @@ nexal run --config ABSOLUTE_CONFIG
 nexal status --config ABSOLUTE_CONFIG
 nexal pause --config ABSOLUTE_CONFIG
 nexal resume --config ABSOLUTE_CONFIG
+nexal accept-jobs --config ABSOLUTE_CONFIG             # explicit local-preview permission
 ```
 
 `ABSOLUTE_CONFIG` is `~/Library/Application Support/Nexal/config.json`, expanded

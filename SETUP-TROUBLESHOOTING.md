@@ -16,8 +16,8 @@ The UI keeps owner authorization only in the current tab's memory. Use
 **Hosts > Enroll host** to generate a one-use invitation. Connector enrollment
 consumes that invitation, not an owner token or Cloudflare token.
 
-Successful owner login, new enrollment and native M4-to-M2 delivery still need
-owner acceptance. Browser rendering alone does not establish those results.
+The owner reports successful dashboard login and an M4 host entry. Fresh
+two-Mac enrollment and native M4-to-M2 delivery still need owner acceptance.
 See the [deployment evidence](https://github.com/keithknott26/nexal-platform/blob/main/docs/SHARED-DEPLOYMENT-STATUS.md).
 
 If raw JSON still appears at the homepage, reload and check the exact URL.
@@ -31,8 +31,25 @@ an anonymous local development server to the network.
 ## “An enrollment is already recorded”
 
 This means the selected local configuration contains a host ID. The wrapper
-does not verify the credential with the server; check the shared dashboard
-and authenticated connector behavior.
+does not verify the credential with the server. It now prints that ID, the
+saved name, coordinator and config path; match the exact ID in the dashboard.
+`--name` does not rename an existing identity. A requested name mismatch stops
+instead of reporting a successful enrollment.
+
+To enroll afresh without deleting or replacing credentials, use
+`--enroll-platform --profile private-lan --name "M4 mini"` on the M4,
+then the same options with `"M2 mini"` on the M2. Generate a separate one-use
+invitation for each Mac. Both use the private-lan path on their **own disk**;
+do not copy a config or Keychain credentials between Macs.
+
+The new path is
+`~/Library/Application Support/Nexal-Profiles/private-lan/config.json`.
+Use that path with bundle-transfer `--config`. The menu-bar app is **not**
+automatically switched to this separate test profile. Old hosts are not revoked,
+and an old M4 entry may remain alongside the new one; compare host IDs.
+If this named profile is already enrolled, use it or deliberately choose a
+different unused profile name. Never delete an enrollment merely to clear a
+prompt. Enrollment creates an identity but does not start heartbeats or jobs.
 
 ## “setup (donor)” during enrollment
 

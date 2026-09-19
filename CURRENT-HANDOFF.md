@@ -4,6 +4,23 @@ Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
 engineering preview, not a production-approved distributed cloud.
 
+## Named enrollment and iPhone repository checkpoint
+
+Owner reports dashboard login succeeds and M4 appears, but the M2 script
+skips because its selected profile already records a host ID. The setup now
+supports `--profile private-lan`, a separate on-disk/Keychain namespace on each
+Mac, for explicit fresh enrollment without resetting or revoking old identities.
+Run M4 first, match its new host ID in Hosts, then M2 with another invitation.
+The menu-bar app does not switch profiles automatically. Use the printed new
+path for bundle transfers. Existing host IDs now print saved identity details;
+explicit name mismatches fail. No live credential validation is implied.
+Validation: 11 enrollment orchestration tests on Linux mocks, native pending.
+
+The owner created `keithknott26/nexal-ios` for the free nexal@home iPhone app.
+It initially reported public; changed to private and verified before app upload.
+App source is separate; SMS backend, Mac QR pairing and App Store release
+remain gated, not deployed. No fabricated App Store QR/link.
+
 ## Concise documentation and shared dashboard deployment
 
 Owner prefers a concise, current README with minimal full-path M4/M2 commands.
@@ -12,7 +29,8 @@ The shared dashboard was repaired September 19, 2026 by attaching its missing
 assets. The encrypted relay and migration 0006 are deployed to the shared-dev
 Worker/database, retaining its existing owner secret and enrolled host.
 Root HTML, assets, health, unauthenticated API rejection and browser login-screen
-rendering pass. Owner login and native two-Mac delivery remain unverified.
+rendering pass. Owner now reports login success and an M4 entry; native
+two-Mac delivery remains unverified.
 See `SETUP-TROUBLESHOOTING.md`; this supersedes older no-deployment statements.
 
 ## Network labeling checkpoint
@@ -45,7 +63,7 @@ Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pendin
 
 - Product: Nexal Platform and Nexal Connector; entity: KWK, LLC.
 - Domain: owner purchased `nexal.systems`; registration provider is not confirmed.
-- Source owner: GitHub account `keithknott26`; both repositories must stay private.
+- Source owner: GitHub account `keithknott26`; all Nexal repositories must stay private.
 - Prefer Go where practical, native Cloudflare services for the coordinator,
   and native SwiftUI/Go on Macs. MLX uses a small Python runtime adapter.
 - Setup should inspect dependencies automatically, offer narrowly scoped upgrades

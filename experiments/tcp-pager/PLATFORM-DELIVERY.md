@@ -20,12 +20,15 @@ From the connector repository root, on either Mac:
 
 ```sh
 bash experiments/tcp-pager/scripts/setup-lan-macos.sh \
-  --enroll-platform --name "M4 mini"
+  --enroll-platform --profile private-lan --name "M4 mini"
 ```
 
 For the M2 use `--name "M2 mini"`. The default shared coordinator is
-`https://nexal-coordinator-dev.nexal.systems`; the default configuration is
-`~/Library/Application Support/Nexal/config.json`. Use `--coordinator HTTPS_ORIGIN`
+`https://nexal-coordinator-dev.nexal.systems`. The named profile above uses
+`~/Library/Application Support/Nexal-Profiles/private-lan/config.json` on each
+Mac separately, preserving the original default
+`~/Library/Application Support/Nexal/config.json`. Without `--profile`, the
+original default remains selected. Use `--coordinator HTTPS_ORIGIN`
 and/or `--config ABSOLUTE_PATH` to select a different deployment explicitly.
 Do not use the localhost preview profile for a cross-Mac relay.
 
@@ -40,7 +43,8 @@ enable jobs/public sharing, deploy the coordinator, or apply remote migrations.
 Use `--prepare-only` to stop before the invitation prompt. Rerun without it when
 ready; reruns preserve configuration, resource policy and credentials. A saved
 host ID skips re-enrollment but does **not** prove that credentials are still
-valid. A different saved coordinator is rejected instead of silently replacing
+valid. Saved identity details are printed; an explicitly requested name mismatch
+stops without changing that identity. A different saved coordinator is rejected instead of silently replacing
 the profile. Interrupted or rejected invitations can be retried; an ambiguous
 server-side success may require a fresh invitation and dashboard review.
 The wrapper does not provide transactional recovery for the underlying enrollment
@@ -50,7 +54,7 @@ Run from an interactive Terminal. If invoking inside a here-document, append
 `</dev/tty` to give the hidden prompt a terminal. No reboot or login task is
 installed. The underlying standalone `--donor` and `--receiver` modes are unchanged.
 
-Validation: 11 existing setup tests plus 8 enrollment orchestration tests,
+Validation: 12 setup tests plus 11 enrollment orchestration tests,
 including hidden-input pseudo-terminal success/failure/retry, safe reruns,
 coordinator mismatch, no-terminal refusal, build failure and symlink rejection.
 These are Linux mocks, not native macOS/Keychain acceptance.
@@ -61,7 +65,7 @@ From this module on the M2:
 
 ```sh
 bash scripts/platform-bundle-macos.sh receive \
-  --config "/ABSOLUTE/M2/config.json" --from-host "M4_HOST_ID"
+  --config "$HOME/Library/Application Support/Nexal-Profiles/private-lan/config.json" --from-host "M4_HOST_ID"
 ```
 
 Keep it open. Copy the PUBLIC transfer ID and receiver key fingerprint to a
@@ -69,7 +73,7 @@ second terminal on the M4, then send the current donor's client folder:
 
 ```sh
 bash scripts/platform-bundle-macos.sh send \
-  --config "/ABSOLUTE/M4/config.json" \
+  --config "$HOME/Library/Application Support/Nexal-Profiles/private-lan/config.json" \
   --transfer "TRANSFER_ID" --receiver-key-sha256 "RECEIVER_PUBLIC_KEY_SHA256" \
   --bundle "/ABSOLUTE/DONOR/STATE/client"
 ```

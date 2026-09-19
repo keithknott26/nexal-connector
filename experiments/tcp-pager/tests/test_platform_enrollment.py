@@ -60,7 +60,7 @@ with open(os.environ["TEST_LOG"], "a") as log: log.write(json.dumps(args) + "\\n
 path = Path(args[args.index("--config") + 1])
 if args[0] == "init":
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"coordinator": args[args.index("--coordinator")+1]}))
+    path.write_text(json.dumps({"coordinator": args[args.index("--coordinator")+1], "name": args[args.index("--name")+1]}))
 elif args[0] == "enroll":
     code = sys.stdin.read().strip()
     if code != "test-secret-invitation": sys.exit(1)
@@ -107,7 +107,7 @@ else: sys.exit(1)
         result = self.run_script("--name", "M4 mini", "--prepare-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         before = self.config.read_bytes()
-        result = self.run_script("--prepare-only")
+        result = self.run_script("--name", "M4 mini", "--prepare-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(before, self.config.read_bytes())
         actions = self.log.read_text()
@@ -156,8 +156,48 @@ else: sys.exit(1)
 
     def test_argument_guards(self):
         for args in (("--config", "relative"), ("--coordinator", "http://host"),
-                     ("--name",), ("--unknown",)):
+                     ("--name",), ("--unknown",), ("--profile", "../escape"),
+                     ("--profile", ".hidden"), ("--profile", "a" * 49),
+                     ("--profile", "bad name"), ("--profile", "lan", "--config", "/tmp/config")):
             self.assertNotEqual(self.run_script(*args).returncode, 0)
+        self.assertFalse(self.log.exists())
+
+    def test_named_profile_preserves_default_identity(self):
+        self.existing(hostId="host_original", name="Original Mac")
+        before = self.config.read_bytes()
+        result = self.run_script("--profile", "private-lan", "--name", "M4 mini", "--prepare-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, self.config.read_bytes())
+        profile = self.home / "Library/Application Support/Nexal-Profiles/private-lan/config.json"
+        self.assertEqual(json.loads(profile.read_text())["name"], "M4 mini")
+        self.assertNotIn("hostId", json.loads(profile.read_text()))
+        saved = profile.read_bytes()
+        result = self.run_script("--profile", "private-lan", "--name", "M4 mini", "--prepare-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(saved, profile.read_bytes())
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
+
+    def test_recorded_name_mismatch_is_not_success(self):
+        self.existing(hostId="host_existing", name="M4 mini")
+        before = self.config.read_bytes()
+        result = self.run_script("--name", "M2 mini")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Saved host ID: host_existing", result.stdout)
+        self.assertIn("Saved name: M4 mini", result.stdout)
+        self.assertIn("differs", result.stderr)
+        self.assertEqual(before, self.config.read_bytes())
+        self.assertFalse(self.log.exists())
+
+    def test_symlink_profile_parent_rejected(self):
+        base = self.home / "Library/Application Support/Nexal-Profiles"
+        base.mkdir(parents=True)
+        target = self.root / "elsewhere"
+        target.mkdir()
+        (base / "private-lan").symlink_to(target, target_is_directory=True)
+        result = self.run_script("--profile", "private-lan", "--prepare-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr)
+        self.assertFalse((target / "config.json").exists())
         self.assertFalse(self.log.exists())
 
     def test_hidden_terminal_enrollment_and_failure_retry(self):

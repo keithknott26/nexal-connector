@@ -17,7 +17,7 @@ START=true
 usage() {
   printf 'Usage: bash setup-lan-macos.sh --donor|--receiver "/path/to/client" [--check] [--no-start]\n'
   printf '   or: bash setup-lan-macos.sh --network-info [--check]\n'
-  printf '   or: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--coordinator HTTPS_ORIGIN] [--config ABSOLUTE_PATH] [--prepare-only]\n'
+  printf '   or: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--profile NAME | --config ABSOLUTE_PATH] [--coordinator HTTPS_ORIGIN] [--prepare-only]\n'
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in

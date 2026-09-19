@@ -38,7 +38,7 @@ class EnrollmentTests(unittest.TestCase):
                     "TEST_BROWSER_LOG": str(self.browser_log)}
         for key in ("BASH_ENV", "ENV", "NEXAL_PAGER_GO"):
             self.env.pop(key, None)
-        for name in ("setup-lan-macos.sh", "toolchain-lib.sh", "enroll-platform-macos.sh"):
+        for name in ("setup-lan-macos.sh", "toolchain-lib.sh", "enroll-platform-macos.sh", "debug-lib.sh"):
             shutil.copy2(SOURCE / name, self.scripts / name)
         # The release uses Apple's absolute plutil. Replace only in this isolated
         # fixture, so Linux can exercise its return values without native claims.

@@ -7,6 +7,9 @@ loopback acceptance on September 19, 2026; see [VALIDATION.md](VALIDATION.md).
 Two-Mac bundle delivery was reported successful, but LAN paging failed during
 connection setup (timeout, then reset); no pages or native cases ran.
 See [connection troubleshooting](CONNECTION-TROUBLESHOOTING.md).
+Add `--debug` to LAN setup, donor, resumed donor, or receiver scripts for live
+diagnostics and a private log; the terminal prints its location. Enrollment
+logging is deliberately excluded.
 
 **New scripted workflow:** read [the Mac test runbook](MAC-TEST-RUNBOOK.md).
 For prerequisite detection and consent-based Go installation, start the donor

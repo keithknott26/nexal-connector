@@ -5,6 +5,24 @@ unset CDPATH GOROOT NODE_OPTIONS NODE_PATH GOFLAGS GOENV
 unset DYLD_INSERT_LIBRARIES DYLD_LIBRARY_PATH LD_PRELOAD LD_LIBRARY_PATH
 export GOTOOLCHAIN=local
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+. "$ROOT/scripts/debug-lib.sh"
+# Enrollment accepts secrets; debug capture is deliberately limited to the lab.
+for arg in "$@"; do
+  if [[ "$arg" == --enroll-platform ]]; then
+    for option in "$@"; do
+      [[ "$option" != --debug ]] || {
+        printf '%s\n' '--debug is for the private LAN lab, not enrollment.' >&2
+        exit 2
+      }
+    done
+  fi
+done
+pager_debug_parse "$@"
+if [[ "$PAGER_DEBUG" == true ]]; then
+  export NEXAL_PAGER_DEBUG_SNAPSHOT=1
+  pager_debug_run setup "${BASH_SOURCE[0]}" ${PAGER_ARGS[@]+"${PAGER_ARGS[@]}"}
+  exit
+fi
 if [[ "${1:-}" == --enroll-platform ]]; then
   shift
   exec bash "$ROOT/scripts/enroll-platform-macos.sh" "$@"
@@ -15,7 +33,7 @@ BUNDLE=""
 CHECK=false
 START=true
 usage() {
-  printf 'Usage: bash setup-lan-macos.sh --donor|--receiver "/path/to/client" [--check] [--no-start]\n'
+  printf 'Usage: bash setup-lan-macos.sh --donor|--receiver "/path/to/client" [--check] [--no-start] [--debug]\n'
   printf '   or: bash setup-lan-macos.sh --network-info [--check]\n'
   printf '   or: bash setup-lan-macos.sh --enroll-platform [--name NAME] [--profile NAME | --config ABSOLUTE_PATH] [--coordinator HTTPS_ORIGIN] [--prepare-only] [--no-browser]\n'
 }
@@ -47,6 +65,7 @@ printf 'Safe command to rerun after interruption or reboot:\n  bash %q --%s' "$R
 [[ "$MODE" != receiver ]] || printf ' %q' "$BUNDLE"
 [[ "$START" == true ]] || printf ' --no-start'
 [[ "$CHECK" == false ]] || printf ' --check'
+[[ "${NEXAL_PAGER_DEBUG_SNAPSHOT:-}" != 1 ]] || printf ' --debug'
 printf '\nNo reboot is requested by this script. If macOS or Apple tooling requests one,\ncomplete it and rerun the command above. No donor is started automatically at login.\n'
 
 # Validate Apple build tooling before offering package changes.

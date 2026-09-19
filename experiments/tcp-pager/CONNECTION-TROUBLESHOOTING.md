@@ -12,6 +12,23 @@ native cases executed, and no OS/GPU memory expansion occurred.
 The reset's underlying cause is not established. Do not call this a proven
 certificate, firewall, hybrid-key-exchange or macOS failure.
 
+## Live debug mode
+
+Add `--debug` to `lan-donor-macos.sh`, `resume-donor-macos.sh`,
+`lan-receiver-macos.sh`, or the LAN modes of `setup-lan-macos.sh`.
+It displays and saves build/runtime output, UTC time, checkout revision,
+active private interfaces, visible TCP 9443 listeners, and the script exit status.
+Connection diagnostics remain fixed-label events; this is not a packet capture.
+The terminal prints the exact `debug.log` path inside a fresh private temporary
+directory (directory mode 0700, log mode 0600). Keep the donor running while
+trying the receiver once, then read the donor log from another terminal.
+
+Debug mode does not dump the environment, trace shell commands, read private
+keys, bypass TLS checks, change timeouts, or create another enrollment.
+It is deliberately rejected with `--enroll-platform`.
+Logs contain local paths/IPs: review before sharing. They are not automatically
+uploaded or deleted; remove them after troubleshooting.
+
 ## Updated diagnostics
 
 Receiver errors now distinguish `TCP connect`, `TLS handshake` and
@@ -43,7 +60,7 @@ After updating the repository, run on the M4:
 
 ```sh
 bash "$HOME/Downloads/nexal-connector/experiments/tcp-pager/scripts/resume-donor-macos.sh" \
-  "/ABSOLUTE/EXISTING/DONOR/STATE/run"
+  "/ABSOLUTE/EXISTING/DONOR/STATE/run" --debug
 ```
 
 Use the state directory one level above its `client` folder. This builds the
@@ -64,7 +81,7 @@ On M2, update the repository and rerun against the previously imported credentia
 
 ```sh
 bash "$HOME/Downloads/nexal-connector/experiments/tcp-pager/scripts/lan-receiver-macos.sh" \
-  "/ABSOLUTE/RECEIVER/EVIDENCE/run/credentials"
+  "/ABSOLUTE/RECEIVER/EVIDENCE/run/credentials" --debug
 ```
 
 This rebuilds the receiver, creates a fresh evidence directory and asks for the
@@ -80,3 +97,7 @@ classical-only rejection tests still pass; no TLS downgrade or timeout increase.
 The resume test verifies unchanged key/manifest files and successful authenticated
 portable paging after restarting with existing donor state.
 Native Mac diagnostic output and a successful two-Mac paging run remain unverified.
+The debug-wrapper change additionally passed 39 Linux mock script tests covering
+capture, private permissions, stdin, error exit codes, build-failure stopping,
+setup and enrollment regression guards, plus shell syntax and diff checks.
+These are not a substitute for running `--debug` on the physical Macs.

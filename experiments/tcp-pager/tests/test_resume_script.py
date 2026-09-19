@@ -16,6 +16,7 @@ class ResumeScriptTests(unittest.TestCase):
         build.mkdir()
         shutil.copyfile(ROOT / "scripts/resume-donor-macos.sh",
                         scripts / "resume-donor-macos.sh")
+        shutil.copyfile(ROOT / "scripts/debug-lib.sh", scripts / "debug-lib.sh")
         (scripts / "build-macos.sh").write_text("#!/bin/bash\nexit 0\n")
         binary = build / "nexal-pager-lab"
         binary.write_text(

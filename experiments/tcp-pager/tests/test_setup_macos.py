@@ -16,7 +16,7 @@ class SetupTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.scripts = self.root / "scripts"
         self.scripts.mkdir()
-        for name in ("setup-lan-macos.sh", "toolchain-lib.sh"):
+        for name in ("setup-lan-macos.sh", "toolchain-lib.sh", "debug-lib.sh"):
             shutil.copy2(ROOT / "scripts" / name, self.scripts / name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
@@ -108,6 +108,23 @@ esac
         r = self.run_setup("--receiver", str(bundle))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.actions(), f"receiver:{bundle}\n")
+
+    def test_debug_check_does_not_start_or_install(self):
+        self.env["NEXAL_PAGER_GO"] = str(self.prefix / "bin/go")
+        self.env["TMPDIR"] = str(self.root)
+        r = self.run_setup("--debug", "--donor", "--check")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.actions(), "")
+        self.assertIn("--debug", r.stdout)
+        self.assertEqual(len(list(self.root.glob("nexal-pager-setup.*/debug.log"))), 1)
+
+    def test_debug_enrollment_rejected_before_capture(self):
+        self.env["TMPDIR"] = str(self.root)
+        for args in (("--debug", "--enroll-platform"),
+                     ("--enroll-platform", "--debug")):
+            r = self.run_setup(*args)
+            self.assertEqual(r.returncode, 2)
+        self.assertEqual(list(self.root.glob("nexal-pager-setup.*")), [])
 
     def test_network_info_never_starts_donor(self):
         cli = self.root / "mock network cli"

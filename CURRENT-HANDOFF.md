@@ -6,6 +6,16 @@ engineering preview, not a production-approved distributed cloud.
 
 ## Named enrollment and iPhone repository checkpoint
 
+M4 owner reports successful enrollment. M2 private-lan enrollment produced the
+old generic `coordinator request failed`, not a recorded HTTP response. Its
+underlying network cause is still unknown and needs the owner's native retry.
+Added credential-free `coordinator-check` and preflight before invitation input;
+fixed-message network error classification and enrollment-only HTTP 409 advice.
+No automatic POST retry, TLS bypass, proxy forwarding, identity reset or remote
+deployment. Platform relay still requires separate enrolled receiver identity;
+pager certificates do not supply platform enrollment. Phone/QR end-to-end flow
+remains unimplemented.
+
 Owner accidentally pasted dashboard owner token into enrollment Terminal input
 and received HTTP 409 on an earlier checkout. Wrapper now validates the current
 `enr_` + 64 lowercase hex format before submission, never echoes rejected input,

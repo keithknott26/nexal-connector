@@ -18,6 +18,8 @@ Enrollment opens the Hosts page in your default browser. Enter the Nexal owner
 credential there, generate a one-use invitation, then paste the invitation into
 Terminal's hidden prompt. The invitation starts with `enr_`; **do not paste
 the owner token into Terminal**. No credential is put in the browser URL.
+Before requesting an invitation, setup checks connectivity without credentials;
+if it fails, resolve the reported connection issue rather than generating codes.
 Donor mode shows numbered IP,
 Ethernet/Wi-Fi and interface labels; choose a number and leave its terminal open.
 Stop an existing donor before starting another. Restarting produces a new bundle.
@@ -35,6 +37,11 @@ This enrolls/prepares the M2; it does not start receiving pages. Follow
 [bundle delivery and receiver startup](experiments/tcp-pager/PLATFORM-DELIVERY.md)
 after both hosts and the shared coordinator relay are ready. Do not run donor
 mode on the M2.
+
+The current relay requires both Macs enrolled: the M2's own platform identity
+authorizes delivery, while the M4's client bundle authorizes private pager access.
+Downloading the bundle is not platform enrollment. Phone/QR automation of these
+steps is not yet connected end to end.
 
 ## Existing checkout and options
 

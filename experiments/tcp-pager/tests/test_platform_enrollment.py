@@ -45,7 +45,9 @@ class EnrollmentTests(unittest.TestCase):
         helper = self.scripts / "enroll-platform-macos.sh"
         helper.write_text(helper.read_text()
                           .replace("/usr/bin/plutil", shlex.quote(str(self.bin / "plutil")))
+                          .replace("/usr/sbin/sysctl", shlex.quote(str(self.bin / "sysctl")))
                           .replace("/usr/bin/open", shlex.quote(str(self.bin / "open"))))
+        self.script("sysctl", 'case "$2" in machdep.cpu.brand_string) echo "Apple M2";; hw.logicalcpu) echo 8;; hw.memsize) echo 8589934592;; *) exit 1;; esac')
         self.python("open", """
 import json, os, sys
 with open(os.environ["TEST_BROWSER_LOG"], "a") as log:
@@ -67,6 +69,12 @@ except (KeyError, ValueError, OSError): sys.exit(1)
 import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
+if args[0] == "coordinator-check":
+    if os.environ.get("TEST_CHECK_FAIL"):
+        print("coordinator request failed [dns]: hostname lookup failed", file=sys.stderr)
+        sys.exit(1)
+    print('{"coordinatorReachable":true,"credentialsRead":false}')
+    sys.exit(0)
 with open(os.environ["TEST_LOG"], "a") as log: log.write(json.dumps(args) + "\\n")
 path = Path(args[args.index("--config") + 1])
 if args[0] == "init":
@@ -117,6 +125,9 @@ else: sys.exit(1)
     def test_prepare_rerun_preserves_configuration(self):
         result = self.run_script("--name", "M4 mini", "--prepare-only")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Chip: Apple M2", result.stdout)
+        self.assertIn("Logical CPU cores: 8", result.stdout)
+        self.assertIn("Physical RAM (bytes): 8589934592", result.stdout)
         before = self.config.read_bytes()
         result = self.run_script("--name", "M4 mini", "--prepare-only")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -264,7 +275,8 @@ else: sys.exit(1)
             self.assertEqual(status == 0, not fail, output)
             self.assertNotIn(INVITATION, self.log.read_text())
             if fail:
-                self.assertIn(b"HTTP 409 means", output)
+                self.assertNotIn(b"HTTP 409", output)
+                self.assertIn(b"no automatic enrollment retry", output)
             data = json.loads(self.config.read_text())
             self.assertEqual("hostId" in data, not fail)
         self.assertEqual([json.loads(line) for line in self.browser_log.read_text().splitlines()],
@@ -314,6 +326,19 @@ else: sys.exit(1)
             self.assertFalse(self.log.exists())
         status, output = self.run_terminal(invitation=INVITATION)
         self.assertEqual(status, 0, output)
+
+    def test_failed_preflight_never_requests_invitation_or_opens_browser(self):
+        self.existing(name="M2 mini")
+        before = self.config.read_bytes()
+        self.env["TEST_CHECK_FAIL"] = "1"
+        status, output = self.run_terminal("--name", "M2 mini")
+        self.assertNotEqual(status, 0, output)
+        self.assertIn(b"[dns]", output)
+        self.assertNotIn(b"HTTP 409", output)
+        self.assertNotIn(b"input hidden", output)
+        self.assertFalse(self.browser_log.exists())
+        self.assertFalse(self.log.exists())
+        self.assertEqual(before, self.config.read_bytes())
 
 
 if __name__ == "__main__":

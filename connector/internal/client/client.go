@@ -98,7 +98,7 @@ func New(base, token string, dev bool) (*Client, error) {
 	}
 	return &Client{base: strings.TrimRight(base, "/"), token: token, http: &http.Client{
 		Timeout: 10 * time.Second, Transport: tr,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("coordinator redirects are forbidden") },
+		CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectForbidden },
 	}}, nil
 }
 func ValidID(id string) bool {
@@ -134,14 +134,20 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return errors.New("coordinator request failed")
+		return transportError(err)
 	} // never expose URL or bearer in errors
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if path == "/api/hosts/enroll" && resp.StatusCode == http.StatusConflict {
+			return errors.New("coordinator rejected enrollment (HTTP 409): invitation invalid, expired, or already used; generate a fresh enr_ invitation in Hosts > Enroll host, not an owner token")
+		}
 		return fmt.Errorf("coordinator rejected request (HTTP %d)", resp.StatusCode)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
-	if err != nil || len(b) > 64<<10 {
+	if err != nil {
+		return transportError(err)
+	}
+	if len(b) > 64<<10 {
 		return errors.New("coordinator response too large or unreadable")
 	}
 	if err := config.CheckJSONObject(b); err != nil {

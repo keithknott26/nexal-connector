@@ -10,6 +10,13 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   macOS uses the login Keychain through `/usr/bin/security`; no token appears in argv.
   `--memory-limit-mib 256 --reserve-memory-mib 1024` are optional.
 - `nexal enroll --code-stdin` reads the one-use enrollment code from stdin.
+- `nexal coordinator-check` checks `/api/health` using the same bounded direct
+  HTTPS transport as enrollment, without reading Keychain or sending credentials.
+  It does not change configuration or enrollment. Success is connectivity only,
+  not proof of a valid host identity or authorization. Errors distinguish DNS,
+  certificate validation, timeout, connection refusal/closure, and other network
+  failures using fixed messages without raw URLs, certificates or response text.
+  Ambient proxy settings remain disabled and TLS verification remains required.
 - `nexal run` starts a loopback-only authenticated API at `127.0.0.1:8788`,
   host heartbeat and optional pinned strict tunnel supervision. It does not install
   software, ask for root, or enable public work.

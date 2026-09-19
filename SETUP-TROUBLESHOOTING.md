@@ -1,5 +1,19 @@
 # Nexal setup troubleshooting
 
+## Host looks like the wrong Mac
+
+Names such as `M4 mini` are labels, not hardware detection. Setup prints the
+local chip, logical CPU count and physical RAM in bytes. Match its **saved host
+ID**, not just its name, with Hosts. Enrollment reports `runtime.NumCPU()` and
+macOS `hw.memsize`; changing `--name` does not rename a saved identity or update
+its stored inventory. Do not overwrite RAM/CPU values to match an expected model.
+
+If two cards have the same name, preserve both until their IDs are identified.
+The platform's confirmed Delete host feature requires its migration/deployment;
+deletion revokes platform access, retains history and does not stop an existing
+local pager. A deleted profile remains local and must not silently be reused as
+a new identity.
+
 ## Shared dashboard and owner credentials
 
 Open https://nexal-coordinator-dev.nexal.systems/ and authorize with the
@@ -47,6 +61,46 @@ Update the checkout and rerun the same enrollment command with the same
 incorrect invitation formats locally without echoing or submitting the value.
 Format validation does not establish validity: the coordinator still verifies
 the invitation. If another error occurs, resolve that error before retrying.
+
+## “coordinator request failed” on one Mac
+
+This is a transport failure, **not** evidence of HTTP 409 or an invalid invitation.
+Older builds discarded the reason and the shell then printed misleading 409
+advice. Updated builds classify DNS, TLS certificate, timeout, refused/closed
+connections and other network failures without printing secrets.
+
+Update and rerun the same setup command. Before opening the browser or asking for
+an invitation, the script performs a credential-free `/api/health` check through
+the connector's own transport. A failed check stops without submitting a code.
+After setup has built the helper, the check can be repeated independently:
+
+```bash
+"$HOME/Downloads/nexal-connector/experiments/tcp-pager/build/nexal-transfer" coordinator-check --config "$HOME/Library/Application Support/Nexal-Profiles/private-lan/config.json"
+```
+
+Browser access is not proof the connector route works: the connector deliberately
+does not use automatic proxy settings. Check the category in the diagnostic;
+review DNS/connectivity for `dns`, system clock/trust configuration for
+`tls_certificate`, and reachability/outbound filtering for timeout or connection
+errors. Do not disable TLS verification or indiscriminately disable firewalls.
+If your network requires a proxy, report that requirement; this release has no
+explicit proxy configuration.
+
+A successful preflight does not guarantee a later enrollment response. If an
+enrollment request loses its response, server-side success is ambiguous: review
+Hosts before retrying. There is no automatic retry or transactional recovery,
+and a fresh invitation alone does not recover a lost host credential.
+
+## Why the receiver needs its own enrollment
+
+The private platform relay delivers only between enrolled sender and receiver
+identities. The M2 must have its own host credential to request/download the
+encrypted bundle. The donor's client bundle contains separate short-lived pager
+connection credentials; it cannot enroll the receiver or replace that identity.
+Never copy the M4's platform configuration or host credentials to the M2.
+The desired phone-login/QR flow will automate this authorization but is not yet
+integrated. Direct manual bundle delivery is a separate lab path, not automatic
+platform enrollment.
 
 ## “An enrollment is already recorded”
 

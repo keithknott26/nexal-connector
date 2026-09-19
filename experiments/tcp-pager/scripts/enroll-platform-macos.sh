@@ -88,6 +88,11 @@ fi
 # The reused prerequisite flow offers Homebrew changes only with consent.
 # It does not start another donor, receiver, or agent.
 bash "$ROOT/scripts/setup-lan-macos.sh" --donor --no-start
+printf '\n=== This Mac: local hardware, not the saved host name ===\n'
+printf 'Chip: '; /usr/sbin/sysctl -n machdep.cpu.brand_string || printf 'Unavailable\n'
+printf 'Logical CPU cores: '; /usr/sbin/sysctl -n hw.logicalcpu || printf 'Unavailable\n'
+printf 'Physical RAM (bytes): '; /usr/sbin/sysctl -n hw.memsize || printf 'Unavailable\n'
+printf 'Compare this hardware and the exact saved host ID with the dashboard. Names are labels, not hardware detection.\n'
 . "$ROOT/scripts/toolchain-lib.sh"
 GO="$(pager_select_go)"
 [[ ! -L "$ROOT/build" ]] || { printf 'Refusing symlink build directory.\n' >&2; exit 1; }
@@ -143,6 +148,12 @@ fi
   printf 'Enrollment needs a terminal for hidden input. Rerun interactively or append </dev/tty.\n' >&2
   exit 1
 }
+printf '\nChecking coordinator connectivity without credentials before requesting an invitation...\n'
+if ! "$BIN" coordinator-check --config "$CONFIG"; then
+  printf 'Connection check failed. No invitation was requested or submitted, and this check did not change enrollment.\n' >&2
+  printf 'Resolve the diagnostic above, then rerun this same command. Browser access alone does not verify the connector route; automatic proxies are not used.\n' >&2
+  exit 1
+fi
 open_dashboard
 printf 'After signing in, use Hosts > Enroll host > Generate invitation, then return to this Terminal.\n'
 printf 'Use that shared dashboard, not localhost. Do not paste the invitation into chat.\n'
@@ -170,8 +181,8 @@ if printf '%s\n' "$CODE" | "$BIN" enroll --code-stdin --config "$CONFIG"; then
 else
   STATUS=$?
   unset CODE
-  printf 'Enrollment did not complete. HTTP 409 means the invitation is invalid, expired, or already used; generate a fresh invitation in the same coordinator dashboard and rerun this command.\n' >&2
-  printf 'For other errors, resolve the reported cause first. Do not delete the profile or paste the owner token here.\n' >&2
+  printf 'Enrollment did not complete; use the specific diagnostic above. Do not delete the profile or paste the owner token here.\n' >&2
+  printf 'If the connection failed after submission, the server may have created a host without returning its credentials. Review Hosts before retrying; no automatic enrollment retry was made.\n' >&2
   exit "$STATUS"
 fi
 printf 'Enrollment complete. No agent or job started; existing donor was left alone.\n'

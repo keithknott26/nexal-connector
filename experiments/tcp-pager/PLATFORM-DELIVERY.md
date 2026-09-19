@@ -11,6 +11,10 @@ Full deployment, commands, security model and validation:
 Prerequisites: coordinator code and migration 0006 installed, both Macs enrolled
 in the same reachable coordinator, valid host credentials, M4 donor still running.
 Two separate loopback coordinators do not constitute a shared service.
+The M2's own platform enrollment authorizes bundle delivery; the delivered pager
+certificate authorizes access to the running donor. These are separate identities.
+The current flow does not implement phone/QR authorization or automatically
+enroll an unknown receiver just because it downloads a client bundle.
 The shared-dev coordinator and migration 0006 were deployed September 19, 2026.
 Native two-Mac acceptance remains pending; deployment does not enroll either Mac.
 
@@ -34,7 +38,9 @@ Do not use the localhost preview profile for a cross-Mac relay.
 
 This mode checks prerequisites using the existing consent-based installer,
 builds the CLI, and initializes a private, paused profile only if none exists.
-After the build it opens `<coordinator>/#/hosts` using macOS's default browser,
+After the build it checks `/api/health` without credentials using the connector's
+direct transport, stopping with a specific diagnostic if unreachable. It then
+opens `<coordinator>/#/hosts` using macOS's default browser,
 then prompts for a one-use invitation with terminal echo disabled. Enter the
 Nexal owner credential only in the browser sign-in form; the Terminal prompt
 accepts the generated invitation, not the owner credential. URLs contain no
@@ -60,7 +66,7 @@ Run from an interactive Terminal. If invoking inside a here-document, append
 `</dev/tty` to give the hidden prompt a terminal. No reboot or login task is
 installed. The underlying standalone `--donor` and `--receiver` modes are unchanged.
 
-Validation: 12 setup tests plus 15 enrollment orchestration tests,
+Validation: 12 setup tests plus 17 enrollment orchestration tests,
 including hidden-input pseudo-terminal success/failure/retry, safe reruns,
 coordinator mismatch, no-terminal refusal, build failure and symlink rejection.
 Browser success/failure, explicit opt-out, already-enrolled reopening and

@@ -1,85 +1,205 @@
-# Nexal Connector continuation checkpoint
+# Nexal current engineering handoff
 
-September 19, 2026. This is a private engineering preview, not a production
-marketplace connector. Preserve all release gates and both repositories' privacy.
+Checkpoint: September 19, 2026. This file is intended for a developer or LLM
+resuming work without access to the original conversation. It describes an
+engineering preview, not a production-approved distributed cloud.
 
-## Start here
+## Product and owner decisions
 
-- [Connector verification](VERIFICATION.md).
-- [Connector security boundaries](SECURITY.md).
-- [Cloudflare/cloudflared trust and deployment status](CLOUDFLARED-TRUST.md).
-- [Rename and configuration migration](MIGRATION.md).
-- [Go CLI contract](connector/CLI-CONTRACT.md).
-- [Native UI setup](macos/README.md).
-- [Private-pool integration](connector/internal/pool/INTEGRATION.md).
-- [MLX release gates](runtimes/RELEASE-GATES.md).
-- [Platform's complete product archive](https://github.com/keithknott26/nexal-platform/tree/main/docs).
-- [Canonical cross-repository handoff](https://github.com/keithknott26/nexal-platform/blob/main/docs/CURRENT-HANDOFF.md).
+- Product: Nexal Platform and Nexal Connector; entity: KWK, LLC.
+- Domain: owner purchased `nexal.systems`; registration provider is not confirmed.
+- Source owner: GitHub account `keithknott26`; both repositories must stay private.
+- Prefer Go where practical, native Cloudflare services for the coordinator,
+  and native SwiftUI/Go on Macs. MLX uses a small Python runtime adapter.
+- Setup should inspect dependencies automatically, offer narrowly scoped upgrades
+  with consent, and minimize setup friction. Docker is acceptable for the
+  coordinator; it does not replace native Metal/MLX execution.
+- Target owner hardware: base M4 Mac mini, 10 cores, 24 GB RAM, 512 GB storage;
+  an M2 Mac is also intended for private and later public participation.
+- Owner reported macOS 27.0, build 26A428, Swift 6.4, Node 23.6.1 and Go 1.23.1.
+  Ethernet reaches a mesh/PLC network backed by DSL; do not assume data-center
+  bandwidth or latency. The source build targets Node 24 and Go 1.26.
+- The owner built the older Nexal native preview, opened its menu-bar app and
+  enrolled the 8 GB M2. Private CPU execution was blocked by owner-activity,
+  heartbeat-only startup and low measured memory, not proven successful on Mac.
+- Local pooled RAM must remain private, even when idle, with no public fallback.
+  Supported-app integration is desired; arbitrary-app transparent RAM is not
+  an established supported implementation.
 
-## Immediate acceptance work
+## Scope that must remain represented
 
-Native update: owner-supplied M4 output for connector `76345d9` confirms Go
-vet/race package tests, Swift compilation, seven XCTest cases and initial app
-packaging passed. Read MAC-ACCEPTANCE.md before repeating build-only checks.
-App launch, Keychain, telemetry and recovery are still pending. The Swift local
-preview is fixed to port 8787, which an existing Docker service occupies;
-identify that service before stopping it or attaching the app.
+- MCP access to permissioned enriched market data: stocks, options, earnings,
+  PEAD research and news sentiment. Provider feeds are not live in this preview.
+- Member contributions of compute, storage and properly licensed datasets.
+- Private LAN pooling of approved jobs, model caches and project storage.
+- Potential distributed MLX jobs with per-rank memory admission, not transparent
+  operating-system RAM expansion or automatic acceleration of arbitrary apps.
+- Owner-first scheduling, pause/reclaim, budgets, metering and eventual payments.
+- Approved managed-cloud fallback only with credentials, budget and explicit
+  authorization. Provider names do not imply implemented parity.
+- Dynamic funding contribution plus usage charges minus eligible earned credits.
+  More members can spread fixed costs; this is not a guaranteed falling bill.
+- Strict fail-closed post-quantum requirements for the tunnel segment, not a claim
+  that the entire system or every peer connection is post-quantum secured.
+- Data format conversion does not itself establish redistribution permission.
+  Entitlements and approved use must remain separate from membership.
 
-Latest installation pass adds `nexal doctor` / `doctor --probe`, a sanitized
-read-only configuration/optional telemetry report. No credentials or network
-connections are accessed. Native app packaging stages a complete replacement
-before publishing it, with locks and preservation of the prior app on ordinary
-failure. Power-loss recovery and successful packaging still need real Mac tests.
-The platform supplies easier double-click setup/start, a supervised readiness
-launcher and installer fault-injection tests. See its INSTALLATION-BUGCHECK.md.
+## Repository map
 
-Latest source increment adds `nexal policy` and `nexal set-policy` through the
-authenticated loopback API. Resource-policy updates persist atomically, cancel
-active work and invalidate prior observations without enabling public execution.
-Consent generations and per-observation sequences reject stale/out-of-order
-telemetry and heartbeat completions. A native SwiftUI settings form is not added.
-190 named Go test passes (89 top-level), race/vet, repeated race tests and a Darwin
-ARM64 cross-build passed locally. The shared contract now documents additive
-usage-budget configuration, bounded MCP protocol behavior and the new owner-only
-transactional audit endpoint. Coordinator migrations through 0004 are required.
-The platform's `scripts/verify-local.sh` checks both sibling repositories and can
-run the actual CLI/Worker integration using `--integration-port 8787`.
+- `nexal-platform`: Worker, D1, dashboard, services/MCP, setup, container recipe,
+  product documents and financial/visual archive.
+- `nexal-connector`: Go agent and private-pool package, SwiftUI source, Python MLX
+  adapter and Go bridge, packaging instructions and tests.
+- Both carry `CONTRACT.md` and `COMPATIBILITY` (`nexal-private-preview-api-v2`).
+- Initial source checkpoint: platform `755c1c1`, connector `c34cabc`.
+  These are baseline commits, not the latest documentation commits.
+- Local authoritative directories are the two sibling repositories, not the old
+  `kwk-platform` monorepo. Old source and local state were retained, not migrated.
 
-The latest safety pass adds an independent stale-observation reclaim watcher,
-pending-pull cancellation fencing, bounded network contexts, strict JSON
-ambiguity checks and safer private-file reads. Saved configuration must include
-explicit, non-null `paused`; generated configurations already comply.
-Tunnel diagnostics remain local observations, never verification or attestation.
-See the platform's `docs/PRODUCTION-HARDENING-PASS.md` for the full integrated
-report. Its 424 TypeScript tests and 62 installer/startup checks passed locally.
+## Implemented and tested boundaries
 
-The owner has an M4 Mac mini (10 cores, 24 GB RAM, 512 GB) and an M2 Mac.
-Compile and test the SwiftUI application, Keychain integration, setup scripts and
-container coordinator on real macOS before claiming native acceptance. The Go
-Darwin ARM64 cross-build passed, but it does not validate those native components.
-New Nexal state is separate from the old KWK install; do not automatically copy
-or delete old credentials. Stop older services using ports 8787/8788 first.
+Native update: the owner subsequently supplied successful native build output for
+platform `d601629` and connector `76345d9`: 424 TypeScript tests, Go vet/race
+package tests, Swift compilation, seven XCTest cases, migrations 0001–0004
+and initial app packaging. See [MAC-ACCEPTANCE.md](MAC-ACCEPTANCE.md). This
+supersedes older statements that Swift compilation was wholly untested.
+The owner reports the menu-bar app opened and the M2 enrolled, with real
+telemetry observed. Full UI behavior, Keychain and signed distribution remain
+unvalidated; latest Swift changes have not been compiled in the Linux sandbox.
+The acceptance worktrees are separate from the owner's dirty staging checkout.
+Docker occupies 8787; Swift local-preview initialization is fixed to that port,
+so identify the container before a reviewed local service switch.
 
-Production dispatch remains fail-closed. Distributed MLX, proven malicious-code
-isolation, actual PQ negotiation and signed/notarized distribution are not
-complete. Private-pool primitives are not automatically a fully integrated
-filesystem or transparent shared OS memory.
+See [NEXAL-VERIFICATION.md](NEXAL-VERIFICATION.md) for evidence and commands.
+Previous local testing reported 424 TypeScript tests and 190 named Go test passes
+(89 top-level tests, with named subtests included in 190), race/vet, 34 Python
+tests, 24 setup policy checks, 20 mocked installer scenarios, 18 subprocess
+launcher tests and a local Go-to-Worker/D1 integration run with 41 checks.
+Polling can change the integration check count. The fixed CPU workload completed
+with synthetic Linux telemetry and no external spending. Browser QA covered six
+mobile views, usage-limit persistence, error states and keyboard interaction.
 
-## External status
+Latest implemented increment:
+- [Private MLX and manual acceptance](PRIVATE-MLX-AND-MANUAL-ACCEPTANCE.md):
+  433 TypeScript tests passed across 12 files, root/scoped typechecks and dashboard
+  build passed, all connector race/vet checks and Darwin ARM64 cross-build passed.
+  Existing 34 Python tests and 62 installer/launcher policy checks passed.
+  Real local Worker/D1 plus Go integration passed with manual acceptance and
+  completed zero-cost private jobs (60 checks; synthetic Linux telemetry).
+- Essential migration 0005 introduces short-lived private manual consent without
+  falsifying owner activity. The native Accept jobs now button uses the existing
+  authenticated daemon. It never bypasses memory checks. Public/paid work is
+  excluded during the manual window; pause/policy/restart clear local permission.
+- Enrollment confirmation displays a fixed mask without retaining the one-use
+  code. New native XCTest cases are written but not executed on macOS here.
+- Private-memory reservation/export and MLX placement guards are library
+  safeguards, not an enabled distributed-memory runtime or OS sandbox.
+- `nexal-connector/runtimes/bridge` now contains `RunLocalInference` and standalone
+  `cmd/nexal-mlx-job`: fixed pinned local runtime execution, output/deadline limits,
+  process-group cleanup, strict results and per-config exclusion. Main-agent
+  race/vet checks and Darwin ARM64 cross-build passed. Real MLX/Metal, authoritative
+  scheduler admission/reclaim, native testing and multi-Mac execution are NOT
+  implemented/validated by that result. The native app does not launch MLX yet.
+  See the bridge README and validation handoff before integrating it.
+- [Production-hardening pass](PRODUCTION-HARDENING-PASS.md): independent reviews
+  of installation, connector safety and coordinator integrity, plus main-agent
+  MCP/provider deadlines, stream limits and integrated verification.
+- Essential migration `0004_admission_fencing.sql` rejects missing/unconfigured
+  usage authorization and uses database-clock invitation expiry. Coordinator
+  lease/credential checks and budget-month calculations use execution-time SQL.
+  Applied locally only; no remote migration or new spending permission.
+- Connector cancels pending pulls after owner decisions, reclaims on expired
+  observations independently of stalled probes, and bounds network contexts.
+  Saved configuration must contain explicit, non-null `paused`; generated
+  settings already do. Do not delete existing state to bypass validation.
+- Installer diagnostics sanitize preload variables; real Node/npm pairing,
+  compatibility checks, relative paths and bounded subprocess-group cleanup
+  have regression coverage. Actual Mac acceptance is still outstanding.
+- Owner-only `/api/audit` records curated state transitions atomically using
+  migration `0003_audit_history.sql`. Apply pending local migrations when updating.
+  No backfill, actor attribution, external tamper evidence or retention automation
+  is claimed; read `AUDIT-HISTORY.md`.
+- `nexal doctor` provides a sanitized local config report without credential reads,
+  network calls or mutations. `--probe` explicitly enables bounded Mac telemetry.
+- The owner prioritized **easy, seamless, robust installation**. Revision 2
+  defaults double-click setup to native mode, adds a Start command, validates
+  first-launch Xcode status, scopes toolchains, rejects ambiguous modes/remote
+  Docker contexts, serializes setup and stages replacement app bundles.
+  A supervised native launcher handles readiness, browser opening, port conflicts,
+  deadlines and owned-child cleanup. See `INSTALLATION-BUGCHECK.md`.
+- These installer tests simulate Mac tools. An actual local Wrangler/D1 launcher
+  run passed on Linux, not Finder, Homebrew, Swift, Docker or macOS `open`.
+- Dashboard has a separate monthly compute-usage authorization editor, with
+  explicit acknowledgment and non-cash labels. Operating forecasts never grant
+  spending authorization. The additive API `configured` field needs no migration.
+- Connector has authenticated `policy` / `set-policy` CLI and local API controls
+  for workload memory, owner reserve and idle threshold. Changes cancel work,
+  persist before application and preserve pause/public-dispatch restrictions.
+- Consent generation and observation sequence checks fence stale or out-of-order
+  telemetry/heartbeat responses. Resume requires fresh observations.
+- MCP parsing now reaches the protocol handler after authentication, preserving
+  JSON-RPC errors and a streamed 16 KiB ceiling. MCP-specific version preflight
+  is supported. This is still a stateless subset, not certified Claude onboarding.
+- `bash scripts/verify-local.sh --integration-port 8787` provides a repeatable
+  cross-repository check against an already running loopback development Worker.
+  It does not install software or deploy, and does not replace Mac acceptance.
 
-The owner purchased `nexal.systems`; no domain deployment or DNS changes were
-performed. Cloudflare account inspection is blocked by a repeated
-`Invalid format for X-Auth-Key header` error. Resolve credential type without
-requesting secrets in chat. GitHub Actions remains disabled pending review.
-The platform repository preserves business documents, financial models, four
-original flowcharts, dashboard source and screenshots, and the full architecture.
+Real production tunnel dispatch, public arbitrary-code isolation, licensed live
+feed delivery, payments, signed/notarized Mac releases and distributed MLX
+execution remain incomplete or gated. Swift/native Keychain and the Docker
+runtime require real Mac acceptance; a Darwin cross-build is not that acceptance.
+Do not remove these gates to make a demo appear production-ready.
 
-The owner's explicit next-session resume point is to finish DNS for
-`nexal.systems` and link Claude with Cloudflare. Neither is complete. Confirm
-which Claude client and whether the desired connection is developer/infrastructure
-access or end-user access to Nexal's MCP before granting permissions.
+## Credentials, environments and deployment
 
-Public registration evidence does not establish who owns `cloudfare.com`;
-the registrar redacts registrant identity. No spelling-variant publisher was
-trusted and no live tunnel was enabled. Preserve the owner's dirty
-`cloudflare-staging` worktree when updating; do not reset or overwrite it.
+- GitHub uploads succeeded; repositories are private and Pages is off.
+- GitHub Actions is disabled pending owner review. Local tests do not prove
+  GitHub-hosted CI passed. CODEOWNERS alone is not branch protection.
+- No Cloudflare production deployment, DNS change or paid cloud action performed.
+- Cloudflare connector authentication is currently blocked; read
+  [the domain checkpoint](CLOUDFLARE-DOMAIN-STATUS.md) before retrying.
+- Private hosted sandbox preview is only a development demonstration, not the
+  production domain. Do not configure DNS to its ephemeral backend.
+- User setup defaults to loopback. Never expose anonymous development mode.
+- Do not commit credentials, live enrollment invitations, local databases,
+  Keychain exports, `.env`, `.dev.vars`, tunnel tokens or raw conversation logs.
+- Original inline diagrams are preserved as JSON and standalone SVG. They are
+  design artifacts, not proof the proposed services have been implemented.
+- Exact-domain investigation did not establish the registrant of
+  `cloudfare.com`: its registrar redacts identity. Redirects, nameservers and
+  registrar identity are not common-ownership evidence. See CLOUDFLARED-TRUST.md.
+- The owner's Mac checkout showed dirty `cloudflare-staging`. Preserve its local
+  work before any merge or branch switch; never reset, clean or overwrite it
+  automatically. These repository updates alone do not update that checkout.
+
+## Next work in order
+
+The owner's latest requested resume point is: **finish DNS for nexal.systems
+and link Claude with Cloudflare. Both remain outstanding.** Do not interpret the
+successful GitHub upload as completing either task.
+
+1. Resolve credential-type mismatch or connector failure without requesting
+   secret values in chat. Inspect the zone only after successful authentication.
+2. Confirm registrar, assigned Cloudflare nameservers, existing email/DNS records
+   and DNSSEC status. Ask for authorization before consequential DNS changes.
+3. Clone both private repositories as siblings on the M4; stop old local services
+   using ports 8787/8788 before starting Nexal. Follow MAC-SETUP.md.
+4. Compile/test SwiftUI and verify Keychain, setup and Docker mode on real hardware;
+   fix failures and record evidence before claiming Mac acceptance.
+5. Review CI permissions/costs and enable/run workflows only with owner approval.
+6. Work through PRODUCTION-GATES.md before an authenticated Cloudflare pilot.
+   Confirm spend limits and bindings; do not enable public jobs or payments.
+7. Validate signed dispatch, actual PQ behavior, owner reclaim, pool persistence,
+   data rights and cloud fallback independently before expanding the pilot.
+8. Configure the requested Claude/Cloudflare connection. First confirm whether
+   the owner means Claude Code developer access, a Claude app MCP connection to
+   Cloudflare, or Claude consuming Nexal's own MCP endpoint. These are distinct
+   integrations; none has been configured. Use least-privilege credentials and
+   separate development/deployment permissions from end-user MCP access.
+
+## Source-of-truth order
+
+Current code, current verification and explicit release gates take precedence
+over historical handoffs. Architecture and requirement files describe the target
+system; financial models are illustrative assumptions rather than a business
+forecast. Consult the document index for every preserved product artifact.

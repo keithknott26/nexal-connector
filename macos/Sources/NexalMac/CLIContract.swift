@@ -5,7 +5,7 @@ import Foundation
 enum CLICommand {
     case initialize(coordinator: String, name: String, memoryMiB: Int, reserveMiB: Int)
     case initializeLocalPreview(name: String, memoryMiB: Int, reserveMiB: Int)
-    case enroll, run, status, pause, resume
+    case enroll, run, status, pause, resume, acceptJobs
 
     func arguments(config: URL) -> [String] {
         let command: [String]
@@ -24,6 +24,7 @@ enum CLICommand {
         case .status: command = ["status"]
         case .pause: command = ["pause"]
         case .resume: command = ["resume"]
+        case .acceptJobs: command = ["accept-jobs"]
         }
         return command + ["--config", config.path]
     }
@@ -61,6 +62,10 @@ struct ConnectorStatus: Decodable {
     let productionDispatchVerified: Bool?
     let activeAttempt: String?
     let telemetry: Telemetry?
+    let manualAcceptanceSupported: Bool?
+    let ownerActivityOverride: Bool?
+    let acceptJobsUntil: String?
+    let executionBlocker: String?
 
     struct Telemetry: Decodable {
         let known: Bool

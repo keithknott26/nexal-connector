@@ -52,6 +52,16 @@ func TestMLXRankMemoryAndBackendPlacement(t *testing.T) {
 	if _, err := PlanMLX(req); !errors.Is(err, ErrUnsupported) {
 		t.Fatal("alternate base M4 label accepted JACCL")
 	}
+	for _, chip := range []string{"M2", "Apple M2"} {
+		req.Peers[0].Chip = chip
+		req.Peers[0].DirectPeers = []string{req.Peers[1].DeviceID}
+		req.Peers[1].DirectPeers = []string{req.Peers[0].DeviceID}
+		if _, err := PlanMLX(req); !errors.Is(err, ErrUnsupported) {
+			t.Fatal("base M2 accepted JACCL")
+		}
+	}
+	req.Peers[0].DirectPeers = nil
+	req.Peers[1].DirectPeers = nil
 	req.Peers[0].Chip = "M4 Pro"
 	if _, err := PlanMLX(req); !errors.Is(err, ErrUnsupported) {
 		t.Fatal("unconnected JACCL topology accepted")

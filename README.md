@@ -13,7 +13,10 @@ production-ready marketplace worker, certified sandbox or verified PQ system.
   prototype, private-pool primitives and strict tunnel configuration.
 - `macos/`: SwiftUI menu-bar app and unsigned source-build packaging.
 - `runtimes/`: gated MLX adapter, integrity manifests and Go command bridge.
-- `CONTRACT.md`: API v1 snapshot shared with the platform. Change both contracts
+  The [new local supervisor](runtimes/bridge/README.md) can supervise the fixed
+  adapter under reviewed owner policy, but is not integrated with native UI,
+  coordinator dispatch or authoritative memory reservation.
+- `CONTRACT.md`: HTTP v1 contract, preview compatibility v2, shared with the platform. Change both contracts
   and the `COMPATIBILITY` revision together for breaking integration changes.
 
 ## Setup on your Mac
@@ -49,12 +52,23 @@ Local preview uses numeric loopback only and separate
 `~/Library/Application Support/Nexal-Local-Preview` configuration with restricted
 file credentials, not Keychain. Production configuration uses
 `~/Library/Application Support/Nexal` and requires HTTPS. Switching profiles is
-blocked while attached/running. No public sharing, synthetic telemetry, paid
-cloud fallback or job dispatch is enabled by this UI.
+blocked while attached/running. No public sharing, synthetic telemetry or paid
+cloud fallback is enabled by this UI. **Accept jobs now** explicitly permits
+zero-cost private CPU jobs for ten minutes without waiting for inactivity.
+Memory/resource and lease checks remain active. Use Pause to revoke permission.
+Update both repositories together and apply local migration 0005 before use.
 
-The local-preview UI and its XCTest cases are written but have not been compiled
-or run on a Mac in this environment. Go policies and Python integrity tests were
-tested separately. Report actual Mac build failures; do not bypass safeguards.
+The owner previously built and opened the older native preview on a Mac.
+The newer enrollment mask and Accept jobs now Swift changes still need native
+compilation and acceptance. Go policies and Python integrity tests were tested
+separately. Report actual Mac build failures; do not bypass safeguards.
+
+## Private MLX memory
+
+See [private LAN memory](macos/PRIVATE-LAN-MEMORY.md). Protected private memory
+cannot be borrowed or exported by public admissions in the pool library.
+This is not a working two-Mac RAM pool or transparent RAM for arbitrary apps.
+Distributed execution and automatic lifecycle wiring remain gated.
 
 ## Verification
 

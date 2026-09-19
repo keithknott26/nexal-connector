@@ -1,0 +1,53 @@
+{
+  "task": "Private MLX execution — bounded first stage",
+  "date": "2026-09-19",
+  "scope": "nexal-connector/runtimes/bridge only",
+  "commits_or_pushes_performed": false,
+  "public_api": {
+    "runner": "RunLocalInference(context.Context, OwnerPolicy, LocalJob) (InferenceResult, error)",
+    "policy_loader": "LoadOwnerPolicy(absolutePath) (OwnerPolicy, error)",
+    "cli": "cmd/nexal-mlx-job"
+  },
+  "implementation": [
+    "Fixed argv exclusively through InferenceCommand; Python -I -B; no public injection bypass",
+    "Actual inference restricted to Darwin arm64",
+    "Explicit reviewed entry, Python executable, config and complete adjacent runtime source tree SHA-256 pins required",
+    "Canonical absolute owner-controlled regular input files; private config/admission/policy; no symlinks",
+    "Existing admission only; validates identity, model, observation window, expiry and positive headroom",
+    "Nonblocking exclusive flock on securely opened existing private config descriptor, held through subprocess cleanup; no lock-file creation or stale deletion",
+    "Process-group SIGKILL on caller cancellation, deadline or output overflow; leader wait and descendant cleanup, including inherited-pipe WaitDelay",
+    "Bounded stdout and count/discard stderr; sanitized stable library errors and CLI JSON codes",
+    "Strict result schema, runtime/template, identity/model and admitted memory checks",
+    "CLI signal cancellation and minimal fixed offline child environment"
+  ],
+  "validation": {
+    "host_toolchain": "go1.26.0 linux/amd64",
+    "go_test_count_1_all": "PASS",
+    "go_test_race_count_1_all": "PASS",
+    "go_vet_all": "PASS",
+    "git_diff_check_bridge": "PASS",
+    "darwin_arm64_cli_cross_compile": "PASS",
+    "darwin_arm64_bridge_test_binary_cross_compile": "PASS",
+    "actual_python_or_mlx_execution": "NOT RUN",
+    "native_darwin_execution": "NOT RUN",
+    "final_linux_log": "validation/linux-tests-race-vet.txt",
+    "cross_compile_log": "validation/darwin-build.txt",
+    "test_processes": "Compiled Go helper behind unexported command factory; real subprocess, group, lock, cancellation and pipe behavior exercised on Linux",
+    "test_admissions": "Synthetic test fixtures only; production code creates no admissions",
+    "dependencies_downloaded": false
+  },
+  "integration_limits": [
+    "Per-config inode lock is cooperative exclusion only, not cross-config/device memory reservation or replay protection",
+    "Coordinator/pool reservation creation, renewal, release, live headroom, owner activity and lease-loss cancellation are not integrated",
+    "Admission files remain unauthenticated local snapshots; caller must already hold authoritative reservation and cancel on reclaim",
+    "No network sandbox: offline flags and local adapter behavior do not enforce OS egress denial",
+    "Same-user/privileged file TOCTOU remains; immutable read-only deployment, protected ancestors and stable config inode are required",
+    "Python executable/source hashes do not seal the full stdlib, wheels, dynamic libraries or OS; existing Python release gates remain unchanged",
+    "Supervisor SIGKILL/crash, escaped process groups, native sleep/wake and managed-service recovery remain unresolved",
+    "Native MLX, Metal, no-egress correctness, actual memory/swap/power and filesystem flock behavior need Mac evidence",
+    "No distributed inference, public execution, network listeners, downloads, admission issuance or transparent RAM semantics added"
+  ],
+  "documentation": "README.md contains deployment shape, nonfunctional policy example, CLI usage, error behavior, test commands and explicit missing native/scheduler work",
+  "generated_binaries": "Preserved under validation; ignored there by validation/.gitignore; cross-compilation artifacts are not native test evidence",
+  "notable_existing_file_change": "commands.go adds -B to shared base argv and JSON field tags to LocalInstallation; commands_test.go adjusts fixed prompt index"
+}

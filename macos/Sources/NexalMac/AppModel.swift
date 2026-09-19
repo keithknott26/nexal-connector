@@ -165,6 +165,22 @@ final class AppModel: ObservableObject {
         catch { status = nil; lastUpdated = nil; message = error.localizedDescription }
     }
 
+    func acceptJobsNow() async {
+        guard !busy, localPreview else { return }
+        if status == nil { await start() }
+        guard status?.manualAcceptanceSupported == true else {
+            message = "Accept jobs now requires the updated development connector. Stop the old connector before launching the updated app."
+            return
+        }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await invoke(.acceptJobs)
+            try await updateStatus()
+            message = "Private zero-cost CPU jobs are permitted while you use this Mac for ten minutes. Memory, lease and connection checks remain required. Pause cancels this permission and active work."
+        } catch { message = error.localizedDescription }
+    }
+
     func setContribution(_ enabled: Bool) async {
         guard !busy, status != nil else { return }
         busy = true

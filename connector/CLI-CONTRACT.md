@@ -28,6 +28,13 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   output failure exit nonzero. `productionReady` is always false in this release.
 - `nexal pause` persists paused state and cancels active work; requires the running API.
 - `nexal resume` persists resumed state; requires the running API.
+- `nexal accept-jobs` asks the running development connector to accept explicitly
+  private, zero-cost jobs for ten minutes even while the owner is active.
+  It enables development pull in that process without starting another daemon.
+  The existing memory and lease checks remain; no telemetry is fabricated.
+  Repeated clicks do not extend an active grant. Pause/cancel, policy change
+  or restart clears it. Production rejects the command.
+  Requires matching preview v2 coordinator and migration 0005.
 - `nexal policy` reads the running agent's effective resource limits.
 - `nexal set-policy --memory-limit-mib 128 --reserve-memory-mib 512 --idle-seconds 600`
   requires all three settings explicitly. It persists limits atomically, cancels
@@ -63,7 +70,8 @@ The native UI can consume `status` JSON and invoke `pause` / `resume`; it must
 not duplicate credential storage or implement a second resource scheduler.
 
 Local API: authenticated `GET /v1/status`, `POST /v1/pause`,
-`POST /v1/resume`, `POST /v1/cancel`, `GET /v1/policy` and `PUT /v1/policy`.
+`POST /v1/resume`, `POST /v1/accept-jobs`, `POST /v1/cancel`,
+`GET /v1/policy` and `PUT /v1/policy`.
 Use `Authorization: Bearer <admin secret>`.
 The policy response and PUT request have exactly these three integer fields:
 `{memoryLimitBytes,reserveMemoryBytes,idleSeconds}`. PUT requires application/json;
@@ -71,6 +79,10 @@ the 4096-byte limit, numeric-loopback binding, browser-Origin rejection and
 authentication apply before mutation. Missing, duplicate, unknown, null and
 noninteger fields are rejected. GET accepts no body. Status includes `resourcePolicy`.
 Persistence failure pauses the live host without applying unsaved new limits.
+Status additionally reports `manualAcceptanceSupported`, `ownerActivityOverride`,
+optional `acceptJobsUntil`, and optional `executionBlocker`. An absent blocker is
+not a promise of queued work. `/v1/accept-jobs` accepts no caller-selected duration,
+workload or resource bypass. Its authenticated local owner decision is temporary.
 Consent changes invalidate in-flight observations; old and out-of-order telemetry
 or heartbeat responses cannot restore execution eligibility. Pausing/resuming
 also requires fresh observations, and stale memory observations are not advertised.

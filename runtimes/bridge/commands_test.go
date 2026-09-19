@@ -24,7 +24,7 @@ func TestInferenceArgsAreFixed(t *testing.T) {
 		t.Fatal(err)
 	}
 	if command.Executable != installation().Python || command.Args[0] != "-I" ||
-		command.Args[8] != "/tmp/hello;$(not-a-command).txt" {
+		command.Args[1] != "-B" || command.Args[9] != "/tmp/hello;$(not-a-command).txt" {
 		t.Fatalf("unexpected argument array: %#v", command)
 	}
 	if _, err := InferenceCommand(installation(), "/tmp/a", "/tmp/p", 513); err == nil {

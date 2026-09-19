@@ -50,33 +50,35 @@ type Reservation struct {
 }
 
 type AdmissionOptions struct {
-	Capacity      Resources
-	PublicEnabled bool // Explicit opt-in; does not grant access to private data.
-	Clock         func() time.Time
+	Capacity           Resources
+	PublicEnabled      bool  // Explicit opt-in; does not grant access to private data.
+	PrivateMemoryBytes int64 // Non-borrowable by public jobs, even while unused.
+	Clock              func() time.Time
 }
 
 // Admission is process-local and must be shared by all schedulers on this host.
 // Persistent storage charges do not expire or disappear on owner reclaim.
 type Admission struct {
-	mu       sync.Mutex
-	capacity Resources
-	used     Resources
-	public   bool
-	paused   bool
-	epoch    uint64
-	now      func() time.Time
-	leases   map[string]Reservation
-	storage  map[string]int64
+	mu            sync.Mutex
+	capacity      Resources
+	used          Resources
+	public        bool
+	paused        bool
+	epoch         uint64
+	now           func() time.Time
+	leases        map[string]Reservation
+	storage       map[string]int64
+	privateMemory int64
 }
 
 func NewAdmission(o AdmissionOptions) (*Admission, error) {
-	if !o.Capacity.valid() {
+	if !o.Capacity.valid() || o.PrivateMemoryBytes < 0 || o.PrivateMemoryBytes > o.Capacity.MemoryBytes {
 		return nil, ErrInvalid
 	}
 	if o.Clock == nil {
 		o.Clock = time.Now
 	}
-	return &Admission{capacity: o.Capacity, public: o.PublicEnabled, epoch: 1,
+	return &Admission{capacity: o.Capacity, public: o.PublicEnabled, privateMemory: o.PrivateMemoryBytes, epoch: 1,
 		now: o.Clock, leases: make(map[string]Reservation), storage: make(map[string]int64)}, nil
 }
 
@@ -116,6 +118,9 @@ func (a *Admission) Reserve(owner string, class WorkClass, amount Resources, ttl
 	}
 	if class == PublicWork && !a.public {
 		return Reservation{}, ErrUnauthorized
+	}
+	if class == PublicWork && amount.MemoryBytes > a.capacity.MemoryBytes-a.privateMemory-a.publicMemoryLocked() {
+		return Reservation{}, ErrQuota
 	}
 	// Subtract before adding to avoid integer overflow.
 	if !amount.fits(a.capacity.sub(a.used)) {
@@ -242,9 +247,43 @@ func (a *Admission) SetCapacity(capacity Resources) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.expireLocked()
-	if !a.used.fits(capacity) {
+	if !a.used.fits(capacity) || capacity.MemoryBytes < a.privateMemory ||
+		a.publicMemoryLocked() > capacity.MemoryBytes-a.privateMemory {
 		return fmt.Errorf("%w: reclaim running work first", ErrQuota)
 	}
 	a.capacity = capacity
 	return nil
+}
+
+func (a *Admission) publicMemoryLocked() int64 {
+	var memory int64
+	for _, lease := range a.leases {
+		if lease.Class == PublicWork {
+			memory += lease.Resources.MemoryBytes
+		}
+	}
+	return memory
+}
+
+// PublicAvailable is the only capacity view intended for marketplace export.
+// Never publish Snapshot's total capacity or add another host's RAM to it.
+func (a *Admission) PublicAvailable() Resources {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.expireLocked()
+	if !a.public || a.paused {
+		return Resources{}
+	}
+	free := a.capacity.sub(a.used)
+	publicMemory := a.capacity.MemoryBytes - a.privateMemory - a.publicMemoryLocked()
+	if publicMemory < free.MemoryBytes {
+		free.MemoryBytes = publicMemory
+	}
+	return free
+}
+
+// NewPrivateMemoryAdmission never admits public work and exposes zero public
+// capacity. It plans local resource reservations, not a remote RAM device.
+func NewPrivateMemoryAdmission(capacity Resources) (*Admission, error) {
+	return NewAdmission(AdmissionOptions{Capacity: capacity, PrivateMemoryBytes: capacity.MemoryBytes})
 }

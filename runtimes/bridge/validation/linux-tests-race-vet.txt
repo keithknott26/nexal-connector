@@ -1,0 +1,184 @@
+Go toolchain: go version go1.26.0 linux/amd64
+
+Unit/process tests:
+=== RUN   TestInferenceArgsAreFixed
+--- PASS: TestInferenceArgsAreFixed (0.00s)
+=== RUN   TestRingPlanAndDigest
+--- PASS: TestRingPlanAndDigest (0.00s)
+=== RUN   TestDistributedGates
+--- PASS: TestDistributedGates (0.00s)
+=== RUN   TestLocalPaths
+--- PASS: TestLocalPaths (0.00s)
+=== RUN   TestMLXHelperProcess
+--- PASS: TestMLXHelperProcess (0.00s)
+=== RUN   TestSupervisedSuccess
+--- PASS: TestSupervisedSuccess (0.02s)
+=== RUN   TestPublicPlatformGate
+--- PASS: TestPublicPlatformGate (0.00s)
+=== RUN   TestEnvironmentIsNotInherited
+--- PASS: TestEnvironmentIsNotInherited (0.01s)
+=== RUN   TestProcessFailureIsSanitized
+--- PASS: TestProcessFailureIsSanitized (0.01s)
+=== RUN   TestDeadlineAndCancellation
+=== RUN   TestDeadlineAndCancellation/job-deadline
+=== RUN   TestDeadlineAndCancellation/context-deadline
+=== RUN   TestDeadlineAndCancellation/cancel
+=== RUN   TestDeadlineAndCancellation/pre-cancel
+=== RUN   TestDeadlineAndCancellation/admission-deadline
+--- PASS: TestDeadlineAndCancellation (1.36s)
+    --- PASS: TestDeadlineAndCancellation/job-deadline (0.12s)
+    --- PASS: TestDeadlineAndCancellation/context-deadline (0.12s)
+    --- PASS: TestDeadlineAndCancellation/cancel (0.01s)
+    --- PASS: TestDeadlineAndCancellation/pre-cancel (0.00s)
+    --- PASS: TestDeadlineAndCancellation/admission-deadline (1.11s)
+=== RUN   TestOutputLimitsKillProcess
+=== RUN   TestOutputLimitsKillProcess/stdout
+=== RUN   TestOutputLimitsKillProcess/stderr
+--- PASS: TestOutputLimitsKillProcess (0.01s)
+    --- PASS: TestOutputLimitsKillProcess/stdout (0.00s)
+    --- PASS: TestOutputLimitsKillProcess/stderr (0.00s)
+=== RUN   TestBoundedWriterExactBoundary
+--- PASS: TestBoundedWriterExactBoundary (0.00s)
+=== RUN   TestExclusiveConfigLockAndRelease
+--- PASS: TestExclusiveConfigLockAndRelease (0.02s)
+=== RUN   TestProcessGroupTeardown
+=== RUN   TestProcessGroupTeardown/child
+=== RUN   TestProcessGroupTeardown/orphan
+--- PASS: TestProcessGroupTeardown (0.27s)
+    --- PASS: TestProcessGroupTeardown/child (0.01s)
+    --- PASS: TestProcessGroupTeardown/orphan (0.26s)
+=== RUN   TestInvalidResults
+=== RUN   TestInvalidResults/schema
+=== RUN   TestInvalidResults/attempt
+=== RUN   TestInvalidResults/runtime
+=== RUN   TestInvalidResults/negative
+=== RUN   TestInvalidResults/fraction
+=== RUN   TestInvalidResults/array
+=== RUN   TestInvalidResults/unknown
+=== RUN   TestInvalidResults/model
+=== RUN   TestInvalidResults/template
+=== RUN   TestInvalidResults/memory
+=== RUN   TestInvalidResults/utf8
+=== RUN   TestInvalidResults/missing
+=== RUN   TestInvalidResults/malformed
+=== RUN   TestInvalidResults/empty
+=== RUN   TestInvalidResults/trailing
+=== RUN   TestInvalidResults/duplicate
+=== RUN   TestInvalidResults/null
+--- PASS: TestInvalidResults (0.04s)
+    --- PASS: TestInvalidResults/schema (0.00s)
+    --- PASS: TestInvalidResults/attempt (0.00s)
+    --- PASS: TestInvalidResults/runtime (0.00s)
+    --- PASS: TestInvalidResults/negative (0.00s)
+    --- PASS: TestInvalidResults/fraction (0.00s)
+    --- PASS: TestInvalidResults/array (0.00s)
+    --- PASS: TestInvalidResults/unknown (0.00s)
+    --- PASS: TestInvalidResults/model (0.00s)
+    --- PASS: TestInvalidResults/template (0.00s)
+    --- PASS: TestInvalidResults/memory (0.00s)
+    --- PASS: TestInvalidResults/utf8 (0.00s)
+    --- PASS: TestInvalidResults/missing (0.00s)
+    --- PASS: TestInvalidResults/malformed (0.00s)
+    --- PASS: TestInvalidResults/empty (0.00s)
+    --- PASS: TestInvalidResults/trailing (0.00s)
+    --- PASS: TestInvalidResults/duplicate (0.00s)
+    --- PASS: TestInvalidResults/null (0.00s)
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/missing-entry-pin
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/wrong-entry-pin
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/missing-python-pin
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/changed-python
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/missing-config-pin
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/changed-config
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/missing-runtime-pin
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/changed-runtime
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/extra-runtime
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/extra-bytecode-dir
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/unknown-runtime-pin
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/wrong-config-mode
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/writable-source
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/relative-python
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/missing-admission
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/expired-admission
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/stale-admission
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/future-admission
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/overlong-lease
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/identity-mismatch
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/model-mismatch
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/no-reservation
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/private-admission
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/null-admission
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/blank-prompt
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/large-prompt
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/binary-prompt
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/symlink-prompt
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/fifo-prompt
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/bad-token-count
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/bad-timeout
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/negative-timeout
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/bad-output-limit
+=== RUN   TestPolicyAndInputRejectionsBeforeLaunch/negative-output-limit
+--- PASS: TestPolicyAndInputRejectionsBeforeLaunch (0.03s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/missing-entry-pin (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/wrong-entry-pin (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/missing-python-pin (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/changed-python (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/missing-config-pin (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/changed-config (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/missing-runtime-pin (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/changed-runtime (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/extra-runtime (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/extra-bytecode-dir (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/unknown-runtime-pin (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/wrong-config-mode (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/writable-source (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/relative-python (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/missing-admission (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/expired-admission (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/stale-admission (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/future-admission (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/overlong-lease (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/identity-mismatch (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/model-mismatch (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/no-reservation (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/private-admission (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/null-admission (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/blank-prompt (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/large-prompt (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/binary-prompt (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/symlink-prompt (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/fifo-prompt (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/bad-token-count (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/bad-timeout (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/negative-timeout (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/bad-output-limit (0.00s)
+    --- PASS: TestPolicyAndInputRejectionsBeforeLaunch/negative-output-limit (0.00s)
+=== RUN   TestLoadOwnerPolicy
+=== RUN   TestLoadOwnerPolicy/duplicate-runtime-hash
+=== RUN   TestLoadOwnerPolicy/unknown
+=== RUN   TestLoadOwnerPolicy/trailing
+=== RUN   TestLoadOwnerPolicy/duplicate-top
+=== RUN   TestLoadOwnerPolicy/duplicate-installation
+--- PASS: TestLoadOwnerPolicy (0.00s)
+    --- PASS: TestLoadOwnerPolicy/duplicate-runtime-hash (0.00s)
+    --- PASS: TestLoadOwnerPolicy/unknown (0.00s)
+    --- PASS: TestLoadOwnerPolicy/trailing (0.00s)
+    --- PASS: TestLoadOwnerPolicy/duplicate-top (0.00s)
+    --- PASS: TestLoadOwnerPolicy/duplicate-installation (0.00s)
+PASS
+ok  	nexal/runtimebridge	1.774s
+=== RUN   TestCLIRejectsWithoutLeakingArguments
+--- PASS: TestCLIRejectsWithoutLeakingArguments (0.00s)
+=== RUN   TestCLIHelp
+--- PASS: TestCLIHelp (0.00s)
+=== RUN   TestCLIErrorCodes
+--- PASS: TestCLIErrorCodes (0.00s)
+PASS
+ok  	nexal/runtimebridge/cmd/nexal-mlx-job	0.018s
+
+Race tests:
+ok  	nexal/runtimebridge	25.494s
+ok  	nexal/runtimebridge/cmd/nexal-mlx-job	1.016s
+
+Static checks:
+PASS: go vet ./...

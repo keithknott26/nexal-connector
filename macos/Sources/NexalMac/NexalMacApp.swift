@@ -50,8 +50,25 @@ private struct ConnectorPanel: View {
                         if let telemetry = model.status?.telemetry {
                             Text(telemetry.synthetic ? "Synthetic development telemetry"
                                  : (!telemetry.known ? "Telemetry unknown — Go admission fails closed"
-                                    : (telemetry.ownerActive ? "Owner active — owner priority applies" : "Owner idle")))
+                                    : (telemetry.ownerActive
+                                       ? (model.status?.ownerActivityOverride == true
+                                          ? "Owner active; private work explicitly permitted"
+                                          : "Owner active; owner priority applies")
+                                       : "Owner idle")))
                                 .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let blocker = model.status?.executionBlocker, !blocker.isEmpty {
+                            Text("Waiting: \(blocker)").font(.caption).foregroundStyle(.secondary)
+                        } else if model.status?.manualAcceptanceSupported == true {
+                            Text("Ready for an eligible job, or currently executing one.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if model.status?.ownerActivityOverride == true {
+                            Text("You explicitly permitted private work while active.")
+                                .font(.caption)
+                            if let until = model.status?.acceptJobsUntil {
+                                Text("Permission ends: \(until)").font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                         if model.status?.productionDispatchVerified != true {
                             Text("Production dispatch not verified").font(.caption).foregroundStyle(.secondary)
@@ -68,6 +85,10 @@ private struct ConnectorPanel: View {
                 }
                 GroupBox("Owner controls") {
                     VStack(alignment: .leading, spacing: 10) {
+                        Button("Accept jobs now") { Task { await model.acceptJobsNow() } }
+                            .disabled(!model.localPreview || model.selection == nil || !model.configurationExists)
+                        Text("No idle wait: permits zero-cost private CPU jobs while you use this Mac for ten minutes. Requires the updated local preview coordinator. Memory limits still apply. Pause stops work and removes this permission.")
+                            .font(.caption).foregroundStyle(.secondary)
                         Toggle("Contribute private resources", isOn: Binding(
                             get: { model.contributes },
                             set: { enabled in Task { await model.setContribution(enabled) } }

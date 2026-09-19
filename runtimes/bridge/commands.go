@@ -19,9 +19,9 @@ var ErrGate = errors.New("runtime release gate closed")
 
 type LocalInstallation struct {
 	// All paths come from owner-managed local configuration, never a remote job.
-	Python string
-	Entry  string
-	Config string
+	Python string `json:"python"`
+	Entry  string `json:"entry"`
+	Config string `json:"config"`
 }
 
 type Command struct {
@@ -41,7 +41,8 @@ func (i LocalInstallation) base() (Command, error) {
 		filepath.Base(i.Entry) != "nexal_mlx_entry.py" {
 		return Command{}, fmt.Errorf("%w: owner-pinned absolute installation paths required", ErrGate)
 	}
-	return Command{Executable: i.Python, Args: []string{"-I", i.Entry}, TimeoutSeconds: 35}, nil
+	// Do not create mutable bytecode in the reviewed, read-only runtime tree.
+	return Command{Executable: i.Python, Args: []string{"-I", "-B", i.Entry}, TimeoutSeconds: 35}, nil
 }
 
 func InferenceCommand(i LocalInstallation, admission, prompt string, maxTokens int) (Command, error) {

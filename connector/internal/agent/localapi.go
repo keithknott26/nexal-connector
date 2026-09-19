@@ -128,6 +128,12 @@ func (a *Agent) Handler(adminToken string) (http.Handler, error) {
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/accept-jobs":
+			err = a.AcceptJobsNow()
+			if err != nil {
+				apiError(w, 409, "manual_acceptance_unavailable")
+				return
+			}
 		case "/v1/pause":
 			err = a.SetPaused(true)
 		case "/v1/resume":

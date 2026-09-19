@@ -1,0 +1,2 @@
+Darwin arm64 compile only; no native execution
+PASS: CLI and bridge test binary cross-compiled

@@ -24,6 +24,10 @@ type Record struct {
 	LeaseExpiresAt time.Time      `json:"leaseExpiresAt"`
 }
 type Status struct {
+	ManualAcceptanceSupported  bool                  `json:"manualAcceptanceSupported"`
+	AcceptJobsUntil            string                `json:"acceptJobsUntil,omitempty"`
+	OwnerActivityOverride      bool                  `json:"ownerActivityOverride"`
+	ExecutionBlocker           string                `json:"executionBlocker,omitempty"`
 	Version                    string                `json:"version"`
 	HostID                     string                `json:"hostId"`
 	Mode                       string                `json:"mode"`
@@ -60,7 +64,9 @@ type Agent struct {
 	heartbeatGeneration uint64
 	// Only explicit development pull can execute. Production dispatch has no
 	// bypass flag and remains closed even if a tunnel reports a QUIC connection.
-	devPull bool
+	devPull           bool
+	manualUntil       time.Time
+	manualEnabledPull bool
 }
 
 func New(c config.Config, path string, api client.API, probe Probe, devPull bool) (*Agent, error) {
@@ -114,10 +120,53 @@ func (a *Agent) Snapshot() Status {
 	if a.devPull {
 		transport = "outbound HTTP(S) private pull prototype — NOT protected by incoming PQ tunnel"
 	}
-	return Status{Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
+	until := ""
+	if a.manualActiveLocked() {
+		until = a.manualUntil.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
+	blocker := ""
+	if err := a.admitLocked(true); err != nil {
+		blocker = err.Error()
+	}
+	return Status{ManualAcceptanceSupported: a.cfg.Development, AcceptJobsUntil: until,
+		OwnerActivityOverride: a.manualActiveLocked(), ExecutionBlocker: blocker,
+		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
 		ResourcePolicy:     a.cfg.ResourcePolicy(),
 		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
+}
+
+// AcceptJobsNow is explicit, local owner consent for ten minutes of zero-cost
+// private development work while active. Real resource/lease checks still apply.
+// The permission is not persisted and cannot enable production or marketplace work.
+func (a *Agent) AcceptJobsNow() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.cfg.Development {
+		return errors.New("manual acceptance is development-only")
+	}
+	if a.manualActiveLocked() {
+		return nil
+	} // retries do not extend consent
+	if a.active != "" {
+		return errors.New("wait for the active attempt or pause it first")
+	}
+	next := a.cfg
+	next.Paused = false
+	if err := config.Save(a.path, next); err != nil {
+		return err
+	}
+	a.invalidateConsentLocked()
+	a.cfg = next
+	a.manualEnabledPull = !a.devPull
+	a.devPull = true
+	a.manualUntil = time.Now().Add(10 * time.Minute)
+	a.wakeHeartbeatLocked()
+	return nil
+}
+
+func (a *Agent) manualActiveLocked() bool {
+	return a.cfg.Development && !a.cfg.Paused && time.Now().Before(a.manualUntil)
 }
 
 // SetResourcePolicy persists consent before making it effective. Any change
@@ -167,6 +216,11 @@ func (a *Agent) SetPaused(paused bool) error {
 	return nil
 }
 func (a *Agent) invalidateConsentLocked() {
+	a.manualUntil = time.Time{}
+	if a.manualEnabledPull {
+		a.devPull = false
+		a.manualEnabledPull = false
+	}
 	a.stateGeneration++
 	a.lastHeartbeat = time.Time{}
 	a.telemetryAt = time.Time{}
@@ -232,6 +286,9 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	if !a.devPull || !a.cfg.Development {
 		return errors.New("production job execution gated pending verified tunnel dispatch")
 	}
+	if a.manualEnabledPull && !a.manualActiveLocked() {
+		return errors.New("manual acceptance expired; click Accept jobs now to renew")
+	}
 	if a.cfg.Paused {
 		return errors.New("host paused by owner")
 	}
@@ -241,7 +298,7 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	if !a.telemetry.Known || time.Since(a.telemetryAt) > 10*time.Second {
 		return errors.New("fresh resource and owner telemetry required")
 	}
-	if a.telemetry.OwnerActive {
+	if a.telemetry.OwnerActive && !a.manualActiveLocked() {
 		return errors.New("owner priority blocks execution")
 	}
 	if a.telemetry.AvailableMemoryBytes > a.telemetry.TotalMemoryBytes ||
@@ -306,6 +363,10 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 	if err := a.admitLocked(true); err != nil {
 		a.mu.Unlock()
 		return err
+	}
+	if a.manualActiveLocked() && (at.Execution != "private" || at.MaxCostCents != 0) {
+		a.mu.Unlock()
+		return errors.New("manual acceptance requires an explicitly private zero-cost attempt")
 	}
 	if len(a.records) >= 10000 {
 		a.mu.Unlock()
@@ -456,6 +517,9 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	known := a.telemetry.Known && time.Since(a.telemetryAt) <= 10*time.Second
 	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || a.telemetry.OwnerActive,
 		PQ: a.pq, Version: config.Version}
+	if a.manualActiveLocked() {
+		h.AcceptJobsUntil = a.manualUntil.UTC().Format("2006-01-02T15:04:05.000Z")
+	}
 	if known {
 		h.AvailableMemoryBytes = a.telemetry.AvailableMemoryBytes
 	}

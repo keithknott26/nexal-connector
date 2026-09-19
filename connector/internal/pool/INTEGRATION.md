@@ -86,3 +86,14 @@ section and distributed MLX per-rank requirements. Package tests include real
 loopback TLS transfers, fake acknowledgments, pin failures, revocation, quota/
 headroom, corruption, replay, concurrency, traversal, symlink/hardlink protection,
 catalog backup/restore and base-M4 rejection.
+# Private-memory export boundary
+
+For local-only memory use `NewPrivateMemoryAdmission`. For an explicitly mixed
+authority set `PrivateMemoryBytes` to a non-borrowable protected amount.
+Only `PublicAvailable()` is intended for public capacity export; never publish
+`Snapshot()` totals or sum remote peer RAM into a host's physical inventory.
+All schedulers on a host must share the same authority. These APIs are not yet
+wired into the native daemon and do not enforce OS-level isolation by themselves.
+`PlanMLX` accepts only private-LAN scope and rejects cloud fallback. Its
+`NetworkValidated` and `ExecutionValidated` fields remain false until separate
+runtime acceptance exists; a plan must not be treated as execution permission.

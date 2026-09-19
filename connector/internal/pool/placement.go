@@ -56,16 +56,18 @@ type MLXPeer struct {
 }
 
 type PlacementRequest struct {
-	ModelDigest       string
-	Architecture      string
-	Quantization      string
-	PartitionStrategy string
-	MLXVersion        string
-	MLXLMVersion      string
-	ValidatedModel    bool // Evidence supplied by the approved runtime registry.
-	Backend           MLXBackend
-	Ranks             []RankMemory // The approved partitioner supplies estimates.
-	Peers             []MLXPeer
+	Scope              string // Empty defaults to private-lan; no public placement.
+	AllowCloudFallback bool
+	ModelDigest        string
+	Architecture       string
+	Quantization       string
+	PartitionStrategy  string
+	MLXVersion         string
+	MLXLMVersion       string
+	ValidatedModel     bool // Evidence supplied by the approved runtime registry.
+	Backend            MLXBackend
+	Ranks              []RankMemory // The approved partitioner supplies estimates.
+	Peers              []MLXPeer
 }
 
 type RankPlacement struct {
@@ -77,9 +79,12 @@ type RankPlacement struct {
 }
 
 type PlacementPlan struct {
-	ModelDigest string          `json:"modelDigest"`
-	Backend     MLXBackend      `json:"backend"`
-	Ranks       []RankPlacement `json:"ranks"`
+	Scope                string          `json:"scope"`
+	CloudFallbackAllowed bool            `json:"cloudFallbackAllowed"`
+	NetworkValidated     bool            `json:"networkValidated"`
+	ModelDigest          string          `json:"modelDigest"`
+	Backend              MLXBackend      `json:"backend"`
+	Ranks                []RankPlacement `json:"ranks"`
 	// Always false: planning is not proof of runtime/topology correctness.
 	ExecutionValidated bool `json:"executionValidated"`
 }
@@ -107,6 +112,9 @@ func direct(p MLXPeer, target string) bool {
 // The largest-rank-first best-fit placement is deterministic, not an optimizer.
 // JACCL conservatively requires all provided eligible peers to form a clique.
 func PlanMLX(req PlacementRequest) (PlacementPlan, error) {
+	if (req.Scope != "" && req.Scope != "private-lan") || req.AllowCloudFallback {
+		return PlacementPlan{}, fmt.Errorf("%w: pooled MLX memory is private-LAN-only with no cloud fallback", ErrUnauthorized)
+	}
 	if !validDigest(req.ModelDigest) || !req.ValidatedModel || req.Architecture == "" ||
 		req.Quantization == "" || req.PartitionStrategy == "" || req.MLXVersion == "" ||
 		req.MLXLMVersion == "" || len(req.Ranks) < 1 || len(req.Ranks) > 64 ||
@@ -133,10 +141,10 @@ func PlanMLX(req PlacementRequest) (PlacementPlan, error) {
 			return PlacementPlan{}, ErrInvalid
 		}
 		if req.Backend == JACCL {
-			// A base M4 is ineligible even if capability inventory mistakenly
+			// A base M2/M4 is ineligible even if capability inventory mistakenly
 			// claims TB5. TB5/macOS/RDMA are necessary, not sufficient evidence.
 			chip := strings.TrimSpace(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(p.Chip)), "apple"))
-			if chip == "m4" || p.Thunderbolt < 5 ||
+			if chip == "m4" || chip == "m2" || p.Thunderbolt < 5 ||
 				!p.RDMAEnabled || p.MacOSMajor < 26 || (p.MacOSMajor == 26 && p.MacOSMinor < 2) {
 				continue
 			}
@@ -188,7 +196,7 @@ func PlanMLX(req PlacementRequest) (PlacementPlan, error) {
 		}
 		return peers[i].bytes < peers[j].bytes
 	})
-	plan := PlacementPlan{ModelDigest: req.ModelDigest, Backend: req.Backend, Ranks: make([]RankPlacement, len(ranks))}
+	plan := PlacementPlan{Scope: "private-lan", ModelDigest: req.ModelDigest, Backend: req.Backend, Ranks: make([]RankPlacement, len(ranks))}
 	for _, rank := range ranks {
 		found := -1
 		for idx, peer := range peers {

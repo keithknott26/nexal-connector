@@ -19,6 +19,7 @@ import (
 )
 
 type Attempt struct {
+	Execution      string    `json:"execution,omitempty"`
 	ID             string    `json:"id"`
 	JobID          string    `json:"jobId"`
 	HostID         string    `json:"hostId"`
@@ -38,6 +39,7 @@ type PQ struct {
 	Protocol   string `json:"protocol"`
 }
 type Heartbeat struct {
+	AcceptJobsUntil      string `json:"acceptJobsUntil,omitempty"`
 	OwnerActive          bool   `json:"ownerActive"`
 	AvailableMemoryBytes uint64 `json:"availableMemoryBytes"`
 	PQ                   PQ     `json:"pq"`

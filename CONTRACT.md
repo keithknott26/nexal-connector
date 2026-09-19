@@ -1,4 +1,4 @@
-# Nexal implementation contract v1
+# Nexal implementation contract v2
 
 This repository is an engineering preview, not a production-approved service.
 Canonical scope lives in the platform repository's docs/scope/architecture-v0.6.md
@@ -27,7 +27,7 @@ GET /api/health -> {status:"ok",mode:"development"|"production",version:"0.1.0"}
 GET /api/overview -> {hosts:Host[],jobs:Job[],datasets:Dataset[],ledger:LedgerEntry[],budget:Budget,usageBudget:object,capabilities:object,listLimits:object}
 POST /api/enrollment -> {code,expiresAt}; owner authorized, one-use, ten-minute enrollment invitation.
 POST /api/hosts/enroll {code,name,platform,arch,cpuCores,memoryBytes,storageBytes} -> {hostId,token}
-POST /api/hosts/:id/heartbeat (host Bearer) {ownerActive:boolean,availableMemoryBytes:number,pq:{configured:boolean,verified:boolean,protocol:string},version:string} -> {ok:true,leaseSeconds:60}
+POST /api/hosts/:id/heartbeat (host Bearer) {ownerActive:boolean,availableMemoryBytes:number,pq:{configured:boolean,verified:boolean,protocol:string},version:string,acceptJobsUntil?:string} -> {ok:true,leaseSeconds:60}
 PATCH /api/hosts/:id (owner) {marketplaceEnabled?:boolean,paused?:boolean,approved?:boolean}
 POST /api/hosts/:id/revoke (owner) -> {ok:true}
 GET /api/hosts/:id/next (host) -> {attempt:Attempt|null}; leased offer, no arbitrary code.
@@ -77,12 +77,22 @@ certification is implied. Quote delivery and paid execution remain disabled.
 
 Host {id,name,platform,arch,cpuCores,memoryBytes,storageBytes,marketplaceEnabled,paused,approved,revoked,ownerActive,pqConfigured,pqVerified,lastSeenAt,createdAt}
 Job {id,template,samples,maxCostCents,execution,targetHostId,status:"queued"|"leased"|"running"|"completed"|"cancelled"|"failed",createdAt,updatedAt,result?:object,attemptId?:string}
-Attempt {id,jobId,hostId,template:"monte-carlo-pi-v1",samples,leaseExpiresAt,maxCostCents}
+Attempt {id,jobId,hostId,template:"monte-carlo-pi-v1",samples,leaseExpiresAt,maxCostCents,execution}
 Dataset {id,name,provider,status:"disabled"|"licensed"|"demo",kind,description}
 LedgerEntry {id,jobId?,kind,amountCents,createdAt,description}
 Budget {coreMonthlyCents,founderMonthlyCents,engineeringMonthlyCents,reserveMonthlyCents,memberCount,usageContributionCents,sharedMonthlyCents}
 
 ## Security and honest scope
+- Matching preview v2 builds and migration 0005 are required for manual job acceptance.
+  Optional `acceptJobsUntil` is development-only, canonical UTC, capped at SQL-time
+  now + 600 seconds. The connector's authenticated local `accept-jobs` command
+  grants ten minutes without falsifying owner activity. While active, only
+  explicitly private zero-cost jobs are eligible, including on an idle host.
+  Missing consent on the next heartbeat revokes the grant. Local pause, cancel,
+  policy changes and restart clear it. Memory, freshness and lease gates remain.
+- Private pooled RAM is never public inventory. Private MLX planning forbids
+  public placement/cloud fallback; actual distributed execution remains disabled.
+  Library capacity reservations are not an OS-enforced memory/network sandbox.
 - Private-by-default host membership; public opts in separately and requires approved host plus fresh PQ verification.
 - Host-reported PQ is not remote attestation. Owner review is separate; never claim malicious host secrecy.
 - For end-to-end pilot the connector pulls jobs via outbound HTTPS; this is NOT protected by its incoming cloudflared tunnel.

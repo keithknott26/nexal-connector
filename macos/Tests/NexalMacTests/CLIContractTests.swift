@@ -41,9 +41,23 @@ final class CLIContractTests: XCTestCase {
 
     func testCommandsMatchGoContract() {
         for (command, name) in [(CLICommand.run, "run"), (.status, "status"),
-                                (.pause, "pause"), (.resume, "resume")] {
+                                (.pause, "pause"), (.resume, "resume"), (.acceptJobs, "accept-jobs")] {
             XCTAssertEqual(command.arguments(config: config).first, name)
         }
+    }
+
+    func testAcceptJobsUsesAuthenticatedCLIAndDoesNotFakeTelemetry() {
+        let args = CLICommand.acceptJobs.arguments(config: config)
+        XCTAssertEqual(args, ["accept-jobs", "--config", config.path])
+        XCTAssertFalse(args.contains("--dev-assume-idle"))
+    }
+
+    func testManualAcceptanceStatusIsOptionalForOldConnectors() throws {
+        let old = try ConnectorStatus.decode(Data(#"{"paused":true}"#.utf8))
+        XCTAssertNil(old.manualAcceptanceSupported)
+        let updated = try ConnectorStatus.decode(Data(#"{"paused":false,"manualAcceptanceSupported":true,"ownerActivityOverride":true,"acceptJobsUntil":"2026-09-19T13:00:00.000Z","executionBlocker":"insufficient approved memory headroom"}"#.utf8))
+        XCTAssertEqual(updated.ownerActivityOverride, true)
+        XCTAssertEqual(updated.executionBlocker, "insufficient approved memory headroom")
     }
 
     func testStatusRejectsMissingPauseState() {

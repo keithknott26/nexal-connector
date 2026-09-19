@@ -4,6 +4,15 @@ Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
 engineering preview, not a production-approved distributed cloud.
 
+## Concise documentation and shared dashboard blocker
+
+Owner prefers a concise, current README with minimal full-path M4/M2 commands.
+Detailed setup remains in `DEVELOPER-GUIDE.md` and the linked lab guides.
+`SETUP-TROUBLESHOOTING.md` records the reproduced shared homepage HTTP 401 JSON
+instead of dashboard HTML. Health is reachable; owner dashboard, live relay
+deployment and two-Mac transfer remain unverified. No remote deployment was
+performed; Workers deployment access is currently unavailable in this session.
+
 ## Network labeling checkpoint
 
 The pager donor now labels each active private address with interface name and

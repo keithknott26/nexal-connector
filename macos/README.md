@@ -28,7 +28,12 @@ binary is included. This is not production-ready or M2-validated.
 - Initialize a private, paused Go configuration with coordinator URL, host name,
   chosen memory allowance and owner reserve. Existing config is never overwritten.
 - Pass a one-use code to `nexal enroll --code-stdin` through a pipe, not arguments,
-  environment, preferences or logs. The code field is cleared afterward.
+  environment, preferences or logs. The actual code field is cleared afterward.
+  Successful enrollment shows a fixed, display-only 24-dot mask and an
+  **Enrolled** label, not the consumed code. **Use another code** explicitly
+  reopens entry and requires fresh consent. Confirmation is scoped to the chosen
+  configuration; authenticated local status can restore it after restarting.
+  It is enrollment feedback, not proof of coordinator connectivity or job readiness.
 - Start `nexal run`, or attach to an existing local connector; display Go status,
   transport and real/synthetic/unknown telemetry without inventing readiness.
 - Map the private resource toggle to `resume` / `pause`, with a separate explicit

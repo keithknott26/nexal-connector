@@ -121,13 +121,30 @@ private struct ConnectorPanel: View {
                                 }
                             }
                         }
-                        SecureField("One-use enrollment code", text: $model.enrollmentCode)
-                        Toggle("I approve private-only enrollment", isOn: $model.consent)
-                        Text("Approved CPU template only in the explicit development pilot. MLX, shared storage and distributed ranks are separate gated capabilities. No folder sharing or public access is enabled by this screen.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button(model.configurationExists ? "Enroll existing configuration" : "Create and enroll") {
-                            Task { await model.initializeAndEnroll() }
-                        }.disabled(!model.consent || model.selection == nil || model.enrollmentCode.isEmpty)
+                        if model.showsEnrollmentConfirmation {
+                            // Fixed display-only mask, never the consumed invitation or CLI input.
+                            SecureField("Enrollment confirmed", text: .constant(String(repeating: "x", count: 24)))
+                                .disabled(true)
+                                .accessibilityHidden(true)
+                            HStack {
+                                Label("Enrolled", systemImage: "checkmark.circle")
+                                    .font(.caption)
+                                Spacer()
+                                Button("Use another code") { model.useAnotherEnrollmentCode() }
+                            }
+                            Text("The dots indicate completed enrollment. The one-use code is not retained.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            SecureField("One-use enrollment code", text: $model.enrollmentCode)
+                        }
+                        if !model.showsEnrollmentConfirmation {
+                            Toggle("I approve private-only enrollment", isOn: $model.consent)
+                            Text("Approved CPU template only in the explicit development pilot. MLX, shared storage and distributed ranks are separate gated capabilities. No folder sharing or public access is enabled by this screen.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button(model.configurationExists ? "Enroll existing configuration" : "Create and enroll") {
+                                Task { await model.initializeAndEnroll() }
+                            }.disabled(!model.consent || model.selection == nil || model.enrollmentCode.isEmpty)
+                        }
                     }.padding(.top, 10)
                 }
                 if let message = model.message {

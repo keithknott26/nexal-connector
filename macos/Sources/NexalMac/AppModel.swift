@@ -15,8 +15,16 @@ final class AppModel: ObservableObject {
     @Published private(set) var message: String?
     @Published private(set) var processOwned = false
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var enrollmentPresentation = EnrollmentPresentation()
     @Published var consent = false
-    @Published var localPreview = false
+    @Published var localPreview = false {
+        didSet {
+            if oldValue != localPreview {
+                enrollmentCode = ""
+                consent = false
+            }
+        }
+    }
     private var child: Process?
 
     var selectedConfig: URL {
@@ -30,6 +38,16 @@ final class AppModel: ObservableObject {
         return status.paused ? "Paused" : "Private resources enabled"
     }
     var contributes: Bool { status.map { !$0.paused } ?? false }
+    var showsEnrollmentConfirmation: Bool {
+        enrollmentPresentation.showsConfirmation(for: selectedConfig)
+    }
+
+    func useAnotherEnrollmentCode() {
+        guard !busy else { return }
+        enrollmentCode = ""
+        consent = false
+        enrollmentPresentation.beginReplacement(for: selectedConfig)
+    }
 
     init() {
         // Stored only after explicit selection. Credentials/config stay in Go.
@@ -74,7 +92,7 @@ final class AppModel: ObservableObject {
     }
 
     func initializeAndEnroll() async {
-        guard !busy, consent else { return }
+        guard !busy, consent, !showsEnrollmentConfirmation else { return }
         busy = true
         defer { busy = false; enrollmentCode = "" }
         do {
@@ -91,6 +109,7 @@ final class AppModel: ObservableObject {
                 }
             }
             _ = try await invoke(.enroll, input: Data((code + "\n").utf8))
+            enrollmentPresentation.recordSuccess(for: selectedConfig)
             message = "Enrolled with contribution paused. Start the connector, then explicitly enable private resources."
         } catch { message = error.localizedDescription }
     }
@@ -104,6 +123,7 @@ final class AppModel: ObservableObject {
             if let data = try? await invoke(.status),
                let existing = try? ConnectorStatus.decode(data) {
                 status = existing
+                enrollmentPresentation.observeHost(existing.hostId, for: selectedConfig)
                 lastUpdated = Date()
                 message = "Connected to an existing connector. Quitting this app will not stop it."
                 return
@@ -133,6 +153,7 @@ final class AppModel: ObservableObject {
 
     private func updateStatus() async throws {
         status = try ConnectorStatus.decode(try await invoke(.status))
+        enrollmentPresentation.observeHost(status?.hostId, for: selectedConfig)
         lastUpdated = Date()
     }
 

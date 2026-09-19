@@ -10,8 +10,10 @@ The owner supplied successful output from `bash scripts/accept-macos.sh`.
 The reported toolchain was Go 1.26.8 on darwin/arm64. The output shows passing
 Go tests, native helper build completion, valid local code signature, and
 successful portable and native loopback workloads. This was run on the owner's
-Mac, not independently executed in the Linux development environment. The exact
-Mac model, macOS version and checkout revision are not established by this output.
+Mac, not independently executed in the Linux development environment. In a
+follow-up, the owner identified the receiving/test Mac as the M2 Mac mini and
+confirmed both Macs are on the same local network. The exact model identifier,
+macOS version and checkout revision are not established by this output.
 
 Both workloads reported:
 

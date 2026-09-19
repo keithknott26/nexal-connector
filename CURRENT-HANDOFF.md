@@ -25,6 +25,9 @@ short-lived pairing; verified phone login, donor scans, receiver scan and Link
 are the complete intended flow. QR codes will carry scoped one-use claim tokens;
 they are sensitive until expiry/consumption. Backend and Mac QR mode are not yet
 implemented. Keep resource scope within the Mac's initial configured limits.
+Connection policy: prefer Ethernet only after verifying a working peer path on
+the same LAN as the Wi-Fi path; otherwise offer a choice. Existing lab scripts
+still show numbered interfaces and do not yet provide that verification.
 
 ## Concise documentation and shared dashboard deployment
 

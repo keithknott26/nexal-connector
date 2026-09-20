@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func testDirectory(t *testing.T) string {
@@ -283,5 +284,75 @@ func TestReaderErrorAndClosedStore(t *testing.T) {
 	s.Close()
 	if _, err := s.PutBytes(Cache, []byte("x")); !errors.Is(err, ErrClosed) {
 		t.Fatal(err)
+	}
+}
+
+// Close must hand the directory's persistent charge back to Admission. Before
+// this, every open/close cycle left a storage entry nobody could ever delete,
+// so the host's reported (billed) storage total only grew.
+func TestStorageAccountingReleasedOnCloseAndReclaimedOnReopen(t *testing.T) {
+	a, err := NewAdmission(AdmissionOptions{Capacity: Resources{1000, 1000, 1000}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := testDirectory(t)
+	open := func() *Store {
+		s, err := NewStore(StoreOptions{Directory: directory, QuotaBytes: 1000,
+			MaxObjectBytes: 1 << 20, Admission: a, FreeBytes: func() (uint64, error) { return 1 << 30, nil }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	stored := func() int64 {
+		_, used, _, _ := a.Snapshot()
+		return used.StorageBytes
+	}
+	s := open()
+	if _, err := s.PutBytes(Cache, make([]byte, 600)); err != nil {
+		t.Fatal(err)
+	}
+	if stored() != 600 {
+		t.Fatalf("stored bytes not charged: %d", stored())
+	}
+	// Three cycles: a leaking charge shows up as 600, 1200, 1800.
+	for cycle := 0; cycle < 3; cycle++ {
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if stored() != 0 {
+			t.Fatalf("cycle %d retained a charge for a closed store: %d", cycle, stored())
+		}
+		s = open()
+		if stored() != 600 {
+			t.Fatalf("cycle %d did not recharge the reopened store: %d", cycle, stored())
+		}
+	}
+	// A repeated Close cannot double-release into a negative total, and a
+	// still-open store elsewhere keeps its own charge.
+	other := testStore(t, 1000, a)
+	if _, err := other.PutBytes(Cache, make([]byte, 100)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if stored() != 100 {
+		t.Fatalf("release disturbed another owner or underflowed: %d", stored())
+	}
+	// Capacity freed by the release is grantable again, which is the point.
+	lease, err := a.Reserve("private", PrivateWork, Resources{0, 0, 900}, time.Minute)
+	if err != nil {
+		t.Fatalf("released storage not reusable: %v", err)
+	}
+	a.Release(lease.ID)
+	if err := other.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if stored() != 0 {
+		t.Fatalf("charge survived the last owner: %d", stored())
 	}
 }

@@ -232,6 +232,24 @@ func (a *Admission) SetStorageUsage(owner string, bytes int64) error {
 	return nil
 }
 
+// ReleaseStorage drops an owner's persistent storage charge and the map entry
+// itself. A Store calls this from Close: the bytes remain on disk, but this
+// process stops accounting for them, and a Store reopened on that directory
+// re-registers the scanned total. Without a delete path the entry survives every
+// closed store and the reported total only ever grows, which is the number that
+// gets billed. Releasing is idempotent; an unknown owner is not an error.
+func (a *Admission) ReleaseStorage(owner string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.expireLocked()
+	bytes, ok := a.storage[owner]
+	if !ok {
+		return
+	}
+	delete(a.storage, owner)
+	a.used.StorageBytes -= bytes
+}
+
 func (a *Admission) Snapshot() (capacity, used Resources, paused bool, epoch uint64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -310,7 +310,9 @@ func (s *Store) reserveLocked(extra int64) error {
 
 func (s *Store) unchargeLocked(bytes int64) {
 	s.used -= bytes
-	if s.admission != nil {
+	// A closed store has already released its charge; re-registering the key here
+	// would resurrect the accounting entry Close deleted.
+	if s.admission != nil && !s.closed {
 		// Decreasing a registered persistent charge cannot fail.
 		_ = s.admission.SetStorageUsage(s.directory, s.used)
 	}
@@ -575,6 +577,14 @@ func (s *Store) Close() error {
 		return nil
 	}
 	s.closed = true
+	// The bytes stay on disk, but this process no longer owns the directory, so it
+	// must stop charging Admission for it: a retained entry can never be deleted
+	// again and the host's reported storage total drifts upward with every closed
+	// store. A Store reopened on this directory re-registers its scanned total in
+	// NewStore, so the charge returns as soon as somebody owns the bytes again.
+	if s.admission != nil {
+		s.admission.ReleaseStorage(s.directory)
+	}
 	var result error
 	if s.lock != nil {
 		result = errors.Join(result, s.lock.Close())
@@ -585,7 +595,6 @@ func (s *Store) Close() error {
 	if s.root != nil {
 		result = errors.Join(result, s.root.Close())
 	}
-	// Disk still occupies capacity after closing; retain Admission's charge.
 	return result
 }
 

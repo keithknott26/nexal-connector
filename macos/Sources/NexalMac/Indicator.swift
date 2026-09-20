@@ -19,6 +19,9 @@ enum IndicatorTone {
 /// One indicator row. `reason` is always shown next to the label, because §26.3
 /// forbids a grey state with no explanation. `detail` carries the longer honest
 /// explanation and is shown in a disclosure — never dropped to save space.
+/// `detailLines` carries an itemised breakdown for indicators whose underlying
+/// facts are per-subsystem rather than one flag (§29.8); it appears in the same
+/// disclosure, so a correct model needs no extra top-level indicator.
 struct IndicatorState: Equatable {
     let heading: String
     let label: String
@@ -26,15 +29,18 @@ struct IndicatorState: Equatable {
     let tone: IndicatorTone
     let reason: String
     let detail: String?
+    let detailLines: [String]
 
     init(heading: String, label: String, systemImage: String,
-         tone: IndicatorTone, reason: String, detail: String? = nil) {
+         tone: IndicatorTone, reason: String, detail: String? = nil,
+         detailLines: [String] = []) {
         self.heading = heading
         self.label = label
         self.systemImage = systemImage
         self.tone = tone
         self.reason = reason
         self.detail = detail
+        self.detailLines = detailLines
     }
 
     /// Spoken as one sentence so the symbol, the label and the reason arrive

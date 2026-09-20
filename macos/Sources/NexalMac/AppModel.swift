@@ -16,6 +16,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var processOwned = false
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var enrollmentPresentation = EnrollmentPresentation()
+    /// Bounded, in-memory only, appended by the single status poll (§26.4).
+    @Published private(set) var history = ConnectorHistory()
+    /// Transport and RDMA facts as reported through the one seam (§26.2/§26.3).
+    /// Starts as "nothing is reporting", which is the honest state at launch.
+    @Published private(set) var capability: TransportCapability
     @Published var consent = false
     @Published var localPreview = false {
         didSet {
@@ -26,6 +31,9 @@ final class AppModel: ObservableObject {
         }
     }
     private var child: Process?
+    /// The only place a capability source is named. Swapping the implementation
+    /// changes no view, presenter or chart.
+    private let capabilitySource: TransportCapabilityProviding
 
     var selectedConfig: URL {
         localPreview ? ConnectorProcess.localPreviewConfigURL : ConnectorProcess.configURL
@@ -38,6 +46,11 @@ final class AppModel: ObservableObject {
         return status.paused ? "Paused" : "Private resources enabled"
     }
     var contributes: Bool { status.map { !$0.paused } ?? false }
+    var transport: TransportPresentation { TransportPresentation(capability: capability) }
+    var rdma: RDMAPresentation { RDMAPresentation(capability: capability) }
+    var resourceSharing: ResourceSharingPresentation {
+        ResourceSharingPresentation(status: status)
+    }
     var manualAcceptance: ManualAcceptancePresentation {
         ManualAcceptancePresentation(status: status)
     }
@@ -57,7 +70,9 @@ final class AppModel: ObservableObject {
         enrollmentPresentation.beginReplacement(for: selectedConfig)
     }
 
-    init() {
+    init(capabilitySource: TransportCapabilityProviding = ConnectorStatusCapabilitySource()) {
+        self.capabilitySource = capabilitySource
+        capability = capabilitySource.capability(from: nil)
         // Stored only after explicit selection. Credentials/config stay in Go.
         let defaults = UserDefaults.standard
         if let path = defaults.string(forKey: "approvedConnectorPath"),
@@ -139,6 +154,7 @@ final class AppModel: ObservableObject {
                 status = existing
                 enrollmentPresentation.observeHost(existing.hostId, for: selectedConfig)
                 lastUpdated = Date()
+                observe(existing)
                 message = "Connected to an existing connector. Quitting this app will not stop it."
                 return
             }
@@ -153,6 +169,7 @@ final class AppModel: ObservableObject {
                     self.child = nil
                     self.processOwned = false
                     self.status = nil
+                    self.capability = self.capabilitySource.capability(from: nil)
                     self.message = "Connector stopped. Review the Go CLI configuration before restarting."
                 }
             }
@@ -169,6 +186,14 @@ final class AppModel: ObservableObject {
         status = try ConnectorStatus.decode(try await invoke(.status))
         enrollmentPresentation.observeHost(status?.hostId, for: selectedConfig)
         lastUpdated = Date()
+        observe(status)
+    }
+
+    /// The single fan-out point for every view: one poll updates the reported
+    /// capability and appends one history sample. No chart owns a timer.
+    private func observe(_ status: ConnectorStatus?) {
+        capability = capabilitySource.capability(from: status)
+        history.record(status)
     }
 
     func refresh() async {
@@ -176,7 +201,14 @@ final class AppModel: ObservableObject {
         busy = true
         defer { busy = false }
         do { try await updateStatus() }
-        catch { status = nil; lastUpdated = nil; message = error.localizedDescription }
+        catch {
+            status = nil
+            lastUpdated = nil
+            // Record the gap rather than dropping the poll, so the charts stop
+            // extending instead of implying continued measurement.
+            observe(nil)
+            message = error.localizedDescription
+        }
     }
 
     func acceptJobsNow() async {

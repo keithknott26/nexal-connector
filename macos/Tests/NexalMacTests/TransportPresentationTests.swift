@@ -3,79 +3,75 @@ import XCTest
 @testable import NexalMac
 
 final class TransportPresentationTests: XCTestCase {
-    private func status(transport: String?) throws -> ConnectorStatus {
-        var object: [String: Any] = ["paused": false]
-        if let transport { object["transport"] = transport }
-        return try ConnectorStatus.decode(try JSONSerialization.data(withJSONObject: object))
+    private func capability(_ mechanism: TransportMechanism,
+                            rdma: [TransportSubsystem: TransportCapability.RDMAState] = [:],
+                            reported: String? = "reported text",
+                            sourceReporting: Bool = true) -> TransportCapability {
+        TransportCapability(rdma: rdma, mechanism: mechanism, reportedText: reported,
+                            sourceName: "the Go connector", sourceReporting: sourceReporting)
     }
 
-    // The two strings the Go agent actually emits today.
-    func testGoHeartbeatStringIsControlPlaneOnly() throws {
-        let state = TransportPresentation(
-            status: try status(transport: "heartbeat-only; production tunnel dispatch unavailable"))
-        XCTAssertEqual(state.mechanism, .controlPlaneOnly)
-        XCTAssertEqual(state.label, "No data transport established")
-        XCTAssertEqual(state.indicator.tone, .grey)
-    }
+    private let allMechanisms: [TransportMechanism] = [
+        .nativeThunderboltRDMA, .tcpPrivateLAN, .coordinatorMediated, .controlPlaneOnly, .unknown
+    ]
 
-    func testGoDevelopmentPullStringIsRelayed() throws {
-        let raw = "outbound HTTP(S) private pull prototype — NOT protected by incoming PQ tunnel"
-        let state = TransportPresentation(status: try status(transport: raw))
-        XCTAssertEqual(state.mechanism, .coordinatorMediated)
-        XCTAssertEqual(state.label, "Relayed through the coordinator")
-        // The connector's own warning must survive the switch to an indicator row.
-        XCTAssertTrue(state.indicator.reason.contains(raw))
-    }
-
-    func testMissingOrBlankTransportIsUnknownAndNotUnavailable() throws {
-        for raw in [nil, "", "   "] as [String?] {
-            let state = TransportPresentation(status: try status(transport: raw))
-            XCTAssertEqual(state.mechanism, .unknown)
-            XCTAssertEqual(state.label, "Transport unknown")
-            XCTAssertNil(state.connectorReported)
-        }
-        XCTAssertEqual(TransportPresentation(status: nil).mechanism, .unknown)
-    }
-
-    func testEstablishedRDMAAndPrivateLANUseTheFixedProductNames() throws {
-        XCTAssertEqual(TransportPresentation(
-            status: try status(transport: "native Thunderbolt RDMA link established")).label,
+    func testFixedProductNamesAreUsedForEachMechanism() {
+        XCTAssertEqual(TransportPresentation(capability: capability(.nativeThunderboltRDMA)).label,
                        "Native Thunderbolt RDMA")
-        XCTAssertEqual(TransportPresentation(
-            status: try status(transport: "TCP private-LAN transport to paired peer")).label,
+        XCTAssertEqual(TransportPresentation(capability: capability(.tcpPrivateLAN)).label,
                        "TCP private-LAN transport")
+        XCTAssertEqual(TransportPresentation(capability: capability(.coordinatorMediated)).label,
+                       "Relayed through the coordinator")
+        XCTAssertEqual(TransportPresentation(capability: capability(.controlPlaneOnly)).label,
+                       "No data transport established")
+        XCTAssertEqual(TransportPresentation(capability: capability(.unknown)).label,
+                       "Transport unknown")
     }
 
-    // A string that merely mentions RDMA is not an RDMA link. The UI must never
-    // read "Thunderbolt 5 detected" out of an absence.
-    func testMentioningRDMAWhileAbsentIsNeverReportedAsRDMA() throws {
-        for raw in ["thunderbolt RDMA unavailable; using TCP private-LAN transport",
-                    "RDMA unsupported on this host",
-                    "rdma disabled, tcp lan fallback"] {
-            let state = TransportPresentation(status: try status(transport: raw))
-            XCTAssertNotEqual(state.mechanism, .nativeThunderboltRDMA)
-        }
+    // The reporting layer's own warnings must survive the move from plain text
+    // to an indicator row.
+    func testTheReportedStringIsShownVerbatim() {
+        let raw = "outbound HTTP(S) private pull prototype — NOT protected by incoming PQ tunnel"
+        let state = TransportPresentation(capability: capability(.coordinatorMediated, reported: raw))
+        XCTAssertTrue(state.indicator.reason.contains(raw))
+        XCTAssertTrue(state.indicator.reason.contains("the Go connector"))
     }
 
-    func testEveryStateCarriesALabelASymbolAndAReason() throws {
-        let samples: [String?] = [nil, "heartbeat-only; x", "native Thunderbolt RDMA established",
-                                  "TCP private-LAN transport", "relayed via coordinator", "mystery"]
-        for raw in samples {
-            let indicator = TransportPresentation(status: try status(transport: raw)).indicator
+    func testNoReportIsUnknownAndSaysUnknownIsNotUnavailable() {
+        let state = TransportPresentation(
+            capability: .notReported(sourceName: "the Go connector"))
+        XCTAssertEqual(state.mechanism, .unknown)
+        XCTAssertEqual(state.indicator.tone, .grey)
+        XCTAssertTrue(state.indicator.reason.contains("not the same as unavailable"))
+    }
+
+    func testEveryStateCarriesALabelASymbolAReasonAndDetail() {
+        for mechanism in allMechanisms {
+            let indicator = TransportPresentation(capability: capability(mechanism)).indicator
+            XCTAssertEqual(indicator.heading, "Active transport")
             XCTAssertFalse(indicator.label.isEmpty)
             XCTAssertFalse(indicator.systemImage.isEmpty)
             XCTAssertFalse(indicator.reason.isEmpty)
             XCTAssertNotNil(indicator.detail)
-            XCTAssertEqual(indicator.heading, "Active transport")
         }
     }
 
-    func testNoStateClaimsThunderboltFiveDetection() throws {
-        for raw in [nil, "heartbeat-only; production tunnel dispatch unavailable",
-                    "outbound HTTP(S) private pull prototype"] as [String?] {
-            let indicator = TransportPresentation(status: try status(transport: raw)).indicator
+    func testEstablishedPathsAreColouredAndNonPathsAreGrey() {
+        for mechanism in [TransportMechanism.nativeThunderboltRDMA, .tcpPrivateLAN, .coordinatorMediated] {
+            XCTAssertEqual(TransportPresentation(capability: capability(mechanism)).indicator.tone, .colour)
+        }
+        for mechanism in [TransportMechanism.controlPlaneOnly, .unknown] {
+            XCTAssertEqual(TransportPresentation(capability: capability(mechanism)).indicator.tone, .grey)
+        }
+    }
+
+    func testNoStateClaimsDetectionOrAVendorPerformanceFigure() {
+        for mechanism in allMechanisms {
+            let indicator = TransportPresentation(capability: capability(mechanism)).indicator
             let text = "\(indicator.label) \(indicator.reason) \(indicator.detail ?? "")"
             XCTAssertFalse(text.contains("Thunderbolt 5 detected"))
+            XCTAssertFalse(text.contains("99%"))
+            XCTAssertFalse(text.lowercased().contains("reduction in latency"))
         }
     }
 }

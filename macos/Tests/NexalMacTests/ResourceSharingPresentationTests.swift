@@ -64,13 +64,12 @@ final class ResourceSharingPresentationTests: XCTestCase {
 
     // The two indicators answer different questions and must not be merged: a
     // paused Mac still reports its transport state, and vice versa (§26.3).
-    func testPausingDoesNotChangeTheTransportOrRDMAIndicators() throws {
+    func testPausingDoesNotChangeTheTransportIndicator() throws {
         let paused = try status(paused: true)
-        XCTAssertEqual(TransportPresentation(status: paused).mechanism, .unknown)
+        let capability = ConnectorStatusCapabilitySource().capability(from: paused)
+        XCTAssertEqual(TransportPresentation(capability: capability).mechanism, .unknown)
         XCTAssertEqual(ResourceSharingPresentation(status: paused).state, .pausedByOwner)
-        let rdma = RDMAAvailability(osMajor: 14, osMinor: 0,
-                                    isAppleSiliconBuild: true, establishedLink: false)
-        XCTAssertEqual(rdma.state, .unavailable)
-        XCTAssertNotEqual(rdma.indicator.heading, ResourceSharingPresentation(status: paused).indicator.heading)
+        XCTAssertNotEqual(TransportPresentation(capability: capability).indicator.heading,
+                          ResourceSharingPresentation(status: paused).indicator.heading)
     }
 }

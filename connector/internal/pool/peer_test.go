@@ -344,3 +344,63 @@ func TestPeerCertificatesRotateBeforeExpiry(t *testing.T) {
 		t.Fatalf("expired peer certificate was never rotated: %v", err)
 	}
 }
+
+// postQuantumKeyExchange reports whether a negotiated group is one of Go's hybrid
+// ML-KEM key exchanges. This observes our own handshake; it is a self-report about
+// this process, not attestation of the peer's configuration.
+func postQuantumKeyExchange(id tls.CurveID) bool {
+	switch id { // gitleaks:allow -- public algorithm names, not key material
+	case tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024:
+		return true
+	}
+	return false
+}
+
+// Peer mTLS must negotiate a post-quantum group. Go offers the hybrid ML-KEM
+// groups only while CurvePreferences is nil, and the GODEBUG that gates them comes
+// from go.mod's go directive, so both "pinning" a curve and lowering that directive
+// would downgrade this handshake to classical X25519 with no other visible effect.
+// Both ends run this code, so the assertion covers the real server and client
+// configurations rather than a synthetic pair.
+func TestPeerHandshakeUsesPostQuantumKeyExchange(t *testing.T) {
+	registry := NewRegistry(nil)
+	a := enrolledIdentity(t, registry)
+	b := enrolledIdentity(t, registry)
+	policy, err := newPeerPolicy(registry, []string{DeviceID(a.PublicKey)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, server := range []bool{true, false} {
+		cfg, err := peerTLS(b, policy, server)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.CurvePreferences != nil {
+			t.Fatalf("server=%v: CurvePreferences is set, so Go offers only the listed groups and post-quantum key agreement is silently dropped", server)
+		}
+		if cfg.MinVersion != tls.VersionTLS13 {
+			t.Fatalf("server=%v: TLS floor is %#x, and the ML-KEM groups exist only in TLS 1.3", server, cfg.MinVersion)
+		}
+	}
+	store := testStore(t, 100, nil)
+	endpoint := startTestPeer(t, store, b, registry, []string{DeviceID(a.PublicKey)})
+	client := testPeerClient(t, a, registry, DeviceID(b.PublicKey), endpoint)
+	// Any authenticated route completes a full mutual handshake; the response
+	// status is irrelevant, the negotiated group is the subject.
+	resp, err := client.client.Get(endpoint + "/v1/objects/protected/" + digestOf([]byte("absent")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.TLS == nil {
+		t.Fatal("peer transfer completed without TLS")
+	}
+	if resp.TLS.Version != tls.VersionTLS13 {
+		t.Fatalf("negotiated TLS version %#x", resp.TLS.Version)
+	}
+	if !postQuantumKeyExchange(resp.TLS.CurveID) {
+		t.Fatalf("classical key exchange negotiated between peers: %v (%d)", resp.TLS.CurveID, resp.TLS.CurveID)
+	}
+	t.Logf("negotiated %v (%d) at TLS %#x", resp.TLS.CurveID, resp.TLS.CurveID, resp.TLS.Version)
+}

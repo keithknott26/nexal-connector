@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -97,4 +98,61 @@ func TestProductionTLSNeverSkipsCertificateVerification(t *testing.T) {
 	if _, err := c.Next(context.Background(), "h1"); err == nil {
 		t.Fatal("untrusted production TLS certificate accepted")
 	}
+}
+
+// postQuantumKeyExchange reports whether a negotiated group is one of Go's hybrid
+// ML-KEM key exchanges. Observing our own handshake is a self-report about this
+// process, not attestation of anything the peer claims.
+func postQuantumKeyExchange(id tls.CurveID) bool {
+	switch id { // gitleaks:allow -- public algorithm names, not key material
+	// tls.MLKEM1024 is omitted: the constant needs a go1.27 module directive, and
+	// it is a standalone ML-KEM group Go never offers by default anyway.
+	case tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024:
+		return true
+	}
+	return false
+}
+
+// The coordinator transport must actually negotiate a post-quantum group. Go
+// enables the hybrid ML-KEM groups only for a nil CurvePreferences, and the
+// GODEBUG that gates them is selected by go.mod's go directive, so both "pinning"
+// the curve and lowering that directive downgrade the handshake with no visible
+// change. This test is what makes either downgrade fail instead of pass quietly.
+func TestCoordinatorHandshakeIsTLS13AndPostQuantum(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ioJSON(w, map[string]any{"attempt": nil})
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "host-secret-secret", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := c.http.Transport.(*http.Transport).TLSClientConfig
+	if cfg.CurvePreferences != nil {
+		t.Fatal("CurvePreferences is set: Go then offers only the listed groups, which silently drops post-quantum key agreement")
+	}
+	if cfg.MinVersion != tls.VersionTLS13 {
+		t.Fatalf("coordinator TLS floor is not 1.3: %#x", cfg.MinVersion)
+	}
+	if cfg.InsecureSkipVerify {
+		t.Fatal("certificate verification disabled")
+	}
+	var state tls.ConnectionState
+	// Observe the completed handshake of the production configuration; trust only
+	// this test server's certificate, and change nothing else about the config.
+	cfg.RootCAs = srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	cfg.VerifyConnection = func(cs tls.ConnectionState) error {
+		state = cs
+		return nil
+	}
+	if _, err := c.Next(context.Background(), "h1"); err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != tls.VersionTLS13 {
+		t.Fatalf("negotiated TLS version %#x", state.Version)
+	}
+	if !postQuantumKeyExchange(state.CurveID) {
+		t.Fatalf("classical key exchange negotiated: %v (%d)", state.CurveID, state.CurveID)
+	}
+	t.Logf("negotiated %v (%d) at TLS %#x", state.CurveID, state.CurveID, state.Version)
 }

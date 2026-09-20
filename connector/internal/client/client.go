@@ -88,9 +88,27 @@ func New(base, token string, dev bool) (*Client, error) {
 		}
 	}
 	tr := &http.Transport{
-		Proxy:                 nil, // avoid ambient proxy settings forwarding host credentials
-		DialContext:           (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		Proxy:       nil, // avoid ambient proxy settings forwarding host credentials
+		DialContext: (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		// TLS 1.3 floor: the coordinator is our own origin, so there is no 1.2-only
+		// peer to accommodate, and the hybrid ML-KEM key exchanges are 1.3-only.
+		//
+		// CurvePreferences is deliberately left nil, and must stay nil. Go enables
+		// X25519MLKEM768 (and, from Go 1.26, the SecP hybrids) only for a nil
+		// CurvePreferences; setting the field to "pin" a group disables every group
+		// not listed, which is how a change meant as post-quantum hardening ends up
+		// shipping a classical-only handshake. Go also ignores the list's order, so
+		// listing a group first buys nothing. Leaving it nil already negotiates
+		// X25519MLKEM768 against the coordinator, and keeps a working fallback if an
+		// origin ever drops the group instead of failing every request.
+		//
+		// The GODEBUG defaults that gate these groups (tlsmlkem, tlssecpmlkem) come
+		// from the go directive in go.mod, not from the installed toolchain: lowering
+		// that directive below go 1.24 turns post-quantum key agreement off with no
+		// code change here. TestCoordinatorHandshakeIsTLS13AndPostQuantum asserts the
+		// negotiated group, so that downgrade fails the test suite instead of passing
+		// silently. Certificate authentication remains classical (WebPKI, no ML-DSA).
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS13}, // gitleaks:allow -- public algorithm names in the comment above, not key material
 		TLSHandshakeTimeout:   5 * time.Second,
 		ResponseHeaderTimeout: 8 * time.Second,
 		MaxIdleConns:          4,

@@ -24,7 +24,7 @@ struct DomainEscrowPresentation: Equatable {
 
     /// Every mention of the product name in this copy is qualified by a domain.
     static var namesAreQualified: Bool {
-        var remainder = Substring(text)
+        var remainder = text[text.startIndex...]
         while let found = remainder.range(of: "Nexal") {
             let tail = remainder[found.upperBound...]
             guard tail.hasPrefix(" @ Home") || tail.hasPrefix(" @ Work") else { return false }

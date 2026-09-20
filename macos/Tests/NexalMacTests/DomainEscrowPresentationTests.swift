@@ -27,7 +27,8 @@ final class DomainEscrowPresentationTests: XCTestCase {
 
     func testTheQualificationCheckActuallyFails() {
         // Guards the check itself, so a future edit cannot pass by accident.
-        var remainder = Substring("Nexal keeps your files private")
+        let sample = "Nexal keeps your files private"
+        var remainder = sample[sample.startIndex...]
         var qualified = true
         while let found = remainder.range(of: "Nexal") {
             let tail = remainder[found.upperBound...]

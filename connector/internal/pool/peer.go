@@ -91,6 +91,15 @@ func (p *peerPolicy) verifyCertificates(certs []*x509.Certificate) error {
 	return nil
 }
 
+const (
+	// A device certificate is deliberately short lived: it is a handshake binding
+	// for an enrolled Ed25519 device, not a durable credential.
+	peerCertificateLifetime = 24 * time.Hour
+	// Re-mint this far ahead of expiry so an in-progress transfer cannot be cut
+	// off by its own certificate aging out mid-connection.
+	peerCertificateRenewal = time.Hour
+)
+
 func peerCertificate(identity Identity, now time.Time) (tls.Certificate, error) {
 	if !identity.valid() || now.IsZero() {
 		return tls.Certificate{}, ErrInvalid
@@ -101,7 +110,7 @@ func peerCertificate(identity Identity, now time.Time) (tls.Certificate, error) 
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial, Subject: pkix.Name{CommonName: DeviceID(identity.PublicKey)},
-		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(24 * time.Hour),
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(peerCertificateLifetime),
 		KeyUsage:           x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		SignatureAlgorithm: x509.PureEd25519,
@@ -110,19 +119,71 @@ func peerCertificate(identity Identity, now time.Time) (tls.Certificate, error) 
 	if err != nil {
 		return tls.Certificate{}, err
 	}
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: identity.PrivateKey}, nil
+	// Parse the leaf so rotation reads the real validity window instead of
+	// recomputing it, and so the TLS stack does not re-parse on every handshake.
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: identity.PrivateKey, Leaf: leaf}, nil
+}
+
+// peerCertificates mints this device's certificate on demand and caches it until
+// it approaches expiry. A certificate minted once at construction expires after
+// peerCertificateLifetime, after which a long-running host presents a certificate
+// its own peers must reject (verifyCertificates checks NotAfter) and every
+// transfer fails until somebody restarts the process. Rotation is local: the
+// certificate is self-signed by the enrolled device key, so no re-enrollment,
+// registry round trip or new trust decision is involved.
+type peerCertificates struct {
+	identity Identity
+	now      func() time.Time
+	mu       sync.Mutex
+	current  *tls.Certificate
+}
+
+func (c *peerCertificates) certificate() (*tls.Certificate, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	if current := c.current; current != nil && current.Leaf != nil &&
+		!now.Before(current.Leaf.NotBefore) &&
+		now.Add(peerCertificateRenewal).Before(current.Leaf.NotAfter) {
+		return current, nil
+	}
+	// Also covers a clock that moved backwards past the cached NotBefore: the
+	// cached certificate is not yet valid, so mint one for the time we now see.
+	minted, err := peerCertificate(c.identity, now)
+	if err != nil {
+		c.current = nil
+		return nil, err
+	}
+	c.current = &minted
+	return c.current, nil
 }
 
 func peerTLS(identity Identity, policy *peerPolicy, server bool) (*tls.Config, error) {
 	if err := policy.enrolled(DeviceID(identity.PublicKey)); err != nil {
 		return nil, err
 	}
-	certificate, err := peerCertificate(identity, policy.now())
-	if err != nil {
+	certificates := &peerCertificates{identity: identity, now: policy.now}
+	// Mint eagerly so an unusable identity or a broken entropy source is reported
+	// here rather than as an opaque handshake failure later.
+	if _, err := certificates.certificate(); err != nil {
 		return nil, err
 	}
 	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate},
+		MinVersion: tls.VersionTLS13,
+		// Certificates is left empty on purpose. Go consults GetCertificate only
+		// when Certificates is empty or the handshake carried SNI, and peers dial
+		// literal private IPs, which send no SNI: a populated Certificates slice
+		// would pin the process to the certificate minted at startup forever.
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return certificates.certificate()
+		},
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return certificates.certificate()
+		},
 		// Names/public CAs are not the trust model. The mandatory callback below
 		// verifies a pinned, enrolled Ed25519 device, cert validity and signature.
 		InsecureSkipVerify: true,

@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -216,6 +217,16 @@ func TestPinnedTLSRejectsFakeSuccessReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// peerTLS mints on demand and leaves Certificates empty; httptest fills an
+	// empty Certificates with its own generated certificate, and Go skips
+	// GetCertificate when Certificates is non-empty and no SNI is sent. Pin b's
+	// real device certificate so this stays a test about a genuinely pinned peer
+	// returning an unsigned receipt, not about an unrelated certificate.
+	device, err := peerCertificate(b, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Certificates = []tls.Certificate{device}
 	blob := Blob{digestOf([]byte("x")), 1, Protected}
 	fake := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -235,5 +246,101 @@ func TestPinnedTLSRejectsFakeSuccessReceipt(t *testing.T) {
 	receipts, err := ReplicateProtected(context.Background(), source, a, registry, blob.Digest, nil, time.Now())
 	if !errors.Is(err, ErrDurability) || len(receipts) != 1 {
 		t.Fatalf("one local copy called durable: %+v %v", receipts, err)
+	}
+}
+
+// A peer certificate lives 24 hours and used to be minted exactly once, so any
+// host running longer than that presented a certificate its own peers had to
+// reject. Both ends must re-mint as expiry approaches.
+func TestPeerCertificatesRotateBeforeExpiry(t *testing.T) {
+	var clockMu sync.Mutex
+	current := time.Now()
+	clock := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return current
+	}
+	advance := func(d time.Duration) {
+		clockMu.Lock()
+		current = current.Add(d)
+		clockMu.Unlock()
+	}
+	registry := NewRegistry(nil)
+	a := enrolledIdentity(t, registry)
+	b := enrolledIdentity(t, registry)
+	source := &peerCertificates{identity: b, now: clock}
+	first, err := source.certificate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := source.certificate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Leaf.SerialNumber.Cmp(again.Leaf.SerialNumber) != 0 {
+		t.Fatal("certificate re-minted while still comfortably valid")
+	}
+	// Inside the renewal margin, before the certificate is actually invalid.
+	advance(peerCertificateLifetime - peerCertificateRenewal/2)
+	renewed, err := source.certificate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Leaf.SerialNumber.Cmp(first.Leaf.SerialNumber) == 0 {
+		t.Fatal("certificate not renewed as expiry approached")
+	}
+	if !renewed.Leaf.NotAfter.After(first.Leaf.NotAfter) {
+		t.Fatal("renewal did not extend validity")
+	}
+	// A clock that jumped backwards leaves the cached certificate not yet valid.
+	advance(-48 * time.Hour)
+	rewound, err := source.certificate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rewound.Leaf.SerialNumber.Cmp(renewed.Leaf.SerialNumber) == 0 {
+		t.Fatal("cached certificate reused after the clock moved backwards")
+	}
+	if _, err := (&peerCertificates{identity: Identity{}, now: clock}).certificate(); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid identity minted a certificate: %v", err)
+	}
+	// End to end: a server and a client built now must still transfer after both
+	// of their certificates would have expired.
+	advance(48 * time.Hour)
+	store := testStore(t, 1<<20, nil)
+	server, err := NewPeerServer(PeerOptions{Identity: b, Registry: registry,
+		AllowedPeers: []string{DeviceID(a.PublicKey)}, Store: store, Clock: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = server.Close()
+		<-done
+	})
+	client, err := NewPeerClient(PeerClientOptions{Identity: a, Registry: registry,
+		ExpectedDeviceID: DeviceID(b.PublicKey), Endpoint: "https://" + listener.Addr().String(),
+		MaxObjectBytes: 1 << 20, Clock: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(client.Close)
+	fresh := []byte("transferred on a freshly minted certificate")
+	if _, err := client.Upload(context.Background(), Blob{digestOf(fresh), int64(len(fresh)), Protected},
+		bytes.NewReader(fresh)); err != nil {
+		t.Fatal(err)
+	}
+	advance(peerCertificateLifetime + time.Hour)
+	// Force a new handshake instead of reusing the established connection.
+	client.transport.CloseIdleConnections()
+	aged := []byte("transferred after both certificates would have expired")
+	if _, err := client.Upload(context.Background(), Blob{digestOf(aged), int64(len(aged)), Protected},
+		bytes.NewReader(aged)); err != nil {
+		t.Fatalf("expired peer certificate was never rotated: %v", err)
 	}
 }

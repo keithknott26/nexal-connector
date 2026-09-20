@@ -19,7 +19,12 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   Ambient proxy settings remain disabled and TLS verification remains required.
 - `nexal run` starts a loopback-only authenticated API at `127.0.0.1:8788`,
   host heartbeat and optional pinned strict tunnel supervision. It does not install
-  software, ask for root, or enable public work.
+  software, ask for root, or enable public work. While running it writes one JSON
+  log record per line to stderr (attempt lifecycle, abandonment reasons, heartbeat
+  failures; `INFO` and above, `DEBUG` for a development configuration). Records
+  contain no credential, ciphertext, key material or coordinator URL. Stdout stays
+  reserved for command output, so a supervisor must drain stderr but need not parse
+  it; the record set is diagnostic and not part of the compatibility surface.
 - `nexal status` queries the running local API using the admin credential.
 - `nexal doctor` emits a versioned, read-only JSON setup report without requiring
   the agent to be running. It reads only the nonsecret configuration file and

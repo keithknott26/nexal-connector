@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,9 +69,29 @@ type Agent struct {
 	devPull           bool
 	manualUntil       time.Time
 	manualEnabledPull bool
+	// logger is set by New and never written again, so every goroutine below can
+	// read it without a.mu. Records carry attempt identifiers, states, durations
+	// and this package's fixed error strings; never tokens, admin credentials,
+	// ciphertext, key material or coordinator URLs. The client package already
+	// reduces transport failures to fixed messages for the same reason.
+	logger *slog.Logger
 }
 
-func New(c config.Config, path string, api client.API, probe Probe, devPull bool) (*Agent, error) {
+// Option configures optional Agent behaviour. Options exist so observability can
+// be added without changing New's signature for every caller and test.
+type Option func(*Agent)
+
+// WithLogger installs a structured logger. Without it an Agent discards its logs,
+// which keeps tests and library callers silent by default.
+func WithLogger(l *slog.Logger) Option {
+	return func(a *Agent) {
+		if l != nil {
+			a.logger = l
+		}
+	}
+}
+
+func New(c config.Config, path string, api client.API, probe Probe, devPull bool, opts ...Option) (*Agent, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -79,7 +101,11 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 	if probe == nil {
 		return nil, errors.New("telemetry probe required")
 	}
-	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1)}
+	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1),
+		logger: slog.New(slog.DiscardHandler)}
+	for _, opt := range opts {
+		opt(a)
+	}
 	b, err := config.ReadPrivate(a.journalPath(), 8<<20)
 	if err == nil {
 		if err = json.Unmarshal(b, &a.records); err != nil || a.records == nil {
@@ -94,6 +120,9 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 			if r.State == "running" {
 				r.State = "interrupted"
 				a.records[id] = r
+				// Unsettled work that a restart fenced. The coordinator may
+				// reissue it; nothing here re-runs it, so say so once.
+				a.logger.Warn("fenced attempt interrupted by restart", "attempt", id)
 			}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -459,7 +488,16 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 	allowed := a.admitLocked(false) == nil
 	a.mu.Unlock()
 	if err != nil || workCtx.Err() != nil || !allowed || !time.Now().Before(deadline()) {
-		_ = a.finish(at.ID, "cancelled-or-lease-expired", nil, seconds, deadline())
+		// Which of the four reasons applied is the whole diagnostic value here:
+		// owner activity, resource pressure, a cancelled context and an expired
+		// lease are very different operational problems.
+		a.logger.Warn("attempt abandoned", "attempt", at.ID, "seconds", seconds,
+			"workload_error", errorText(err), "context_error", errorText(workCtx.Err()),
+			"admitted", allowed, "lease_expired", !time.Now().Before(deadline()))
+		if ferr := a.finish(at.ID, "cancelled-or-lease-expired", nil, seconds, deadline()); ferr != nil {
+			a.logger.Error("attempt journal write failed", "attempt", at.ID,
+				"state", "cancelled-or-lease-expired", "error", errorText(ferr))
+		}
 		if err != nil {
 			return err
 		}
@@ -477,11 +515,18 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 		reqCtx, stop := boundedRequest(workCtx, deadline())
 		accepted, callErr := a.api.Complete(reqCtx, at.ID, result, seconds)
 		stop()
+		if callErr != nil {
+			// Retried below; a single failure is routine, three are not.
+			a.logger.Debug("completion submission failed", "attempt", at.ID,
+				"retry", retries, "error", errorText(callErr))
+		}
 		if callErr == nil {
 			state := "completion-rejected"
 			if accepted {
 				state = "completed"
 			}
+			a.logger.Info("attempt settled", "attempt", at.ID, "state", state,
+				"seconds", seconds, "retries", retries)
 			if err := a.finish(at.ID, state, &result, seconds, deadline()); err != nil {
 				return err
 			}
@@ -495,7 +540,14 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	_ = a.finish(at.ID, "completion-unconfirmed", &result, seconds, deadline())
+	// The work is done and paid for locally but the coordinator never confirmed
+	// settlement. Nothing re-executes automatically, so this must be visible.
+	a.logger.Error("completion unconfirmed after retries", "attempt", at.ID,
+		"seconds", seconds, "retries", 3)
+	if ferr := a.finish(at.ID, "completion-unconfirmed", &result, seconds, deadline()); ferr != nil {
+		a.logger.Error("attempt journal write failed", "attempt", at.ID,
+			"state", "completion-unconfirmed", "error", errorText(ferr))
+	}
 	return errors.New("completion unconfirmed; no automatic re-execution")
 }
 
@@ -505,6 +557,38 @@ func boundedRequest(ctx context.Context, lease time.Time) (context.Context, cont
 		deadline = lease
 	}
 	return context.WithDeadline(ctx, deadline)
+}
+
+// errorText renders an error for a log record. Errors reaching these sites are
+// this package's own fixed strings or the client package's deliberately sanitized
+// transport messages, which carry no URL, credential or response text; funnelling
+// them through one place keeps that reviewable and bounds the field so a long
+// unexpected error cannot bloat a log line.
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	s := err.Error()
+	if len(s) > 256 {
+		s = strings.ToValidUTF8(s[:256], "") + " …(truncated)"
+	}
+	return s
+}
+
+// heartbeat runs one host heartbeat and records why it failed. A failed heartbeat
+// clears lastHeartbeat and cancels running work, so silence here used to make an
+// abandoned attempt look spontaneous. trigger distinguishes the scheduled beat
+// from the consent-change beat, which is the difference between a network problem
+// and an owner action.
+func (a *Agent) heartbeat(ctx context.Context, trigger string) {
+	if err := a.hostHeartbeat(ctx); err != nil {
+		if ctx.Err() != nil {
+			// Shutdown, not a fault.
+			a.logger.Debug("host heartbeat abandoned during shutdown", "trigger", trigger)
+			return
+		}
+		a.logger.Warn("host heartbeat failed", "trigger", trigger, "error", errorText(err))
+	}
 }
 
 func (a *Agent) hostHeartbeat(ctx context.Context) error {
@@ -557,7 +641,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Host network I/O must not block the owner/telemetry monitor.
 	go func() {
 		defer wg.Done()
-		_ = a.hostHeartbeat(ctx)
+		a.heartbeat(ctx, "startup")
 		t := time.NewTicker(15 * time.Second)
 		defer t.Stop()
 		for {
@@ -565,9 +649,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				_ = a.hostHeartbeat(ctx)
+				a.heartbeat(ctx, "interval")
 			case <-a.heartbeatWake:
-				_ = a.hostHeartbeat(ctx)
+				a.heartbeat(ctx, "consent-change")
 			}
 		}
 	}()
@@ -591,10 +675,25 @@ func (a *Agent) Run(ctx context.Context) error {
 				at, err := a.api.Next(reqCtx, hostID)
 				expired := reqCtx.Err() != nil
 				stop()
-				if expired || err != nil || at == nil {
+				if expired || err != nil {
+					// Every 2 s, so Debug: a coordinator outage would otherwise
+					// bury the records that matter under thousands of lines.
+					a.logger.Debug("attempt poll failed", "expired", expired, "error", errorText(err))
 					continue
 				}
-				_ = a.execute(ctx, *at, &generation)
+				if at == nil {
+					continue
+				}
+				a.logger.Info("attempt accepted", "attempt", at.ID, "job", at.JobID,
+					"template", at.Template, "samples", at.Samples,
+					"lease_expires_at", at.LeaseExpiresAt.UTC().Format(time.RFC3339))
+				if err := a.execute(ctx, *at, &generation); err != nil {
+					// execute logs the specific abandonment or settlement reason;
+					// this records that the attempt ended unsuccessfully at all,
+					// including the admission refusals that return before any of
+					// those sites are reached.
+					a.logger.Warn("attempt did not complete", "attempt", at.ID, "error", errorText(err))
+				}
 			}
 		}
 	}()

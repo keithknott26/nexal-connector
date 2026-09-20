@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -258,7 +259,17 @@ func runCommand(ctx context.Context, args []string) error {
 				TotalMemoryBytes: 8 << 30, AvailableMemoryBytes: 4 << 30}
 		}
 	}
-	a, err := agent.New(c, *path, api, probe, *pull)
+	// Structured logs go to stderr as JSON: stdout carries the CLI's JSON command
+	// output (see emit and CLI-CONTRACT.md), so logging there would corrupt it.
+	// Records never include tokens, ciphertext or coordinator URLs.
+	// Development configurations get the high-frequency records (per-poll and
+	// per-retry failures); production keeps to attempt-level and fault records.
+	level := slog.LevelInfo
+	if c.Development {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	a, err := agent.New(c, *path, api, probe, *pull, agent.WithLogger(logger))
 	if err != nil {
 		return err
 	}

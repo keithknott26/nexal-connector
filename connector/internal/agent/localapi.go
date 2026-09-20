@@ -176,7 +176,11 @@ func (a *Agent) Serve(ctx context.Context, adminToken string) error {
 		case <-ctx.Done():
 			stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			_ = server.Shutdown(stopCtx)
+			if err := server.Shutdown(stopCtx); err != nil {
+				// A refused graceful shutdown means a handler is still running
+				// past the 3 s budget; the process exits regardless.
+				a.logger.Warn("local API shutdown incomplete", "error", errorText(err))
+			}
 		case <-stopped:
 		}
 	}()
@@ -186,6 +190,9 @@ func (a *Agent) Serve(ctx context.Context, adminToken string) error {
 		return nil
 	}
 	if err != nil {
+		// The returned error is fixed so nothing about the listener leaks to the
+		// caller; the log keeps the sanitized reason for the operator.
+		a.logger.Error("local API stopped unexpectedly", "error", errorText(err))
 		return errors.New("local API stopped unexpectedly")
 	}
 	return nil

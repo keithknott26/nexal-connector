@@ -60,6 +60,29 @@ final class CLIContractTests: XCTestCase {
         XCTAssertEqual(updated.executionBlocker, "insufficient approved memory headroom")
     }
 
+    func testResourcePolicyAndTelemetryExtrasAreOptional() throws {
+        let sparse = try ConnectorStatus.decode(Data(#"{"paused":true}"#.utf8))
+        XCTAssertNil(sparse.resourcePolicy)
+        XCTAssertNil(sparse.coordinatorHealthy)
+        XCTAssertNil(sparse.lastOutcome)
+        let full = try ConnectorStatus.decode(Data(#"{"paused":false,"coordinatorHealthy":true,"lastOutcome":"completed","resourcePolicy":{"memoryLimitBytes":268435456,"reserveMemoryBytes":4294967296,"idleSeconds":300},"telemetry":{"known":true,"synthetic":false,"ownerActive":true,"availableMemoryBytes":1024,"idleSeconds":12,"totalMemoryBytes":2048}}"#.utf8))
+        XCTAssertEqual(full.resourcePolicy?.memoryLimitBytes, 268_435_456)
+        XCTAssertEqual(full.resourcePolicy?.reserveMemoryBytes, 4_294_967_296)
+        XCTAssertEqual(full.telemetry?.idleSeconds, 12)
+        XCTAssertEqual(full.telemetry?.totalMemoryBytes, 2_048)
+        XCTAssertEqual(full.coordinatorHealthy, true)
+        XCTAssertEqual(full.lastOutcome, "completed")
+    }
+
+    // A connector that reports only part of the policy must not make the whole
+    // status undecodable, which would blank the panel rather than degrade it.
+    func testPartialResourcePolicyDoesNotFailTheWholeStatus() throws {
+        let partial = try ConnectorStatus.decode(Data(#"{"paused":true,"resourcePolicy":{"idleSeconds":300}}"#.utf8))
+        XCTAssertNil(partial.resourcePolicy?.memoryLimitBytes)
+        XCTAssertEqual(partial.resourcePolicy?.idleSeconds, 300)
+        XCTAssertTrue(partial.paused)
+    }
+
     func testStatusRejectsMissingPauseState() {
         XCTAssertThrowsError(try ConnectorStatus.decode(Data(#"{"version":"0.1.0"}"#.utf8)))
         XCTAssertTrue(try ConnectorStatus.decode(Data(#"{"paused":true,"future":42}"#.utf8)).paused)

@@ -66,12 +66,27 @@ struct ConnectorStatus: Decodable {
     let ownerActivityOverride: Bool?
     let acceptJobsUntil: String?
     let executionBlocker: String?
+    let lastOutcome: String?
+    let coordinatorHealthy: Bool?
+    let resourcePolicy: ResourcePolicy?
 
     struct Telemetry: Decodable {
         let known: Bool
         let synthetic: Bool
         let ownerActive: Bool
         let availableMemoryBytes: UInt64
+        // Reported by the Go agent today, optional here so an older connector
+        // that omits them still decodes instead of failing the whole status.
+        let idleSeconds: UInt64?
+        let totalMemoryBytes: UInt64?
+    }
+
+    /// The connector's own approved resource policy. Optional throughout: a
+    /// missing value is charted as absent, never as a measured zero.
+    struct ResourcePolicy: Decodable {
+        let memoryLimitBytes: UInt64?
+        let reserveMemoryBytes: UInt64?
+        let idleSeconds: UInt64?
     }
 
     // Decode only stable public status fields. Unknown fields are ignored;

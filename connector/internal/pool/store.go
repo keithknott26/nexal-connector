@@ -45,8 +45,16 @@ type StoreOptions struct {
 // Store is one exclusive process owner per directory, thread-safe within that
 // process. The dedicated directory is 0700, every file 0600. The retained root
 // descriptor contains operations even if path components are later renamed.
+//
+// Put streams payload bytes with mu released, so a slow network reader cannot
+// block reads, evictions or accounting on this host. Quota is reserved before
+// the stream starts and the object's name is registered in writing for the
+// duration, which keeps the reservation honest and keeps two writers off one
+// name. streams counts writes currently outside the mutex; the descriptors
+// outlive Close until that count reaches zero.
 type Store struct {
 	mu        sync.Mutex
+	cond      *sync.Cond // Broadcast when an in-flight write finishes or Close runs.
 	root      *os.Root
 	dir       *os.File
 	lock      *os.File
@@ -57,7 +65,10 @@ type Store struct {
 	used      int64
 	admission *Admission
 	free      func() (uint64, error)
+	writing   map[string]bool
+	streams   int
 	closed    bool
+	torndown  bool
 }
 
 func validDigest(s string) bool {
@@ -169,7 +180,9 @@ func NewStore(o StoreOptions) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{root: root, directory: directory, quota: o.QuotaBytes,
-		minFree: o.MinFreeBytes, maxObject: o.MaxObjectBytes, admission: o.Admission}
+		minFree: o.MinFreeBytes, maxObject: o.MaxObjectBytes, admission: o.Admission,
+		writing: map[string]bool{}}
+	s.cond = sync.NewCond(&s.mu)
 	ok := false
 	defer func() {
 		if !ok {
@@ -318,46 +331,69 @@ func (s *Store) unchargeLocked(bytes int64) {
 	}
 }
 
-// writeAtomicLocked publishes a newly named file only, and never mutates an
-// existing blob/manifest. fsync(file), no-replace link, fsync(directory) precede success.
-// Caller holds exclusive lock and has reserved exactly size bytes.
-func (s *Store) writeAtomicLocked(name string, size int64, reader io.Reader, digest string) (committed bool, err error) {
-	if _, err := s.root.Lstat(name); err == nil {
-		return false, ErrConflict
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return false, err
-	}
+// writeTemp streams exactly size bytes into a fresh unpublished temporary file,
+// verifies the digest and fsyncs the data. It touches only immutable fields and
+// the root descriptor, whose methods are safe from multiple goroutines, so it may
+// run with mu released: this is the slow, caller-paced part of a write and it must
+// not hold the store's only mutex while a peer trickles bytes in. The caller has
+// already reserved size bytes. A failed stream leaves nothing behind.
+func (s *Store) writeTemp(size int64, reader io.Reader, digest string) (string, error) {
 	id, err := randomID(32)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	tmp := ".tmp." + id
 	f, err := openNoFollow(s.root, tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
-		return false, err
+		return "", err
 	}
+	streamed := false
 	defer func() {
 		f.Close()
-		_ = s.root.Remove(tmp)
+		if !streamed {
+			_ = s.root.Remove(tmp)
+		}
 	}()
 	hash := sha256.New()
 	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(reader, size))
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if n != size {
-		return false, fmt.Errorf("%w: input size mismatch", ErrIntegrity)
+		return "", fmt.Errorf("%w: input size mismatch", ErrIntegrity)
 	}
 	// Do not write an extra byte or allow an unbounded reader to fill disk.
 	var probe [1]byte
 	nprobe, probeErr := io.ReadFull(reader, probe[:])
 	if nprobe != 0 || probeErr != io.EOF {
-		return false, fmt.Errorf("%w: input exceeds declared size", ErrIntegrity)
+		return "", fmt.Errorf("%w: input exceeds declared size", ErrIntegrity)
 	}
 	if digest != "" && hex.EncodeToString(hash.Sum(nil)) != digest {
-		return false, ErrIntegrity
+		return "", ErrIntegrity
 	}
 	if err := f.Sync(); err != nil {
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	streamed = true
+	return tmp, nil
+}
+
+// publishTempLocked gives a streamed temporary file its final name, and never
+// mutates an existing blob/manifest. no-replace link, unlink, fsync(directory)
+// precede success. The caller holds mu and has reserved exactly size bytes.
+//
+// Publication must stay under the mutex even though streaming does not: between
+// Link and Remove the inode has two links, and openNoFollow rejects any file with
+// more than one link, so a reader that observed that window would see its own
+// store's object as an unsafe hardlink. Holding mu across these metadata calls
+// keeps that window invisible; it costs no network I/O.
+func (s *Store) publishTempLocked(tmp, name string) (committed bool, err error) {
+	if _, err := s.root.Lstat(name); err == nil {
+		return false, ErrConflict
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
 	// Recheck after allocation: filesystem block/metadata overhead and unrelated
@@ -368,9 +404,6 @@ func (s *Store) writeAtomicLocked(name string, size int64, reader io.Reader, dig
 	}
 	if free < s.minFree {
 		return false, ErrHeadroom
-	}
-	if err := f.Close(); err != nil {
-		return false, err
 	}
 	// Root.Link creates atomically without overwriting an existing destination.
 	// It also avoids a race with unexpected same-user filesystem modification.
@@ -386,41 +419,107 @@ func (s *Store) writeAtomicLocked(name string, size int64, reader io.Reader, dig
 	return true, nil
 }
 
+// writeAtomic streams and publishes in one step for callers that already hold mu
+// and whose bytes are already in memory, such as manifest publication.
+func (s *Store) writeAtomic(name string, size int64, reader io.Reader, digest string) (committed bool, err error) {
+	tmp, err := s.writeTemp(size, reader, digest)
+	if err != nil {
+		return false, err
+	}
+	committed, err = s.publishTempLocked(tmp, name)
+	if !committed {
+		_ = s.root.Remove(tmp)
+	}
+	return committed, err
+}
+
 // Put verifies the caller-specified SHA-256 while streaming exactly size bytes.
 // Protected stores only a local copy, not a two-replica durability promise.
 // An existing identical object is verified and returned without consuming quota.
+//
+// The payload is streamed with mu released. reader is frequently a network body,
+// so holding the store's only mutex across the copy stalled every other caller —
+// reads, eviction, receipts, usage — for as long as the slowest peer took to send
+// its bytes. Quota is reserved first and the blob name is published in writing
+// for the whole stream, so a concurrent Put of the same object waits for the
+// outcome (and then finds the verified object) instead of racing it, and a
+// concurrent Put of a different object cannot spend the same bytes twice.
 func (s *Store) Put(class StorageClass, digest string, size int64, reader io.Reader) (Blob, error) {
 	name, err := blobName(class, digest)
 	if err != nil || reader == nil || size < 0 || size > s.maxObject {
 		return Blob{}, ErrInvalid
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return Blob{}, ErrClosed
-	}
-	if f, err := s.verifiedLocked(class, digest); err == nil {
-		info, statErr := f.Stat()
-		f.Close()
-		if statErr != nil {
-			return Blob{}, statErr
+	for {
+		if s.closed {
+			s.mu.Unlock()
+			return Blob{}, ErrClosed
 		}
-		if info.Size() != size {
-			return Blob{}, ErrIntegrity
+		if f, err := s.verifiedLocked(class, digest); err == nil {
+			info, statErr := f.Stat()
+			f.Close()
+			s.mu.Unlock()
+			if statErr != nil {
+				return Blob{}, statErr
+			}
+			if info.Size() != size {
+				return Blob{}, ErrIntegrity
+			}
+			return Blob{digest, size, class}, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			s.mu.Unlock()
+			return Blob{}, err
 		}
-		return Blob{digest, size, class}, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return Blob{}, err
+		if !s.writing[name] {
+			break
+		}
+		// Another goroutine is streaming this exact object. Wait for its result
+		// rather than reserving quota twice for one blob; Wait releases mu, so
+		// unrelated store operations continue.
+		s.cond.Wait()
 	}
 	if err := s.reserveLocked(size); err != nil {
+		s.mu.Unlock()
 		return Blob{}, err
 	}
-	committed, err := s.writeAtomicLocked(name, size, reader, digest)
+	s.writing[name] = true
+	s.streams++
+	s.mu.Unlock()
+
+	tmp, writeErr := s.writeTemp(size, reader, digest)
+
+	s.mu.Lock()
+	committed := false
+	if writeErr == nil {
+		if s.closed {
+			// Shutting down: the bytes are verified but nothing new gets published,
+			// and the caller gets no receipt for an object this store does not hold.
+			writeErr = ErrClosed
+		} else {
+			committed, writeErr = s.publishTempLocked(tmp, name)
+		}
+		if !committed {
+			_ = s.root.Remove(tmp)
+		}
+	}
+	delete(s.writing, name)
+	s.streams--
 	if !committed {
 		s.unchargeLocked(size)
 	}
-	if err != nil {
-		return Blob{}, err
+	// Close does not wait on network I/O, so the last writer out releases the
+	// descriptors it was still using.
+	var teardown error
+	if s.closed && s.streams == 0 {
+		teardown = s.teardownLocked()
+	}
+	s.cond.Broadcast()
+	s.mu.Unlock()
+	if writeErr != nil {
+		return Blob{}, writeErr
+	}
+	if teardown != nil {
+		return Blob{}, teardown
 	}
 	return Blob{digest, size, class}, nil
 }
@@ -570,21 +669,12 @@ func (s *Store) Usage() (used, quota int64) {
 	return s.used, s.quota
 }
 
-func (s *Store) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
+// teardownLocked releases the descriptors and the directory flock exactly once.
+func (s *Store) teardownLocked() error {
+	if s.torndown {
 		return nil
 	}
-	s.closed = true
-	// The bytes stay on disk, but this process no longer owns the directory, so it
-	// must stop charging Admission for it: a retained entry can never be deleted
-	// again and the host's reported storage total drifts upward with every closed
-	// store. A Store reopened on this directory re-registers its scanned total in
-	// NewStore, so the charge returns as soon as somebody owns the bytes again.
-	if s.admission != nil {
-		s.admission.ReleaseStorage(s.directory)
-	}
+	s.torndown = true
 	var result error
 	if s.lock != nil {
 		result = errors.Join(result, s.lock.Close())
@@ -596,6 +686,33 @@ func (s *Store) Close() error {
 		result = errors.Join(result, s.root.Close())
 	}
 	return result
+}
+
+// Close stops admitting work and releases accounting immediately. It does not
+// block on a streaming Put: a peer trickling bytes must not be able to hold up
+// shutdown. When a write is still in flight the descriptors and the directory
+// flock are handed to that writer, which releases them as it finishes, so this
+// process can still briefly own the directory after Close returns.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	s.cond.Broadcast() // Duplicate-object waiters must observe ErrClosed.
+	// The bytes stay on disk, but this process no longer owns the directory, so it
+	// must stop charging Admission for it: a retained entry can never be deleted
+	// again and the host's reported storage total drifts upward with every closed
+	// store. A Store reopened on this directory re-registers its scanned total in
+	// NewStore, so the charge returns as soon as somebody owns the bytes again.
+	if s.admission != nil {
+		s.admission.ReleaseStorage(s.directory)
+	}
+	if s.streams > 0 {
+		return nil
+	}
+	return s.teardownLocked()
 }
 
 func manifestName(key string, version uint64) string {

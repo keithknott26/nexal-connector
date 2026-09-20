@@ -356,3 +356,173 @@ func TestStorageAccountingReleasedOnCloseAndReclaimedOnReopen(t *testing.T) {
 		t.Fatalf("charge survived the last owner: %d", stored())
 	}
 }
+
+// gatedReader parks after its first byte until the test releases it, standing in
+// for a peer that streams an object slowly over the network.
+type gatedReader struct {
+	data    []byte
+	off     int
+	gate    chan struct{}
+	started chan struct{}
+	once    sync.Once
+}
+
+func (r *gatedReader) Read(p []byte) (int, error) {
+	r.once.Do(func() { close(r.started) })
+	if r.off > 0 {
+		<-r.gate
+	}
+	if r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := 1
+	if r.off > 0 {
+		n = len(r.data) - r.off
+	}
+	if n > len(p) {
+		n = len(p)
+	}
+	copy(p, r.data[r.off:r.off+n])
+	r.off += n
+	return n, nil
+}
+
+func newGatedReader(data []byte) *gatedReader {
+	return &gatedReader{data: data, gate: make(chan struct{}), started: make(chan struct{})}
+}
+
+// A Put must not hold the store's only mutex across the byte stream: every other
+// caller on the host used to block for as long as the slowest uploader took.
+func TestPutStreamsWithoutHoldingStoreMutex(t *testing.T) {
+	s := testStore(t, 1<<20, nil)
+	existing, err := s.PutBytes(Cache, []byte("readable during a slow upload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("s"), 4096)
+	reader := newGatedReader(payload)
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Put(Protected, digestOf(payload), int64(len(payload)), reader)
+		done <- err
+	}()
+	<-reader.started
+	operations := make(chan error, 1)
+	go func() {
+		if _, err := s.Read(Cache, existing.Digest); err != nil {
+			operations <- err
+			return
+		}
+		if used, _ := s.Usage(); used < int64(len(payload)) {
+			operations <- errors.New("in-flight reservation not visible")
+			return
+		}
+		operations <- s.Check(Cache, existing.Digest)
+	}()
+	select {
+	case err := <-operations:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("readers blocked on an in-flight Put: the mutex is still held across the stream")
+	}
+	close(reader.gate)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Read(Protected, digestOf(payload)); err != nil || !bytes.Equal(got, payload) {
+		t.Fatalf("streamed object not published: %v", err)
+	}
+}
+
+// Two callers uploading the same object concurrently must charge quota once. The
+// second waits for the first instead of reserving a second copy's worth of bytes.
+func TestConcurrentDuplicatePutChargesQuotaOnce(t *testing.T) {
+	payload := bytes.Repeat([]byte("q"), 4096)
+	s := testStore(t, int64(len(payload)), nil) // Exactly one copy fits.
+	reader := newGatedReader(payload)
+	first := make(chan error, 1)
+	go func() {
+		_, err := s.Put(Protected, digestOf(payload), int64(len(payload)), reader)
+		first <- err
+	}()
+	<-reader.started
+	second := make(chan error, 1)
+	go func() {
+		_, err := s.Put(Protected, digestOf(payload), int64(len(payload)), bytes.NewReader(payload))
+		second <- err
+	}()
+	time.Sleep(20 * time.Millisecond) // Let the duplicate reach its wait.
+	close(reader.gate)
+	if err := <-first; err != nil {
+		t.Fatalf("streaming writer: %v", err)
+	}
+	select {
+	case err := <-second:
+		if err != nil {
+			t.Fatalf("duplicate upload rejected instead of deduplicated: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("duplicate upload never woke up")
+	}
+	if used, _ := s.Usage(); used != int64(len(payload)) {
+		t.Fatalf("one object charged twice: %d", used)
+	}
+}
+
+// Close must not wait on network I/O, must release accounting at once, and the
+// last writer out must release the descriptors and the directory flock.
+func TestCloseDoesNotBlockOnStreamingPut(t *testing.T) {
+	a, err := NewAdmission(AdmissionOptions{Capacity: Resources{1000, 1000, 1 << 20}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := testDirectory(t)
+	options := StoreOptions{Directory: directory, QuotaBytes: 1 << 20, MaxObjectBytes: 1 << 20,
+		Admission: a, FreeBytes: func() (uint64, error) { return 1 << 30, nil }}
+	s, err := NewStore(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := s.PutBytes(Cache, []byte("survives the shutdown"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("c"), 4096)
+	reader := newGatedReader(payload)
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Put(Protected, digestOf(payload), int64(len(payload)), reader)
+		done <- err
+	}()
+	<-reader.started
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Close blocked on a streaming write")
+	}
+	if _, used, _, _ := a.Snapshot(); used.StorageBytes != 0 {
+		t.Fatalf("charge retained while shutting down: %d", used.StorageBytes)
+	}
+	close(reader.gate)
+	if err := <-done; !errors.Is(err, ErrClosed) {
+		t.Fatalf("object published into a closed store: %v", err)
+	}
+	reopened, err := NewStore(options)
+	if err != nil {
+		t.Fatalf("last writer did not release the directory: %v", err)
+	}
+	defer reopened.Close()
+	if err := reopened.Check(Cache, kept.Digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Check(Protected, digestOf(payload)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("aborted write left a published object: %v", err)
+	}
+}

@@ -177,7 +177,7 @@ func (s *Store) appendRecordLocked(rec ManifestRecord) error {
 	if err := s.reserveLocked(size); err != nil {
 		return err
 	}
-	committed, err := s.writeAtomicLocked(manifestName(rec.Manifest.Key, rec.Manifest.Version), size, bytes.NewReader(data), "")
+	committed, err := s.writeAtomic(manifestName(rec.Manifest.Key, rec.Manifest.Version), size, bytes.NewReader(data), "")
 	if !committed {
 		s.unchargeLocked(size)
 	}

@@ -31,6 +31,20 @@ struct ResourceSharingPresentation: Equatable {
         It does not promise that a workload is available or enabled.
         """
 
+    /// The existing owner-activity line, verbatim, moved out of the view so the
+    /// exact wording is asserted by a test instead of living in a nested
+    /// ternary. Returns nil when the connector reported no telemetry at all,
+    /// which is what the previous layout also did.
+    static func ownerActivityLine(status: ConnectorStatus?) -> String? {
+        guard let telemetry = status?.telemetry else { return nil }
+        if telemetry.synthetic { return synthetic }
+        if !telemetry.known { return telemetryUnknown }
+        guard telemetry.ownerActive else { return "Owner idle" }
+        return status?.ownerActivityOverride == true
+            ? "Owner active; private work explicitly permitted"
+            : "Owner active; owner priority applies"
+    }
+
     let state: State
     /// Non-nil only while the connector reports synthetic telemetry.
     let syntheticNotice: String?

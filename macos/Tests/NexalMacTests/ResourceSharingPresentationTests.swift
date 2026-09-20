@@ -72,4 +72,42 @@ final class ResourceSharingPresentationTests: XCTestCase {
         XCTAssertNotEqual(TransportPresentation(capability: capability).indicator.heading,
                           ResourceSharingPresentation(status: paused).indicator.heading)
     }
+    // The owner-activity line moved out of the view; the words did not change.
+    func testOwnerActivityLineKeepsEveryExistingString() throws {
+        func status(known: Bool, synthetic: Bool, ownerActive: Bool, override: Bool) throws -> ConnectorStatus {
+            let object: [String: Any] = [
+                "paused": false,
+                "ownerActivityOverride": override,
+                "telemetry": ["known": known, "synthetic": synthetic, "ownerActive": ownerActive]
+            ]
+            return try ConnectorStatus.decode(try JSONSerialization.data(withJSONObject: object))
+        }
+        XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
+            status: try status(known: true, synthetic: true, ownerActive: true, override: false)),
+                       "Synthetic development telemetry")
+        XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
+            status: try status(known: false, synthetic: false, ownerActive: false, override: false)),
+                       "Telemetry unknown — Go admission fails closed")
+        XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
+            status: try status(known: true, synthetic: false, ownerActive: true, override: true)),
+                       "Owner active; private work explicitly permitted")
+        XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
+            status: try status(known: true, synthetic: false, ownerActive: true, override: false)),
+                       "Owner active; owner priority applies")
+        XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
+            status: try status(known: true, synthetic: false, ownerActive: false, override: false)),
+                       "Owner idle")
+    }
+
+    func testOwnerActivityLineIsNilWithoutTelemetry() throws {
+        XCTAssertNil(ResourceSharingPresentation.ownerActivityLine(status: nil))
+        let noTelemetry = try ConnectorStatus.decode(Data(#"{"paused":false}"#.utf8))
+        XCTAssertNil(ResourceSharingPresentation.ownerActivityLine(status: noTelemetry))
+    }
+
+    // Synthetic telemetry wins the line, exactly as the previous layout did.
+    func testSyntheticNoticeStillExistsSeparately() throws {
+        let state = ResourceSharingPresentation(status: try status(synthetic: true))
+        XCTAssertEqual(state.syntheticNotice, "Synthetic development telemetry")
+    }
 }

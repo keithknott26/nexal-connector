@@ -312,3 +312,11 @@ proves authorization.
 | Any relay (Cloudflare TURN or ours) | **Rejected** for bulk bytes; §3 |
 | go-libp2p | **Not added.** Conflict raised in §6, founder decides |
 | Verified between two real Macs on two real VLANs | **No.** Sandbox is Linux; `GOOS=darwin go build` and `go vet` are the only checks the Darwin path has had |
+
+One real observation exists, from a single manual `nexal doctor --stun` run in the
+Linux build sandbox (not from a test): both Cloudflare servers answered, the
+reflexive address was `54.237.68.156` with **different ports per server** (45039 vs
+58837), so the sandbox was classified `endpoint-dependent` and the report correctly
+warned that hole punching from such a host would need a relay. That is one host on
+one network and says nothing about any customer's NAT — it is evidence the decoder
+and the classifier work end to end against a real server, nothing more.

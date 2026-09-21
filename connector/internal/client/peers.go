@@ -82,10 +82,14 @@ type PeerDirectory struct {
 // AuthorizationCandidateList and CapabilityEvidenceSelfReported are the exact
 // strings the API contract specifies.
 const (
-	AuthorizationCandidateList         = "candidate-list-not-authorization"
-	CapabilityEvidenceSelfReported     = "self-reported-not-attested"
-	IdentityEvidenceEnrollmentBound    = "enrollment-bound-not-hardware-attested"
-	maxDirectoryPeers                  = 128
+	AuthorizationCandidateList      = "candidate-list-not-authorization"
+	CapabilityEvidenceSelfReported  = "self-reported-not-attested"
+	IdentityEvidenceEnrollmentBound = "enrollment-bound-not-hardware-attested"
+	// maxDirectoryPeers must not be below the coordinator's MAX_PEERS
+	// (apps/coordinator/src/peers.ts). The client rejects the entire directory
+	// when the count is exceeded, so a cap lower than the server's page size
+	// silently disables discovery for any tenant large enough to fill a page.
+	maxDirectoryPeers                  = 200
 	maxDirectoryAddressesPerPeer       = 9 // 8 lan + 1 wan, matching the server cap.
 	errDirectorySchema                 = "invalid coordinator peer directory schema"
 	errDirectoryUnauthorizedAssumption = "coordinator peer directory did not declare itself a candidate list"

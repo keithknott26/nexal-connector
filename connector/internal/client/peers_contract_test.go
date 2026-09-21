@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,5 +111,60 @@ func TestPeersRefusesWeakenedAuthorizationString(t *testing.T) {
 		"candidate-list-not-authorization", "authorized-peers", 1)
 	if _, err := directoryFrom(t, body); err == nil {
 		t.Fatal("directory claiming to be authorization was accepted")
+	}
+}
+
+// The client rejects an oversized directory outright rather than truncating it,
+// so maxDirectoryPeers below the coordinator's MAX_PEERS would disable discovery
+// for large tenants only — invisible in small-fleet testing. 200 is the server's
+// page size in apps/coordinator/src/peers.ts.
+func TestDirectoryCapAcceptsAFullServerPage(t *testing.T) {
+	const serverMaxPeers = 200
+	if maxDirectoryPeers < serverMaxPeers {
+		t.Fatalf("maxDirectoryPeers=%d rejects a full server page of %d",
+			maxDirectoryPeers, serverMaxPeers)
+	}
+	var b strings.Builder
+	b.WriteString(`{"peers":[`)
+	for i := 0; i < serverMaxPeers; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"hostId":"h_%016x","name":"n","fingerprint":"ab",`+
+			`"lastSeenAt":"2026-09-20T23:00:00.000Z","addresses":[],`+
+			`"capabilities":null,"capabilitiesReportedAt":null}`, i)
+	}
+	b.WriteString(`],"peerLimit":200,"truncated":false,"freshnessSeconds":900,` +
+		`"authorization":"candidate-list-not-authorization",` +
+		`"capabilityEvidence":"self-reported-not-attested",` +
+		`"identityEvidence":"enrollment-bound-not-hardware-attested"}`)
+	got, err := directoryFrom(t, b.String())
+	if err != nil {
+		t.Fatalf("full server page rejected: %v", err)
+	}
+	if len(got.Peers) != serverMaxPeers {
+		t.Fatalf("peers = %d, want %d", len(got.Peers), serverMaxPeers)
+	}
+}
+
+// A directory above the server's own page size is not a bigger tenant, it is a
+// response that does not share this contract. It must still be refused.
+func TestDirectoryAboveCapIsRefused(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`{"peers":[`)
+	for i := 0; i < maxDirectoryPeers+1; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"hostId":"h_%016x","name":"n","fingerprint":"ab",`+
+			`"lastSeenAt":"2026-09-20T23:00:00.000Z","addresses":[],`+
+			`"capabilities":null,"capabilitiesReportedAt":null}`, i)
+	}
+	b.WriteString(`],"peerLimit":200,"truncated":true,"freshnessSeconds":900,` +
+		`"authorization":"candidate-list-not-authorization",` +
+		`"capabilityEvidence":"self-reported-not-attested",` +
+		`"identityEvidence":"enrollment-bound-not-hardware-attested"}`)
+	if _, err := directoryFrom(t, b.String()); err == nil {
+		t.Fatal("directory above the contract cap was accepted")
 	}
 }

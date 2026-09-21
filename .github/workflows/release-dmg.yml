@@ -126,9 +126,9 @@ jobs:
           VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
             macos/Resources/Info.plist)"
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
-            NAME="Nexal-Connector-$VERSION-arm64.dmg"
+            NAME="Nexal-Connector-$VERSION-universal.dmg"
           else
-            NAME="Nexal-Connector-$VERSION-arm64-UNSIGNED-DO-NOT-DISTRIBUTE.dmg"
+            NAME="Nexal-Connector-$VERSION-universal-UNSIGNED-DO-NOT-DISTRIBUTE.dmg"
           fi
           STAGE="$RUNNER_TEMP/dmg"
           mkdir -p "$STAGE"

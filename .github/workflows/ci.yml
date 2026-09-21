@@ -23,6 +23,10 @@ jobs:
         working-directory: runtimes/bridge
       - run: GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o /tmp/nexal-darwin-arm64 ./cmd/nexal
         working-directory: connector
+      # The release DMG is universal, so a broken amd64 build must fail HERE
+      # rather than at tag time on a machine nobody is watching.
+      - run: GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/nexal-darwin-amd64 ./cmd/nexal
+        working-directory: connector
   mlx-policy:
     runs-on: ubuntu-latest
     timeout-minutes: 10

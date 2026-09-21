@@ -62,6 +62,18 @@ const statusBody = `{"pairingId":"%s","status":"%s","expiresAt":"%s"}`
 // cancelBody is the LITERAL body of the cancel branch: reply({ cancelled: true }).
 const cancelBody = `{"cancelled":true}`
 
+// mustReplace fails the test if the substitution found nothing. A drift case
+// whose replacement silently no-ops degrades into a second copy of the control
+// case: it asserts the OPPOSITE of what it claims to, and reports that as a
+// failure of the code under test rather than of itself.
+func mustReplace(t *testing.T, body, old, replacement string) string {
+	t.Helper()
+	if !strings.Contains(body, old) {
+		t.Fatalf("drift case is broken: %q is not present in the control body", old)
+	}
+	return strings.Replace(body, old, replacement, 1)
+}
+
 func futureExpiry(d time.Duration) string {
 	// The Worker's %f gives milliseconds; match that, not Go's default precision.
 	return time.Now().UTC().Add(d).Format("2006-01-02T15:04:05.000Z")
@@ -449,8 +461,15 @@ func TestCancelPairingSendsAnEmptyObjectAndRequiresConfirmation(t *testing.T) {
 // Mac, where the reason can be shown — rather than drawing a code that fails
 // silently in a camera viewfinder.
 func TestCreatePairingRefusesDriftedPayloads(t *testing.T) {
+	// The control expiry is computed ONCE and reused as both the body value and
+	// the search string. Calling futureExpiry twice races the millisecond in the
+	// format: when the clock ticks between the two calls the strings differ,
+	// strings.Replace matches nothing, and the case silently tests the UNMODIFIED
+	// control body -- which is valid, so the client accepts it and the drift case
+	// reports a false failure. That flake is far likelier under -race.
+	controlExpiry := futureExpiry(5 * time.Minute)
 	good := func(origin string) string {
-		return fmt.Sprintf(pairingBody, "http://"+origin, testPairingID, futureExpiry(5*time.Minute), "receiver", testClaimToken)
+		return fmt.Sprintf(pairingBody, "http://"+origin, testPairingID, controlExpiry, "receiver", testClaimToken)
 	}
 	if _, _, err := mintAgainst(t, PairingRoleReceiver, good, 201); err != nil {
 		t.Fatalf("the control case must be accepted: %v", err)
@@ -479,13 +498,13 @@ func TestCreatePairingRefusesDriftedPayloads(t *testing.T) {
 			return strings.Replace(good(o), testClaimToken, strings.ToUpper(testClaimToken), 1)
 		},
 		"a local-time expiry": func(o string) string {
-			return strings.Replace(good(o), futureExpiry(5*time.Minute), "2027-01-01T00:00:00+01:00", 1)
+			return mustReplace(t, good(o), controlExpiry, "2027-01-01T00:00:00+01:00")
 		},
 		"an already-past expiry": func(o string) string {
-			return strings.Replace(good(o), futureExpiry(5*time.Minute), futureExpiry(-time.Minute), 1)
+			return mustReplace(t, good(o), controlExpiry, futureExpiry(-time.Minute))
 		},
 		"an expiry beyond the five-minute contract": func(o string) string {
-			return strings.Replace(good(o), futureExpiry(5*time.Minute), futureExpiry(2*time.Hour), 1)
+			return mustReplace(t, good(o), controlExpiry, futureExpiry(2*time.Hour))
 		},
 		"the wrong schema version": func(o string) string {
 			return strings.Replace(good(o), `"schemaVersion": 1`, `"schemaVersion": 2`, 1)

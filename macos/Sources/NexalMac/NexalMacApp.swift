@@ -287,6 +287,23 @@ private struct ConnectorPanel: View {
                     Button(model.configurationExists ? "Enroll existing configuration" : "Create and enroll") {
                         Task { await model.initializeAndEnroll() }
                     }.disabled(!model.consent || model.selection == nil || model.enrollmentCode.isEmpty)
+                    // Three separate conditions gate this button and none of them
+                    // were stated, so it read as broken rather than blocked. Named
+                    // in the order the owner must satisfy them, and only while the
+                    // button is actually disabled.
+                    if model.selection == nil {
+                        Text("Choose the Go connector in step 1 first.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if model.enrollmentCode.isEmpty {
+                        Text("Paste the one-use enrollment code issued by your coordinator.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if !model.consent {
+                        Text("Approve private-only enrollment above to continue.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .padding(.top, PanelMetrics.rowSpacing)

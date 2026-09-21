@@ -72,6 +72,20 @@ final class ResourceSharingPresentationTests: XCTestCase {
         XCTAssertNotEqual(TransportPresentation(capability: capability).indicator.heading,
                           ResourceSharingPresentation(status: paused).indicator.heading)
     }
+    // A status carrying only the telemetry booleans must still decode. Requiring
+    // any single memory reading meant one absent field threw invalidStatus and
+    // discarded `paused` with it, so a chart gap could hide consent state.
+    func testStatusDecodesWhenMemoryReadingsAreAbsent() throws {
+        let object: [String: Any] = [
+            "paused": true,
+            "telemetry": ["known": true, "synthetic": false, "ownerActive": false]
+        ]
+        let status = try ConnectorStatus.decode(try JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(status.paused, true)
+        XCTAssertNil(status.telemetry?.availableMemoryBytes)
+        XCTAssertEqual(ResourceSharingPresentation(status: status).state, .pausedByOwner)
+    }
+
     // The owner-activity line moved out of the view; the words did not change.
     func testOwnerActivityLineKeepsEveryExistingString() throws {
         func status(known: Bool, synthetic: Bool, ownerActive: Bool, override: Bool) throws -> ConnectorStatus {

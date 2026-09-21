@@ -74,9 +74,14 @@ struct ConnectorStatus: Decodable {
         let known: Bool
         let synthetic: Bool
         let ownerActive: Bool
-        let availableMemoryBytes: UInt64
         // Reported by the Go agent today, optional here so an older connector
         // that omits them still decodes instead of failing the whole status.
+        // availableMemoryBytes was briefly required, which meant one missing
+        // memory reading threw invalidStatus and discarded the ENTIRE status —
+        // including `paused`, the consent signal. A chart gap must never be able
+        // to take down consent display. Absent stays absent; mib() maps nil to
+        // nil, so it is still never charted as a measured zero.
+        let availableMemoryBytes: UInt64?
         let idleSeconds: UInt64?
         let totalMemoryBytes: UInt64?
     }

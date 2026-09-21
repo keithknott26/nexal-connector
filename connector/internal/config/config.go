@@ -72,6 +72,10 @@ type Config struct {
 	// fingerprint is what peer TLS pins, and the coordinator's list still decides
 	// AllowedPeers.
 	StaticPeers []StaticPeer `json:"staticPeers,omitempty"`
+	// P2P gates the libp2p data plane (internal/p2p, TRANSPORT-NAT-DESIGN.md
+	// Phase 2) and carries its relay ceilings. Absent means OFF, so an upgrade
+	// starts no new transport. See p2p.go.
+	P2P *P2P `json:"p2p,omitempty"`
 }
 
 // Discovery configures LAN/WAN peer discovery. Every gate defaults to false and
@@ -230,6 +234,9 @@ func (c Config) Validate() error {
 	if err := ValidateStaticPeers(c.StaticPeers); err != nil {
 		return err
 	}
+	if err := c.P2P.Validate(); err != nil {
+		return err
+	}
 	return c.ResourcePolicy().Validate()
 }
 
@@ -253,7 +260,8 @@ func Load(path string) (Config, error) {
 		if strings.EqualFold(key, "paused") {
 			hasPause = true
 		}
-		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") {
+		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") ||
+			strings.EqualFold(key, "p2p") {
 			continue
 		}
 		if strings.TrimSpace(string(value)) == "null" {

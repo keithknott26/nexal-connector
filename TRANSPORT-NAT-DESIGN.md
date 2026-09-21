@@ -1,11 +1,22 @@
 # Peer transport and NAT traversal: decision record
 
 Scope: `connector/` only. This records what the peer transport does **today**, what
-changed in Phase 1, what is deliberately **not** built, and one conflict with the
-platform hardening plan that is raised here and left for the founder to decide.
+changed in Phase 1 and Phase 2, what is deliberately **not** built, and how the one
+conflict with the platform hardening plan was resolved.
 
-Nothing in this document or in the Phase 1 code establishes a peer-to-peer
-connection over the internet. Read §5 before believing otherwise.
+**The conflict is resolved.** §16 line 872 selects go-libp2p; the house rule was
+zero dependencies. The founder chose **go-libp2p on 2026-09-21**, an explicit
+override of the zero-dep rule on the plan's authority. §6 records it, and the scope
+of the override is exact: `connector/internal/p2p` and nothing else. Do not revert
+it as an accident.
+
+**Phase 1 (STUN observability, static peers) established no peer-to-peer connection
+over the internet — read §5.** Phase 2 builds the path that can, and it is
+**feature-flagged off by default** (§7): `config.p2p` is absent in every config
+written before this change, absent means `enabled:false`, and a disabled host builds
+no libp2p host at all. Read §9 for the line-by-line real-vs-not, §10 for what a
+relay operator can see, §11 for the coordinator work still required, and §13 for why
+the existing LAN transport is untouched and still preferred.
 
 ## 0. The plan wins — what it says
 
@@ -179,7 +190,7 @@ work", and a test asserts that no summary string ever contains that claim.
 **This does not ship peer-to-peer over the internet.** It ships the measurement
 that tells us whether doing so is feasible per host.
 
-## 6. CONFLICT RAISED, NOT RESOLVED: go-libp2p vs the zero-dependency rule
+## 6. CONFLICT RESOLVED 2026-09-21: go-libp2p, by founder override
 
 HARDENING-PLAN §16 line 872 selects **go-libp2p** for the data plane (AutoNAT +
 DCUtR + Circuit Relay v2). The founder's standing rule for the connector is
@@ -207,15 +218,36 @@ runs on customers' Macs — a supply-chain surface, an audit surface, a binary-s
 cost, and an upgrade treadmill, in a codebase whose entire review posture is "we
 read every line that ships".
 
-**No decision is made here, and no dependency was added.** The decision belongs to
-the founder because it trades a house rule against a plan directive. Phase 2 cannot
-start until it is made; everything in Phase 1 is useful under either answer,
-because a reflexive-address observation and a static peer list are equally valid
-inputs to a hand-rolled ICE stack and to libp2p's AutoNAT.
+### DECIDED 2026-09-21: go-libp2p, founder override of the zero-dep rule, on the plan's authority
+
+The conflict above was put to the founder as stated — HARDENING-PLAN line 872
+selects go-libp2p, the standing house rule is hand-roll and keep zero
+dependencies — and he chose **go-libp2p, as the plan says**. This is an explicit
+founder override of the zero-dependency rule, made on the authority of §16, not an
+oversight and not a drift.
+
+**This is recorded so nobody reverts it as an accident.** A future contributor
+reading `connector/go.mod` will find a dependency tree in a repo whose other
+packages are standard-library-only, and the natural reading of that is "somebody
+slipped a dep in". It is not. The scope of the override is exact:
+
+- go-libp2p is permitted **in `connector/internal/p2p` only**. Every other package
+  in `connector/` still compiles against the standard library alone, and that is
+  the property to preserve.
+- The override covers **this dependency and its transitive closure**, nothing
+  else. It is not a general relaxation. No unrelated dependency may be added
+  anywhere in the tree on the strength of this decision.
+- `internal/p2p/p2p.go`'s package comment repeats the decision and its date at the
+  point of use, because a decision recorded only in a design document is a decision
+  the next person will not find.
+
+Everything in Phase 1 survived the decision unchanged, as predicted: the reflexive
+address observation became AutoNAT's cheap pre-check (§10) rather than being
+thrown away, and the static peer list is untouched.
 
 ## 7. Phasing
 
-### Phase 1 — this change. REAL.
+### Phase 1 — REAL (shipped earlier).
 
 **A. STUN observability.** New `connector/internal/stun`: hand-rolled RFC 5389
 binding client, zero dependencies. 20-byte header, magic cookie `0x2112A442`,
@@ -267,15 +299,90 @@ configured peer is authorized only if the coordinator lists its fingerprint.
 under the exclusive lock and says `appliesAt: next nexal run`, rather than
 pretending a live update happened. See `connector/CLI-CONTRACT.md`.
 
-### Phase 2 — NOT STARTED.
+### Phase 2 — this change. REAL, and OFF BY DEFAULT.
 
-Coordinator candidate signalling plus simultaneous-dial hole punching, and the
-relay fallback for the hosts where punching cannot work. **Blocked on §6**: the
-libp2p-vs-hand-roll decision determines almost every line of it, so writing any of
-it now would be writing it twice. Phase 1 deliberately publishes nothing: the
-reflexive address is printed locally for the owner and is never advertised to the
-coordinator, because an address published without a signalling and punching design
-is an address that leaks for no benefit.
+New package `connector/internal/p2p`, built on go-libp2p per §6. It delivers the
+three pieces HARDENING-PLAN §16 names. **The whole path is feature-flagged off**:
+`config.p2p` is absent in every config written before this change, absent means
+`enabled:false`, and a disabled host builds no libp2p host at all — no socket, no
+goroutines, no published address, no reservation. Shipping this cannot regress an
+existing user because for an existing user nothing runs
+(`TestDisabledHostIsInert`).
+
+**A. AutoNAT — dialability, reconciled with `internal/stun` rather than duplicating
+it.** `internal/p2p/nat.go`. The two signals answer **different questions** and
+neither supersedes the other, which is why there is exactly one type
+(`Dialability`) that consumers read and no way to read a punchability conclusion
+out of AutoNAT or a dialability conclusion out of STUN:
+
+| | question | predicts | authority |
+| --- | --- | --- | --- |
+| `internal/stun` (Phase 1) | does my NAT reuse one mapping across destinations? | whether **hole punching** can work | the cheap pre-check, and the **only** signal available with the flag off |
+| libp2p AutoNAT | can a peer complete an inbound dial to an address I advertised? | whether a **relay** is needed | authoritative on **dialability** — an end-to-end test by a third party, not an inference |
+
+`Reconcile` composes them. `private` + `endpoint-dependent` is `agree` (both
+independently say "relay required"). `private` + `endpoint-independent` is
+`complementary`, **not** a conflict — it is the ordinary home-network state and
+printing it as a contradiction would train owners to ignore the field. A measured
+`endpoint-dependent` NAT skips the punch entirely, because §16 says symmetric and
+carrier-grade NAT defeat it. Everything else attempts the punch first, since a
+punch is cheap and the relay is the expensive path. Phase 1's honesty rule still
+holds and is still asserted by a test: no summary claims hole punching *will*
+work.
+
+**B. DCUtR — address exchange over the relay, RTT, simultaneous dial.**
+`libp2p.EnableHolePunching`, with a tracer (`internal/p2p/punch.go`) because libp2p
+punches **silently** otherwise, and §5's complaint about Phase 1 was precisely that
+an unobservable transport property is one you cannot decide anything about. The
+surfaced RTT is DCUtR's own CONNECT round trip — the value the synchronised dial
+was timed against — not a ping.
+
+**C. Circuit Relay v2 — fallback with ceilings on all three axes.**
+`internal/p2p/limits.go`. HARDENING-PLAN lines 877-879 make the byte ceiling the
+cost control: "a fallback path cannot silently run up spend". An unbounded relay
+path is therefore a **failed** implementation, not an incomplete one. Three axes,
+three enforcement points, because they are knowable at three different moments:
+
+| axis | as relay **service** (we carry others' bytes) | as relay **client** (our bytes) |
+| --- | --- | --- |
+| connections | `relayv2.Resources.MaxCircuits` / `MaxReservations`, inside libp2p | `InterceptAddrDial` + `InterceptAccept`, via `Ledger` |
+| time | `relayv2.RelayLimit.Duration` resets the circuit | per-circuit deadline, reaped by a 5 s watchdog ticker |
+| bytes | `relayv2.RelayLimit.Data` resets the circuit | `MeteredStream` charges **every read and write** |
+
+The client-side column is ours because libp2p imposes no ceiling on bytes we push
+through someone **else's** relay; relying on a counterparty to enforce our budget
+would mean we cannot state a bound. All ceilings are owner-configurable under
+`config.p2p`, a **zero means the reviewed default and never unlimited** (no value
+expresses unlimited, on purpose), and hard outer bounds stop a fat-fingered config
+becoming an uncapped relay. Consumption is surfaced with each limit beside its
+usage, and refusals are counted separately from truncations — "we protected you"
+and "a transfer failed, here is why" mean different things to an owner.
+
+Two honest limitations, stated on the surface itself rather than in this document
+only (`Limits.Stated()`): the byte counters cover data streams on the nexal
+protocol and not libp2p's own control chatter, and the total **resets on process
+restart**, so it is *not* the per-donor **monthly** budget §16 also requires. That
+one needs persistence and a calendar the connector does not have; claiming a
+monthly cap that silently resets would be worse than claiming a process-lifetime
+cap.
+
+**D. Direct connections are never metered.** Metering the good path would throttle
+the transport the relay ceiling exists to protect. Only relayed streams are
+wrapped, asserted in both directions by test.
+
+### Phase 2 — what is still NOT built
+
+- **Coordinator signalling endpoints.** Out of scope by instruction. The seam is
+  `p2p.Rendezvous`, the in-process `StubRendezvous` satisfies the tests, and §11
+  lists the four endpoints the coordinator must expose. With no rendezvous a host
+  can accept and can relay, but cannot initiate to a peer whose address it does not
+  already hold — `ErrNoRendezvous`, a distinct error so "not wired up" cannot be
+  mistaken for "unreachable".
+- **Any agent/CLI wiring.** `internal/p2p` is complete and tested but nothing
+  constructs it yet; `nexal doctor` does not print `Snapshot` yet.
+- **A proven hole punch.** It cannot be proven offline — see §9.
+- **The §16 monthly per-donor bandwidth budget and cap-aware scheduling.**
+- **ML-DSA.** See §12.
 
 ## 8. Cross-VLAN operational guidance
 
@@ -307,10 +414,20 @@ proves authorization.
 | STUN reflexive address + NAT class observation | **Real**, opt-in, offline-tested, `doctor --stun` |
 | Static owner-configured peers, fingerprint-pinned | **Real**, config + CLI, same private-IP rule |
 | Static peer grants authorization | **No.** §30.2; coordinator's list alone sets `Authorized` |
-| Hole punching / simultaneous dial | **Not built.** Phase 2 |
-| Coordinator candidate signalling | **Not built.** Phase 2 |
-| Any relay (Cloudflare TURN or ours) | **Rejected** for bulk bytes; §3 |
-| go-libp2p | **Not added.** Conflict raised in §6, founder decides |
+| go-libp2p | **Added, `internal/p2p` only.** Founder override 2026-09-21; §6 |
+| libp2p path active for existing users | **No.** `config.p2p` absent ⇒ `enabled:false`; a disabled host builds no libp2p host at all |
+| AutoNAT dialability, reconciled with `internal/stun` | **Real**, `p2p.Dialability`; the two signals compose, neither supersedes (§7 Phase 2 A) |
+| DCUtR hole punching wired + RTT/outcome surfaced | **Real** (`EnableHolePunching` + tracer) |
+| A hole punch **proven** to traverse two real NATs | **No, and not provable here.** Loopback has no public address, so libp2p never even registers the DCUtR handler in a sandbox. Only two real NATed hosts can prove this |
+| Circuit Relay v2 fallback | **Real**, client and (opt-in) service |
+| Relay ceilings on connections, time **and** bytes | **Real and enforced**, owner-configurable, zero means default and never unlimited; consumption surfaced. Lines 877-879 |
+| Monthly per-donor bandwidth budget (§16) | **Not built.** The byte total resets on restart, and every surface says so |
+| Relay sees customer file content | **No.** End-to-end libp2p security through the circuit. It *does* see both fingerprints, IPs, volume and timing — §10 |
+| Coordinator candidate signalling | **Not built, out of scope.** Seam is `p2p.Rendezvous`; §11 lists the four endpoints |
+| Agent/CLI wiring for the libp2p path | **Not built.** `internal/p2p` is complete and tested but nothing constructs it yet |
+| libp2p can admit a peer the coordinator never authorized | **No.** Gate at `InterceptSecured` (before the muxer, so no stream can open), re-checked at stream open; the transport has no path that ADDS to the allowlist |
+| `privateIP` / LAN mutual-TLS path changed | **No.** Untouched and preferred when a private address exists; `TestLANRuleIsNotWeakened` imports `pool` and asserts the rule accept-for-accept |
+| Any relay (Cloudflare TURN or ours) for bulk bytes | **Still rejected**; §3. The relay here is a donor's, per §16 |
 | Verified between two real Macs on two real VLANs | **No.** Sandbox is Linux; `GOOS=darwin go build` and `go vet` are the only checks the Darwin path has had |
 
 One real observation exists, from a single manual `nexal doctor --stun` run in the
@@ -320,3 +437,142 @@ reflexive address was `54.237.68.156` with **different ports per server** (45039
 warned that hole punching from such a host would need a relay. That is one host on
 one network and says nothing about any customer's NAT — it is evidence the decoder
 and the classifier work end to end against a real server, nothing more.
+
+## 10. What the relay operator can and cannot see
+
+Stated plainly, because overstating this is worse than admitting a gap. A Circuit
+Relay v2 hop carries an opaque byte stream; the two endpoints run their **own**
+libp2p security handshake (TLS 1.3 or Noise) end to end **through** the circuit,
+and the relay is not a party to it.
+
+**The relay CANNOT see:**
+
+- **Customer file content.** Payload bytes are encrypted end to end between the two
+  connectors. The relay forwards ciphertext.
+- **Which application protocol is in use, or stream framing** — protocol
+  negotiation happens inside the encrypted session.
+- **Anything it could substitute itself into.** Both peer IDs are authenticated
+  end to end, so a relay that tried to terminate the session itself fails the
+  handshake rather than becoming a silent man in the middle.
+
+**The relay CAN see, and this is not a small list:**
+
+- **Both peers' identities.** It is told the destination peer ID in the `CONNECT`
+  message and knows the reserving peer's ID from the reservation. Since our peer
+  IDs embed their public keys, the relay can derive both **device fingerprints**.
+- **The reserving peer's IP addresses**, and the dialling peer's source IP.
+- **Byte volume, direction, timing and duration** of every circuit it carries —
+  i.e. enough for traffic analysis: who backs up to whom, how much, and when.
+- **Nothing about membership**, and it gains nothing by carrying traffic: a relay
+  is not an authorizer (§30.2), and the relay itself must be an authorized peer
+  before we will reserve on it, precisely because of the metadata above.
+
+The confidentiality claim therefore rests on **libp2p's security transport**, not
+on the `internal/pool` mutual-TLS layer, which does not run over this path. That is
+a different trust surface from the LAN path and is called out here rather than
+blurred: on the LAN path, confidentiality and authorization are the same
+handshake; on the libp2p path they are two mechanisms — libp2p's transport
+security for confidentiality, and the coordinator's fingerprint allowlist,
+re-checked at connect **and** at stream open, for authorization.
+
+## 11. What the coordinator must expose (NOT built — out of scope)
+
+Four additive endpoints. None may carry authorization: the peer directory's
+`Authorized` flag remains the only thing that admits a peer, and each endpoint must
+be refused for a caller whose own device is not authorized.
+
+1. `POST /v1/peers/self/p2p` — publish this device's libp2p peer ID, advertised
+   multiaddrs, and relay-reservation addresses. This is where an address leaves the
+   machine for the first time (Phase 1 published nothing), so it must be gated on
+   the owner's flag and must never include an address the host has not bound.
+2. `GET /v1/peers/{deviceId}/p2p` — one authorized peer's peer ID and multiaddrs.
+   **404 for a device the caller may not transfer with**, so the endpoint cannot be
+   used to enumerate membership.
+3. `GET /v1/relays` — relay candidates: authorized, publicly dialable donor devices
+   that opted into relay duty. §16 requires donors, paid, never company-run
+   infrastructure — so this list is the coordinator's, not a bootstrap list
+   hardcoded in the binary.
+4. `DELETE /v1/peers/self/p2p` — withdraw on shutdown or when the owner disables
+   the flag. Without it, peers keep being handed a stale address that fails to
+   dial.
+
+**One property the connector cannot enforce for other peers and the coordinator
+must:** a published peer ID has to derive to the DeviceID it was published under.
+The check is `DeviceIDFromPeerID(peerID) == deviceId`, four lines. Without it a
+member could publish someone else's peer ID and redirect their traffic. The
+connector **re-checks it on every fetch** anyway (`TestCoordinatorRecordPairing
+IsRechecked`), because a client that assumes the server checked is a client with a
+second source of truth about identity — but the coordinator should reject it at
+write time too.
+
+## 12. ML-DSA (§2) migration implication — written down, not implemented
+
+§16 warns the §2 post-quantum migration "has to be planned across both at once".
+Concretely, and the detail is in `internal/p2p/identity.go`:
+
+- Today one identity has two encodings. `DeviceID = sha256(ed25519 pubkey)`
+  (`identity.go:33-39`), and an Ed25519 libp2p peer ID is the **identity**
+  multihash of the marshalled public key — the key rides *inside* the peer ID. So
+  `peer.ID → pubkey → DeviceID` is total, deterministic and needs no directory,
+  which is what makes the authorization gate possible at all.
+- ML-DSA breaks **both halves at once**. `DeviceID` becomes
+  `sha256(ML-DSA pubkey)`, changing every fingerprint in every coordinator record,
+  every `staticPeers` entry and every operator's notes. And libp2p has **no ML-DSA
+  key type** — its key enum is RSA, Ed25519, Secp256k1, ECDSA — while an ML-DSA-44
+  public key (≈1312 bytes) is far too large to sit in an identity multihash the way
+  a 32-byte Ed25519 key does, so peer IDs would become hash-based and
+  `ExtractPublicKey` would stop working, removing the directory-free derivation.
+- **Therefore the order is forced.** The coordinator must serve *both* fingerprints
+  for a peer through a dual-fingerprint window before any connector switches, and
+  the libp2p side needs either a hybrid handshake (Ed25519 peer identity carrying an
+  ML-DSA-signed binding to the new DeviceID) or a libp2p release with an ML-DSA key
+  type. Until one exists, **§2 cannot land for the libp2p path even if it lands for
+  the LAN path** — and shipping it for one transport only would create exactly the
+  two-sources-of-truth-about-identity problem this design otherwise avoids.
+
+## 13. Two transports coexist; the LAN path is preferred and untouched
+
+This is the invariant most at risk from a change this size, so it is stated last
+and tested twice.
+
+`internal/pool`'s mutual-TLS HTTPS path to a literal private IP is the **proven**
+transport. Phase 2 changed **not one line** of it. `privateIP`
+(`peer.go:314-317`) and `ValidPeerEndpoint` are byte-identical, and
+`TestLANRuleIsNotWeakened` imports `internal/pool` from the test binary and asserts
+the rule still refuses every public address and still accepts every RFC1918,
+loopback and link-local one — the same technique `TestStaticPeerEndpointRuleMatches
+Pool` used in Phase 1, because the guard against a loosened rule is a test, not a
+comment.
+
+libp2p is an **additional** path for peers no private address can reach. The
+routing rule:
+
+1. If the peer has a usable private address → **LAN mutual-TLS path**. `p2p.Connect`
+   refuses (`ErrInvalid`) when every address it was given is private, and counts it
+   as `lanPreferred` in the snapshot. A high count there is good news, not an error
+   rate (`TestLANIsPreferredOverLibp2p`).
+2. Otherwise, libp2p: direct dial, then DCUtR, then a relayed circuit under the
+   ceilings.
+
+`p2p.PrivateAddr` is the routing hint for step 1. It deliberately **mirrors** the
+shape of `privateIP` without importing it, and a test asserts the two agree
+case-for-case — so it can never quietly become a looser second copy of the security
+rule. The authoritative rule for what the LAN transport will dial remains
+`pool.ValidPeerEndpoint`.
+
+Authorization is identical across both transports and comes from one place: the
+coordinator's `Authorized` set. On the LAN path the mutual-TLS `peerPolicy` pins an
+exact fingerprint; on the libp2p path the connection gater derives the fingerprint
+from the authenticated peer ID and checks the same allowlist, at
+`InterceptSecured` — before the muxer is negotiated, so an unauthorized peer cannot
+open a stream at all — and again at stream open, so a long-lived connection cannot
+outlive a revocation. An empty allowlist denies everything, matching
+`pool.newPeerPolicy`'s refusal of `len(allowed) < 1`. **No code path in
+`internal/p2p` can add to the allowlist**, which is the property that keeps libp2p
+from becoming a §30.2 back door, and it has its own test.
+
+There is **no DHT, no mDNS, and no public bootstrap list** in the libp2p wiring.
+That is a security decision, not minimalism: a global DHT would publish members'
+addresses to strangers and would make open discovery a thing this host does, and
+§30.2 forbids discovery from carrying authorization weight anyway. Peers come from
+the coordinator or they do not come.

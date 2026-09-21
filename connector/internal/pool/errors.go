@@ -15,4 +15,14 @@ var (
 	ErrPaused       = errors.New("pool: owner has reclaimed capacity")
 	ErrClosed       = errors.New("pool: store closed")
 	ErrUnsupported  = errors.New("pool: unsupported placement")
+	// ErrTimeout is a bounded wait that expired. It exists so a caller can tell
+	// "nothing arrived in time" apart from "the input was wrong": in the ring
+	// collective the first is a failed rank and the second is a bug.
+	ErrTimeout = errors.New("pool: bounded wait expired")
+	// ErrRankUnreachable is a collective rank this host could not reach or did not
+	// hear from inside its step budget. It is always wrapped in a RingFailure that
+	// names the rank, so survivors report a rank rather than hanging on it.
+	ErrRankUnreachable = errors.New("pool: ring rank unreachable")
+	// ErrAborted is another rank's report that the collective cannot complete.
+	ErrAborted = errors.New("pool: collective aborted by a peer")
 )

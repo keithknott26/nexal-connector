@@ -29,6 +29,21 @@ final class AppModel: ObservableObject {
     /// Starts as "nothing is reporting", which is the honest state at launch.
     @Published private(set) var capability: TransportCapability
     @Published var consent = false
+    /// The pairing being shown, if any. Held in memory only: the module matrix
+    /// encodes the claim token, so it is never persisted, never logged and dropped
+    /// as soon as the pairing is finished with.
+    @Published private(set) var pairing: PairingPresentation?
+    /// The connector's own explanation when a pairing could not be minted — the
+    /// feature being switched off on the coordinator, or a host credential the
+    /// coordinator no longer accepts. Kept separate from `message` so the reason
+    /// stays next to the pairing controls rather than scrolling away in the footer.
+    @Published private(set) var pairingProblem: String?
+    /// The role the owner picked. Defaults to receiver, which is the direction a
+    /// Mac is used in first; nothing is minted until the owner asks.
+    @Published var pairingRole: PairingRole = .receiver
+    /// Ticks once a second while a pairing is live, purely so the countdown text
+    /// re-renders. It does not poll, and it never decides that a pairing expired.
+    @Published private(set) var pairingTick = Date()
     @Published var localPreview = false {
         didSet {
             if oldValue != localPreview {
@@ -38,6 +53,10 @@ final class AppModel: ObservableObject {
         }
     }
     private var child: Process?
+    /// The pairing poll and the countdown timer, cancelled together. Separate from
+    /// the panel's single status poll because a pairing lives for five minutes and
+    /// must be watched more closely than that poll's ten-second cadence.
+    private var pairingWatch: Task<Void, Never>?
     /// The only place a capability source is named. Swapping the implementation
     /// changes no view, presenter or chart.
     private let capabilitySource: TransportCapabilityProviding
@@ -65,6 +84,11 @@ final class AppModel: ObservableObject {
         ManualAcceptancePresentation.unavailableReason(
             localPreview: localPreview, hasExecutable: selection != nil,
             configurationExists: configurationExists, status: status)
+    }
+    var pairingUnavailableReason: String? {
+        PairingPresentation.unavailableReason(
+            hasExecutable: selection != nil, configurationExists: configurationExists,
+            status: status)
     }
     var showsEnrollmentConfirmation: Bool {
         enrollmentPresentation.showsConfirmation(for: selectedConfig)
@@ -263,7 +287,107 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - Phone pairing
+    //
+    // Every step goes through the ONE seam: `invoke` runs the Go CLI with the
+    // bounded execution every other command uses. This app does not mint, poll,
+    // cancel, encode or validate a pairing itself — it displays what the connector
+    // reports. That is why there is no QR encoder and no coordinator client here.
+
+    /// Mint a pairing and start watching it.
+    func startPairing() async {
+        guard !busy else { return }
+        if let reason = pairingUnavailableReason {
+            pairingProblem = reason
+            return
+        }
+        busy = true
+        defer { busy = false }
+        pairingProblem = nil
+        // A second pairing must not leave the first one open on the coordinator,
+        // where it would stay scannable until it expired.
+        await cancelPairing(silently: true)
+        do {
+            let minted = try PairingMint.decode(try await invoke(.pair(role: pairingRole)))
+            guard let presentation = PairingPresentation(mint: minted) else {
+                throw ShellError.invalidPairing
+            }
+            pairing = presentation
+            watchPairing()
+            message = "Pairing code ready. Scan it in nexal@home; it expires shortly and nothing is shared by scanning alone."
+        } catch {
+            pairing = nil
+            // The connector's text is shown verbatim because it names the actual
+            // cause — the feature being off on the coordinator, an unaccepted host
+            // credential, an unreachable coordinator — which this app cannot infer.
+            pairingProblem = error.localizedDescription
+        }
+    }
+
+    /// Cancel the displayed pairing. `silently` is used when replacing one pairing
+    /// with another, where a failure to cancel the old one must not overwrite the
+    /// message about the new one.
+    func cancelPairing(silently: Bool = false) async {
+        guard let current = pairing else { return }
+        pairingWatch?.cancel()
+        pairingWatch = nil
+        do {
+            _ = try await invoke(.cancelPairing(pairingId: current.pairingId))
+            pairing = nil
+            if !silently { message = "Pairing cancelled. The code can no longer be scanned." }
+        } catch {
+            // The pairing is NOT cleared here: if the cancellation could not be
+            // confirmed, the code may still be live on the coordinator, and hiding
+            // it would tell the owner it was dead when it is not.
+            if !silently {
+                pairingProblem = "Could not confirm the cancellation. \(error.localizedDescription) The code may still be scannable until it expires."
+                watchPairing()
+            }
+        }
+    }
+
+    /// Poll this pairing's status through the CLI until it stops being live.
+    private func watchPairing() {
+        pairingWatch?.cancel()
+        pairingWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard let self else { return }
+                let keepGoing = await self.refreshPairing()
+                if !keepGoing { return }
+            }
+        }
+    }
+
+    /// One tick of the pairing watch. Returns false when there is nothing left to
+    /// watch. The status is polled every third tick: the countdown needs a redraw
+    /// every second, but the coordinator does not need a request every second.
+    private func refreshPairing() async -> Bool {
+        guard let current = pairing else { return false }
+        pairingTick = Date()
+        guard current.status.isLive else { return false }
+        guard Int(pairingTick.timeIntervalSince1970) % 3 == 0 else { return true }
+        do {
+            let report = try PairingStatusReport.decode(
+                try await invoke(.pairingStatus(pairingId: current.pairingId)))
+            let updated = current.updated(with: report.pairingStatus)
+            pairing = updated
+            if updated.status == .scanned {
+                message = "Your phone claimed this pairing. Approve what it may use on the phone; nothing is shared by pairing alone."
+            }
+            return updated.status.isLive
+        } catch {
+            // A failed poll says nothing about the pairing, so the code stays on
+            // screen and the reason is shown. Stopping here would silently strand
+            // a pairing that is still live.
+            pairingProblem = "Could not read the pairing status. \(error.localizedDescription)"
+            return true
+        }
+    }
+
     func quit() {
+        pairingWatch?.cancel()
+        pairingWatch = nil
         if let child, child.isRunning { child.terminate() }
         NSApplication.shared.terminate(nil)
     }

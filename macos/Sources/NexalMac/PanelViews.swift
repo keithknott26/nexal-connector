@@ -183,3 +183,58 @@ struct SeriesChart: View {
         .chartXAxis(.hidden)
     }
 }
+
+/// The pairing code, drawn from the module matrix the Go connector reported.
+///
+/// It is drawn rather than image-loaded, and it is never written to a file: the
+/// modules encode the claim token that authorizes a phone to claim this Mac, so
+/// the code exists on screen and nowhere else. A `Canvas` draws it at whatever
+/// size the panel gives it, and each module is snapped to a whole point so the
+/// rows do not blur into each other at fractional scales — a blurred QR is an
+/// unscannable QR, and that failure is invisible until someone tries.
+///
+/// Rendering is deliberately black-on-white regardless of appearance. An inverted
+/// code is a photographic negative, and most scanners refuse one; this is the
+/// same reason the CLI has an `--invert` flag for dark terminals rather than
+/// guessing.
+struct PairingCodeView: View {
+    let symbol: PairingSymbol
+    /// Dimmed when the pairing can no longer be scanned. The code stays on screen
+    /// so the owner can see WHICH code expired, instead of an empty box.
+    let isLive: Bool
+
+    var body: some View {
+        let padded = symbol.paddedModules
+        Canvas { context, size in
+            let count = CGFloat(symbol.paddedSize)
+            let module = (min(size.width, size.height) / count).rounded(.down)
+            guard module >= 1 else { return }
+            let side = module * count
+            let originX = ((size.width - side) / 2).rounded(.down)
+            let originY = ((size.height - side) / 2).rounded(.down)
+            context.fill(Path(CGRect(x: originX, y: originY, width: side, height: side)),
+                         with: .color(.white))
+            for (row, cells) in padded.enumerated() {
+                for (column, isDark) in cells.enumerated() where isDark {
+                    let rect = CGRect(x: originX + CGFloat(column) * module,
+                                      y: originY + CGFloat(row) * module,
+                                      width: module, height: module)
+                    context.fill(Path(rect), with: .color(.black))
+                }
+            }
+        }
+        .frame(width: PairingCodeView.side, height: PairingCodeView.side)
+        .background(Color.white)
+        .opacity(isLive ? 1 : 0.35)
+        .accessibilityLabel(isLive
+            ? "Pairing QR code. \(symbol.caption) Scan it with the nexal@home app."
+            : "Expired pairing QR code, shown dimmed. \(symbol.caption)")
+        // A QR is not meaningfully described by VoiceOver; the surrounding rows
+        // carry the role, the status and the countdown as text instead.
+        .accessibilityAddTraits(.isImage)
+    }
+
+    /// Large enough that a 177-module version-40 symbol still gets one whole point
+    /// per module, with the quiet zone included.
+    static let side: CGFloat = 200
+}

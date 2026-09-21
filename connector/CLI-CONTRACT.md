@@ -126,6 +126,45 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   permits the peer port between the subnets — a silent deny there looks exactly
   like a discovery failure. Alternative to static peers: enable mDNS
   reflection/repeating on the switch (UniFi, Cisco). See `TRANSPORT-NAT-DESIGN.md`.
+- `nexal pair --role receiver|donor` mints a short-lived phone pairing, renders it
+  as a QR code, and then polls the coordinator until it is scanned, cancelled or
+  expired, printing each status transition. `--cancel <pairingId>` cancels one;
+  `--status <pairingId>` reports one status and exits; `--no-poll` mints and
+  renders without waiting (this is what the menu-bar app uses, so that every
+  process stays inside its bounded execution); `--ascii` renders with ASCII
+  characters for terminals that cannot draw Unicode half blocks; `--invert` swaps
+  ink and paper for a dark terminal, where an uninverted code is a photographic
+  negative most scanners refuse.
+  AUTHENTICATION is the existing ENROLLED HOST credential — not the owner token
+  and not a phone session — because the coordinator's pairing routes are behind
+  `requireHost` and compare the device id in the path against the host's own id.
+  An unenrolled Mac therefore cannot pair, and the command says so.
+  OUTPUT: stdout is JSON and only JSON, ONE OBJECT PER LINE, because a poll must
+  report transitions as they happen rather than printing nothing until the end.
+  The mint line is `{"pairing":{pairingId,role,coordinator,expiresAt,status,
+  qr:{version,mask,size,quietZone,errorLevel,encoding,moduleRows,moduleMeaning},
+  claimToken}}`; each transition is `{"pairingStatus":{pairingId,status,
+  expiresAt}}`; the last line of a poll is `{"pairingResult":{pairingId,status,
+  scanned,…}}`; `--cancel` prints `{"pairingCancelled":true,"pairingId":…}`.
+  `qr.moduleRows` is one string per row, `"1"` for a dark module, quiet zone NOT
+  included — it is emitted so the native UI draws the SAME matrix the CLI drew
+  rather than shipping a second QR encoder that could drift from this one.
+  THE RENDERED QR GOES TO STDERR, never stdout, so the JSON stream stays
+  machine-parseable while a human still sees the code.
+  THE CLAIM TOKEN IS A SECRET and is NOT in the output. The `claimToken` JSON
+  field holds a sentence saying so. The token authorizes a phone to claim this
+  Mac; it lives in the connector's memory and inside the QR modules (which are
+  the code the phone reads) and is never logged, never written to the
+  configuration file and never placed in an error message.
+  A pairing that nobody scans is NOT an error: the poll ends with
+  `pairingResult.status = "expired"` and exit code 0, so a UI does not show a
+  failure for a founder who simply did not scan in time.
+  Pairing requires an https coordinator on both ends — the coordinator rejects
+  non-https requests to its home routes and the phone's payload parser requires an
+  https origin — so the `--dev-loopback` development profile cannot pair.
+  The command takes NO configuration lock: it writes nothing, and blocking on the
+  lock a running agent may hold would make pairing fail on exactly the machines
+  that are working normally.
 - `nexal tunnel-check` verifies the configured binary digest/configuration and reports
   policy evidence, NOT live PQ attestation.
 - `nexal self-test --samples 1000000` runs the fixed CPU workload offline with a

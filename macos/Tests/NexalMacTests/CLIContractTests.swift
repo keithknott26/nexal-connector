@@ -108,4 +108,69 @@ final class CLIContractTests: XCTestCase {
             XCTAssertFalse(model.coordinator.contains(host), "default must not be local: \(host)")
         }
     }
+
+    // MARK: - Phone pairing
+
+    /// The three pairing invocations, asserted argument for argument against
+    /// connector/CLI-CONTRACT.md. `--no-poll` is the important one: without it the
+    /// CLI blocks until the pairing resolves, which would sit inside the app's
+    /// 20-second process bound and time out on every pairing nobody scans instantly.
+    func testPairingCommandsMatchGoContract() {
+        XCTAssertEqual(CLICommand.pair(role: .receiver).arguments(config: config),
+                       ["pair", "--role", "receiver", "--no-poll", "--config", config.path])
+        XCTAssertEqual(CLICommand.pair(role: .donor).arguments(config: config),
+                       ["pair", "--role", "donor", "--no-poll", "--config", config.path])
+        let id = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b"
+        XCTAssertEqual(CLICommand.pairingStatus(pairingId: id).arguments(config: config),
+                       ["pair", "--status", id, "--config", config.path])
+        XCTAssertEqual(CLICommand.cancelPairing(pairingId: id).arguments(config: config),
+                       ["pair", "--cancel", id, "--config", config.path])
+    }
+
+    /// A pairing id arrives from the connector and goes back out as an argument.
+    /// It must stay a single separate argument: no shell is involved anywhere in
+    /// ConnectorProcess, and this asserts that the app is not the place where that
+    /// stops being true.
+    func testPairingIdentifierStaysOneArgument() {
+        let hostile = "id; touch /tmp/not-executed --role donor"
+        let args = CLICommand.cancelPairing(pairingId: hostile).arguments(config: config)
+        XCTAssertEqual(args, ["pair", "--cancel", hostile, "--config", config.path])
+        XCTAssertFalse(args.contains("/bin/sh"))
+        XCTAssertEqual(args.filter { $0 == "--role" }.count, 0)
+    }
+
+    /// The role is an enum precisely so an unchecked string cannot reach the CLI.
+    func testOnlyTheTwoContractRolesExist() {
+        XCTAssertEqual(PairingRole.allCases.map(\.rawValue), ["receiver", "donor"])
+        XCTAssertNil(PairingRole(rawValue: "observer"))
+        for role in PairingRole.allCases {
+            XCTAssertFalse(role.label.isEmpty)
+            XCTAssertFalse(role.explanation.isEmpty)
+        }
+    }
+
+    /// The claim token authorizes a phone to claim this Mac. The CLI puts a
+    /// disclaimer in that field rather than the secret, and this app must not
+    /// decode, store or display it either way.
+    func testPairingOutputCarriesNoClaimToken() throws {
+        let json = #"""
+        {"pairing":{"pairingId":"3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b","role":"receiver","coordinator":"https://coordinator-dev.nexal.systems","expiresAt":"2026-09-21T19:25:00.000Z","status":"waiting","qr":{"version":1,"mask":2,"size":21,"quietZone":4,"errorLevel":"M","encoding":"byte","moduleRows":["111111101010101111111","100000101010101000001","101110101010101011101","101110100000001011101","101110101111101011101","100000101010101000001","111111101010101111111","000000001010100000000","101010101010101010101","010101010101010101010","101010101010101010101","010101010101010101010","101010101010101010101","000000001010101010101","111111101010101010101","100000101010101010101","101110101010101010101","101110101010101010101","101110101010101010101","100000101010101010101","111111101010101010101"]},"claimToken":"not emitted"}}
+        """#
+        let mint = try PairingMint.decode(Data(json.utf8))
+        XCTAssertEqual(mint.pairing.qr.moduleRows.count, 21)
+        XCTAssertFalse(Mirror(reflecting: mint.pairing).children.contains { $0.label == "claimToken" })
+    }
+
+    /// The app is not allowed to have its own QR encoder: two encoders can drift,
+    /// and only a phone would ever notice. The matrix must come from the CLI.
+    @MainActor
+    func testTheAppHasNoPairingStateUntilTheConnectorMintsOne() {
+        let model = AppModel()
+        XCTAssertNil(model.pairing)
+        XCTAssertNil(model.pairingProblem)
+        XCTAssertEqual(model.pairingRole, .receiver)
+        // Without a chosen connector there is nothing to run, and the reason must
+        // be stated rather than leaving a dead button.
+        XCTAssertNotNil(model.pairingUnavailableReason)
+    }
 }

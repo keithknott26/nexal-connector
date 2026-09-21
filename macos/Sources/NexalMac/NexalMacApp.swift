@@ -36,6 +36,7 @@ private struct ConnectorPanel: View {
                 detailSection
                 graphsSection
                 controlsSection
+                pairingSection
                 setupSection
                 footer
             }
@@ -222,6 +223,77 @@ private struct ConnectorPanel: View {
                 Text("Private membership is not public consent. This build has no public execution, earnings, or automatic paid fallback.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Phone pairing (§26). The code, the role, a live countdown, the status and a
+    /// Cancel button are all present, and when pairing cannot start the reason is
+    /// stated next to a button that stays visible: a dead control with no
+    /// explanation reads as a broken app.
+    private var pairingSection: some View {
+        PanelSection(title: "Pair your phone") {
+            if let pairing = model.pairing {
+                IndicatorRow(state: pairing.indicator, tint: .indigo)
+                if let symbol = pairing.symbol {
+                    HStack {
+                        Spacer(minLength: 0)
+                        PairingCodeView(symbol: symbol, isLive: pairing.status.isLive)
+                        Spacer(minLength: 0)
+                    }
+                    Text(symbol.caption)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                // Recomputed from the tick the model publishes each second, so the
+                // countdown is live without any view owning a timer of its own.
+                Text(pairing.countdown(now: model.pairingTick))
+                    .font(.caption)
+                    .foregroundStyle(pairing.status.isLive ? .primary : .secondary)
+                Text("Pairing id \(pairing.pairingId)")
+                    .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                HStack {
+                    Button("Cancel pairing", role: .destructive) {
+                        Task { await model.cancelPairing() }
+                    }
+                    Button("New code") { Task { await model.startPairing() } }
+                }
+                Text("Scanning only claims this Mac. What it may use is approved separately on the phone; this panel grants nothing.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Picker("This Mac's role", selection: $model.pairingRole) {
+                    ForEach(PairingRole.allCases) { role in
+                        Text(role.label).tag(role)
+                    }
+                }
+                .disabled(model.pairingUnavailableReason != nil)
+                Text(model.pairingRole.explanation)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await model.startPairing() }
+                } label: {
+                    Label("Show pairing code", systemImage: "qrcode")
+                        .frame(maxWidth: .infinity)
+                }
+                .accessibilityIdentifier("show-pairing-code")
+                .disabled(model.pairingUnavailableReason != nil)
+                if let reason = model.pairingUnavailableReason {
+                    Text(reason)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                CaveatDisclosure(title: "How pairing works",
+                                 text: "The Go connector asks your coordinator for a short-lived pairing and renders the code. The code is drawn on screen only and is never saved: it carries a one-time secret that lets the phone claim this Mac. Codes expire in a few minutes, and an https coordinator is required — the local development preview profile cannot pair.")
+            }
+            // The connector's own explanation of a failure, kept beside the
+            // controls rather than in the footer where it would scroll away.
+            if let problem = model.pairingProblem {
+                Divider()
+                Text(problem)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
     }

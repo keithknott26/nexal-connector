@@ -73,6 +73,11 @@ type Client struct {
 	base  string
 	token string
 	http  *http.Client
+	// dev records that this client was built for a development profile, where the
+	// coordinator may be plain-HTTP loopback. It is read only by the pairing
+	// validator, to relax the https clause that would otherwise make the loopback
+	// profile (and the offline test harness) unable to construct a payload at all.
+	dev bool
 }
 
 func New(base, token string, dev bool) (*Client, error) {
@@ -114,11 +119,20 @@ func New(base, token string, dev bool) (*Client, error) {
 		MaxIdleConns:          4,
 		IdleConnTimeout:       30 * time.Second,
 	}
-	return &Client{base: strings.TrimRight(base, "/"), token: token, http: &http.Client{
+	return &Client{base: strings.TrimRight(base, "/"), token: token, dev: dev, http: &http.Client{
 		Timeout: 10 * time.Second, Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectForbidden },
 	}}, nil
 }
+
+// StatusError is a non-2xx coordinator response. It deliberately carries the
+// status code and NOTHING else: no URL, no response body, no bearer token.
+type StatusError struct{ Status int }
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("coordinator rejected request (HTTP %d)", e.Status)
+}
+
 func ValidID(id string) bool {
 	if len(id) < 1 || len(id) > 128 {
 		return false
@@ -159,7 +173,12 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 		if path == "/api/hosts/enroll" && resp.StatusCode == http.StatusConflict {
 			return errors.New("coordinator rejected enrollment (HTTP 409): invitation invalid, expired, or already used; generate a fresh enr_ invitation in Hosts > Enroll host, not an owner token")
 		}
-		return fmt.Errorf("coordinator rejected request (HTTP %d)", resp.StatusCode)
+		// Typed so a caller can distinguish "the feature is switched off" (503) from
+		// "this host credential is not accepted" (401) without string matching, which
+		// is what the pairing command needs in order to tell the owner WHICH of the
+		// several possible causes applies (HARDENING-PLAN §26). The message is
+		// unchanged, so existing callers and their tests see exactly what they did.
+		return &StatusError{Status: resp.StatusCode}
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if err != nil {

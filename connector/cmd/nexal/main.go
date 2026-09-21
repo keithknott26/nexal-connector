@@ -271,6 +271,23 @@ func runCommand(ctx context.Context, args []string) error {
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	opts := []agent.Option{agent.WithLogger(logger)}
+	// HARDENING-PLAN §36.4: contribution must be conditional, so the power,
+	// thermal and free-disk probes are installed for every configuration — there
+	// is no flag to turn them off, because "unconditional" is the thing §36.4
+	// forbids. The data directory (not "/") is measured, since an owner who put
+	// their Nexal data on an external volume cares about free space there.
+	//
+	// Off macOS the Mac-only dimensions report unknown and withhold nothing, which
+	// is why a Linux end-to-end test is unaffected by this wiring.
+	if *idle {
+		// --dev-assume-idle already substitutes synthetic idle/memory telemetry, so
+		// it substitutes synthetic §36.4 conditions too: a Linux end-to-end test must
+		// not fail because the CI box happens to be below the disk floor. Status marks
+		// them synthetic, and the flag is refused for a production configuration above.
+		opts = append(opts, agent.WithSyntheticConditions())
+	} else {
+		opts = append(opts, agent.WithConditionSource(agent.NewConditionSource(filepath.Dir(*path))))
+	}
 	if c.Discovery.Enabled() {
 		// Off unless the owner turned it on: config.Discovery is absent by default,
 		// and Validate has already refused a gate opened without a fingerprint and
@@ -352,6 +369,10 @@ func policyCommand(ctx context.Context, args []string) error {
 	// safe reading of silence — the alternative default is an unshaped uplink.
 	uploadMode := f.String("upload-mode", config.UploadModeAuto, "upload throttle mode: auto|manual|unlimited")
 	uploadLimit := f.Uint64("upload-limit-kib-per-second", 0, "manual upload ceiling in KiB/s, 32–1048576; manual mode only")
+	// Optional for the same reason as the upload flags: an existing three-flag
+	// caller (including the shipped Swift UI) must keep working, and 0 means the
+	// reviewed §36.4 default rather than "no floor".
+	minFreeDisk := f.Uint64("min-free-disk-mib", 0, "§36.4 disk reserve in MiB, 1024–1048576; 0 keeps the 10 GiB default")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -362,9 +383,13 @@ func policyCommand(ctx context.Context, args []string) error {
 	if *uploadLimit > 1<<20 {
 		return errors.New("upload limit is outside safe bounds")
 	}
+	if *minFreeDisk > 1<<20 {
+		return errors.New("disk reserve is outside safe bounds")
+	}
 	policy := config.ResourcePolicy{MemoryLimitBytes: *memory << 20,
 		ReserveMemoryBytes: *reserve << 20, IdleSeconds: *idle,
-		UploadMode: *uploadMode, UploadLimitBytesPerSecond: *uploadLimit << 10}
+		UploadMode: *uploadMode, UploadLimitBytesPerSecond: *uploadLimit << 10,
+		MinFreeDiskBytes: *minFreeDisk << 20}
 	if err := policy.Validate(); err != nil {
 		return err
 	}

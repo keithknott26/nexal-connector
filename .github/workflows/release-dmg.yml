@@ -161,8 +161,21 @@ jobs:
           # Proves Gatekeeper will accept it, rather than assuming.
           spctl --assess --type open --context context:primary-signature -vv "$DMG"
 
+      # shasum records the path exactly as it is given, so hashing an absolute
+      # path writes the CI runner's /Users/runner/work/_temp/... into the file.
+      # Every customer who downloaded it then got "No such file or directory"
+      # from `shasum -c`, because that path exists only on the build machine.
+      # Hash the basename from inside its directory so the checksum file names
+      # the DMG the way the person verifying it actually has it: sitting in the
+      # same folder, usually ~/Downloads.
       - name: Checksum
-        run: shasum -a 256 "${{ steps.build.outputs.dmg }}" | tee "${{ steps.build.outputs.dmg }}.sha256"
+        run: |
+          set -euo pipefail
+          DMG="${{ steps.build.outputs.dmg }}"
+          cd "$(dirname "$DMG")"
+          shasum -a 256 "$(basename "$DMG")" | tee "$(basename "$DMG").sha256"
+          # Verify here so a broken checksum file fails the build, not the customer.
+          shasum -a 256 -c "$(basename "$DMG").sha256"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

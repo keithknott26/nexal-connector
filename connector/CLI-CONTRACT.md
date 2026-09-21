@@ -25,7 +25,12 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   contain no credential, ciphertext, key material or coordinator URL. Stdout stays
   reserved for command output, so a supervisor must drain stderr but need not parse
   it; the record set is diagnostic and not part of the compatibility surface.
-- `nexal status` queries the running local API using the admin credential.
+- `nexal status` queries the running local API using the admin credential. Its
+  `contribution` block is the HARDENING-PLAN §36.4 / §26 answer to "why is my Mac
+  or is it not contributing": one entry per condition (power, thermal, owner
+  activity, free disk) with the observed value, whether that condition is
+  withholding, and a plain-language reason — including when the condition is
+  unknown. See the local API section for the field list and the honesty caveats.
 - `nexal doctor` emits a versioned, read-only JSON setup report without requiring
   the agent to be running. It reads only the nonsecret configuration file and
   omits host names/IDs, endpoints, paths and raw errors. It never reads Keychain,
@@ -50,6 +55,12 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
 - `nexal policy` reads the running agent's effective resource limits.
 - `nexal set-policy --memory-limit-mib 128 --reserve-memory-mib 512 --idle-seconds 600`
   requires all three settings explicitly.
+  `--min-free-disk-mib N` sets the §36.4 disk reserve (1024–1048576 MiB). It is
+  OPTIONAL and 0 keeps the reviewed 10 GiB default — 0 is never "no floor".
+  It is the only one of the three new conditions that is owner-tunable: free-space
+  needs differ per machine, whereas "do not run on battery" and "do not run while
+  thermally throttled" are §36.4 safety properties, not preferences, so no flag
+  disables them.
   `--upload-mode auto|manual|unlimited` (default `auto`) and
   `--upload-limit-kib-per-second N` add the upload-throttle dimension. These two
   are OPTIONAL so an existing three-flag caller keeps working and inherits `auto`;
@@ -95,7 +106,9 @@ Use `Authorization: Bearer <admin secret>`.
 The policy response and PUT request have these three required integer fields:
 `{memoryLimitBytes,reserveMemoryBytes,idleSeconds}`, plus the optional upload
 fields `uploadMode` (string `auto`|`manual`|`unlimited`),
-`uploadLimitBytesPerSecond` and `measuredUploadBytesPerSecond`. A body carrying
+`uploadLimitBytesPerSecond` and `measuredUploadBytesPerSecond`, plus the optional
+`minFreeDiskBytes` (§36.4 disk reserve; absent or 0 means the reviewed 10 GiB
+default, and must be 1 GiB–1 TiB when set). A body carrying
 only the original three fields is still accepted and decodes as `uploadMode`
 `auto` with no manual limit, so a client built before this dimension existed is
 not rejected. `measuredUploadBytesPerSecond` is DERIVED: it appears in the GET
@@ -118,6 +131,39 @@ unknown applies no metered ceiling rather than guessing in either direction. A
 metered path is capped hard (64 KiB/s) and never paused, and a rate cap is NOT the
 per-donor monthly bandwidth budget §16 requires — that remains unimplemented.
 Persistence failure pauses the live host without applying unsaved new limits.
+Status also includes `contribution`
+`{withholding,conditions[],summary,ownerPaused,enforced,enforcedScope,observedAt,thermalSource,synthetic}`,
+where each `conditions[]` entry is `{name,value,known,withholding,reason}` for
+`power`, `thermal`, `owner activity` and `free disk` (HARDENING-PLAN §36.4, surfaced
+per §26). Rules a consumer may rely on:
+
+- `withholding` is AUTOMATIC and TRANSIENT and is NEVER the same fact as `paused`.
+  `paused` is the owner's deliberate, persisted choice (`pause`/`resume`); no
+  condition ever writes it, and a machine cooling down never clears it. A UI must
+  render them as two different statements.
+- UNKNOWN NEVER WITHHOLDS. A condition that cannot be read reports
+  `known:false`, `withholding:false` and a reason saying so, because an
+  unreadable probe must not silently disable every host.
+- `thermal` normally reads unknown on Apple silicon and that is expected, not a
+  bug: `pmset -g therm` prints nothing on a cool Mac AND on a Mac that never
+  reports, so silence cannot prove either answer. Thermal is therefore
+  POSITIVE-ONLY — a stated `CPU_Speed_Limit` below 100 or a nonzero thermal /
+  performance warning level is believed; everything else is unknown. The
+  authoritative source is Swift's `ProcessInfo.processInfo.thermalState`, which is
+  not bridged yet, so thermal protection is currently INERT on that hardware and
+  says so in its reason string.
+- `power` treats a desktop (an `AC Power` line with no internal battery) as a
+  fully known healthy state; that condition can never withhold on a Mac mini.
+- `enforced` is `true`, unlike `uploadThrottle.enforced`, and `enforcedScope`
+  states the limit precisely: withholding gates local job admission and sets the
+  host heartbeat's "do not send me work" flag, so a withholding host stops being
+  offered attempts. It does NOT gate bulk storage/upload traffic, because no such
+  path exists in the connector (§21 Step 0). The heartbeat carries no "why", so the
+  reason is visible locally only.
+- `synthetic` is true under `run --dev-assume-idle`, which substitutes a
+  development fixture (AC power, ample disk, thermal still unknown) exactly as it
+  already substitutes idle/memory telemetry.
+
 Status additionally reports `manualAcceptanceSupported`, `ownerActivityOverride`,
 optional `acceptJobsUntil`, and optional `executionBlocker`. An absent blocker is
 not a promise of queued work. `/v1/accept-jobs` accepts no caller-selected duration,

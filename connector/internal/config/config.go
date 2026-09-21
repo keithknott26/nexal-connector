@@ -45,10 +45,18 @@ type Config struct {
 	// rewritten with empty strings, and NormalizeUploadMode reads the absence as
 	// the shaped default rather than as unlimited. Nothing enforces them on bulk
 	// data yet because no bulk upload path exists — see internal/throttle.
-	UploadMode                   string  `json:"uploadMode,omitempty"`
-	UploadLimitBytesPerSecond    uint64  `json:"uploadLimitBytesPerSecond,omitempty"`
-	MeasuredUploadBytesPerSecond uint64  `json:"measuredUploadBytesPerSecond,omitempty"`
-	Tunnel                       *Tunnel `json:"tunnel,omitempty"`
+	UploadMode                   string `json:"uploadMode,omitempty"`
+	UploadLimitBytesPerSecond    uint64 `json:"uploadLimitBytesPerSecond,omitempty"`
+	MeasuredUploadBytesPerSecond uint64 `json:"measuredUploadBytesPerSecond,omitempty"`
+	// MinFreeDiskBytes is the owner's disk reserve for HARDENING-PLAN §36.4's
+	// "pause when disk is low" condition — the disk analogue of
+	// ReserveMemoryBytes. Absent/0 means the reviewed default
+	// (contribution.MinFreeDiskBytesDefault), never "no floor": a zero reserve
+	// would mean contributing until the owner's volume is full. omitempty for the
+	// same reason as the upload fields — a config written before this existed is
+	// not rewritten, and silence reads as the safe default.
+	MinFreeDiskBytes uint64  `json:"minFreeDiskBytes,omitempty"`
+	Tunnel           *Tunnel `json:"tunnel,omitempty"`
 	// Discovery is absent by default, and absent means off. Peer discovery joins
 	// multicast groups and publishes this host's addresses, so it is an explicit
 	// owner decision rather than something a new binary starts doing on upgrade.

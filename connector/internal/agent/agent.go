@@ -16,6 +16,7 @@ import (
 
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/contribution"
 	"nexal/connector/internal/throttle"
 )
 
@@ -45,6 +46,11 @@ type Status struct {
 	CoordinatorHealthy         bool                  `json:"coordinatorHealthy"`
 	ResourcePolicy             config.ResourcePolicy `json:"resourcePolicy"`
 	UploadThrottle             UploadThrottle        `json:"uploadThrottle"`
+	// Contribution is HARDENING-PLAN §36.4's conditional-contribution verdict.
+	// Paused above and Contribution.withholding below are DIFFERENT facts and are
+	// reported separately on purpose: the first is the owner's persisted decision,
+	// the second is automatic, transient and never written to disk.
+	Contribution ContributionStatus `json:"contribution"`
 }
 
 // UploadThrottle is the §26 "always see why" view of the upload dimension: the
@@ -97,6 +103,16 @@ type Agent struct {
 	// ceiling rather than guessing. Set by WithMeteredSource once that bridge
 	// exists. Read under mu.
 	metered throttle.MeteredSource
+	// conditionSource and conditions are the §36.4 power/thermal/disk dimensions.
+	// conditions is the last observation and is read under mu; it is memory-only,
+	// because automatic withholding must never become persisted state that could
+	// outlive the condition or be confused with cfg.Paused.
+	conditionSource contribution.Source
+	conditions      contribution.Signals
+	// bridge is the single Swift→Go signal carrier (metered + authoritative
+	// thermal). Nil in every shipped configuration today; see
+	// contribution.PlatformBridge for why one interface carries both.
+	bridge contribution.PlatformBridge
 	// logger is set by New and never written again, so every goroutine below can
 	// read it without a.mu. Records carry attempt identifiers, states, durations
 	// and this package's fixed error strings; never tokens, admin credentials,
@@ -194,7 +210,7 @@ func (a *Agent) Snapshot() Status {
 		blocker = err.Error()
 	}
 	return Status{ManualAcceptanceSupported: a.cfg.Development, AcceptJobsUntil: until,
-		UploadThrottle:        a.uploadThrottleLocked(),
+		UploadThrottle: a.uploadThrottleLocked(), Contribution: a.contributionStatusLocked(),
 		OwnerActivityOverride: a.manualActiveLocked(), ExecutionBlocker: blocker,
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
@@ -300,6 +316,11 @@ func (a *Agent) invalidateConsentLocked() {
 	a.telemetry.Known = false
 	a.telemetry.OwnerActive = true
 	a.telemetry.AvailableMemoryBytes = 0
+	// a.conditions is deliberately NOT cleared. A consent change fences
+	// observations that could wrongly PERMIT work; discarding the §36.4 conditions
+	// would do the opposite — unknown does not withhold, so clearing them would
+	// let a policy edit resume contribution on a laptop that is still on battery.
+	// They age out through contribution.StaleAfter instead.
 	if a.cancel != nil {
 		a.cancel()
 	}
@@ -364,6 +385,15 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	}
 	if a.cfg.Paused {
 		return errors.New("host paused by owner")
+	}
+	// §36.4: default-on contribution must be CONDITIONAL. This is checked AFTER
+	// the owner's pause and as a separate clause, so the two never merge: the
+	// owner's flag is persisted consent, this is a transient machine condition,
+	// and each must survive the other. Unknown conditions do not withhold, so a
+	// Mac whose thermal state cannot be read keeps working with the reason
+	// visible in status rather than silently going dark.
+	if d := a.contributionLocked(); d.Withholding {
+		return errors.New("withholding contribution — " + d.Summary)
 	}
 	if a.lastHeartbeat.IsZero() || time.Since(a.lastHeartbeat) > 30*time.Second {
 		return errors.New("fresh authenticated coordinator heartbeat required")
@@ -643,7 +673,15 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	a.heartbeatGeneration++
 	heartbeat := a.heartbeatGeneration
 	known := a.telemetry.Known && time.Since(a.telemetryAt) <= 10*time.Second
-	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || a.telemetry.OwnerActive,
+	// Automatic withholding rides the existing OwnerActive flag, which is the
+	// coordinator's only "do not send me work" input. That is what makes §36.4
+	// real rather than display-only: a host on battery stops being offered
+	// attempts instead of merely refusing them locally. It is also a CONFLICT
+	// worth recording — the wire protocol has no field for "withholding, and
+	// why", so the reason is visible locally (status/UI per §26) but the
+	// coordinator cannot distinguish a busy owner from a hot machine.
+	withholding := a.contributionLocked().Withholding
+	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || a.telemetry.OwnerActive || withholding,
 		PQ: a.pq, Version: config.Version}
 	if a.manualActiveLocked() {
 		h.AcceptJobsUntil = a.manualUntil.UTC().Format("2006-01-02T15:04:05.000Z")
@@ -680,8 +718,25 @@ func (a *Agent) Run(ctx context.Context) error {
 		return errors.New("enroll this host before running")
 	}
 	a.Refresh(ctx)
+	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
+	// §36.4 power/thermal/disk sampling is its own goroutine on its own slower
+	// cadence: it spawns processes, so it must never sit in the 2 s telemetry path,
+	// and a slow pmset must not delay a heartbeat.
+	go func() {
+		defer wg.Done()
+		t := time.NewTicker(contribution.ProbeInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				a.RefreshConditions(ctx)
+			}
+		}
+	}()
 	// Peer discovery is its own goroutine so a multicast join, an advertise or a
 	// coordinator directory read can never delay a heartbeat or an attempt poll.
 	// It returns immediately when discovery is not configured.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 
+	"nexal/connector/internal/contribution"
 	"nexal/connector/internal/throttle"
 )
 
@@ -53,6 +54,17 @@ type ResourcePolicy struct {
 	// cold-start default on a link that was already measured, and zero means
 	// "never measured".
 	MeasuredUploadBytesPerSecond uint64 `json:"measuredUploadBytesPerSecond"`
+	// MinFreeDiskBytes is the §36.4 disk-low floor, and it is the ONLY one of the
+	// three new conditions that is owner-tunable. That asymmetry is deliberate:
+	// free-space needs genuinely differ between a 256 GB MacBook Air and an 8 TB
+	// Studio, whereas "do not run on battery" and "do not run while thermally
+	// throttled" are §36.4 safety properties rather than preferences, and a knob
+	// to switch them off would be a knob to re-create the support incident §36.4
+	// exists to prevent.
+	//
+	// Optional, like UploadMode: 0 decodes and validates as the reviewed default
+	// so a payload written before this field existed keeps working.
+	MinFreeDiskBytes uint64 `json:"minFreeDiskBytes"`
 }
 
 // NormalizeUploadMode maps the absent value onto the default. Backward
@@ -72,7 +84,8 @@ func (c Config) ResourcePolicy() ResourcePolicy {
 		ReserveMemoryBytes: c.ReserveMemoryBytes, IdleSeconds: c.IdleSeconds,
 		UploadMode:                   NormalizeUploadMode(c.UploadMode),
 		UploadLimitBytesPerSecond:    c.UploadLimitBytesPerSecond,
-		MeasuredUploadBytesPerSecond: c.MeasuredUploadBytesPerSecond}
+		MeasuredUploadBytesPerSecond: c.MeasuredUploadBytesPerSecond,
+		MinFreeDiskBytes:             c.MinFreeDiskBytes}
 }
 
 func (p ResourcePolicy) Validate() error {
@@ -104,6 +117,14 @@ func (p ResourcePolicy) Validate() error {
 			p.MeasuredUploadBytesPerSecond > throttle.MaxBytesPerSecond) {
 		return errors.New("measured upload rate must be 0 or 32 KiB/s–1 GiB/s")
 	}
+	// 0 is "use the reviewed default", which is why it is accepted here rather
+	// than clamped up: the accessor resolves it, so the stored value stays a
+	// faithful record of what the owner chose (or did not choose).
+	if p.MinFreeDiskBytes != 0 &&
+		(p.MinFreeDiskBytes < contribution.MinFreeDiskBytesFloor ||
+			p.MinFreeDiskBytes > contribution.MinFreeDiskBytesCeiling) {
+		return errors.New("disk reserve must be 0 (default) or 1 GiB–1 TiB")
+	}
 	return nil
 }
 
@@ -113,7 +134,16 @@ func (c Config) WithResourcePolicy(p ResourcePolicy) Config {
 	c.UploadMode = NormalizeUploadMode(p.UploadMode)
 	c.UploadLimitBytesPerSecond = p.UploadLimitBytesPerSecond
 	c.MeasuredUploadBytesPerSecond = p.MeasuredUploadBytesPerSecond
+	c.MinFreeDiskBytes = p.MinFreeDiskBytes
 	return c
+}
+
+// EffectiveMinFreeDisk resolves the §36.4 disk floor, mapping the "owner never
+// chose" zero onto the reviewed default. It exists so no caller has to remember
+// that zero is not a floor, which is the mistake that would turn a disk
+// protection into a no-op.
+func (p ResourcePolicy) EffectiveMinFreeDisk() uint64 {
+	return contribution.Policy{MinFreeDiskBytes: p.MinFreeDiskBytes}.MinFreeDisk()
 }
 
 // EffectiveUploadLimit is the single place that turns consent into the number a
@@ -167,7 +197,10 @@ func DecodeResourcePolicy(body []byte) (ResourcePolicy, error) {
 	numbers := map[string]*uint64{"memoryLimitBytes": &p.MemoryLimitBytes,
 		"reserveMemoryBytes": &p.ReserveMemoryBytes, "idleSeconds": &p.IdleSeconds,
 		"uploadLimitBytesPerSecond":    &p.UploadLimitBytesPerSecond,
-		"measuredUploadBytesPerSecond": &discarded}
+		"measuredUploadBytesPerSecond": &discarded,
+		// Optional, exactly like the upload fields: absent means the reviewed
+		// default, and a three-field body from an older client still decodes.
+		"minFreeDiskBytes": &p.MinFreeDiskBytes}
 	texts := map[string]*string{"uploadMode": &p.UploadMode}
 	required := []string{"memoryLimitBytes", "reserveMemoryBytes", "idleSeconds"}
 	seen := make(map[string]bool)

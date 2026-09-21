@@ -21,6 +21,9 @@ type PeerAddress struct {
 	Kind    string `json:"kind"`
 	Address string `json:"address"`
 	Port    uint16 `json:"port"`
+	// ObservedAt is the coordinator's ISO-8601 timestamp. Declared because the
+	// client decodes strictly; see the forward-compatibility note on PeerDirectory.
+	ObservedAt string `json:"observedAt"`
 }
 
 // PeerCapabilities is self-reported by the peer and unattested by anything. The
@@ -43,16 +46,37 @@ type DirectoryPeer struct {
 	Fingerprint              string           `json:"fingerprint"`
 	Addresses                []PeerAddress    `json:"addresses"`
 	SelfReportedCapabilities PeerCapabilities `json:"capabilities"`
+	// LastSeenAt and CapabilitiesReportedAt are coordinator-assigned ISO-8601
+	// timestamps. CapabilitiesReportedAt is null when a peer has never reported;
+	// encoding/json leaves the zero value for null, which is the intended reading.
+	LastSeenAt             string `json:"lastSeenAt"`
+	CapabilitiesReportedAt string `json:"capabilitiesReportedAt"`
 }
 
 // PeerDirectory carries the coordinator's two honesty fields verbatim. They are
 // checked, not decoration: a response that does not say
 // "candidate-list-not-authorization" is a response from something that does not
 // share this contract, and it is refused rather than interpreted.
+// Every field the coordinator sends must be declared here, because c.call decodes
+// with DisallowUnknownFields. That strictness is deliberate for config files and
+// untrusted bundles, but it makes this struct a hard coupling to the coordinator's
+// response: the Worker deploys instantly while installed connectors lag, so a new
+// server field breaks every old client at once. See HARDENING-PLAN §43.
 type PeerDirectory struct {
 	Peers              []DirectoryPeer `json:"peers"`
 	Authorization      string          `json:"authorization"`
 	CapabilityEvidence string          `json:"capabilityEvidence"`
+	// IdentityEvidence states that a fingerprint is enrollment-bound, not hardware
+	// attested. Checked, not decorative, for the same reason as Authorization.
+	IdentityEvidence string `json:"identityEvidence"`
+	// PeerLimit and Truncated say whether the fleet exceeded the server page. A
+	// truncated directory is not a complete view of the tenant and must never be
+	// treated as one.
+	PeerLimit int  `json:"peerLimit"`
+	Truncated bool `json:"truncated"`
+	// FreshnessSeconds is the lease window, published so a connector does not have
+	// to guess how stale an omitted peer had to be.
+	FreshnessSeconds int `json:"freshnessSeconds"`
 }
 
 // AuthorizationCandidateList and CapabilityEvidenceSelfReported are the exact
@@ -60,6 +84,7 @@ type PeerDirectory struct {
 const (
 	AuthorizationCandidateList         = "candidate-list-not-authorization"
 	CapabilityEvidenceSelfReported     = "self-reported-not-attested"
+	IdentityEvidenceEnrollmentBound    = "enrollment-bound-not-hardware-attested"
 	maxDirectoryPeers                  = 128
 	maxDirectoryAddressesPerPeer       = 9 // 8 lan + 1 wan, matching the server cap.
 	errDirectorySchema                 = "invalid coordinator peer directory schema"
@@ -76,7 +101,9 @@ func (c *Client) Peers(ctx context.Context) (PeerDirectory, error) {
 	if out.Authorization != AuthorizationCandidateList {
 		return PeerDirectory{}, errors.New(errDirectoryUnauthorizedAssumption)
 	}
-	if out.CapabilityEvidence != CapabilityEvidenceSelfReported || len(out.Peers) > maxDirectoryPeers {
+	if out.CapabilityEvidence != CapabilityEvidenceSelfReported ||
+		out.IdentityEvidence != IdentityEvidenceEnrollmentBound ||
+		len(out.Peers) > maxDirectoryPeers {
 		return PeerDirectory{}, errors.New(errDirectorySchema)
 	}
 	for _, p := range out.Peers {

@@ -32,6 +32,7 @@ func TestPeerDirectoryRead(t *testing.T) {
 	c := peerDirectoryServer(t, map[string]any{
 		"authorization":      AuthorizationCandidateList,
 		"capabilityEvidence": CapabilityEvidenceSelfReported,
+		"identityEvidence":   IdentityEvidenceEnrollmentBound,
 		"peers": []map[string]any{{
 			"hostId":      "host-2",
 			"name":        "Studio",
@@ -68,24 +69,31 @@ func TestPeerDirectoryRefusesResponsesThatDoNotShareTheContract(t *testing.T) {
 		body map[string]any
 	}{
 		{"missing authorization field", map[string]any{
-			"capabilityEvidence": CapabilityEvidenceSelfReported, "peers": []any{}}},
+			"capabilityEvidence": CapabilityEvidenceSelfReported,
+			"identityEvidence":   IdentityEvidenceEnrollmentBound, "peers": []any{}}},
 		{"authorization claims more than it should", map[string]any{
-			"authorization": "authorized", "capabilityEvidence": CapabilityEvidenceSelfReported, "peers": []any{}}},
+			"authorization": "authorized", "capabilityEvidence": CapabilityEvidenceSelfReported,
+			"identityEvidence": IdentityEvidenceEnrollmentBound, "peers": []any{}}},
 		{"missing capability disclaimer", map[string]any{
-			"authorization": AuthorizationCandidateList, "peers": []any{}}},
+			"authorization":    AuthorizationCandidateList,
+			"identityEvidence": IdentityEvidenceEnrollmentBound, "peers": []any{}}},
 		{"unknown field", map[string]any{
 			"authorization": AuthorizationCandidateList, "capabilityEvidence": CapabilityEvidenceSelfReported,
-			"peers": []any{}, "trustAll": true}},
+			"identityEvidence": IdentityEvidenceEnrollmentBound,
+			"peers":            []any{}, "trustAll": true}},
 		{"invalid host id", map[string]any{
 			"authorization": AuthorizationCandidateList, "capabilityEvidence": CapabilityEvidenceSelfReported,
-			"peers": []map[string]any{{"hostId": "host 2/../", "name": "", "fingerprint": strings.Repeat("ab", 32), "addresses": []any{}, "capabilities": map[string]any{}}}}},
+			"identityEvidence": IdentityEvidenceEnrollmentBound,
+			"peers":            []map[string]any{{"hostId": "host 2/../", "name": "", "fingerprint": strings.Repeat("ab", 32), "addresses": []any{}, "capabilities": map[string]any{}}}}},
 		{"unknown address kind", map[string]any{
 			"authorization": AuthorizationCandidateList, "capabilityEvidence": CapabilityEvidenceSelfReported,
+			"identityEvidence": IdentityEvidenceEnrollmentBound,
 			"peers": []map[string]any{{"hostId": "host-2", "name": "", "fingerprint": strings.Repeat("ab", 32),
 				"addresses":    []map[string]any{{"kind": "relay", "address": "192.168.4.7", "port": 8443}},
 				"capabilities": map[string]any{}}}}},
 		{"more addresses than the server cap", map[string]any{
 			"authorization": AuthorizationCandidateList, "capabilityEvidence": CapabilityEvidenceSelfReported,
+			"identityEvidence": IdentityEvidenceEnrollmentBound,
 			"peers": []map[string]any{{"hostId": "host-2", "name": "", "fingerprint": strings.Repeat("ab", 32),
 				"addresses":    tooManyAddresses(),
 				"capabilities": map[string]any{}}}}},

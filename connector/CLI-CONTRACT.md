@@ -49,7 +49,14 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   Requires matching preview v2 coordinator and migration 0005.
 - `nexal policy` reads the running agent's effective resource limits.
 - `nexal set-policy --memory-limit-mib 128 --reserve-memory-mib 512 --idle-seconds 600`
-  requires all three settings explicitly. It persists limits atomically, cancels
+  requires all three settings explicitly.
+  `--upload-mode auto|manual|unlimited` (default `auto`) and
+  `--upload-limit-kib-per-second N` add the upload-throttle dimension. These two
+  are OPTIONAL so an existing three-flag caller keeps working and inherits `auto`;
+  silence is read as the shaped default, never as unlimited. `--upload-mode manual`
+  requires a limit of 32–1048576 KiB/s; `auto` and `unlimited` require the limit to
+  be absent or 0 rather than storing a number no mode consults. No bulk upload path
+  exists yet (see below), so setting these changes policy, not live traffic. It persists limits atomically, cancels
   active work and waits for fresh telemetry and coordinator contact before new
   admission. It never resumes a paused host or enables production dispatch.
   Workload memory is bounded to 64–8192 MiB, owner reserve to 128–1048576 MiB,
@@ -85,11 +92,31 @@ Local API: authenticated `GET /v1/status`, `POST /v1/pause`,
 `POST /v1/resume`, `POST /v1/accept-jobs`, `POST /v1/cancel`,
 `GET /v1/policy` and `PUT /v1/policy`.
 Use `Authorization: Bearer <admin secret>`.
-The policy response and PUT request have exactly these three integer fields:
-`{memoryLimitBytes,reserveMemoryBytes,idleSeconds}`. PUT requires application/json;
+The policy response and PUT request have these three required integer fields:
+`{memoryLimitBytes,reserveMemoryBytes,idleSeconds}`, plus the optional upload
+fields `uploadMode` (string `auto`|`manual`|`unlimited`),
+`uploadLimitBytesPerSecond` and `measuredUploadBytesPerSecond`. A body carrying
+only the original three fields is still accepted and decodes as `uploadMode`
+`auto` with no manual limit, so a client built before this dimension existed is
+not rejected. `measuredUploadBytesPerSecond` is DERIVED: it appears in the GET
+response so a read-modify-write client is not refused for echoing it, and its
+value is discarded on PUT — a client cannot assert a measured rate, and a policy
+update preserves whatever the agent measured. PUT requires application/json;
 the 4096-byte limit, numeric-loopback binding, browser-Origin rejection and
 authentication apply before mutation. Missing, duplicate, unknown, null and
-noninteger fields are rejected. GET accepts no body. Status includes `resourcePolicy`.
+noninteger fields are rejected. GET accepts no body. Status includes `resourcePolicy` and `uploadThrottle`
+`{mode,effectiveBytesPerSecond,source,meteredStatus,enforced,reason}`.
+`enforced` is always false in this release and says so for a reason: there is NO
+bulk data upload path in the connector. `internal/bundletransfer` moves 6 KB
+enrollment bundles, and the Time Machine / JuiceFS storage path is gated behind
+HARDENING-PLAN §21 Step 0, so the shaper, the policy and the measurement exist and
+are tested but nothing large is being throttled today. `effectiveBytesPerSecond`
+is 0 only for explicit `unlimited` mode; `auto` without a measurement reports the
+conservative default, never 0. `meteredStatus` is `unknown` in this release because
+the macOS NWPathMonitor (`isExpensive`/`isConstrained`) bridge is not implemented;
+unknown applies no metered ceiling rather than guessing in either direction. A
+metered path is capped hard (64 KiB/s) and never paused, and a rate cap is NOT the
+per-donor monthly bandwidth budget §16 requires — that remains unimplemented.
 Persistence failure pauses the live host without applying unsaved new limits.
 Status additionally reports `manualAcceptanceSupported`, `ownerActivityOverride`,
 optional `acceptJobsUntil`, and optional `executionBlocker`. An absent blocker is

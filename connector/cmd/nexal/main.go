@@ -345,6 +345,13 @@ func policyCommand(ctx context.Context, args []string) error {
 	memory := f.Uint64("memory-limit-mib", 0, "workload cap, 64–8192 MiB")
 	reserve := f.Uint64("reserve-memory-mib", 0, "owner reserve, 128–1048576 MiB")
 	idle := f.Uint64("idle-seconds", 0, "idle threshold, 30–86400 seconds")
+	// The upload flags default to auto rather than being required like the three
+	// memory/idle settings: existing scripts and the already-built Swift UI call
+	// set-policy with three flags, and failing them on upgrade would be worse
+	// than inheriting the default the founder asked for anyway. Auto is also the
+	// safe reading of silence — the alternative default is an unshaped uplink.
+	uploadMode := f.String("upload-mode", config.UploadModeAuto, "upload throttle mode: auto|manual|unlimited")
+	uploadLimit := f.Uint64("upload-limit-kib-per-second", 0, "manual upload ceiling in KiB/s, 32–1048576; manual mode only")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -352,8 +359,12 @@ func policyCommand(ctx context.Context, args []string) error {
 	if *memory > 8192 || *reserve > 1<<20 {
 		return errors.New("memory limits are outside safe bounds")
 	}
+	if *uploadLimit > 1<<20 {
+		return errors.New("upload limit is outside safe bounds")
+	}
 	policy := config.ResourcePolicy{MemoryLimitBytes: *memory << 20,
-		ReserveMemoryBytes: *reserve << 20, IdleSeconds: *idle}
+		ReserveMemoryBytes: *reserve << 20, IdleSeconds: *idle,
+		UploadMode: *uploadMode, UploadLimitBytesPerSecond: *uploadLimit << 10}
 	if err := policy.Validate(); err != nil {
 		return err
 	}

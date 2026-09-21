@@ -32,6 +32,18 @@ func TestStrictCLIRejectsUnknownAndUnsafeOptions(t *testing.T) {
 		{"set-policy", "--config", path, "--memory-limit-mib", "18446744073709551615"},
 		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024"},
 		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024", "--idle-seconds", "29"},
+		// Upload throttling flags are validated before any local request, so an
+		// unusable combination fails without touching the running agent.
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024",
+			"--idle-seconds", "600", "--upload-mode", "fast"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024",
+			"--idle-seconds", "600", "--upload-mode", "manual"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024",
+			"--idle-seconds", "600", "--upload-mode", "auto", "--upload-limit-kib-per-second", "1024"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024",
+			"--idle-seconds", "600", "--upload-mode", "manual", "--upload-limit-kib-per-second", "16"},
+		{"set-policy", "--config", path, "--memory-limit-mib", "256", "--reserve-memory-mib", "1024",
+			"--idle-seconds", "600", "--upload-mode", "manual", "--upload-limit-kib-per-second", "18446744073709551615"},
 	} {
 		err := run(context.Background(), args)
 		if err == nil {
@@ -238,6 +250,23 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 	saved, err := config.Load(path)
 	if err != nil || saved.MemoryLimitBytes != 128<<20 || saved.ReserveMemoryBytes != 512<<20 || saved.IdleSeconds != 600 || !saved.Paused {
 		t.Fatal("CLI policy change did not preserve paused state and persist limits")
+	}
+	// Omitting the upload flags inherits auto, which is what an existing script
+	// or the already-built Swift UI sends.
+	if saved.ResourcePolicy().UploadMode != config.UploadModeAuto {
+		t.Fatalf("a three-flag set-policy produced mode %q, want auto", saved.ResourcePolicy().UploadMode)
+	}
+	if err := run(ctx, []string{"set-policy", "--config", path, "--memory-limit-mib", "128",
+		"--reserve-memory-mib", "512", "--idle-seconds", "600", "--upload-mode", "manual",
+		"--upload-limit-kib-per-second", "512"}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err = config.Load(path)
+	if err != nil || saved.UploadMode != config.UploadModeManual || saved.UploadLimitBytesPerSecond != 512<<10 {
+		t.Fatalf("CLI upload throttle did not persist: %+v", err)
+	}
+	if !saved.Paused {
+		t.Fatal("an upload policy change resumed a paused host")
 	}
 	if command("POST", "/v1/attempts") != 403 {
 		t.Fatal("unverified dispatch enabled")

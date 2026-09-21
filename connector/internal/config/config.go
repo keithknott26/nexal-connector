@@ -28,19 +28,27 @@ type Tunnel struct {
 }
 
 type Config struct {
-	Version            int     `json:"version"`
-	Coordinator        string  `json:"coordinator"`
-	Name               string  `json:"name"`
-	HostID             string  `json:"hostId,omitempty"`
-	Listen             string  `json:"listen"`
-	Development        bool    `json:"development"`
-	DevSecrets         bool    `json:"devSecrets"`
-	Paused             bool    `json:"paused"`
-	MarketplaceEnabled bool    `json:"marketplaceEnabled"`
-	MemoryLimitBytes   uint64  `json:"memoryLimitBytes"`
-	ReserveMemoryBytes uint64  `json:"reserveMemoryBytes"`
-	IdleSeconds        uint64  `json:"idleSeconds"`
-	Tunnel             *Tunnel `json:"tunnel,omitempty"`
+	Version            int    `json:"version"`
+	Coordinator        string `json:"coordinator"`
+	Name               string `json:"name"`
+	HostID             string `json:"hostId,omitempty"`
+	Listen             string `json:"listen"`
+	Development        bool   `json:"development"`
+	DevSecrets         bool   `json:"devSecrets"`
+	Paused             bool   `json:"paused"`
+	MarketplaceEnabled bool   `json:"marketplaceEnabled"`
+	MemoryLimitBytes   uint64 `json:"memoryLimitBytes"`
+	ReserveMemoryBytes uint64 `json:"reserveMemoryBytes"`
+	IdleSeconds        uint64 `json:"idleSeconds"`
+	// Upload throttling (HARDENING-PLAN §16, rate half only). Absent means auto:
+	// these fields are omitempty so a config written before they existed is not
+	// rewritten with empty strings, and NormalizeUploadMode reads the absence as
+	// the shaped default rather than as unlimited. Nothing enforces them on bulk
+	// data yet because no bulk upload path exists — see internal/throttle.
+	UploadMode                   string  `json:"uploadMode,omitempty"`
+	UploadLimitBytesPerSecond    uint64  `json:"uploadLimitBytesPerSecond,omitempty"`
+	MeasuredUploadBytesPerSecond uint64  `json:"measuredUploadBytesPerSecond,omitempty"`
+	Tunnel                       *Tunnel `json:"tunnel,omitempty"`
 	// Discovery is absent by default, and absent means off. Peer discovery joins
 	// multicast groups and publishes this host's addresses, so it is an explicit
 	// owner decision rather than something a new binary starts doing on upgrade.

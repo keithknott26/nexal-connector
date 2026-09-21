@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	"nexal/connector/internal/throttle"
 )
 
 func TestResourcePolicyStrictDecoder(t *testing.T) {
@@ -11,6 +13,12 @@ func TestResourcePolicyStrictDecoder(t *testing.T) {
 	p, err := DecodeResourcePolicy([]byte(good))
 	if err != nil || p.MemoryLimitBytes != 256<<20 || p.ReserveMemoryBytes != 1<<30 || p.IdleSeconds != 300 {
 		t.Fatalf("valid policy rejected: %v", err)
+	}
+	// BACKWARD COMPATIBILITY, asserted rather than assumed: a body written by a
+	// client that predates the upload dimension still decodes, and inherits auto
+	// — the shaped default, not unlimited.
+	if p.UploadMode != UploadModeAuto || p.UploadLimitBytesPerSecond != 0 {
+		t.Fatalf("a three-field policy did not default to auto: %+v", p)
 	}
 	for _, body := range []string{
 		`null`, `[]`, `{}`, good + `{}`,
@@ -29,17 +37,53 @@ func TestResourcePolicyStrictDecoder(t *testing.T) {
 }
 
 func TestResourcePolicyBounds(t *testing.T) {
+	// Keyed literals from here on: the upload dimension added fields, and a
+	// positional literal would silently reinterpret an existing test's numbers.
 	for _, p := range []ResourcePolicy{
-		{64 << 20, 128 << 20, 30}, {8 << 30, 1 << 40, 86400},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30},
+		{MemoryLimitBytes: 8 << 30, ReserveMemoryBytes: 1 << 40, IdleSeconds: 86400},
+		// Upload mode absent is the old shape and must stay valid: it reads as auto.
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30, UploadMode: ""},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeManual, UploadLimitBytesPerSecond: throttle.MinBytesPerSecond},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeManual, UploadLimitBytesPerSecond: throttle.MaxBytesPerSecond},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeUnlimited},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			MeasuredUploadBytesPerSecond: throttle.ConservativeBytesPerSecond},
 	} {
 		if err := p.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for n, p := range []ResourcePolicy{
-		{0, 128 << 20, 30}, {8<<30 + 1, 128 << 20, 30},
-		{64 << 20, 128<<20 - 1, 30}, {64 << 20, 1<<40 + 1, 30},
-		{64 << 20, 128 << 20, 29}, {64 << 20, 128 << 20, 86401},
+		{MemoryLimitBytes: 0, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30},
+		{MemoryLimitBytes: 8<<30 + 1, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128<<20 - 1, IdleSeconds: 30},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 1<<40 + 1, IdleSeconds: 30},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 29},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 86401},
+		// An unknown mode is a configuration error, not something to fold into a
+		// default: the owner asked for a behaviour this binary cannot honour.
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30, UploadMode: "Auto"},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30, UploadMode: "throttled"},
+		// Manual mode with no usable limit, and out-of-range manual limits.
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30, UploadMode: UploadModeManual},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeManual, UploadLimitBytesPerSecond: throttle.MinBytesPerSecond - 1},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeManual, UploadLimitBytesPerSecond: throttle.MaxBytesPerSecond + 1},
+		// A limit no mode consults is a trap: the owner believes it applies.
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeAuto, UploadLimitBytesPerSecond: 1 << 20},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			UploadMode: UploadModeUnlimited, UploadLimitBytesPerSecond: 1 << 20},
+		// A measured rate outside the bounds would fail to persist later.
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			MeasuredUploadBytesPerSecond: throttle.MinBytesPerSecond - 1},
+		{MemoryLimitBytes: 64 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 30,
+			MeasuredUploadBytesPerSecond: throttle.MaxBytesPerSecond + 1},
 	} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			if p.Validate() == nil {

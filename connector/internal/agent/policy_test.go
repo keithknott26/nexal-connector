@@ -17,7 +17,10 @@ func TestPolicyPersistsCancelsAndRequiresFreshTelemetry(t *testing.T) {
 	a, _ := testAgent(t)
 	cancelled := false
 	a.cancel = func() { cancelled = true }
-	p := config.ResourcePolicy{MemoryLimitBytes: 128 << 20, ReserveMemoryBytes: 256 << 20, IdleSeconds: 2000}
+	// UploadMode is stated explicitly: SetResourcePolicy normalizes an omitted
+	// mode to auto, so a persisted policy always carries the resolved value.
+	p := config.ResourcePolicy{MemoryLimitBytes: 128 << 20, ReserveMemoryBytes: 256 << 20,
+		IdleSeconds: 2000, UploadMode: config.UploadModeAuto}
 	if err := a.SetResourcePolicy(p); err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +119,8 @@ func TestConcurrentPolicyPauseAndSnapshot(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			p := config.ResourcePolicy{MemoryLimitBytes: 128 << 20, ReserveMemoryBytes: 256 << 20, IdleSeconds: uint64(300 + i)}
+			p := config.ResourcePolicy{MemoryLimitBytes: 128 << 20, ReserveMemoryBytes: 256 << 20,
+				IdleSeconds: uint64(300 + i), UploadMode: config.UploadModeAuto}
 			if err := a.SetResourcePolicy(p); err != nil {
 				t.Error(err)
 			}

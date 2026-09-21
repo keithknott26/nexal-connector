@@ -16,6 +16,7 @@ import (
 
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/throttle"
 )
 
 type Record struct {
@@ -43,6 +44,21 @@ type Status struct {
 	PQ                         client.PQ             `json:"pq"`
 	CoordinatorHealthy         bool                  `json:"coordinatorHealthy"`
 	ResourcePolicy             config.ResourcePolicy `json:"resourcePolicy"`
+	UploadThrottle             UploadThrottle        `json:"uploadThrottle"`
+}
+
+// UploadThrottle is the §26 "always see why" view of the upload dimension: the
+// number in force, where it came from, and whether anything is actually obeying
+// it. Enforced is hardcoded false and stays false until a bulk upload path
+// exists (HARDENING-PLAN §21 Step 0); reporting a ceiling as enforced when
+// nothing uploads bulk data would be the fabrication this feature must avoid.
+type UploadThrottle struct {
+	Mode                    string `json:"mode"`
+	EffectiveBytesPerSecond uint64 `json:"effectiveBytesPerSecond"`
+	Source                  string `json:"source"`
+	MeteredStatus           string `json:"meteredStatus"`
+	Enforced                bool   `json:"enforced"`
+	Reason                  string `json:"reason"`
 }
 type Agent struct {
 	mu            sync.Mutex
@@ -74,6 +90,13 @@ type Agent struct {
 	// polls nothing. peerView is the last merged candidate view, guarded by mu.
 	discovery *DiscoveryOptions
 	peerView  PeerView
+	// metered reports whether the current network path is metered. It is nil in
+	// every shipped configuration because the only reliable macOS signal is
+	// NWPathMonitor's isExpensive/isConstrained, which is Swift and cannot be
+	// built here; nil means "unknown", which deliberately applies no metered
+	// ceiling rather than guessing. Set by WithMeteredSource once that bridge
+	// exists. Read under mu.
+	metered throttle.MeteredSource
 	// logger is set by New and never written again, so every goroutine below can
 	// read it without a.mu. Records carry attempt identifiers, states, durations
 	// and this package's fixed error strings; never tokens, admin credentials,
@@ -94,6 +117,14 @@ func WithLogger(l *slog.Logger) Option {
 			a.logger = l
 		}
 	}
+}
+
+// WithMeteredSource installs an OS path-cost signal. Without it the connector
+// reports metered status as unknown and applies no metered ceiling: guessing
+// metered would crawl for every owner on a normal link, and guessing unmetered
+// could bill someone on a hotspot. Neither guess is acceptable, so neither is made.
+func WithMeteredSource(m throttle.MeteredSource) Option {
+	return func(a *Agent) { a.metered = m }
 }
 
 func New(c config.Config, path string, api client.API, probe Probe, devPull bool, opts ...Option) (*Agent, error) {
@@ -163,6 +194,7 @@ func (a *Agent) Snapshot() Status {
 		blocker = err.Error()
 	}
 	return Status{ManualAcceptanceSupported: a.cfg.Development, AcceptJobsUntil: until,
+		UploadThrottle:        a.uploadThrottleLocked(),
 		OwnerActivityOverride: a.manualActiveLocked(), ExecutionBlocker: blocker,
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
@@ -210,8 +242,15 @@ func (a *Agent) SetResourcePolicy(p config.ResourcePolicy) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
+	// Normalize before comparing, so an older client that omits uploadMode is
+	// recognised as asking for the default rather than as requesting a change.
+	p.UploadMode = config.NormalizeUploadMode(p.UploadMode)
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// The measured rate is derived, not consented: a policy update carries the
+	// owner's mode and manual limit, and must not erase what auto has learned
+	// about this link. DecodeResourcePolicy already discards any client value.
+	p.MeasuredUploadBytesPerSecond = a.cfg.MeasuredUploadBytesPerSecond
 	if p == a.cfg.ResourcePolicy() {
 		return nil
 	}

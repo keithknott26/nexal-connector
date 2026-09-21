@@ -378,3 +378,96 @@ func TestRunStartsAndStopsDiscovery(t *testing.T) {
 		t.Fatal("Run did not return after cancellation")
 	}
 }
+
+// staticOnlyFingerprint is configured by the owner and listed by nobody.
+const staticOnlyFingerprint = "4444444444444444444444444444444444444444444444444444444444444444"
+
+// The wiring-layer counterpart of discovery.TestStaticPeerNeverEntersAllowedPeers.
+// A static endpoint is the owner saying WHERE a peer is, never WHO may act as one:
+// §30.2 holds at the layer where a shortcut would actually be taken.
+func TestAgentStaticPeerNeverEntersAllowedPeers(t *testing.T) {
+	directory := &fakeDirectory{directory: oneAuthorizedPeer()}
+	static := []discovery.Static{
+		// Configured but unauthorized: display only.
+		{Fingerprint: staticOnlyFingerprint, Address: netip.MustParseAddrPort("10.20.0.5:7443"), Label: "vlan 20"},
+		// Configured AND authorized: contributes a cross-VLAN dial address.
+		{Fingerprint: coordinatorFingerprint, Address: netip.MustParseAddrPort("10.20.0.6:7443")},
+	}
+	a := discoveryAgent(t, DiscoveryOptions{Publisher: &fakePublisher{}, Source: directory, StaticPeers: static})
+	rendezvous, err := discovery.NewRendezvous(discovery.RendezvousOptions{
+		Source: directory, Sharing: discovery.SharingPolicy{WANRendezvous: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rendezvous.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	a.mergePeers(rendezvous, newCandidateSet(time.Now), discovery.NewLinkView(nil), now)
+	view := a.PeerCandidates()
+	if len(view.Allowed) != 1 || view.Allowed[0] != coordinatorFingerprint {
+		t.Fatalf("allowed = %v, want only the coordinator's peer", view.Allowed)
+	}
+	var sawConfiguredUnauthorized, sawCrossVLANAddress bool
+	for _, p := range view.Peers {
+		switch p.Fingerprint {
+		case staticOnlyFingerprint:
+			sawConfiguredUnauthorized = true
+			if p.Authorized || !p.Configured {
+				t.Fatalf("configured peer = %+v; configuration must not authorize", p)
+			}
+		case coordinatorFingerprint:
+			if !p.Configured || len(p.Addresses) == 0 || p.Addresses[0].String() != "10.20.0.6:7443" {
+				t.Fatalf("authorized peer = %+v; the configured cross-VLAN address should lead", p)
+			}
+			sawCrossVLANAddress = true
+		}
+	}
+	if !sawConfiguredUnauthorized || !sawCrossVLANAddress {
+		t.Fatalf("view = %+v", view.Peers)
+	}
+}
+
+// Static peers must still be merged when both discovery gates are shut: the owner
+// typed those addresses, and mDNS being off is not a reason to hide them. Nothing
+// is announced or polled in that state, so nothing can become authorized either.
+func TestAgentStaticPeersMergeWithDiscoveryGatesShut(t *testing.T) {
+	a, _ := testAgent(t)
+	a.discovery = &DiscoveryOptions{
+		Config:        &config.Discovery{},
+		Sharing:       discovery.SharingPolicy{},
+		StaticPeers:   []discovery.Static{{Fingerprint: staticOnlyFingerprint, Address: netip.MustParseAddrPort("10.20.0.5:7443")}},
+		MergeInterval: 5 * time.Millisecond,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); a.runDiscovery(ctx) }()
+	deadline := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if len(a.PeerCandidates().Peers) == 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	view := a.PeerCandidates()
+	cancel()
+	<-done
+	if len(view.Peers) != 1 || view.Peers[0].Authorized || !view.Peers[0].Configured {
+		t.Fatalf("view = %+v; a configured peer must be visible and unauthorized with the gates shut", view.Peers)
+	}
+	if len(view.Allowed) != 0 {
+		t.Fatalf("allowed = %v, want empty", view.Allowed)
+	}
+}
+
+func TestStaticPeersFromDropsUnusableEntries(t *testing.T) {
+	out := StaticPeersFrom([]config.StaticPeer{
+		{Endpoint: "https://10.20.0.5:8443", Fingerprint: staticOnlyFingerprint},
+		{Endpoint: "not-a-url", Fingerprint: staticOnlyFingerprint},
+		{Endpoint: "https://10.20.0.7:8443", Fingerprint: "short"},
+	})
+	if len(out) != 1 || out[0].Address.String() != "10.20.0.5:8443" {
+		t.Fatalf("out = %+v", out)
+	}
+}

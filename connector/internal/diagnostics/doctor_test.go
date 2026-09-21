@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"nexal/connector/internal/agent"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/stun"
 )
 
 func validConfig() config.Config {
@@ -40,7 +42,7 @@ func TestDefaultDoctorDoesNotProbeOrRevealPrivateValues(t *testing.T) {
 	c.Tunnel = &config.Tunnel{TokenFile: "/private-token-path", Binary: "/private-binary", Hostname: "private-hostname"}
 	d := deps(c, agent.Telemetry{})
 	d.probe = func(context.Context) agent.Telemetry { t.Fatal("unexpected probe"); return agent.Telemetry{} }
-	report := inspect(context.Background(), "/private-config-path", false, d)
+	report := inspect(context.Background(), "/private-config-path", false, false, d)
 	encoded, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +63,7 @@ func TestDoctorSanitizesConfigurationFailure(t *testing.T) {
 	d := deps(config.Config{}, agent.Telemetry{})
 	d.load = func(string) (config.Config, error) { return config.Config{}, errors.New("private-path-and-secret") }
 	d.probe = func(context.Context) agent.Telemetry { t.Fatal("probe after failure"); return agent.Telemetry{} }
-	report := inspect(context.Background(), "ignored", true, d)
+	report := inspect(context.Background(), "ignored", true, false, d)
 	b, _ := json.Marshal(report)
 	if strings.Contains(string(b), "private-path-and-secret") || report.ResourcePolicy != nil || report.Mode != "unknown" {
 		t.Fatal("configuration failure was not sanitized")
@@ -73,7 +75,7 @@ func TestDoctorSanitizesConfigurationFailure(t *testing.T) {
 func TestDoctorRevalidatesConfiguration(t *testing.T) {
 	c := validConfig()
 	c.MarketplaceEnabled = true
-	report := inspect(context.Background(), "ignored", false, deps(c, agent.Telemetry{}))
+	report := inspect(context.Background(), "ignored", false, false, deps(c, agent.Telemetry{}))
 	if status(t, report, "configuration") != "blocked" {
 		t.Fatal("unsafe config accepted")
 	}
@@ -93,7 +95,7 @@ func TestDoctorPlatformAndCancellationPreventProbe(t *testing.T) {
 				cancel()
 			}
 			d.probe = func(context.Context) agent.Telemetry { t.Fatal("unexpected probe"); return agent.Telemetry{} }
-			report := inspect(ctx, "ignored", true, d)
+			report := inspect(ctx, "ignored", true, false, d)
 			if status(t, report, "telemetry") == "pass" {
 				t.Fatal("false probe success")
 			}
@@ -123,7 +125,7 @@ func TestDoctorTelemetryAndAdmissionBoundaries(t *testing.T) {
 				}
 				return tc.telemetry
 			}
-			report := inspect(context.Background(), "ignored", true, d)
+			report := inspect(context.Background(), "ignored", true, false, d)
 			if status(t, report, "telemetry") != tc.telemetryStatus {
 				t.Fatal("telemetry result mismatch")
 			}
@@ -139,7 +141,7 @@ func TestDoctorTelemetryAndAdmissionBoundaries(t *testing.T) {
 func TestDoctorDevelopmentUnenrolledAndResumed(t *testing.T) {
 	c := validConfig()
 	c.Development, c.Paused, c.HostID = true, false, ""
-	report := inspect(context.Background(), "ignored", false, deps(c, agent.Telemetry{}))
+	report := inspect(context.Background(), "ignored", false, false, deps(c, agent.Telemetry{}))
 	if report.Mode != "development" || status(t, report, "stored_identity") != "warning" || status(t, report, "saved_pause") != "warning" {
 		t.Fatal("saved state not correctly described")
 	}
@@ -150,7 +152,7 @@ func TestInspectReadsConfigWithoutCreatingCredentialsOrChangingFiles(t *testing.
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(path)
-	report := Inspect(context.Background(), path, false)
+	report := Inspect(context.Background(), path, false, false)
 	after, _ := os.ReadFile(path)
 	files, err := os.ReadDir(filepath.Dir(path))
 	if err != nil || len(files) != 1 || string(before) != string(after) {
@@ -158,5 +160,128 @@ func TestInspectReadsConfigWithoutCreatingCredentialsOrChangingFiles(t *testing.
 	}
 	if status(t, report, "configuration") != "pass" {
 		t.Fatal("config not read")
+	}
+}
+
+// NAT observability, entirely offline: observeNAT is injected, exactly like the
+// telemetry probe. No test in this package sends a STUN packet.
+func natDeps(c config.Config, result stun.Result, err error) dependencies {
+	d := deps(c, agent.Telemetry{})
+	d.observeNAT = func(ctx context.Context) (stun.Result, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			panic("the STUN observation must be deadline bounded")
+		}
+		return result, err
+	}
+	return d
+}
+
+func TestDoctorDoesNotQuerySTUNUnlessAsked(t *testing.T) {
+	d := natDeps(validConfig(), stun.Result{}, nil)
+	d.observeNAT = func(context.Context) (stun.Result, error) {
+		t.Fatal("doctor sent a STUN query without --stun")
+		return stun.Result{}, nil
+	}
+	report := inspect(context.Background(), "ignored", false, false, d)
+	if report.NetworkContacted {
+		t.Fatal("a default report must not claim network contact")
+	}
+	if report.NAT != nil {
+		t.Fatal("no NAT block without --stun")
+	}
+	if status(t, report, "nat_reflexive") != "not_checked" {
+		t.Fatal("the NAT check must report not_checked by default")
+	}
+}
+
+func TestDoctorReportsReflexiveAddressAndMapping(t *testing.T) {
+	result := stun.Result{Reachable: true,
+		Reflexive:    netip.MustParseAddrPort("203.0.113.9:41234"),
+		Mapping:      stun.MappingEndpointIndependent,
+		MappingLabel: stun.MappingEndpointIndependent.String(),
+		Summary:      stun.MappingEndpointIndependent.Summary(),
+		Observations: []stun.Observation{{Server: "stun.cloudflare.com:3478"}, {Server: "turn.cloudflare.com:3478"}},
+	}
+	report := inspect(context.Background(), "ignored", false, true, natDeps(validConfig(), result, nil))
+	if !report.NetworkContacted {
+		t.Fatal("a STUN query is network contact and must be reported as such")
+	}
+	if report.NAT == nil || report.NAT.ReflexiveAddress != "203.0.113.9:41234" ||
+		report.NAT.Mapping != "endpoint-independent" || len(report.NAT.Servers) != 2 {
+		t.Fatalf("nat = %+v", report.NAT)
+	}
+	if status(t, report, "nat_reflexive") != "pass" || status(t, report, "nat_mapping") != "pass" {
+		t.Fatal("an observed address and a comparable mapping should both pass")
+	}
+	// HONESTY: no check may claim a working peer-to-peer path, because none exists.
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"hole punching will work", "peer-to-peer is available", "will work"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("report promises more than was established: %q", forbidden)
+		}
+	}
+	if !strings.Contains(string(encoded), "OBSERVABILITY ONLY") {
+		t.Fatal("the report must say the observation establishes no connection")
+	}
+}
+
+func TestDoctorReportsSymmetricNATAsAWarning(t *testing.T) {
+	result := stun.Result{Reachable: true,
+		Reflexive:    netip.MustParseAddrPort("203.0.113.9:1000"),
+		Mapping:      stun.MappingEndpointDependent,
+		MappingLabel: stun.MappingEndpointDependent.String(),
+		Summary:      stun.MappingEndpointDependent.Summary()}
+	report := inspect(context.Background(), "ignored", false, true, natDeps(validConfig(), result, nil))
+	if status(t, report, "nat_mapping") != "warning" {
+		t.Fatal("an endpoint-dependent mapping must warn: hole punching would fail")
+	}
+}
+
+func TestDoctorReportsUnknownMappingWhenOnlyOneServerAnswered(t *testing.T) {
+	result := stun.Result{Reachable: true,
+		Reflexive:    netip.MustParseAddrPort("203.0.113.9:1000"),
+		Mapping:      stun.MappingUnknown,
+		MappingLabel: stun.MappingUnknown.String(), Summary: stun.MappingUnknown.Summary()}
+	report := inspect(context.Background(), "ignored", false, true, natDeps(validConfig(), result, nil))
+	if status(t, report, "nat_mapping") != "not_checked" {
+		t.Fatal("one sample must not be reported as a classification")
+	}
+}
+
+func TestDoctorReportsBlockedSTUN(t *testing.T) {
+	result := stun.Result{Reachable: false, MappingLabel: "unknown", Summary: stun.MappingUnknown.Summary(),
+		Observations: []stun.Observation{{Server: "stun.cloudflare.com:3478", Error: "i/o timeout"}}}
+	report := inspect(context.Background(), "ignored", false, true, natDeps(validConfig(), result, nil))
+	if status(t, report, "nat_reflexive") != "warning" || report.NAT == nil || report.NAT.Reachable {
+		t.Fatalf("an unreachable STUN path must be a reported finding, not an error: %+v", report.NAT)
+	}
+	if report.NAT.ReflexiveAddress != "" {
+		t.Fatal("no address may be reported when nothing answered")
+	}
+}
+
+func TestDoctorReportsStaticPeerCountWithoutAddresses(t *testing.T) {
+	c := validConfig()
+	c.StaticPeers = []config.StaticPeer{{Endpoint: "https://10.20.0.5:8443",
+		Fingerprint: "aa11223344556677889900112233445566778899001122334455667788990011",
+		Label:       "studio vlan 20"}}
+	report := inspect(context.Background(), "ignored", false, false, natDeps(c, stun.Result{}, nil))
+	if status(t, report, "static_peers") != "pass" {
+		t.Fatal("a configured static peer should be reported")
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{"10.20.0.5", "studio vlan 20", "aa1122"} {
+		if strings.Contains(string(encoded), private) {
+			t.Fatalf("doctor leaked a configured value: %q", private)
+		}
+	}
+	if !strings.Contains(string(encoded), "authorized only if the coordinator lists its fingerprint") {
+		t.Fatal("the report must state that configuration is not authorization")
 	}
 }

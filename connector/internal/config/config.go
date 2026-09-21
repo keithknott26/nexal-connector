@@ -61,6 +61,17 @@ type Config struct {
 	// multicast groups and publishes this host's addresses, so it is an explicit
 	// owner decision rather than something a new binary starts doing on upgrade.
 	Discovery *Discovery `json:"discovery,omitempty"`
+	// StaticPeers are owner-typed peer endpoints for peers mDNS cannot find —
+	// principally two Macs on different VLANs, where the ROUTED TRANSPORT ALREADY
+	// WORKS (an RFC1918 address on another subnet satisfies pool.privateIP) and
+	// only link-local discovery does not. omitempty and absent-means-none, like
+	// the fields above, so a config written before this existed is untouched and
+	// an upgrade adds no peers. See staticpeers.go and TRANSPORT-NAT-DESIGN.md.
+	//
+	// A configured address is a dial hint, never authorization (§30.2): the
+	// fingerprint is what peer TLS pins, and the coordinator's list still decides
+	// AllowedPeers.
+	StaticPeers []StaticPeer `json:"staticPeers,omitempty"`
 }
 
 // Discovery configures LAN/WAN peer discovery. Every gate defaults to false and
@@ -214,6 +225,9 @@ func (c Config) Validate() error {
 		return errors.New("host name must contain 1–80 bytes and not be blank")
 	}
 	if err := c.Discovery.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateStaticPeers(c.StaticPeers); err != nil {
 		return err
 	}
 	return c.ResourcePolicy().Validate()

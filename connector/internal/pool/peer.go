@@ -316,6 +316,35 @@ func privateIP(ip net.IP) bool {
 		(ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast())
 }
 
+// ValidPeerEndpoint is the endpoint rule, exported so that a caller which stores
+// an owner-configured peer address (internal/config static peers, for cross-VLAN
+// dialling) validates against THE SAME code NewPeerClient uses, instead of a
+// second copy that can drift looser. NewPeerClient calls it too, so there is one
+// rule and one place to read it.
+//
+// The rule is unchanged and is deliberately not relaxed for cross-VLAN use: an
+// RFC1918 address on another subnet already satisfies ip.IsPrivate(), so routed
+// inter-VLAN peer transport needs no loosening here — only an address to dial.
+// A public address is still refused, which is what keeps this transport off the
+// open internet until a reviewed NAT-traversal design lands
+// (TRANSPORT-NAT-DESIGN.md).
+//
+// Being able to dial an address is never permission to talk to whoever answers:
+// the mutual-TLS peerPolicy pins an exact device fingerprint on every handshake.
+func ValidPeerEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" ||
+		u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Port() == "" ||
+		!privateIP(net.ParseIP(u.Hostname())) {
+		return ErrUnsafePath
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // Serve takes ownership of listener only after validating the bound address.
 func (p *PeerServer) Serve(listener net.Listener) error {
 	if listener == nil {
@@ -438,15 +467,8 @@ func NewPeerClient(o PeerClientOptions) (*PeerClient, error) {
 	if o.MaxObjectBytes <= 0 || o.MaxObjectBytes >= 1<<63-1 {
 		return nil, ErrInvalid
 	}
-	u, err := url.Parse(o.Endpoint)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" ||
-		u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Port() == "" ||
-		!privateIP(net.ParseIP(u.Hostname())) {
-		return nil, ErrUnsafePath
-	}
-	port, err := strconv.Atoi(u.Port())
-	if err != nil || port < 1 || port > 65535 {
-		return nil, ErrInvalid
+	if err := ValidPeerEndpoint(o.Endpoint); err != nil {
+		return nil, err
 	}
 	policy, err := newPeerPolicy(o.Registry, []string{o.ExpectedDeviceID}, o.Clock)
 	if err != nil {

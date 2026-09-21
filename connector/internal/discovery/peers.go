@@ -28,6 +28,11 @@ const (
 	SourceMDNS Source = iota + 1
 	SourceRendezvous
 	SourceBoth
+	// SourceStatic is an owner-typed endpoint from the config file. It is
+	// provenance only, exactly like the other three: see static.go. It is listed
+	// separately from SourceBoth rather than folded into it so a UI can say
+	// "statically configured" instead of implying the peer was discovered.
+	SourceStatic
 )
 
 func (s Source) String() string {
@@ -38,6 +43,8 @@ func (s Source) String() string {
 		return "rendezvous"
 	case SourceBoth:
 		return "both"
+	case SourceStatic:
+		return "static"
 	}
 	return "unknown"
 }
@@ -105,6 +112,12 @@ type Peer struct {
 	// a peer mid-transfer because the control plane blipped is worse than saying
 	// the list is old.
 	AuthorizationStale bool `json:"authorizationStale"`
+	// Configured is true when an owner typed this peer's endpoint into the config
+	// (config.StaticPeers) rather than it being discovered. It is LABELLING, not
+	// permission: it is never read by AllowedPeers, and a surface must show a
+	// configured peer as configured rather than as found on the network, because
+	// "my Mac can see it" and "I told it where to look" are different facts.
+	Configured bool `json:"configured"`
 	// Addresses are dial candidates in preference order. They are hints; the
 	// peer TLS handshake decides whether whoever answers is the right machine.
 	Addresses []netip.AddrPort `json:"addresses,omitempty"`

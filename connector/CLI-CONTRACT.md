@@ -43,6 +43,26 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   the report, not a raw filesystem error. Exit 0 means a report was produced,
   NOT that all checks passed; inspect `checks[].status`. Invalid flags or an
   output failure exit nonzero. `productionReady` is always false in this release.
+  `nexal doctor --stun` is the ONE flag that makes `doctor` touch the network. It
+  sends RFC 5389 STUN binding requests to two public servers
+  (`stun.cloudflare.com:3478` and `turn.cloudflare.com:3478` by default, both free)
+  and adds a `nat` block plus the `nat_reflexive` and `nat_mapping` checks:
+  `{reachable,reflexiveAddress,mapping,summary,servers[]}` where `mapping` is
+  `endpoint-independent`, `endpoint-dependent` or `unknown`. It sends no
+  credential, no host identity and no configuration value, and it sets
+  `networkContacted:true` so the report never claims an offline run it did not
+  have. Without the flag, `nat_reflexive` reports `not_checked` and no packet is
+  sent.
+  READ THE SCOPE HONESTLY: this is OBSERVABILITY ONLY. A reflexive address is not
+  reachability. There is no hole punching, no candidate signalling and no relay in
+  this connector, so `doctor --stun` answers "would peer-to-peer over the internet
+  even be feasible from this network", not "it works". `unknown` is a real answer
+  and is what fewer than two answering servers yields; one sample is never a
+  classification. See `TRANSPORT-NAT-DESIGN.md`.
+  `doctor` also reports a `static_peers` check with the COUNT of configured static
+  peers — never their addresses, labels or fingerprints, which are configuration
+  values — and restates that a configured peer is authorized only while the
+  coordinator lists its fingerprint.
 - `nexal pause` persists paused state and cancels active work; requires the running API.
 - `nexal resume` persists resumed state; requires the running API.
 - `nexal accept-jobs` asks the running development connector to accept explicitly
@@ -73,6 +93,39 @@ No credential is printed. Successful commands exit 0; failures exit nonzero.
   Workload memory is bounded to 64–8192 MiB, owner reserve to 128–1048576 MiB,
   and idle time to 30–86400 seconds. These are admission controls for approved
   work, not an OS-enforced sandbox for arbitrary programs.
+- `nexal static-peers list|add|remove` manages owner-configured peer endpoints for
+  peers mDNS cannot find — principally two Macs on different VLANs.
+  `nexal static-peers add --endpoint https://10.20.0.5:8443 --fingerprint <64-hex>
+  [--label "studio vlan 20"]`, `nexal static-peers remove --fingerprint <64-hex>`,
+  `nexal static-peers list`. Output is the stored list plus `count`.
+  WHY IT EXISTS, precisely: the peer transport ALREADY permits a routed private
+  address (an RFC1918 address on another subnet satisfies the same private-IP rule
+  as one on this subnet), and what does not cross a VLAN is mDNS, which is
+  link-local multicast. So this supplies an address; it relaxes no security rule.
+  `--endpoint` must be `https` with a LITERAL private, loopback or link-local IP
+  and an explicit port — the same rule `internal/pool` enforces on every dial. A
+  public address is refused. A hostname is refused, because the peer transport sets
+  `Proxy:nil` and performs no DNS lookup, so a name would be a setting that
+  silently never works.
+  `--fingerprint` is REQUIRED and is the peer's `pool.DeviceID` (64 lowercase hex).
+  CONFIGURATION IS NOT AUTHORIZATION (HARDENING-PLAN §30.2): a static entry
+  contributes a dial address and the fingerprint to pin, and the coordinator's
+  authorized set alone decides which fingerprints may be dialed. A configured peer
+  the coordinator has not authorized is displayed as "configured, not authorized"
+  and is never dialed with credentials. Adding a peer here cannot widen the
+  mutual-TLS allowlist.
+  Entries are sorted by fingerprint, capped at 32, and duplicate fingerprints or
+  endpoints are refused rather than silently replaced. `remove` takes
+  `--fingerprint`, never `--endpoint`, because the fingerprint is the stable
+  identity. The command edits the configuration FILE under the same exclusive lock
+  `enroll` uses; it does NOT go through the running agent's local API, and its
+  output says `appliesAt: next nexal run` rather than pretending a live host picked
+  up the change. A config written before this feature existed still loads: the
+  `staticPeers` array is optional and absent means none.
+  Cross-VLAN operations also require an inter-VLAN routing rule and a firewall that
+  permits the peer port between the subnets — a silent deny there looks exactly
+  like a discovery failure. Alternative to static peers: enable mDNS
+  reflection/repeating on the switch (UniFi, Cisco). See `TRANSPORT-NAT-DESIGN.md`.
 - `nexal tunnel-check` verifies the configured binary digest/configuration and reports
   policy evidence, NOT live PQ attestation.
 - `nexal self-test --samples 1000000` runs the fixed CPU workload offline with a

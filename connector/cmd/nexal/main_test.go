@@ -294,3 +294,114 @@ func TestOfflineSelfTestNoEnrollment(t *testing.T) {
 		t.Fatal("unbounded self-test")
 	}
 }
+
+// Static cross-VLAN peer CLI. It edits the config file, so these assertions read
+// the file back: the whole point of the command is what ends up persisted.
+func TestStaticPeersCommandAddsListsAndRemoves(t *testing.T) {
+	const fingerprint = "aa11223344556677889900112233445566778899001122334455667788990011"
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	if err := run(context.Background(), []string{"init", "--config", path,
+		"--coordinator", "http://127.0.0.1:1", "--dev-loopback", "--dev-secrets"}); err != nil {
+		t.Fatal(err)
+	}
+	// An owner-typed RFC1918 address on ANOTHER subnet is accepted, because the
+	// peer transport already permits a routed private address; this change adds
+	// no relaxation. See TRANSPORT-NAT-DESIGN.md.
+	if err := run(context.Background(), []string{"static-peers", "add", "--config", path,
+		"--endpoint", "https://10.20.0.5:8443", "--fingerprint", fingerprint, "--label", "studio vlan 20"}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.StaticPeers) != 1 || c.StaticPeers[0].Endpoint != "https://10.20.0.5:8443" ||
+		c.StaticPeers[0].Fingerprint != fingerprint || c.StaticPeers[0].Label != "studio vlan 20" {
+		t.Fatalf("stored = %+v", c.StaticPeers)
+	}
+	if err := run(context.Background(), []string{"static-peers", "list", "--config", path}); err != nil {
+		t.Fatal(err)
+	}
+	// Adding the same device twice must be refused rather than silently
+	// overwriting where a dial goes.
+	if err := run(context.Background(), []string{"static-peers", "add", "--config", path,
+		"--endpoint", "https://10.20.0.9:8443", "--fingerprint", fingerprint}); err == nil {
+		t.Fatal("duplicate fingerprint accepted")
+	}
+	if err := run(context.Background(), []string{"static-peers", "remove", "--config", path,
+		"--fingerprint", fingerprint}); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = config.Load(path); err != nil || len(c.StaticPeers) != 0 {
+		t.Fatalf("static peers = %+v err = %v", c.StaticPeers, err)
+	}
+}
+
+func TestStaticPeersCommandRefusesUnsafeInput(t *testing.T) {
+	const fingerprint = "aa11223344556677889900112233445566778899001122334455667788990011"
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	if err := run(context.Background(), []string{"init", "--config", path,
+		"--coordinator", "http://127.0.0.1:1", "--dev-loopback", "--dev-secrets"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		// A PUBLIC endpoint is refused: the private-IP rule is not relaxed for
+		// cross-VLAN, and nothing here opens a path to the internet.
+		{"static-peers", "add", "--config", path, "--endpoint", "https://203.0.113.9:8443", "--fingerprint", fingerprint},
+		// A hostname cannot work: the peer transport performs no DNS lookup.
+		{"static-peers", "add", "--config", path, "--endpoint", "https://peer.example:8443", "--fingerprint", fingerprint},
+		{"static-peers", "add", "--config", path, "--endpoint", "http://10.20.0.5:8443", "--fingerprint", fingerprint},
+		{"static-peers", "add", "--config", path, "--endpoint", "https://10.20.0.5", "--fingerprint", fingerprint},
+		// An address without a fingerprint would be "trust whoever answers".
+		{"static-peers", "add", "--config", path, "--endpoint", "https://10.20.0.5:8443"},
+		{"static-peers", "add", "--config", path, "--fingerprint", fingerprint},
+		{"static-peers", "add", "--config", path, "--endpoint", "https://10.20.0.5:8443", "--fingerprint", "short"},
+		{"static-peers", "remove", "--config", path, "--endpoint", "https://10.20.0.5:8443"},
+		{"static-peers", "remove", "--config", path, "--fingerprint", fingerprint},
+		{"static-peers", "trust-all", "--config", path},
+		{"static-peers", "list", "--config", path, "--endpoint", "https://10.20.0.5:8443"},
+		{"static-peers"},
+	} {
+		if err := run(context.Background(), args); err == nil {
+			t.Fatalf("accepted unsafe static-peers input: %v", args[1:])
+		}
+	}
+	c, err := config.Load(path)
+	if err != nil || len(c.StaticPeers) != 0 {
+		t.Fatalf("a refused command must persist nothing: %+v", c.StaticPeers)
+	}
+}
+
+// doctor --stun is opt-in, and plain doctor must not send a packet. This test
+// only asserts the flag parses and that the default path stays offline; the STUN
+// behaviour itself is tested offline in internal/stun and internal/diagnostics.
+func TestDoctorSTUNFlagIsOptIn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := os.Stdout
+	os.Stdout = writer
+	err = run(context.Background(), []string{"doctor", "--config", path})
+	_ = writer.Close()
+	os.Stdout = original
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var report struct {
+		NetworkContacted bool `json:"networkContacted"`
+		NAT              any  `json:"nat"`
+	}
+	if json.Unmarshal(output, &report) != nil || report.NetworkContacted || report.NAT != nil {
+		t.Fatalf("default doctor must stay offline and report no NAT block: %s", output)
+	}
+	if err := run(context.Background(), []string{"doctor", "--config", path, "--stun", "--extra"}); err == nil {
+		t.Fatal("unknown flag accepted alongside --stun")
+	}
+}

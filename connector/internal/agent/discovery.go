@@ -79,6 +79,11 @@ type DiscoveryOptions struct {
 	// Capabilities is this host's self-report. It is self-reported and attested
 	// by nothing, at every layer, and may never alone open a gated path.
 	Capabilities *client.PeerCapabilities
+	// StaticPeers are the owner-configured cross-VLAN endpoints
+	// (config.StaticPeers). They contribute dial addresses to the merged view and
+	// authorize nothing — discovery.MergeStatic marks them Configured and never
+	// sets Authorized, so AllowedPeers is unaffected by their presence.
+	StaticPeers []discovery.Static
 	// LocalAddresses is the interface enumeration, injectable for tests. Nil
 	// uses the host's real interfaces.
 	LocalAddresses func() []netip.Addr
@@ -136,7 +141,12 @@ func (a *Agent) PeerCandidates() PeerView {
 // gate is not an error, it is the default.
 func (a *Agent) runDiscovery(ctx context.Context) {
 	o := a.discovery
-	if o == nil || !o.Sharing.LANDiscovery && !o.Sharing.WANRendezvous {
+	gated := o != nil && (o.Sharing.LANDiscovery || o.Sharing.WANRendezvous)
+	// Static peers are merged even with both discovery gates shut: the owner named
+	// those addresses explicitly, and refusing to show them because multicast is
+	// off would hide the one part of the view that does not depend on multicast.
+	// Nothing is announced or polled in that state, and nothing is authorized.
+	if o == nil || (!gated && len(o.StaticPeers) == 0) {
 		return
 	}
 	clock := o.Clock
@@ -148,9 +158,11 @@ func (a *Agent) runDiscovery(ctx context.Context) {
 	if o.Config != nil {
 		fingerprint, port = o.Config.DeviceFingerprint, o.Config.PeerPort
 	}
-	if !discovery.ValidFingerprint(fingerprint) || port == 0 {
+	if gated && (!discovery.ValidFingerprint(fingerprint) || port == 0) {
 		// config.Discovery.Validate already refuses this combination, so reaching
 		// here means a caller built options by hand. Fail closed and say so once.
+		// Only the announcing/polling paths need this host's own identity; a static
+		// peer list does not, which is why the check is scoped to an open gate.
 		a.logger.Warn("peer discovery not started: a device fingerprint and peer port are required")
 		return
 	}
@@ -233,7 +245,11 @@ func (a *Agent) mergePeers(r *discovery.Rendezvous, lan *candidateSet, link disc
 	if r != nil {
 		snapshot = r.Snapshot()
 	}
-	peers := discovery.Merge(snapshot, lan.list(now), link, now)
+	var static []discovery.Static
+	if a.discovery != nil {
+		static = a.discovery.StaticPeers
+	}
+	peers := discovery.MergeStatic(snapshot, lan.list(now), static, link, now)
 	allowed := discovery.AllowedPeers(peers)
 	a.mu.Lock()
 	a.peerView.Peers, a.peerView.Allowed, a.peerView.Directory = peers, allowed, snapshot
@@ -442,5 +458,26 @@ func (s *candidateSet) list(now time.Time) []discovery.Candidate {
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Fingerprint < out[j].Fingerprint })
+	return out
+}
+
+// StaticPeersFrom converts the owner's configured endpoints into dial candidates.
+//
+// The conversion is lossy on purpose: what crosses into the discovery package is
+// an address, a port and the fingerprint to pin. The endpoint STRING stays in
+// internal/config, where pool.ValidPeerEndpoint validated it, so no other
+// package can reconstruct a URL that skipped that check. Entries that fail to
+// parse are dropped rather than passed through half-formed; config.Validate
+// already refused them at load, so this is defence in depth, not a code path an
+// owner can reach.
+func StaticPeersFrom(peers []config.StaticPeer) []discovery.Static {
+	out := make([]discovery.Static, 0, len(peers))
+	for _, p := range peers {
+		addr, ok := p.AddrPort()
+		if !ok || !discovery.ValidFingerprint(p.Fingerprint) {
+			continue
+		}
+		out = append(out, discovery.Static{Fingerprint: p.Fingerprint, Address: addr, Label: p.Label})
+	}
 	return out
 }

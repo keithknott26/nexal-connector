@@ -61,7 +61,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|coordinator-check|run|status|policy|set-policy|pause|resume|accept-jobs|cancel|doctor|tunnel-check|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|coordinator-check|run|status|policy|set-policy|pause|resume|accept-jobs|cancel|doctor|tunnel-check|static-peers|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "coordinator-check":
@@ -82,6 +82,8 @@ func run(ctx context.Context, args []string) error {
 		return tunnelCommand(ctx, args[1:])
 	case "doctor":
 		return doctorCommand(ctx, args[1:])
+	case "static-peers":
+		return staticPeersCommand(ctx, args[1:])
 	case "self-test":
 		return selfTestCommand(ctx, args[1:])
 	case "version":
@@ -96,10 +98,114 @@ func doctorCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	probe := f.Bool("probe", false, "explicitly run bounded local Mac telemetry checks")
+	// Opt-in for the same reason --probe is: it is the only part of doctor that
+	// leaves the machine. It sends STUN binding requests, which carry no
+	// credential and no host identity, and it establishes nothing.
+	nat := f.Bool("stun", false, "explicitly query public STUN servers for this host's reflexive address and NAT mapping class")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
-	return emit(diagnostics.Inspect(ctx, *path, *probe))
+	return emit(diagnostics.Inspect(ctx, *path, *probe, *nat))
+}
+
+// staticPeersCommand lists, adds and removes owner-configured cross-VLAN peer
+// endpoints.
+//
+// It edits the configuration FILE under the same exclusive lock enroll and
+// self-test use, rather than going through the running agent's local API like
+// set-policy. That is a deliberate difference: a resource limit must take effect
+// on a live host immediately, whereas a peer endpoint is read when discovery
+// starts, so pretending a live update happened would be the dishonest option. The
+// output says a restart is required.
+//
+// A configured endpoint is NOT authorization (HARDENING-PLAN §30.2). The
+// fingerprint is mandatory because pool.PeerOptions pins one exact device
+// fingerprint per dial, and the coordinator's authorized set still decides
+// AllowedPeers — adding a peer here cannot widen it.
+func staticPeersCommand(_ context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: nexal static-peers list|add|remove [--endpoint https://10.20.0.5:8443] [--fingerprint 64-hex] [--label text]")
+	}
+	action := args[0]
+	f, path, err := flags("static-peers " + action)
+	if err != nil {
+		return err
+	}
+	endpoint := f.String("endpoint", "", "https URL with a literal private IP and explicit port")
+	fingerprint := f.String("fingerprint", "", "expected peer device fingerprint, 64 lowercase hex")
+	label := f.String("label", "", "optional owner-readable note")
+	if err := parse(f, args[1:], path); err != nil {
+		return err
+	}
+	c, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+	if action == "list" {
+		if *endpoint != "" || *fingerprint != "" || *label != "" {
+			return errors.New("static-peers list takes no peer flags")
+		}
+		peers := c.StaticPeers
+		if peers == nil {
+			peers = []config.StaticPeer{}
+		}
+		return emit(map[string]any{"staticPeers": peers, "count": len(peers),
+			"authorization": "configuration is not authorization: a static peer is dialable only while the coordinator lists its fingerprint",
+			"discovery":     "static peers exist because mDNS is link-local and does not cross a VLAN; the transport itself already permits a routed private address"})
+	}
+	// Mutations take the exclusive config lock so a concurrent run/enroll cannot
+	// interleave a write, and are validated before anything is persisted.
+	unlock, err := config.Lock(*path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Re-read under the lock: the copy above was read without it.
+	if c, err = config.Load(*path); err != nil {
+		return err
+	}
+	switch action {
+	case "add":
+		// Encode the flags and decode them back through the strict exactly-once
+		// decoder, so CLI input and a stored/PUT payload share ONE validation path
+		// instead of two that can drift.
+		fields := map[string]string{"endpoint": *endpoint, "fingerprint": *fingerprint}
+		if *label != "" {
+			fields["label"] = *label
+		}
+		body, err := json.Marshal(fields)
+		if err != nil {
+			return errors.New("cannot encode static peer")
+		}
+		peer, err := config.DecodeStaticPeer(body)
+		if err != nil {
+			return err
+		}
+		updated, err := config.AddStaticPeer(c.StaticPeers, peer)
+		if err != nil {
+			return err
+		}
+		c.StaticPeers = updated
+	case "remove":
+		if *endpoint != "" {
+			// Removal is by fingerprint because that is the stable identity; an
+			// address changes, and removing by address would strand a pin.
+			return errors.New("remove takes --fingerprint, not --endpoint")
+		}
+		updated, err := config.RemoveStaticPeer(c.StaticPeers, *fingerprint)
+		if err != nil {
+			return err
+		}
+		c.StaticPeers = updated
+	default:
+		return errors.New("unknown static-peers action; use list, add or remove")
+	}
+	if err := config.Save(*path, c); err != nil {
+		return err
+	}
+	return emit(map[string]any{"staticPeers": c.StaticPeers, "count": len(c.StaticPeers),
+		"appliesAt":     "next nexal run; a running agent keeps the peer list it started with",
+		"authorization": "configuration is not authorization: the coordinator's authorized set still decides which fingerprints may be dialed"})
 }
 func initCommand(ctx context.Context, args []string) error {
 	f, path, err := flags("init")
@@ -304,6 +410,19 @@ func runCommand(ctx context.Context, args []string) error {
 				WANRendezvous: c.Discovery.WANRendezvous,
 			},
 			Publisher: api, Source: api,
+			// Owner-configured cross-VLAN endpoints, merged into the same candidate
+			// view and marked as configured rather than discovered. They add
+			// addresses only: AllowedPeers still comes from the coordinator alone.
+			StaticPeers: agent.StaticPeersFrom(c.StaticPeers),
+		}))
+	} else if len(c.StaticPeers) > 0 {
+		// Static peers without any discovery gate open: nothing is announced and
+		// the coordinator directory is not polled, so no static peer can be
+		// authorized — but the owner's configured entries are still merged and
+		// visible as "configured, not authorized", which is the honest state.
+		opts = append(opts, agent.WithDiscovery(agent.DiscoveryOptions{
+			Config:      c.Discovery,
+			StaticPeers: agent.StaticPeersFrom(c.StaticPeers),
 		}))
 	}
 	a, err := agent.New(c, *path, api, probe, *pull, opts...)

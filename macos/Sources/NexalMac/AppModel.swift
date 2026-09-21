@@ -4,7 +4,14 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published var coordinator = ""
+    /// The deployed development coordinator, prefilled so a fresh install has a
+    /// working destination without the owner typing one. The connector is a
+    /// client of a hosted service; it does not discover peers on the LAN and
+    /// nothing here probes the local network. `config.go` independently rejects
+    /// any origin that is not https, so this default is the only prefilled value
+    /// that path will accept.
+    static let defaultCoordinator = "https://coordinator-dev.nexal.systems"
+    @Published var coordinator = AppModel.defaultCoordinator
     @Published var hostName = Host.current().localizedName ?? "My Mac"
     @Published var enrollmentCode = ""
     @Published var memoryMiB = 256

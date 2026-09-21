@@ -92,4 +92,20 @@ final class CLIContractTests: XCTestCase {
         XCTAssertThrowsError(try ExecutableSelection.approve(URL(fileURLWithPath: "/usr/bin/true")))
         XCTAssertThrowsError(try ExecutableSelection.approve(URL(fileURLWithPath: "/tmp/nexal")))
     }
+
+    /// The owner asked for the deployed coordinator to be the default and for the
+    /// app never to look on the LAN. Both halves are asserted here: the prefilled
+    /// origin is the deployed https one, and the loopback preview is opt-in rather
+    /// than the state a fresh install starts in.
+    @MainActor
+    func testDefaultCoordinatorIsTheDeployedHTTPSOriginAndPreviewIsOptIn() {
+        let model = AppModel()
+        XCTAssertEqual(model.coordinator, "https://coordinator-dev.nexal.systems")
+        XCTAssertTrue(model.coordinator.hasPrefix("https://"))
+        XCTAssertFalse(model.localPreview)
+        // No default may point at the machine itself or at a private range.
+        for host in ["127.0.0.1", "localhost", "0.0.0.0", "192.168.", "10.", "169.254."] {
+            XCTAssertFalse(model.coordinator.contains(host), "default must not be local: \(host)")
+        }
+    }
 }

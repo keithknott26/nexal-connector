@@ -85,6 +85,50 @@ final class TransportCapabilityTests: XCTestCase {
         }
     }
 
+    // D7 regression. Every case above contains a denial word ("unavailable",
+    // "unsupported", "disabled", "fallback"), which is why the old condition
+    // survived review: `text.contains("thunderbolt")` resolved ANY text naming the
+    // cable to .nativeThunderboltRDMA, and none of these phrases carries a denial
+    // word. resolveCapability() then sets rdma[.memoryPager] = .available, so this
+    // was a false CAPABILITY claim, not merely a wrong label. Thunderbolt 4
+    // carries IP and cannot do RDMA at all.
+    func testNamingTheCableWithoutRDMAIsNeverResolvedToRDMA() {
+        for raw in ["IP over Thunderbolt",
+                    "ip over thunderbolt bridge established",
+                    "Thunderbolt bridge up",
+                    "connected over Thunderbolt 4",
+                    "thunderbolt 5 cable detected",
+                    "peer reachable via thunderbolt"] {
+            XCTAssertNotEqual(TransportMechanism.resolve(reportedText: raw),
+                              .nativeThunderboltRDMA,
+                              "naming the cable must not claim RDMA: \(raw)")
+        }
+    }
+
+    // IP over a Thunderbolt bridge is a private-LAN TCP transport.
+    func testIPOverThunderboltResolvesToPrivateLAN() {
+        for raw in ["IP over Thunderbolt", "thunderbolt bridge established",
+                    "Thunderbolt IP link up"] {
+            XCTAssertEqual(TransportMechanism.resolve(reportedText: raw), .tcpPrivateLAN)
+        }
+    }
+
+    // The fix must not weaken genuine RDMA detection.
+    func testExplicitRDMAStillResolves() {
+        for raw in ["native Thunderbolt RDMA link established",
+                    "RDMA established", "rdma link up over thunderbolt 5"] {
+            XCTAssertEqual(TransportMechanism.resolve(reportedText: raw),
+                           .nativeThunderboltRDMA)
+        }
+    }
+
+    // A denial word must still win even when RDMA is named alongside the cable.
+    func testDenialStillBeatsExplicitRDMA() {
+        XCTAssertNotEqual(
+            TransportMechanism.resolve(reportedText: "ip over thunderbolt; rdma unavailable"),
+            .nativeThunderboltRDMA)
+    }
+
     func testResolutionIsCaseInsensitiveAndOrdered() {
         XCTAssertEqual(TransportMechanism.resolve(reportedText: "NATIVE THUNDERBOLT RDMA ESTABLISHED"),
                        .nativeThunderboltRDMA)

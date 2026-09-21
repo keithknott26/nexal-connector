@@ -30,7 +30,22 @@ enum TransportMechanism {
         if text.contains("heartbeat-only") || text.contains("heartbeat only") {
             return .controlPlaneOnly
         }
-        if !denied && (text.contains("rdma") || text.contains("thunderbolt")) {
+        // IP over a Thunderbolt bridge is a TCP transport that happens to run on
+        // a Thunderbolt cable. It is NOT RDMA. This is checked BEFORE the RDMA
+        // branch because such text mentions Thunderbolt without any denial word,
+        // so an RDMA-first order classifies it as an established RDMA link.
+        if !denied && (text.contains("ip over thunderbolt")
+                       || text.contains("thunderbolt bridge")
+                       || text.contains("thunderbolt ip")) {
+            return .tcpPrivateLAN
+        }
+        // "rdma" is REQUIRED. A cable type is not a protocol: matching bare
+        // "thunderbolt" here claimed a native RDMA link for any report that merely
+        // named the cable, and resolveCapability() turns that into
+        // rdma[.memoryPager] = .available -- a capability claim, not a label.
+        // Thunderbolt 4 carries IP happily and cannot do RDMA at all, so the old
+        // condition would assert a capability the hardware does not have.
+        if !denied && text.contains("rdma") {
             return .nativeThunderboltRDMA
         }
         if !denied && (text.contains("private-lan") || text.contains("private lan")

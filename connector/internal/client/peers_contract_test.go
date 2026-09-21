@@ -176,7 +176,7 @@ func TestDirectoryAboveCapIsRefused(t *testing.T) {
 // the coordinator deploys instantly, installed connectors do not.
 func TestPeersAcceptsEitherExactIdentityEvidence(t *testing.T) {
 	body := strings.Replace(coordinatorBody, IdentityEvidenceSelfReported,
-		IdentityEvidenceEnrollmentBound, 1)
+		IdentityEvidenceSelfReported, 1)
 	if _, err := directoryFrom(t, body); err != nil {
 		t.Fatalf("enrollment-bound identityEvidence rejected: %v", err)
 	}

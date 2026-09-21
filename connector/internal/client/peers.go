@@ -87,26 +87,19 @@ type PeerDirectory struct {
 const (
 	AuthorizationCandidateList     = "candidate-list-not-authorization"
 	CapabilityEvidenceSelfReported = "self-reported-not-attested"
-	// The two identityEvidence spellings this client accepts, both exact.
+	// IdentityEvidenceSelfReported is the exact string apps/coordinator/src/peers.ts
+	// sends as IDENTITY_EVIDENCE. It is compared literally and nothing else is
+	// accepted.
 	//
-	// IdentityEvidenceSelfReported is what apps/coordinator/src/peers.ts actually
-	// sends today (`IDENTITY_EVIDENCE`). IdentityEvidenceEnrollmentBound is the
-	// string this client was written against, and the two never matched: a client
-	// that demanded only the second one refused every real coordinator response,
-	// which is the §43 failure mode a second time — a string duplicated across the
-	// repo boundary with no test comparing the two sides.
-	//
-	// Both are accepted, and nothing else is. That is not a loosened check: each is
-	// an exact, literal, honesty-preserving claim ("this fingerprint is not proof of
-	// key possession" / "not hardware attested"), neither claims authorization, and
-	// an empty, absent or differently-worded value is still refused outright. The
-	// skew is one-directional and unbounded (§43.2): the coordinator is a Worker
-	// that deploys instantly while connectors are installed binaries, so a rename
-	// on either side must not black-hole discovery for an already-installed fleet.
-	// TestIdentityEvidenceMatchesCoordinatorSource fails if peers.ts sends a third
-	// spelling.
-	IdentityEvidenceSelfReported    = "self-reported-not-proof-of-key-possession"
-	IdentityEvidenceEnrollmentBound = "enrollment-bound-not-hardware-attested"
+	// An earlier revision of this file demanded "enrollment-bound-not-hardware-attested",
+	// which appears nowhere in the platform repo: it was invented, and it refused
+	// every real directory read. Accepting both spellings was then proposed as the
+	// fix, and that is wrong for the reason this check exists. The comparison is how
+	// the client refuses a response from something that does not share the contract,
+	// so widening it to admit a string the coordinator never sends weakens the gate
+	// while hiding the original mistake. A rename is a coordinated two-repo change,
+	// and TestHonestyStringsAndCapsMatchCoordinatorSource fails if peers.ts drifts.
+	IdentityEvidenceSelfReported = "self-reported-not-proof-of-key-possession"
 	// maxDirectoryPeers must not be below the coordinator's MAX_PEERS
 	// (apps/coordinator/src/peers.ts). The client rejects the entire directory
 	// when the count is exceeded, so a cap lower than the server's page size
@@ -131,9 +124,9 @@ const (
 )
 
 // acceptedIdentityEvidence is the honesty check for identityEvidence: an exact
-// match against one of the two literal contract strings, and nothing else.
+// match against the one literal contract string, and nothing else.
 func acceptedIdentityEvidence(s string) bool {
-	return s == IdentityEvidenceSelfReported || s == IdentityEvidenceEnrollmentBound
+	return s == IdentityEvidenceSelfReported
 }
 
 // Peers reads the tenant's peer candidates. The tenant is never sent: it is read

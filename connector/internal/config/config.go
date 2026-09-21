@@ -41,6 +41,84 @@ type Config struct {
 	ReserveMemoryBytes uint64  `json:"reserveMemoryBytes"`
 	IdleSeconds        uint64  `json:"idleSeconds"`
 	Tunnel             *Tunnel `json:"tunnel,omitempty"`
+	// Discovery is absent by default, and absent means off. Peer discovery joins
+	// multicast groups and publishes this host's addresses, so it is an explicit
+	// owner decision rather than something a new binary starts doing on upgrade.
+	Discovery *Discovery `json:"discovery,omitempty"`
+}
+
+// Discovery configures LAN/WAN peer discovery. Every gate defaults to false and
+// the zero value is the closed state (discovery.SharingPolicy has the same
+// shape and the same default, and its Listen/NewRendezvous constructors refuse
+// to start on a shut gate).
+//
+// ResourceSharing is deliberately NOT settable here. Whether offering this
+// machine's CPU/GPU/RAM should default on is the unresolved product decision in
+// HARDENING-PLAN §36.4, and a config field would quietly turn it into an
+// implementation detail.
+type Discovery struct {
+	// LANDiscovery gates joining the mDNS groups at all — both announcing this
+	// host on the local link and browsing for others.
+	LANDiscovery bool `json:"lanDiscovery"`
+	// WANRendezvous gates publishing this host's addresses to the coordinator and
+	// polling its peer directory.
+	WANRendezvous bool `json:"wanRendezvous"`
+	// DeviceFingerprint is pool.DeviceID for this host's peer identity: 64
+	// lowercase hex characters. It is a public key hash, not a secret, which is
+	// why it lives in the config rather than the Keychain.
+	//
+	// There is no automatic generation here on purpose. pool.Identity keys are
+	// deliberately not persisted by that package ("the embedding agent must use
+	// its reviewed credential/key recovery policy"), so inventing a key-storage
+	// scheme as a side effect of enabling discovery would be the wrong place to
+	// decide it. Until a fingerprint is configured, discovery publishes nothing.
+	DeviceFingerprint string `json:"deviceFingerprint,omitempty"`
+	// PeerPort is the peer object-transfer port published as the dial candidate.
+	PeerPort uint16 `json:"peerPort,omitempty"`
+}
+
+// Enabled reports whether any discovery mechanism is configured to run. A nil
+// Discovery, or one with both gates false, means nothing starts.
+func (d *Discovery) Enabled() bool {
+	return d != nil && (d.LANDiscovery || d.WANRendezvous)
+}
+
+// Validate refuses a half-configured gate rather than opening it partially: a
+// host that means to advertise must say which fingerprint and which port, and a
+// gate that cannot be honoured is a configuration error, not a silent no-op.
+func (d *Discovery) Validate() error {
+	if d == nil {
+		return nil
+	}
+	if d.DeviceFingerprint != "" && !validDeviceFingerprint(d.DeviceFingerprint) {
+		return errors.New("discovery deviceFingerprint must be 64 lowercase hex characters")
+	}
+	if !d.Enabled() {
+		return nil
+	}
+	if d.DeviceFingerprint == "" {
+		return errors.New("discovery requires a deviceFingerprint; peers are identified by an exact key fingerprint, never by name or address")
+	}
+	if d.PeerPort == 0 {
+		return errors.New("discovery requires a peerPort to publish as the dial candidate")
+	}
+	return nil
+}
+
+// validDeviceFingerprint is pool.DeviceID's exact output shape. Uppercase is
+// rejected rather than folded, so the published value is byte-identical to the
+// value peer TLS pins and to the coordinator's device_fingerprint_shape check.
+func validDeviceFingerprint(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func DefaultPath() (string, error) {
@@ -119,6 +197,9 @@ func (c Config) Validate() error {
 	if len(strings.TrimSpace(c.Name)) < 1 || len(c.Name) > 80 {
 		return errors.New("host name must contain 1–80 bytes and not be blank")
 	}
+	if err := c.Discovery.Validate(); err != nil {
+		return err
+	}
 	return c.ResourcePolicy().Validate()
 }
 
@@ -142,7 +223,7 @@ func Load(path string) (Config, error) {
 		if strings.EqualFold(key, "paused") {
 			hasPause = true
 		}
-		if strings.EqualFold(key, "tunnel") {
+		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") {
 			continue
 		}
 		if strings.TrimSpace(string(value)) == "null" {

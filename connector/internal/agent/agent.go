@@ -69,6 +69,11 @@ type Agent struct {
 	devPull           bool
 	manualUntil       time.Time
 	manualEnabledPull bool
+	// discovery is nil unless WithDiscovery was given, which is the default: a
+	// connector with no discovery block in its config announces nothing and
+	// polls nothing. peerView is the last merged candidate view, guarded by mu.
+	discovery *DiscoveryOptions
+	peerView  PeerView
 	// logger is set by New and never written again, so every goroutine below can
 	// read it without a.mu. Records carry attempt identifiers, states, durations
 	// and this package's fixed error strings; never tokens, admin credentials,
@@ -637,7 +642,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.Refresh(ctx)
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
+	// Peer discovery is its own goroutine so a multicast join, an advertise or a
+	// coordinator directory read can never delay a heartbeat or an attempt poll.
+	// It returns immediately when discovery is not configured.
+	go func() {
+		defer wg.Done()
+		a.runDiscovery(ctx)
+	}()
 	// Host network I/O must not block the owner/telemetry monitor.
 	go func() {
 		defer wg.Done()

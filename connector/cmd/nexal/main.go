@@ -24,6 +24,7 @@ import (
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/diagnostics"
+	"nexal/connector/internal/discovery"
 	"nexal/connector/internal/tunnel"
 )
 
@@ -269,7 +270,26 @@ func runCommand(ctx context.Context, args []string) error {
 		level = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-	a, err := agent.New(c, *path, api, probe, *pull, agent.WithLogger(logger))
+	opts := []agent.Option{agent.WithLogger(logger)}
+	if c.Discovery.Enabled() {
+		// Off unless the owner turned it on: config.Discovery is absent by default,
+		// and Validate has already refused a gate opened without a fingerprint and
+		// port. ResourceSharing stays false here — §36.4 is unresolved, and nothing
+		// in this wiring offers this machine's CPU, GPU or RAM to anyone.
+		//
+		// Discovery grants nothing. Advertise publishes a candidate list entry, the
+		// directory read produces candidates, and admission stays with the
+		// mutual-TLS peerPolicy in internal/pool.
+		opts = append(opts, agent.WithDiscovery(agent.DiscoveryOptions{
+			Config: c.Discovery,
+			Sharing: discovery.SharingPolicy{
+				LANDiscovery:  c.Discovery.LANDiscovery,
+				WANRendezvous: c.Discovery.WANRendezvous,
+			},
+			Publisher: api, Source: api,
+		}))
+	}
+	a, err := agent.New(c, *path, api, probe, *pull, opts...)
 	if err != nil {
 		return err
 	}

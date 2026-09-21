@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 )
 
@@ -45,5 +46,82 @@ func TestResourcePolicyBounds(t *testing.T) {
 				t.Fatal("invalid limit accepted")
 			}
 		})
+	}
+}
+
+// Discovery is absent by default, and absent means off: peer discovery joins
+// multicast groups and publishes this host's addresses, which is an owner
+// decision rather than something a binary starts doing on upgrade.
+func TestDiscoveryDefaultsClosed(t *testing.T) {
+	var absent *Discovery
+	if absent.Enabled() {
+		t.Fatal("a config without a discovery block enabled discovery")
+	}
+	if (&Discovery{}).Enabled() {
+		t.Fatal("the zero Discovery value is not the closed state")
+	}
+	if err := absent.Validate(); err != nil {
+		t.Fatalf("an absent discovery block must validate: %v", err)
+	}
+}
+
+// A gate opened without the identity or the port it needs is a configuration
+// error, not a silent no-op: a host that means to advertise must say what.
+func TestDiscoveryRefusesHalfConfiguredGate(t *testing.T) {
+	good := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for name, d := range map[string]*Discovery{
+		"wan without fingerprint": {WANRendezvous: true, PeerPort: 7443},
+		"lan without fingerprint": {LANDiscovery: true, PeerPort: 7443},
+		"wan without port":        {WANRendezvous: true, DeviceFingerprint: good},
+		"uppercase fingerprint":   {WANRendezvous: true, PeerPort: 7443, DeviceFingerprint: "AB" + good[2:]},
+		"short fingerprint":       {WANRendezvous: true, PeerPort: 7443, DeviceFingerprint: good[:63]},
+		"non-hex fingerprint":     {WANRendezvous: true, PeerPort: 7443, DeviceFingerprint: "zz" + good[2:]},
+	} {
+		if err := d.Validate(); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	full := &Discovery{LANDiscovery: true, WANRendezvous: true, DeviceFingerprint: good, PeerPort: 7443}
+	if err := full.Validate(); err != nil {
+		t.Fatalf("a fully configured discovery block was refused: %v", err)
+	}
+	if !full.Enabled() {
+		t.Fatal("a configured discovery block is not enabled")
+	}
+}
+
+// The block survives a save/load round trip, and a config file that does not
+// mention discovery still loads with discovery off.
+func TestDiscoveryRoundTripsThroughConfigFile(t *testing.T) {
+	base := Config{Version: 1, Coordinator: "https://example.invalid", Name: "test",
+		Listen: "127.0.0.1:8788", MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20,
+		IdleSeconds: 300}
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	if err := Save(path, base); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Discovery != nil {
+		t.Fatalf("discovery = %+v, want absent", loaded.Discovery)
+	}
+	base.Discovery = &Discovery{WANRendezvous: true, PeerPort: 7443,
+		DeviceFingerprint: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+	if err := Save(path, base); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Discovery == nil || !loaded.Discovery.WANRendezvous ||
+		loaded.Discovery.PeerPort != 7443 ||
+		loaded.Discovery.DeviceFingerprint != base.Discovery.DeviceFingerprint {
+		t.Fatalf("discovery did not round trip: %+v", loaded.Discovery)
+	}
+	if loaded.Discovery.LANDiscovery {
+		t.Error("an unset gate came back open")
 	}
 }

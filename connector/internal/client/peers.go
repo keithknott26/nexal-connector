@@ -3,6 +3,9 @@ package client
 import (
 	"context"
 	"errors"
+	"net/netip"
+	"strconv"
+	"strings"
 )
 
 // The coordinator is the rendezvous server for WAN discovery. There is no
@@ -82,18 +85,56 @@ type PeerDirectory struct {
 // AuthorizationCandidateList and CapabilityEvidenceSelfReported are the exact
 // strings the API contract specifies.
 const (
-	AuthorizationCandidateList      = "candidate-list-not-authorization"
-	CapabilityEvidenceSelfReported  = "self-reported-not-attested"
+	AuthorizationCandidateList     = "candidate-list-not-authorization"
+	CapabilityEvidenceSelfReported = "self-reported-not-attested"
+	// The two identityEvidence spellings this client accepts, both exact.
+	//
+	// IdentityEvidenceSelfReported is what apps/coordinator/src/peers.ts actually
+	// sends today (`IDENTITY_EVIDENCE`). IdentityEvidenceEnrollmentBound is the
+	// string this client was written against, and the two never matched: a client
+	// that demanded only the second one refused every real coordinator response,
+	// which is the §43 failure mode a second time — a string duplicated across the
+	// repo boundary with no test comparing the two sides.
+	//
+	// Both are accepted, and nothing else is. That is not a loosened check: each is
+	// an exact, literal, honesty-preserving claim ("this fingerprint is not proof of
+	// key possession" / "not hardware attested"), neither claims authorization, and
+	// an empty, absent or differently-worded value is still refused outright. The
+	// skew is one-directional and unbounded (§43.2): the coordinator is a Worker
+	// that deploys instantly while connectors are installed binaries, so a rename
+	// on either side must not black-hole discovery for an already-installed fleet.
+	// TestIdentityEvidenceMatchesCoordinatorSource fails if peers.ts sends a third
+	// spelling.
+	IdentityEvidenceSelfReported    = "self-reported-not-proof-of-key-possession"
 	IdentityEvidenceEnrollmentBound = "enrollment-bound-not-hardware-attested"
 	// maxDirectoryPeers must not be below the coordinator's MAX_PEERS
 	// (apps/coordinator/src/peers.ts). The client rejects the entire directory
 	// when the count is exceeded, so a cap lower than the server's page size
 	// silently disables discovery for any tenant large enough to fill a page.
-	maxDirectoryPeers                  = 200
-	maxDirectoryAddressesPerPeer       = 9 // 8 lan + 1 wan, matching the server cap.
+	maxDirectoryPeers = 200
+	// MaxAdvertisedLANAddresses and MaxObservedWANAddresses mirror MAX_LAN_ADDRESSES
+	// and MAX_WAN_ADDRESSES in apps/coordinator/src/peers.ts, which are in turn the
+	// `host_address_cap` trigger in migration 0013. Advertising above the cap is
+	// refused here rather than sent, because the server refuses the whole request:
+	// a partially applied advertise does not exist, so an over-cap batch would
+	// leave the host's previous address set in place while the caller believed it
+	// had published a new one.
+	MaxAdvertisedLANAddresses = 8
+	// MaxObservedWANAddresses is 1 because the WAN address is the coordinator's
+	// single observation of the connecting address, not a list a host supplies.
+	MaxObservedWANAddresses            = 1
+	maxDirectoryAddressesPerPeer       = MaxAdvertisedLANAddresses + MaxObservedWANAddresses
 	errDirectorySchema                 = "invalid coordinator peer directory schema"
 	errDirectoryUnauthorizedAssumption = "coordinator peer directory did not declare itself a candidate list"
+	errAdvertiseSchema                 = "invalid coordinator advertise response schema"
+	errAdvertiseUnauthorizedAssumption = "coordinator advertise response did not declare itself a candidate list"
 )
+
+// acceptedIdentityEvidence is the honesty check for identityEvidence: an exact
+// match against one of the two literal contract strings, and nothing else.
+func acceptedIdentityEvidence(s string) bool {
+	return s == IdentityEvidenceSelfReported || s == IdentityEvidenceEnrollmentBound
+}
 
 // Peers reads the tenant's peer candidates. The tenant is never sent: it is read
 // server-side from the host token's row.
@@ -106,7 +147,7 @@ func (c *Client) Peers(ctx context.Context) (PeerDirectory, error) {
 		return PeerDirectory{}, errors.New(errDirectoryUnauthorizedAssumption)
 	}
 	if out.CapabilityEvidence != CapabilityEvidenceSelfReported ||
-		out.IdentityEvidence != IdentityEvidenceEnrollmentBound ||
+		!acceptedIdentityEvidence(out.IdentityEvidence) ||
 		len(out.Peers) > maxDirectoryPeers {
 		return PeerDirectory{}, errors.New(errDirectorySchema)
 	}
@@ -121,4 +162,201 @@ func (c *Client) Peers(ctx context.Context) (PeerDirectory, error) {
 		}
 	}
 	return out, nil
+}
+
+// LANAddress is one address this host publishes as a dial candidate. Kind is
+// always "lan": apps/coordinator/src/peers.ts refuses kind "wan" with a 400
+// rather than ignoring it, because the public address is the coordinator's
+// observation to make and accepting a host's claim about it would let a host
+// point its peers at an arbitrary third party (§3.2).
+//
+// All three fields are always emitted. The server validates the object with
+// `keys(item, ["kind","address","port"])`, whose `required` defaults to the
+// allowed list, so an omitted port is a 400 rather than a default.
+type LANAddress struct {
+	Kind    string `json:"kind"`
+	Address string `json:"address"`
+	Port    uint16 `json:"port"`
+}
+
+// Advertisement is the POST /api/peers/advertise request body. The server
+// accepts exactly {fingerprint, addresses, capabilities} and requires the first
+// two, so Capabilities is a pointer: omitting it is meaningful, and means
+// "clear the stored self-report" rather than "leave it alone" — advertise is a
+// full replacement of this host's published set, not a patch.
+type Advertisement struct {
+	// Fingerprint is pool.DeviceID: 64 lowercase hex characters of SHA-256 over
+	// the ed25519 public key, the same value peer TLS pins. Uppercase is a 400
+	// on the server and is refused here, so both sides publish identical bytes.
+	Fingerprint string `json:"fingerprint"`
+	// Addresses must serialize as a JSON array even when empty: the server tests
+	// Array.isArray, and a nil Go slice encodes as null, which is a 400. Advertise
+	// therefore builds this slice itself rather than forwarding a caller's nil.
+	Addresses    []LANAddress      `json:"addresses"`
+	Capabilities *PeerCapabilities `json:"capabilities,omitempty"`
+}
+
+// AdvertiseAck is the literal response body of POST /api/peers/advertise.
+//
+// EVERY field the coordinator returns must be declared, because c.call decodes
+// with DisallowUnknownFields: an undeclared field is not ignored, it fails the
+// whole call at runtime. HARDENING-PLAN §43 records this exact bug being shipped
+// twice, so the field list below is copied from the return statement of
+// advertisePeer in apps/coordinator/src/peers.ts, not from what this client
+// happens to need.
+type AdvertiseAck struct {
+	OK          bool   `json:"ok"`
+	Fingerprint string `json:"fingerprint"`
+	// LANAddresses is the number of lan candidates the coordinator stored, after
+	// its own duplicate collapsing. It is the count, not the list.
+	LANAddresses int `json:"lanAddresses"`
+	// ObservedWANAddress is the coordinator's own observation of the connecting
+	// address, and the only source of a wan candidate. It is JSON null when the
+	// request did not arrive through a Cloudflare edge (local development), which
+	// encoding/json leaves as the empty string: no WAN candidate was recorded,
+	// which is the honest reading rather than a fabricated public address.
+	ObservedWANAddress string `json:"observedWanAddress"`
+	IdentityEvidence   string `json:"identityEvidence"`
+	CapabilityEvidence string `json:"capabilityEvidence"`
+	Authorization      string `json:"authorization"`
+}
+
+// lanAddressClaim mirrors `lanAddress` in apps/coordinator/src/peers.ts so a
+// request the server would reject is not sent. It returns the normalized form.
+//
+// The accepted families are exactly the server's three: RFC1918, 100.64/10
+// CGNAT, and link-local (169.254/16, fe80::/10). IPv6 unique-local (fc00::/7) is
+// deliberately NOT accepted even though netip.Addr.IsPrivate reports it as
+// private — widening the contract to a fourth family is a policy decision, not a
+// client-side convenience. Loopback is not accepted either: 127.0.0.1 is in none
+// of the three families, so publishing it would be a guaranteed 400.
+//
+// A zone index (fe80::1%en0) is rejected rather than stripped: the zone is
+// meaningful only on this machine, and the server stores no interface names.
+func lanAddressClaim(s string) (string, bool) {
+	if len(s) < 3 || len(s) > 45 || s != strings.ToLower(s) || strings.Contains(s, "%") {
+		return "", false
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil || addr.Zone() != "" {
+		return "", false
+	}
+	if addr.Is4() {
+		// Re-rendered from the parsed value, which also rejects the leading-zero
+		// forms the server refuses: "010.0.0.1" is octal to one resolver and
+		// decimal to another, so the same string would name two hosts.
+		if !addr.IsPrivate() && !cgnatAddress(addr) && !addr.IsLinkLocalUnicast() {
+			return "", false
+		}
+		return addr.String(), true
+	}
+	if addr.Is4In6() || !addr.IsLinkLocalUnicast() {
+		return "", false
+	}
+	return addr.String(), true
+}
+
+// cgnatAddress covers 100.64.0.0/10, which netip does not consider private but
+// the coordinator accepts as a lan family.
+func cgnatAddress(addr netip.Addr) bool {
+	return addr.Is4() && netip.MustParsePrefix("100.64.0.0/10").Contains(addr)
+}
+
+// ValidLANAddressClaim reports whether an address may be published as a lan
+// candidate, and returns the exact normalized string the coordinator will store.
+// Callers gathering interface addresses use it to filter before advertising,
+// instead of learning about a rejected family from an HTTP 400.
+func ValidLANAddressClaim(s string) (string, bool) { return lanAddressClaim(s) }
+
+// Advertise publishes this host's fingerprint and lan dial candidates, and
+// returns what the coordinator recorded.
+//
+// This is what makes the peer directory non-empty: without it the coordinator's
+// host_addresses table stays empty for this host, and every peer reading
+// /api/peers sees this host with no addresses at all.
+//
+// Publishing is not authorization and Advertise grants nothing. It is a claim
+// over an authenticated channel; whether this host may read or write a peer's
+// Store is still decided by the mutual-TLS peerPolicy in internal/pool.
+func (c *Client) Advertise(ctx context.Context, fingerprint string, addresses []LANAddress, capabilities *PeerCapabilities) (AdvertiseAck, error) {
+	if !validFingerprint(fingerprint) {
+		return AdvertiseAck{}, errors.New("invalid device fingerprint")
+	}
+	if len(addresses) > MaxAdvertisedLANAddresses {
+		return AdvertiseAck{}, errors.New("too many lan addresses to advertise")
+	}
+	// Built here, never reused from the caller: the slice must be non-nil so it
+	// encodes as [] rather than null, and every entry must be one the server
+	// accepts, because one bad entry fails the whole replacement.
+	body := Advertisement{Fingerprint: fingerprint,
+		Addresses: make([]LANAddress, 0, len(addresses)), Capabilities: capabilities}
+	seen := map[string]bool{}
+	for _, a := range addresses {
+		if a.Kind != "lan" {
+			// Including "wan": the server returns wan_not_advertisable, and
+			// pretending otherwise here would hide the same contract.
+			return AdvertiseAck{}, errors.New("only lan addresses may be advertised")
+		}
+		if a.Port == 0 {
+			return AdvertiseAck{}, errors.New("invalid advertised port")
+		}
+		address, ok := lanAddressClaim(a.Address)
+		if !ok {
+			return AdvertiseAck{}, errors.New("advertised address must be RFC1918, CGNAT or link-local")
+		}
+		key := address + "/" + strconv.Itoa(int(a.Port))
+		// Duplicates are collapsed, matching the server: a machine legitimately
+		// reports the same address on two interfaces, and the cap counts
+		// candidates rather than noise.
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		body.Addresses = append(body.Addresses, LANAddress{Kind: "lan", Address: address, Port: a.Port})
+	}
+	var out AdvertiseAck
+	if err := c.call(ctx, "POST", "/api/peers/advertise", body, &out); err != nil {
+		return AdvertiseAck{}, err
+	}
+	if out.Authorization != AuthorizationCandidateList {
+		return AdvertiseAck{}, errors.New(errAdvertiseUnauthorizedAssumption)
+	}
+	if out.CapabilityEvidence != CapabilityEvidenceSelfReported ||
+		!acceptedIdentityEvidence(out.IdentityEvidence) {
+		return AdvertiseAck{}, errors.New(errAdvertiseSchema)
+	}
+	// The echoed fingerprint is the one thing that says the coordinator wrote
+	// this host's row and not some other identity's.
+	if !out.OK || out.Fingerprint != fingerprint {
+		return AdvertiseAck{}, errors.New(errAdvertiseSchema)
+	}
+	if out.LANAddresses < 0 || out.LANAddresses > len(body.Addresses) {
+		// More stored candidates than were sent is not a bigger fleet, it is a
+		// response that does not share this contract.
+		return AdvertiseAck{}, errors.New(errAdvertiseSchema)
+	}
+	if out.ObservedWANAddress != "" {
+		addr, err := netip.ParseAddr(out.ObservedWANAddress)
+		if err != nil || addr.Zone() != "" {
+			return AdvertiseAck{}, errors.New(errAdvertiseSchema)
+		}
+	}
+	return out, nil
+}
+
+// validFingerprint is pool.DeviceID's exact output shape, duplicated here rather
+// than imported so internal/client keeps no dependency on internal/pool. It is
+// the same rule as discovery.ValidFingerprint and the server's
+// device_fingerprint_shape constraint: 64 lowercase hex characters.
+func validFingerprint(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

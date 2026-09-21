@@ -138,7 +138,12 @@ struct ChartCard<Content: View>: View {
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: PanelMetrics.chartHeight, alignment: .topLeading)
+                // Deliberately NOT reserving chartHeight here. Four empty charts
+                // each holding 74pt of blank space pushed the owner controls off
+                // the first screen on first launch, which is when the panel is
+                // always empty. The explanation is the content in this state, so
+                // the card sizes to it and the panel stays scannable.
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             } else {
                 content()
                     .frame(height: PanelMetrics.chartHeight)

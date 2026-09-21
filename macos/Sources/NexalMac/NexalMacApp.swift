@@ -168,6 +168,19 @@ private struct ConnectorPanel: View {
                     .disabled(model.selection == nil || !model.configurationExists)
                 Button("Refresh") { Task { await model.refresh() } }
             }
+            // The primary action is disabled on first launch until a connector is
+            // chosen, and the reason lives in a collapsed section further down.
+            // A dead button with no stated cause reads as a broken app, so the
+            // requirement is named at the point of disablement. Shown only while
+            // it is actually blocked.
+            if model.selection == nil || !model.configurationExists {
+                Text(model.selection == nil
+                     ? "Choose a connector under Setup below to enable Start / Connect."
+                     : "No connector configuration found yet. Complete Setup below to enable Start / Connect.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Button {
                 Task { await model.acceptJobsNow() }
             } label: {

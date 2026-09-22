@@ -32,11 +32,38 @@ private struct ConnectorPanel: View {
         ScrollView {
             VStack(alignment: .leading, spacing: PanelMetrics.sectionSpacing) {
                 header
-                statusSection
-                detailSection
-                graphsSection
-                controlsSection
-                pairingSection
+                stageHeading
+                // ONE stage owns the top of the window. The previous layout showed
+                // all six sections at once and left the owner to work out which
+                // applied to them; here the stage decides, and everything that is
+                // not the current step moves below into disclosures.
+                switch model.stage {
+                case .starting:
+                    ProgressView().controlSize(.small)
+                case .offline, .notJoined:
+                    offlineStage
+                case .needsPairing, .pairingEnded:
+                    startPairingStage
+                case .showingCode:
+                    showingCodeStage
+                case .paired:
+                    pairedStage
+                }
+                // Always reachable, never in the way. Graphs stay collapsed until
+                // this Mac is actually on the network, because a chart of a network
+                // you have not joined is decoration, not a measurement.
+                if model.stage.isOnNetwork {
+                    graphsSection
+                } else {
+                    DisclosureGroup("Activity graphs") { graphsSection }
+                }
+                DisclosureGroup("Status and connection") {
+                    VStack(alignment: .leading, spacing: PanelMetrics.sectionSpacing) {
+                        statusSection
+                        detailSection
+                    }
+                }
+                DisclosureGroup("Owner controls") { controlsSection }
                 setupSection
                 footer
             }
@@ -51,6 +78,128 @@ private struct ConnectorPanel: View {
                 await model.refresh()
                 do { try await Task.sleep(for: .seconds(10)) } catch { break }
             }
+        }
+    }
+
+    /// The one line that says where the owner is, and the one thing to do about it.
+    /// Both come from the tested stage type rather than being assembled here.
+    private var stageHeading: some View {
+        VStack(alignment: .leading, spacing: PanelMetrics.tightSpacing) {
+            Text(model.stage.headline)
+                .font(.title3.weight(.semibold))
+                .accessibilityIdentifier("stage.headline")
+            if let guidance = model.stage.guidance {
+                Text(guidance)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("stage.guidance")
+            }
+        }
+    }
+
+    /// Not running, or running but never joined. The only action that helps is
+    /// starting it; the reason it is blocked is stated next to the button rather
+    /// than left as a dead control.
+    private var offlineStage: some View {
+        VStack(alignment: .leading, spacing: PanelMetrics.rowSpacing) {
+            Button {
+                Task { await model.start() }
+            } label: {
+                Label("Start neXal", systemImage: "play.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.selection == nil || !model.configurationExists)
+            if model.selection == nil || !model.configurationExists {
+                Text(model.selection == nil
+                     ? "Choose a connector under Setup below to enable Start."
+                     : "No connector configuration found yet. Complete Setup below to enable Start.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Ready to link. One button, because on the owner's own Macs there is exactly
+    /// one thing to do here.
+    private var startPairingStage: some View {
+        VStack(alignment: .leading, spacing: PanelMetrics.rowSpacing) {
+            Button {
+                Task { await model.startPairing() }
+            } label: {
+                Label("Show pairing code", systemImage: "qrcode").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("show-pairing-code")
+            .disabled(model.pairingUnavailableReason != nil)
+            if let reason = model.pairingUnavailableReason {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let problem = model.pairingProblem {
+                Text(problem).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            }
+            CaveatDisclosure(title: "How pairing works",
+                             text: "The Go connector asks your coordinator for a short-lived pairing and renders the code. The code is drawn on screen only and is never saved: it carries a one-time secret that lets the phone claim this Mac. Codes expire in a few minutes. Pairing requires an https coordinator, which both the development and production environments now provide.")
+            CaveatDisclosure(title: "Pairing somebody else's Mac",
+                             text: "The role picker used to sit on this screen. It now lives here because on your own Macs the answer is always the same: scan the code with your iPhone and this Mac joins your account. The picker matters only when the Mac in front of you belongs to someone else.")
+            Picker("This Mac's role", selection: $model.pairingRole) {
+                ForEach(PairingRole.allCases) { role in Text(role.label).tag(role) }
+            }
+            .disabled(model.pairingUnavailableReason != nil)
+            Text(model.pairingRole.explanation)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The code, and almost nothing else. This is the step where the owner is
+    /// looking at their phone, so competing controls are exactly what they do not
+    /// need; only the countdown, the cancel and the identifier stay.
+    private var showingCodeStage: some View {
+        VStack(alignment: .leading, spacing: PanelMetrics.rowSpacing) {
+            if let pairing = model.pairing {
+                if let symbol = pairing.symbol {
+                    HStack {
+                        Spacer(minLength: 0)
+                        PairingCodeView(symbol: symbol, isLive: pairing.status.isLive)
+                        Spacer(minLength: 0)
+                    }
+                    Text(symbol.caption).font(.caption2).foregroundStyle(.secondary)
+                }
+                // Recomputed from the tick the model publishes each second, so the
+                // countdown is live without any view owning a timer of its own.
+                Text(pairing.countdown(now: model.pairingTick)).font(.caption)
+                Text("Pairing id \(pairing.pairingId)")
+                    .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                HStack {
+                    Button("Cancel pairing", role: .destructive) {
+                        Task { await model.cancelPairing() }
+                    }
+                    Button("New code") { Task { await model.startPairing() } }
+                }
+                Text("Scanning only claims this Mac. What it may use is approved separately on the phone; this panel grants nothing.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// On the network. The indicators that were buried in a section of their own are
+    /// the content here, because this is the screen the owner sees every day.
+    private var pairedStage: some View {
+        VStack(alignment: .leading, spacing: PanelMetrics.rowSpacing) {
+            IndicatorRow(state: model.resourceSharing.indicator, tint: .green)
+            Divider()
+            IndicatorRow(state: model.transport.indicator, tint: .teal)
+            if let hostID = model.status?.hostId {
+                Text("Host: \(hostID)").font(.caption2)
+                    .foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            // The shared drive is not built yet (`nexal drive` is object storage, not
+            // a filesystem). Saying so is better than a button that does nothing.
+            CaveatDisclosure(title: "Shared drive in Finder",
+                             text: "Not in this build. `nexal drive` is object storage with put/get/list, not a mounted filesystem, and no FileProvider or SMB gateway exists yet. A drive in Finder needs that layer built; this panel will not pretend it is there.")
         }
     }
 
@@ -237,77 +386,6 @@ private struct ConnectorPanel: View {
                 Text("Private membership is not public consent. This build has no public execution, earnings, or automatic paid fallback.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// Phone pairing (§26). The code, the role, a live countdown, the status and a
-    /// Cancel button are all present, and when pairing cannot start the reason is
-    /// stated next to a button that stays visible: a dead control with no
-    /// explanation reads as a broken app.
-    private var pairingSection: some View {
-        PanelSection(title: "Pair your phone") {
-            if let pairing = model.pairing {
-                IndicatorRow(state: pairing.indicator, tint: .indigo)
-                if let symbol = pairing.symbol {
-                    HStack {
-                        Spacer(minLength: 0)
-                        PairingCodeView(symbol: symbol, isLive: pairing.status.isLive)
-                        Spacer(minLength: 0)
-                    }
-                    Text(symbol.caption)
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                // Recomputed from the tick the model publishes each second, so the
-                // countdown is live without any view owning a timer of its own.
-                Text(pairing.countdown(now: model.pairingTick))
-                    .font(.caption)
-                    .foregroundStyle(pairing.status.isLive ? .primary : .secondary)
-                Text("Pairing id \(pairing.pairingId)")
-                    .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
-                HStack {
-                    Button("Cancel pairing", role: .destructive) {
-                        Task { await model.cancelPairing() }
-                    }
-                    Button("New code") { Task { await model.startPairing() } }
-                }
-                Text("Scanning only claims this Mac. What it may use is approved separately on the phone; this panel grants nothing.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Picker("This Mac's role", selection: $model.pairingRole) {
-                    ForEach(PairingRole.allCases) { role in
-                        Text(role.label).tag(role)
-                    }
-                }
-                .disabled(model.pairingUnavailableReason != nil)
-                Text(model.pairingRole.explanation)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    Task { await model.startPairing() }
-                } label: {
-                    Label("Show pairing code", systemImage: "qrcode")
-                        .frame(maxWidth: .infinity)
-                }
-                .accessibilityIdentifier("show-pairing-code")
-                .disabled(model.pairingUnavailableReason != nil)
-                if let reason = model.pairingUnavailableReason {
-                    Text(reason)
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                CaveatDisclosure(title: "How pairing works",
-                                 text: "The Go connector asks your coordinator for a short-lived pairing and renders the code. The code is drawn on screen only and is never saved: it carries a one-time secret that lets the phone claim this Mac. Codes expire in a few minutes. Pairing requires an https coordinator, which both the development and production environments now provide.")
-            }
-            // The connector's own explanation of a failure, kept beside the
-            // controls rather than in the footer where it would scroll away.
-            if let problem = model.pairingProblem {
-                Divider()
-                Text(problem)
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
             }
         }
     }

@@ -83,6 +83,22 @@ final class AppModel: ObservableObject {
         return status.paused ? "Paused" : "Private resources enabled"
     }
     var contributes: Bool { status.map { !$0.paused } ?? false }
+
+    /// Which single thing the window should show. The decision itself lives in
+    /// `ConnectorStage` so it can be unit-tested; this only supplies the four facts
+    /// it reads.
+    ///
+    /// `lastUpdated` is the honest test for "has a poll come back", rather than
+    /// `status != nil`: status is also nil after a failed poll, and treating launch
+    /// and failure as the same state would show "not running" before anything had
+    /// been asked.
+    var stage: ConnectorStage {
+        ConnectorStage.derive(hasAnswered: lastUpdated != nil,
+                              isRunning: status != nil,
+                              isEnrolled: status?.hostId?.isEmpty == false,
+                              pairing: pairing,
+                              now: pairingTick)
+    }
     var transport: TransportPresentation { TransportPresentation(capability: capability) }
     var rdma: RDMAPresentation { RDMAPresentation(capability: capability) }
     var resourceSharing: ResourceSharingPresentation {

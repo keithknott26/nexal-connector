@@ -84,7 +84,16 @@ final class ConnectorStageTests: XCTestCase {
 
     func testRunningAndEnrolledWithNoCodeAsksForOne() {
         XCTAssertEqual(derive(isEnrolled: true, pairing: nil), .needsPairing)
-        XCTAssertEqual(derive(isEnrolled: false, pairing: nil), .offline)
+    }
+
+    /// "Not running" is false for a connector that is running but has never joined an
+    /// account, and a false cause is what makes someone restart a process that was
+    /// never the problem. The two must stay distinguishable.
+    func testRunningButUnjoinedIsNotReportedAsNotRunning() {
+        XCTAssertEqual(derive(isRunning: true, isEnrolled: false, pairing: nil), .notJoined)
+        XCTAssertEqual(derive(isRunning: false, isEnrolled: false, pairing: nil), .offline)
+        XCTAssertNotEqual(ConnectorStage.notJoined.headline, ConnectorStage.offline.headline)
+        XCTAssertFalse(ConnectorStage.notJoined.isOnNetwork)
     }
 
     /// Graphs of a network this Mac has not joined are decoration, and the code is on
@@ -92,7 +101,7 @@ final class ConnectorStageTests: XCTestCase {
     func testOnlyPairedCountsAsOnTheNetworkAndOnlyOneStageShowsTheCode() throws {
         let live = try pairing(status: "waiting", expiresAt: now.addingTimeInterval(240))
         let stages: [ConnectorStage] = [
-            .starting, .offline, .needsPairing,
+            .starting, .offline, .notJoined, .needsPairing,
             derive(pairing: live), .paired, .pairingEnded(.expired),
         ]
         XCTAssertEqual(stages.filter(\.isOnNetwork), [.paired])
@@ -103,7 +112,7 @@ final class ConnectorStageTests: XCTestCase {
     /// rather than inventing filler.
     func testEveryStageHasAHeadlineAndOnlyWaitingStatesOmitGuidance() {
         let stages: [ConnectorStage] = [
-            .starting, .offline, .needsPairing, .showingCode, .paired,
+            .starting, .offline, .notJoined, .needsPairing, .showingCode, .paired,
             .pairingEnded(.expired), .pairingEnded(.cancelled), .pairingEnded(.unknown("x")),
         ]
         for stage in stages {

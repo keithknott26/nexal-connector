@@ -22,6 +22,11 @@ enum ConnectorStage: Equatable {
     /// The connector is not running, or this Mac has no connector chosen yet.
     case offline
 
+    /// Running, but this Mac has never joined an account: the connector reports no
+    /// host id. Separate from `.offline` because "not running" would be false, and a
+    /// false cause is what makes someone restart a process that was never the problem.
+    case notJoined
+
     /// Running and enrolled, but not yet joined to an account. A code needs minting.
     case needsPairing
 
@@ -56,7 +61,7 @@ enum ConnectorStage: Equatable {
                        now: Date) -> ConnectorStage {
         guard hasAnswered else { return .starting }
         guard isRunning else { return .offline }
-        guard let pairing else { return isEnrolled ? .needsPairing : .offline }
+        guard let pairing else { return isEnrolled ? .needsPairing : .notJoined }
         if pairing.status == .scanned { return .paired }
         if pairing.status.isTerminal { return .pairingEnded(pairing.status) }
         // Live by the server's own account, but the expiry has passed on this Mac.
@@ -79,6 +84,7 @@ enum ConnectorStage: Equatable {
         switch self {
         case .starting: return "Starting neXal"
         case .offline: return "neXal is not running"
+        case .notJoined: return "Finish setting up this Mac"
         case .needsPairing: return "Link this Mac"
         case .showingCode: return "Scan this code with your iPhone"
         case .paired: return "On the neXal network"
@@ -96,6 +102,9 @@ enum ConnectorStage: Equatable {
             return nil
         case .offline:
             return "Start the connector to link this Mac to your other Macs."
+        case .notJoined:
+            return "The connector is running but has not joined an account yet. "
+                + "Choose a connector and join with an invitation under Setup."
         case .needsPairing:
             return "Show a code, then scan it in the neXal app on your iPhone."
         case .showingCode:

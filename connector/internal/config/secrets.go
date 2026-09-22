@@ -51,7 +51,20 @@ func NewSecrets(path string, c Config) (Secrets, error) {
 
 type FileSecrets struct{ Dir string }
 
-func secretName(name string) bool { return name == "admin" || name == "host" }
+// secretName is a closed allowlist rather than a validity check: a caller that
+// can choose an arbitrary name can read or clobber a credential belonging to a
+// different scope, so every stored secret is named here explicitly.
+//
+//   - admin: the local HTTP API bearer token
+//   - host:  the coordinator host credential
+//   - peer-identity: the ed25519 seed for this host's peer identity, whose
+//     public half hashes to the deviceFingerprint peers pin. Stored alongside
+//     the other two because it has the same lifetime and the same blast radius,
+//     and because on macOS this routes it to the Keychain rather than to a file
+//     the way a bespoke key store would have.
+func secretName(name string) bool {
+	return name == "admin" || name == "host" || name == "peer-identity"
+}
 func (s FileSecrets) Get(_ context.Context, name string) (string, error) {
 	if !secretName(name) {
 		return "", errors.New("invalid credential scope")

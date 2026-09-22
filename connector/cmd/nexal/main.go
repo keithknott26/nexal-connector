@@ -61,7 +61,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|coordinator-check|run|status|policy|set-policy|pause|resume|accept-jobs|cancel|pair|doctor|tunnel-check|static-peers|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|policy|set-policy|pause|resume|accept-jobs|cancel|pair|doctor|tunnel-check|static-peers|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "coordinator-check":
@@ -72,6 +72,8 @@ func run(ctx context.Context, args []string) error {
 		return initCommand(ctx, args[1:])
 	case "enroll":
 		return enrollCommand(ctx, args[1:])
+	case "identity":
+		return identityCommand(ctx, args[1:])
 	case "run":
 		return runCommand(ctx, args[1:])
 	case "status", "policy", "pause", "resume", "accept-jobs", "cancel":

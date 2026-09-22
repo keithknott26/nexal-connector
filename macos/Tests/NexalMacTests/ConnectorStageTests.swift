@@ -26,7 +26,7 @@ final class ConnectorStageTests: XCTestCase {
         "coordinator":"https://coordinator-dev.nexal.systems",\
         "expiresAt":"\(formatter.string(from: expiresAt))",\
         "status":"\(status)","qr":{"version":1,"mask":2,"size":21,\
-        "quietZone":4,"moduleRows":[\(moduleRows)]}}}
+        "quietZone":4,"errorLevel":"M","encoding":"byte","moduleRows":[\(moduleRows)]}}}
         """.utf8)
         return try XCTUnwrap(PairingPresentation(mint: try PairingMint.decode(json)))
     }

@@ -6,6 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -249,4 +252,60 @@ func (r *Registry) VerifyReceipt(v ReplicaReceipt, now time.Time, maxAge time.Du
 		return ErrUnauthorized
 	}
 	return nil
+}
+
+// Snapshot returns every member, revoked ones included, for persistence by the
+// embedding agent. Revoked members are deliberately included: dropping them
+// would make a revocation indistinguishable from a machine that was never
+// enrolled, and a peer that came back would enroll cleanly as a new member.
+// Revocation has to outlive the process to mean anything.
+func (r *Registry) Snapshot() []Member {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]Member, 0, len(r.members))
+	for _, m := range r.members {
+		out = append(out, cloneMember(m))
+	}
+	// Fingerprint order, so a persisted file is byte-stable across runs and a
+	// diff shows a real membership change rather than map iteration order.
+	slices.SortFunc(out, func(a, b Member) int { return strings.Compare(a.DeviceID, b.DeviceID) })
+	return out
+}
+
+// RestoreRegistry rebuilds a registry from persisted members.
+//
+// Enrollment cannot be replayed: an invitation is one-use and its proof signs a
+// random challenge that no longer exists, so a restored registry has to be
+// reconstructed from the resulting members rather than re-derived. That makes
+// this function the trust boundary for the on-disk file, and every member is
+// therefore re-validated here rather than assumed.
+//
+// The DeviceID is recomputed from the public key and must match the stored one.
+// That check is the important one: without it, an attacker who could edit the
+// configuration could pair their own key with a trusted peer's fingerprint and
+// be admitted to the ring under that peer's identity. Pending invitations are
+// intentionally NOT restored -- they are short-lived by design, and a process
+// restart is exactly when an outstanding invitation should lapse.
+func RestoreRegistry(clock func() time.Time, members []Member) (*Registry, error) {
+	r := NewRegistry(clock)
+	for _, m := range members {
+		id := DeviceID(m.PublicKey)
+		if id == "" || id != m.DeviceID {
+			return nil, fmt.Errorf("%w: member fingerprint does not match its public key", ErrUnauthorized)
+		}
+		if !validRoles(m.Roles) {
+			return nil, fmt.Errorf("%w: member %s has invalid roles", ErrInvalid, m.DeviceID)
+		}
+		if m.EnrolledAt.IsZero() {
+			return nil, fmt.Errorf("%w: member %s has no enrollment time", ErrInvalid, m.DeviceID)
+		}
+		if m.RevokedAt != nil && m.RevokedAt.Before(m.EnrolledAt) {
+			return nil, fmt.Errorf("%w: member %s was revoked before it was enrolled", ErrInvalid, m.DeviceID)
+		}
+		if _, exists := r.members[id]; exists {
+			return nil, fmt.Errorf("%w: member %s appears twice", ErrConflict, m.DeviceID)
+		}
+		r.members[id] = cloneMember(m)
+	}
+	return r, nil
 }

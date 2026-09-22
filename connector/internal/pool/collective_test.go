@@ -29,11 +29,12 @@ import (
 const testTenant = "tenant-alpha"
 
 type ringSet struct {
-	registry  *Registry
-	tenant    string
-	fprints   []string
-	endpoints []string
-	rings     []*Ring
+	registry   *Registry
+	identities []Identity
+	tenant     string
+	fprints    []string
+	endpoints  []string
+	rings      []*Ring
 }
 
 // newRingSet binds every rank's listener first so that each rank's member list
@@ -46,6 +47,7 @@ func newRingSet(t *testing.T, n int, tenant string, step time.Duration, alive []
 	registry := NewRegistry(nil)
 	set := &ringSet{registry: registry, tenant: tenant}
 	identities := make([]Identity, n)
+	defer func() { set.identities = identities }()
 	listeners := make([]net.Listener, n)
 	for i := range n {
 		identities[i] = enrolledIdentity(t, registry)
@@ -694,5 +696,90 @@ func TestRingInboxBoundsSessionsAndPendingBytes(t *testing.T) {
 	}
 	if !refused {
 		t.Fatalf("pending payload was never capped at %d bytes", maxCollectivePendingBytes)
+	}
+}
+
+// TestRestoredRegistryAuthorizesARealTwoRankAllReduce is the end-to-end property
+// that persistence exists for.
+//
+// pool.Registry was in-memory only and had no production caller, so a host that
+// restarted lost every peer it had enrolled and could not rejoin a ring it was
+// already a member of. The collective's math and transport were both already
+// tested; this asserts the missing half -- that membership which has been through
+// Snapshot and RestoreRegistry is still sufficient authority for a real
+// authenticated collective over TLS, not merely a struct that survived a
+// round trip.
+func TestRestoredRegistryAuthorizesARealTwoRankAllReduce(t *testing.T) {
+	const n = 2
+	set := newRingSet(t, n, testTenant, time.Second, []bool{true, true})
+
+	// Persist, then rebuild exactly as a restart would.
+	restored, err := RestoreRegistry(nil, set.registry.Snapshot())
+	if err != nil {
+		t.Fatalf("RestoreRegistry: %v", err)
+	}
+	for _, fingerprint := range set.fprints {
+		if _, ok := restored.Member(fingerprint); !ok {
+			t.Fatalf("rank %s is missing from the restored registry", fingerprint)
+		}
+	}
+
+	// Rebuild both ranks against the RESTORED registry and run a real collective
+	// through it, so the assertion covers the ring's live authorization checks.
+	rings := make([]*Ring, n)
+	listeners := make([]net.Listener, n)
+	endpoints := make([]string, n)
+	for i := range n {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen: %v", err)
+		}
+		listeners[i] = listener
+		endpoints[i] = "https://" + listener.Addr().String()
+	}
+	for i := range n {
+		var members []RingMember
+		var authorized []string
+		for j := range n {
+			if j == i {
+				members = append(members, RingMember{Fingerprint: set.fprints[j], Tenant: testTenant})
+				continue
+			}
+			members = append(members, RingMember{Fingerprint: set.fprints[j], Tenant: testTenant, Endpoint: endpoints[j]})
+			authorized = append(authorized, set.fprints[j])
+		}
+		ring, err := NewRing(RingOptions{Identity: set.identities[i], Registry: restored,
+			Tenant: testTenant, AuthorizedPeers: authorized, Members: members, StepTimeout: time.Second})
+		if err != nil {
+			t.Fatalf("rank %d against restored registry: %v", i, err)
+		}
+		rings[i] = ring
+		go func() { _ = ring.Serve(listeners[i]) }()
+		t.Cleanup(func() { _ = ring.Close() })
+	}
+
+	vectors := [][]float64{{1, 2, 3, 4}, {10, 20, 30, 40}}
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = rings[i].AllReduce(context.Background(), testSession, vectors[i], ReduceSum)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("rank %d AllReduce: %v", i, err)
+		}
+	}
+	want := []float64{11, 22, 33, 44}
+	for rank := range n {
+		for i := range want {
+			if vectors[rank][i] != want[i] {
+				t.Fatalf("rank %d = %v, want %v", rank, vectors[rank], want)
+			}
+		}
 	}
 }

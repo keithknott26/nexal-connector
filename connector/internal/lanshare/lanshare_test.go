@@ -23,9 +23,29 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string
 	return f.out[name], nil
 }
 
+// shareDir returns a directory that ValidateSharePath will actually accept.
+//
+// It deliberately does NOT use t.TempDir(). On macOS the per-user temp directory
+// lives under /var/folders/..., and /var is on the forbidden list -- correctly, a
+// share path under /var is a mistake worth refusing. So every plan test that used
+// t.TempDir() passed on Linux (/tmp) and failed on macOS, which is the platform
+// this code actually runs on. The guard was right and the fixture was wrong.
+//
+// Rooting the fixture in the home directory matches where a real backup folder
+// lives. ValidateSharePath refuses $HOME itself but allows a subdirectory, which
+// is exactly the shape being tested.
 func shareDir(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "Backups")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory to root a share fixture in: %v", err)
+	}
+	base, err := os.MkdirTemp(home, "lanshare-test-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	dir := filepath.Join(base, "Backups")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatalf("Mkdir: %v", err)
 	}
@@ -230,5 +250,40 @@ func TestStepStringIsACopyableSudoCommand(t *testing.T) {
 	}
 	if !strings.Contains(got, `'/Users/me/My Backups'`) {
 		t.Errorf("a path with a space was not quoted: %s", got)
+	}
+}
+
+// TestTempDirIsNotAValidShareRoot pins the platform difference that made every
+// plan test pass on Linux and fail on macOS.
+//
+// t.TempDir() honours TMPDIR, which on macOS is /var/folders/<...>. /var is on the
+// forbidden list, so a fixture rooted there is refused -- and the refusal is
+// correct, which is why the fix was to move the fixture rather than to loosen the
+// guard. On Linux TMPDIR is /tmp and the same fixture is accepted, so CI could
+// never see it.
+//
+// This test asserts the RULE rather than the platform: whatever t.TempDir()
+// returns, if it sits under a forbidden prefix it must be refused, and shareDir
+// must hand back something accepted. Both halves hold on either OS.
+func TestTempDirIsNotAValidShareRoot(t *testing.T) {
+	forbidden := []string{"/System", "/Library", "/bin", "/sbin", "/usr", "/etc", "/var", "/private", "/Applications"}
+	temp := t.TempDir()
+	under := false
+	for _, prefix := range forbidden {
+		if temp == prefix || strings.HasPrefix(temp, prefix+"/") {
+			under = true
+			break
+		}
+	}
+	if under {
+		// macOS: prove the guard rejects it, so nobody "fixes" a future failure
+		// by deleting /var from the list.
+		if err := ValidateSharePath(temp); err == nil {
+			t.Fatalf("ValidateSharePath accepted %s, which is under a forbidden system prefix", temp)
+		}
+	}
+	// Either OS: the fixture the plan tests use must be acceptable.
+	if err := ValidateSharePath(shareDir(t)); err != nil {
+		t.Fatalf("shareDir produced a path ValidateSharePath rejects: %v", err)
 	}
 }

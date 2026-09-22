@@ -17,6 +17,26 @@ import (
 	"nexal/connector/internal/smbshare"
 )
 
+// shareableDir returns a directory the share path validator will accept.
+//
+// NOT t.TempDir(): that honours TMPDIR, which on macOS is under /var/folders, and
+// /var is refused as a share location -- correctly. The old fixture therefore
+// passed on Linux and failed on macOS, the platform this command actually runs on.
+// See internal/lanshare shareDir for the same fix and the same reasoning.
+func shareableDir(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory to root a share fixture in: %v", err)
+	}
+	dir, err := os.MkdirTemp(home, "share-test-")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // shareConfig writes a minimal valid configuration. development controls whether
 // a non-445 port is permitted, which is the only thing this command reads the
 // configuration for.
@@ -231,7 +251,9 @@ func TestShareStartReachesTheScratchCheckWithEverythingElseSatisfied(t *testing.
 	}
 	smbdSum := sha256.Sum256([]byte(script))
 	passwdSum := sha256.Sum256([]byte(passwd))
-	served := filepath.Join(dir, "served")
+	// The served path must satisfy the share validator, so it cannot live under
+	// the temp dir that holds the binary fixtures.
+	served := filepath.Join(shareableDir(t), "served")
 	if err := os.MkdirAll(served, 0700); err != nil {
 		t.Fatal(err)
 	}

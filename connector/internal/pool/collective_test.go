@@ -714,7 +714,7 @@ func TestRestoredRegistryAuthorizesARealTwoRankAllReduce(t *testing.T) {
 	set := newRingSet(t, n, testTenant, time.Second, []bool{true, true})
 
 	// Persist, then rebuild exactly as a restart would.
-	restored, err := RestoreRegistry(nil, set.registry.Snapshot())
+	restored, err := RestoreRegistry(nil, set.registry.SnapshotState())
 	if err != nil {
 		t.Fatalf("RestoreRegistry: %v", err)
 	}

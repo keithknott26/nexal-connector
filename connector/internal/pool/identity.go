@@ -286,9 +286,52 @@ func (r *Registry) Snapshot() []Member {
 // be admitted to the ring under that peer's identity. Pending invitations are
 // intentionally NOT restored -- they are short-lived by design, and a process
 // restart is exactly when an outstanding invitation should lapse.
-func RestoreRegistry(clock func() time.Time, members []Member) (*Registry, error) {
+// RegistrySnapshot is everything needed to rebuild a registry.
+//
+// Invitations are included because the connector's CLI is inherently
+// multi-process: `peers invite` and `peers accept` are separate invocations, so
+// an invitation that lived only in the inviting process's memory could never be
+// accepted by the process that runs accept. They remain bounded by their own
+// ExpiresAt, and RestoreRegistry drops expired ones rather than restoring them.
+type RegistrySnapshot struct {
+	Members     []Member     `json:"members"`
+	Invitations []Invitation `json:"invitations,omitempty"`
+}
+
+// SnapshotState returns members and still-valid invitations for persistence.
+func (r *Registry) SnapshotState() RegistrySnapshot {
+	state := RegistrySnapshot{Members: r.Snapshot()}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.now()
+	for _, v := range r.invites {
+		// An already-expired invitation is not worth writing; it would be
+		// dropped on the next load anyway.
+		if now.Before(v.ExpiresAt) {
+			state.Invitations = append(state.Invitations, v)
+		}
+	}
+	slices.SortFunc(state.Invitations, func(a, b Invitation) int { return strings.Compare(a.ID, b.ID) })
+	return state
+}
+
+func RestoreRegistry(clock func() time.Time, state RegistrySnapshot) (*Registry, error) {
 	r := NewRegistry(clock)
-	for _, m := range members {
+	for _, v := range state.Invitations {
+		// Expiry is normal, not corruption: an invitation the owner never
+		// completed simply lapses.
+		if !r.now().Before(v.ExpiresAt) {
+			continue
+		}
+		if v.ID == "" || v.Challenge == "" || !validDigest(v.ExpectedDeviceID) || !validRoles(v.Roles) {
+			return nil, fmt.Errorf("%w: persisted invitation is malformed", ErrInvalid)
+		}
+		if _, exists := r.invites[v.ID]; exists {
+			return nil, fmt.Errorf("%w: invitation %s appears twice", ErrConflict, v.ID)
+		}
+		r.invites[v.ID] = v
+	}
+	for _, m := range state.Members {
 		id := DeviceID(m.PublicKey)
 		if id == "" || id != m.DeviceID {
 			return nil, fmt.Errorf("%w: member fingerprint does not match its public key", ErrUnauthorized)

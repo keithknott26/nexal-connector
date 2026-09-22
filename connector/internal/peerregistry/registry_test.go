@@ -138,8 +138,8 @@ func TestSubstitutedKeyUnderATrustedFingerprintIsRefused(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	// Keep the trusted fingerprint, swap in the attacker's key.
-	f.Members[0].PublicKey = attacker.PublicKey
-	if f.Members[0].DeviceID != trusted.DeviceID {
+	f.State.Members[0].PublicKey = attacker.PublicKey
+	if f.State.Members[0].DeviceID != trusted.DeviceID {
 		t.Fatal("test did not preserve the trusted fingerprint")
 	}
 	tampered, err := json.Marshal(f)
@@ -235,4 +235,87 @@ func TestRestoredRegistryStillAuthorizesTheRing(t *testing.T) {
 		t.Errorf("EnrolledAt = %v, want %v", got.EnrolledAt, member.EnrolledAt)
 	}
 	_ = ed25519.PublicKey(got.PublicKey)
+}
+
+// The bug the two-machine demo caught. `peers invite` and `peers accept` are
+// separate processes, so an invitation held only in the inviting process's
+// memory could never be completed: accept reloaded the registry, found no such
+// invitation and returned "unauthorized". Persisting members alone was not
+// enough to make the handshake work across processes.
+func TestPendingInvitationSurvivesBetweenProcesses(t *testing.T) {
+	path := filepath.Join(privateDir(t), "peers.json")
+	inviting := pool.NewRegistry(fixedClock())
+	peer, err := pool.NewIdentity()
+	if err != nil {
+		t.Fatalf("NewIdentity: %v", err)
+	}
+	invitation, err := inviting.Invite(pool.DeviceID(peer.PublicKey), []pool.Role{pool.Contributor}, time.Minute)
+	if err != nil {
+		t.Fatalf("Invite: %v", err)
+	}
+	if err := Save(path, inviting); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// A different process: reload, then complete the handshake.
+	accepting, err := Load(path, fixedClock())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	proof, err := peer.Prove(invitation)
+	if err != nil {
+		t.Fatalf("Prove: %v", err)
+	}
+	member, err := accepting.Enroll(proof)
+	if err != nil {
+		t.Fatalf("Enroll after reload: %v", err)
+	}
+	if member.DeviceID != pool.DeviceID(peer.PublicKey) {
+		t.Errorf("enrolled %s, want %s", member.DeviceID, pool.DeviceID(peer.PublicKey))
+	}
+
+	// And it is single-use across processes too: replaying the spent proof in yet
+	// another process must fail.
+	if err := Save(path, accepting); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	replaying, err := Load(path, fixedClock())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, err := replaying.Enroll(proof); err == nil {
+		t.Fatal("a spent proof was accepted a second time")
+	}
+}
+
+// An invitation the owner never completed must lapse rather than persist forever.
+func TestExpiredInvitationIsNotRestored(t *testing.T) {
+	path := filepath.Join(privateDir(t), "peers.json")
+	base := time.Date(2026, 9, 21, 22, 0, 0, 0, time.UTC)
+	clock := base
+	registry := pool.NewRegistry(func() time.Time { return clock })
+	peer, err := pool.NewIdentity()
+	if err != nil {
+		t.Fatalf("NewIdentity: %v", err)
+	}
+	invitation, err := registry.Invite(pool.DeviceID(peer.PublicKey), []pool.Role{pool.Contributor}, time.Minute)
+	if err != nil {
+		t.Fatalf("Invite: %v", err)
+	}
+	if err := Save(path, registry); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	later := base.Add(time.Hour)
+	restored, err := Load(path, func() time.Time { return later })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	proof, err := peer.Prove(invitation)
+	if err != nil {
+		t.Fatalf("Prove: %v", err)
+	}
+	if _, err := restored.Enroll(proof); err == nil {
+		t.Fatal("an expired invitation was still accepted after a restart")
+	}
 }

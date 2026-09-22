@@ -38,8 +38,8 @@ const maxRegistryBytes = 1 << 20
 const fileVersion = 1
 
 type file struct {
-	Version int           `json:"version"`
-	Members []pool.Member `json:"members"`
+	Version int                   `json:"version"`
+	State   pool.RegistrySnapshot `json:"state"`
 }
 
 // Path is the registry file beside the given configuration file. It is derived
@@ -76,19 +76,21 @@ func Load(path string, clock func() time.Time) (*pool.Registry, error) {
 	// RestoreRegistry re-derives every DeviceID from its public key and refuses a
 	// mismatch, so an edited file cannot bind a hostile key to a trusted peer's
 	// fingerprint.
-	return pool.RestoreRegistry(clock, f.Members)
+	return pool.RestoreRegistry(clock, f.State)
 }
 
 // Save writes the registry's membership atomically with 0600 permissions.
 //
 // Revoked members are included, because Snapshot includes them: a revocation
 // that vanished on restart would let a removed machine enroll again as if it
-// were new.
+// were new. Still-valid invitations are included too: `peers invite` and
+// `peers accept` are separate processes, so an invitation held only in memory
+// could never be completed.
 func Save(path string, registry *pool.Registry) error {
 	if registry == nil {
 		return errors.New("peer registry is required")
 	}
-	data, err := json.MarshalIndent(file{Version: fileVersion, Members: registry.Snapshot()}, "", "  ")
+	data, err := json.MarshalIndent(file{Version: fileVersion, State: registry.SnapshotState()}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode peer registry: %w", err)
 	}

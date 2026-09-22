@@ -227,7 +227,7 @@ struct PairingCodeView: View {
         .background(Color.white)
         .opacity(isLive ? 1 : 0.35)
         .accessibilityLabel(isLive
-            ? "Pairing QR code. \(symbol.caption) Scan it with the nexal@home app."
+            ? "Pairing QR code. \(symbol.caption) Scan it with the neXal@home app."
             : "Expired pairing QR code, shown dimmed. \(symbol.caption)")
         // A QR is not meaningfully described by VoiceOver; the surrounding rows
         // carry the role, the status and the countdown as text instead.

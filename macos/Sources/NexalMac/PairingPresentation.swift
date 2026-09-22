@@ -59,7 +59,7 @@ struct PairingPresentation: Equatable {
         var explanation: String {
             switch self {
             case .waiting:
-                return "The coordinator is holding this pairing open. Scan the code in nexal@home."
+                return "The coordinator is holding this pairing open. Scan the code in neXal@home."
             case .scanned:
                 return "The phone claimed this pairing. Claiming is not linking: nothing is shared until you approve it on the phone."
             case .cancelled:

@@ -77,7 +77,7 @@ path for bundle transfers. Existing host IDs now print saved identity details;
 explicit name mismatches fail. No live credential validation is implied.
 Validation: 11 enrollment orchestration tests on Linux mocks, native pending.
 
-The owner created `keithknott26/nexal-ios` for the free nexal@home iPhone app.
+The owner created `keithknott26/nexal-ios` for the free neXal@home iPhone app.
 It initially reported public; changed to private and verified before app upload.
 App source is separate; live Postmark email authentication, Mac QR pairing and App Store release
 remain gated, not deployed. No fabricated App Store QR/link.

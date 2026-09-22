@@ -77,7 +77,7 @@ See [troubleshooting](SETUP-TROUBLESHOOTING.md).
 
 ## iPhone pairing app
 
-[nexal@home source](https://github.com/keithknott26/nexal-ios) is being developed
+[neXal@home source](https://github.com/keithknott26/nexal-ios) is being developed
 in a separate private repository. Email-code login (Postmark), donor/receiver QR pairing and
 App Store distribution are **not live**. An App Store QR will be added only
 after the actual listing exists; no placeholder store link is presented as real.

@@ -106,7 +106,7 @@ func pairCommand(ctx context.Context, args []string) error {
 	// a human watching a terminal sees the code immediately rather than after the
 	// first poll.
 	fmt.Fprint(os.Stderr, code.Terminal(qr.Style{ASCII: *ascii, Invert: *invert}))
-	fmt.Fprintf(os.Stderr, "Scan with nexal@home as the %s device. Expires %s.\n",
+	fmt.Fprintf(os.Stderr, "Scan with neXal@home as the %s device. Expires %s.\n",
 		pairing.Role, expiry.UTC().Format(time.RFC3339))
 	fmt.Fprintln(os.Stderr, "If the code looks like a photographic negative on this terminal, re-run with --invert.")
 	if err := emit(map[string]any{"pairing": map[string]any{

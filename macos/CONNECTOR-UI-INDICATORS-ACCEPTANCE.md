@@ -111,8 +111,8 @@ depend on it; no view reads `status.transport`.
 - Two of those moved into disclosures to stop them crowding the layout and are
   not deleted: the "No idle wait: …" paragraph is under "What \"accept jobs now\"
   permits", and per §25.4 a new always-present "Who can read your files"
-  disclosure states that nobody but the owner can read Nexal @ Home while
-  company administrators can recover and therefore read Nexal @ Work.
+  disclosure states that nobody but the owner can read neXal @ Home while
+  company administrators can recover and therefore read neXal @ Work.
 - VoiceOver reads each indicator as one sentence — heading, label, then reason.
 
 ## Known gaps, all owned by the Go status schema

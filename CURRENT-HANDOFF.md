@@ -1,4 +1,4 @@
-# Nexal current engineering handoff
+# neXal current engineering handoff
 
 Checkpoint: September 19, 2026. This file is intended for a developer or LLM
 resuming work without access to the original conversation. It describes an
@@ -123,16 +123,16 @@ now prepares the Go connector and prompts privately for a one-use invitation.
 `--prepare-only` stops before enrollment. Existing profiles are preserved,
 coordinator mismatches refused, and saved host IDs skip re-enrollment without
 claiming live credential verification. Defaults target the shared HTTPS
-`nexal-coordinator-dev.nexal.systems` and the normal Nexal Keychain profile.
+`nexal-coordinator-dev.nexal.systems` and the normal neXal Keychain profile.
 No donor/agent/jobs start and no deployment occurs from the enrollment script.
 The shared-dev relay is now deployed separately. See `PLATFORM-DELIVERY.md`.
 Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pending.
 
 ## Product and owner decisions
 
-- Product: Nexal Platform and Nexal Connector; entity: KWK, LLC.
+- Product: neXal Platform and neXal Connector; entity: KWK, LLC.
 - Domain: owner purchased `nexal.systems`; registration provider is not confirmed.
-- Source owner: GitHub account `keithknott26`; all Nexal repositories must stay private.
+- Source owner: GitHub account `keithknott26`; all neXal repositories must stay private.
 - Prefer Go where practical, native Cloudflare services for the coordinator,
   and native SwiftUI/Go on Macs. MLX uses a small Python runtime adapter.
 - Setup should inspect dependencies automatically, offer narrowly scoped upgrades
@@ -143,7 +143,7 @@ Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pendin
 - Owner reported macOS 27.0, build 26A428, Swift 6.4, Node 23.6.1 and Go 1.23.1.
   Ethernet reaches a mesh/PLC network backed by DSL; do not assume data-center
   bandwidth or latency. The source build targets Node 24 and Go 1.26.
-- The owner built the older Nexal native preview, opened its menu-bar app and
+- The owner built the older neXal native preview, opened its menu-bar app and
   enrolled the 8 GB M2. Private CPU execution was blocked by owner-activity,
   heartbeat-only startup and low measured memory, not proven successful on Mac.
 - Local pooled RAM must remain private, even when idle, with no public fallback.
@@ -345,7 +345,7 @@ successful GitHub upload as completing either task.
 2. Confirm registrar, assigned Cloudflare nameservers, existing email/DNS records
    and DNSSEC status. Ask for authorization before consequential DNS changes.
 3. Clone both private repositories as siblings on the M4; stop old local services
-   using ports 8787/8788 before starting Nexal. Follow MAC-SETUP.md.
+   using ports 8787/8788 before starting neXal. Follow MAC-SETUP.md.
 4. Compile/test SwiftUI and verify Keychain, setup and Docker mode on real hardware;
    fix failures and record evidence before claiming Mac acceptance.
 5. Review CI permissions/costs and enable/run workflows only with owner approval.
@@ -355,7 +355,7 @@ successful GitHub upload as completing either task.
    data rights and cloud fallback independently before expanding the pilot.
 8. Configure the requested Claude/Cloudflare connection. First confirm whether
    the owner means Claude Code developer access, a Claude app MCP connection to
-   Cloudflare, or Claude consuming Nexal's own MCP endpoint. These are distinct
+   Cloudflare, or Claude consuming neXal's own MCP endpoint. These are distinct
    integrations; none has been configured. Use least-privilege credentials and
    separate development/deployment permissions from end-user MCP access.
 

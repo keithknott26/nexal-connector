@@ -1,4 +1,4 @@
-# Nexal verification snapshot
+# neXal verification snapshot
 
 September 19, 2026. This snapshot supersedes historical KWK-era paths and names
 in older workstream handoffs. It is not production certification.
@@ -14,7 +14,7 @@ in older workstream handoffs. It is not production certification.
   detector and vet passed. Agent/client/config/tunnel/diagnostics suites passed
   five repeated race runs.
 - Go MLX command bridge race tests and vet passed.
-- 34 Python policy/integrity tests passed with regenerated Nexal source hashes.
+- 34 Python policy/integrity tests passed with regenerated neXal source hashes.
 - Darwin ARM64 Go cross-build passed; not executed on a Mac here.
 - Locked npm dependency audit reported zero known vulnerabilities at test time.
 - Gitleaks 8.30.1 clean-export scan reported no unhandled findings. Its archive

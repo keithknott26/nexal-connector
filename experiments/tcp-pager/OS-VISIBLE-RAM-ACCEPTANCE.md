@@ -23,7 +23,7 @@ the default allocator argument. It is not documented as a system-wide replacemen
 for memory allocation in unrelated applications.
 ([Apple CFAllocatorSetDefault](https://developer.apple.com/documentation/corefoundation/cfallocatorsetdefault(_:)))
 
-Engineering conclusion: a Nexal allocator could be an opt-in adapter for cooperating
+Engineering conclusion: a neXal allocator could be an opt-in adapter for cooperating
 Core Foundation code, but remote backing would still require a working mechanism
 that makes the returned address usable by CPU loads/stores. The allocator factory
 itself is not that pager and does not establish host RAM or GPU expansion.

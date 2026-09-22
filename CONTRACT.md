@@ -1,4 +1,4 @@
-# Nexal implementation contract v2
+# neXal implementation contract v2
 
 This repository is an engineering preview, not a production-approved service.
 Canonical scope lives in the platform repository's docs/scope/architecture-v0.6.md

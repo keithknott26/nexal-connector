@@ -1,4 +1,4 @@
-# Nexal platform delivery instead of AirDrop
+# neXal platform delivery instead of AirDrop
 
 The platform can relay an encrypted pager client bundle between two explicitly
 selected enrolled Macs. The M2 writes the received files to a new private
@@ -6,7 +6,7 @@ application-support folder and automatically starts the existing receiver script
 with that path; `~/Downloads/client` is not needed.
 
 Full deployment, commands, security model and validation:
-[Nexal private pager bundle relay](https://github.com/keithknott26/nexal-platform/blob/main/docs/PRIVATE-BUNDLE-RELAY.md).
+[neXal private pager bundle relay](https://github.com/keithknott26/nexal-platform/blob/main/docs/PRIVATE-BUNDLE-RELAY.md).
 
 Prerequisites: coordinator code and migration 0006 installed, both Macs enrolled
 in the same reachable coordinator, valid host credentials, M4 donor still running.
@@ -42,7 +42,7 @@ After the build it checks `/api/health` without credentials using the connector'
 direct transport, stopping with a specific diagnostic if unreachable. It then
 opens `<coordinator>/#/hosts` using macOS's default browser,
 then prompts for a one-use invitation with terminal echo disabled. Enter the
-Nexal owner credential only in the browser sign-in form; the Terminal prompt
+neXal owner credential only in the browser sign-in form; the Terminal prompt
 accepts the generated invitation, not the owner credential. URLs contain no
 credentials. `--no-browser` skips opening; failed opening prints manual guidance
 without aborting enrollment. Interactive already-enrolled reruns also open Hosts
@@ -95,7 +95,7 @@ bash scripts/platform-bundle-macos.sh send \
 No folder transfer via AirDrop is required. The sender fingerprint check and
 the existing donor CA fingerprint prompt are intentional security checks; do
 not bypass them. Only ephemeral pager keys are transferred, never the donor's
-server key or Nexal enrollment credentials. Only the four expected files are
+server key or neXal enrollment credentials. Only the four expected files are
 accepted; bundle contents are not scripts and are never executed.
 
 There is no background file scraping, automatic dashboard action or direct

@@ -227,7 +227,7 @@ func initCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	base := f.String("coordinator", "", "HTTPS coordinator origin")
-	name := f.String("name", "Nexal Mac", "owner-readable host name")
+	name := f.String("name", "neXal Mac", "owner-readable host name")
 	listen := f.String("listen", "127.0.0.1:8788", "numeric loopback address")
 	dev := f.Bool("dev-loopback", false, "explicit nonproduction loopback test mode")
 	devSecrets := f.Bool("dev-secrets", false, "nonproduction 0600 credentials")
@@ -395,7 +395,7 @@ func runCommand(ctx context.Context, args []string) error {
 	// thermal and free-disk probes are installed for every configuration — there
 	// is no flag to turn them off, because "unconditional" is the thing §36.4
 	// forbids. The data directory (not "/") is measured, since an owner who put
-	// their Nexal data on an external volume cares about free space there.
+	// their neXal data on an external volume cares about free space there.
 	//
 	// Off macOS the Mac-only dimensions report unknown and withhold nothing, which
 	// is why a Linux end-to-end test is unaffected by this wiring.

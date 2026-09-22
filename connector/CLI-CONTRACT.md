@@ -1,4 +1,4 @@
-# Nexal connector CLI contract v1
+# neXal connector CLI contract v1
 
 The executable is `nexal`. Every subcommand accepts `--config /absolute/path/config.json`.
 Default config is `~/Library/Application Support/Nexal/config.json` on macOS and

@@ -1,5 +1,5 @@
 // Package lab automates disposable, owner-operated two-computer acceptance.
-// It is isolated from the Nexal production connector and all marketplace APIs.
+// It is isolated from the neXal production connector and all marketplace APIs.
 package lab
 
 import (

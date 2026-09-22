@@ -28,7 +28,7 @@ var errOSRAM = errors.New("OS-visible RAM requirement NOT IMPLEMENTED: paging is
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "Nexal pager lab:", err)
+		fmt.Fprintln(os.Stderr, "neXal pager lab:", err)
 		if errors.Is(err, errOSRAM) {
 			os.Exit(3)
 		}
@@ -43,7 +43,7 @@ func root() (string, error) {
 	}
 	base := filepath.Join(home, ".nexal-pager-lab")
 	if runtime.GOOS == "darwin" {
-		base = filepath.Join(home, "Library", "Application Support", "Nexal Pager Lab")
+		base = filepath.Join(home, "Library", "Application Support", "neXal Pager Lab")
 	}
 	if err = os.MkdirAll(base, 0700); err != nil {
 		return "", err

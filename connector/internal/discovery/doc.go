@@ -1,4 +1,4 @@
-// Package discovery locates candidate Nexal Macs. It never authorizes one.
+// Package discovery locates candidate neXal Macs. It never authorizes one.
 //
 // Three separable problems, three mechanisms:
 //

@@ -1,4 +1,4 @@
-# Nexal setup troubleshooting
+# neXal setup troubleshooting
 
 ## Host looks like the wrong Mac
 
@@ -24,8 +24,8 @@ active enrollment; its failed new `private-lan` enrollment is separate.
 ## Shared dashboard and owner credentials
 
 Open https://nexal-coordinator-dev.nexal.systems/ and authorize with the
-Nexal owner credential provisioned for this coordinator. A Cloudflare API token
-deploys infrastructure; it is not a Nexal dashboard or host credential.
+neXal owner credential provisioned for this coordinator. A Cloudflare API token
+deploys infrastructure; it is not a neXal dashboard or host credential.
 
 The homepage previously returned raw `Owner bearer token required` JSON.
 On September 19, 2026, Cloudflare inspection confirmed missing dashboard assets.

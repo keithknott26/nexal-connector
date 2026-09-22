@@ -23,9 +23,9 @@ type macConditions struct {
 	timeout time.Duration
 }
 
-// NewConditionSource returns the platform probe for the volume Nexal stores its
+// NewConditionSource returns the platform probe for the volume neXal stores its
 // data in (the directory holding config.json). dataDir is measured rather than
-// "/" because an owner who moved their Nexal data to an external volume cares
+// "/" because an owner who moved their neXal data to an external volume cares
 // about free space THERE, and the boot volume's free space would be a
 // confidently wrong answer.
 func NewConditionSource(dataDir string) contribution.Source {

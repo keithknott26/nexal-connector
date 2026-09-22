@@ -1,4 +1,4 @@
-# Nexal Connector
+# neXal Connector
 
 Private Mac connector and experimental LAN CPU pager. **Engineering preview:
 not added macOS RAM/VRAM, a production marketplace, or verified PQ dispatch.**
@@ -14,7 +14,7 @@ bash "$S" --enroll-platform --profile private-lan --name "M4 mini" &&
 bash "$S" --donor
 ```
 
-Enrollment opens the Hosts page in your default browser. Enter the Nexal owner
+Enrollment opens the Hosts page in your default browser. Enter the neXal owner
 credential there, generate a one-use invitation, then paste the invitation into
 Terminal's hidden prompt. The invitation starts with `enr_`; **do not paste
 the owner token into Terminal**. No credential is put in the browser URL.
@@ -69,7 +69,7 @@ numbered connections without starting a listener.
 
 **Shared pilot ready for owner acceptance (2026-09-19):**
 [Open the dashboard](https://nexal-coordinator-dev.nexal.systems/) and use its
-Nexal owner credential, not a Cloudflare API token, to authorize the tab.
+neXal owner credential, not a Cloudflare API token, to authorize the tab.
 Dashboard assets, relay and confirmed host deletion are deployed. Both Macs
 have saved identities, currently both labeled `M4 mini`; compare IDs and CPU/RAM
 before enrolling again or deleting. Native LAN transfer still needs testing.

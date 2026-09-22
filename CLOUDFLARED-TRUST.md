@@ -1,4 +1,4 @@
-# Cloudflare and cloudflared: provenance and current Nexal status
+# Cloudflare and cloudflared: provenance and current neXal status
 
 Checked September 19, 2026. The legitimate provider's name is **Cloudflare** and
 its tunnel client is **cloudflared**; Cloudflare's own documentation explicitly
@@ -51,7 +51,7 @@ That uncertainty is not evidence that it is a scam, nor permission to trust it.
 Use the canonical documented publisher path and independently verified artifacts;
 do not add the alternate spelling to a software-source allowlist.
 
-## What is implemented in Nexal
+## What is implemented in neXal
 
 The Go connector has an optional supervisor for an operator-provisioned binary.
 It requires an absolute binary path, a pinned SHA-256, a matching architecture,
@@ -76,7 +76,7 @@ Cloudflare documents that QUIC tunnels use post-quantum cryptography by default
 but may fall back; `--post-quantum` permits only PQ key agreements without
 non-PQ fallback, and HTTP/2 does not support PQ key agreements
 ([official run parameters](https://developers.cloudflare.com/tunnel/reference/run-parameters/)).
-Nexal configures strict QUIC/PQ and rejects observed downgrade diagnostics, but
+neXal configures strict QUIC/PQ and rejects observed downgrade diagnostics, but
 this code policy has not been validated on the owner's network with a genuine
 release. It is not proof of current negotiated cryptography.
 
@@ -103,7 +103,7 @@ does not automatically protect it. No system-wide or all-hop PQ claim is made.
    available publisher signatures/attestations rather than assuming they exist.
 3. Record both archive provenance/integrity and the extracted executable's digest.
    A tar archive checksum and the contained executable's checksum are different.
-4. Inspect executable provenance before running `--version` or Nexal's
+4. Inspect executable provenance before running `--version` or neXal's
    `tunnel-check`, because even a version check executes the selected binary.
 5. Provision least-privilege tunnel credentials and explicit ingress/Access
    controls with the owner's approval. Do not expose an administrative port as

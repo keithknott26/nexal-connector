@@ -149,7 +149,7 @@ final class AppModel: ObservableObject {
 
     func chooseConnector() {
         let panel = NSOpenPanel()
-        panel.title = "Choose your installed Nexal Go connector"
+        panel.title = "Choose your installed neXal Go connector"
         panel.message = "Select nexal in this app’s Contents/Helpers or ~/Library/Application Support/Nexal/bin. Review its code signature first."
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

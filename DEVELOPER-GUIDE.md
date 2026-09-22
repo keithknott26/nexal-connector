@@ -1,9 +1,9 @@
-# Nexal Connector developer guide
+# neXal Connector developer guide
 
 For a resumable engineering checkpoint and the full platform document archive,
 read [CURRENT-HANDOFF.md](CURRENT-HANDOFF.md).
 
-Native Mac connector for the Nexal Platform, intended for nexal.systems.
+Native Mac connector for the neXal Platform, intended for nexal.systems.
 Prepared for KWK, LLC. Private proprietary engineering preview, not a
 production-ready marketplace worker, certified sandbox or verified PQ system.
 
@@ -25,7 +25,7 @@ production-ready marketplace worker, certified sandbox or verified PQ system.
 
 ## Setup on your Mac
 
-Clone [Nexal Platform](https://github.com/keithknott26/nexal-platform) beside this
+Clone [neXal Platform](https://github.com/keithknott26/nexal-platform) beside this
 repository, authenticate to your private GitHub account, then run:
 
 ```sh
@@ -38,7 +38,7 @@ application; a Linux container is not a substitute for macOS Keychain or Metal.
 The installer asks before package-manager changes and keeps global tool links
 untouched. Use `--native` instead for a host-run local coordinator.
 
-The resulting app is `macos/build/Nexal Connector.app`. It is not signed or
+The resulting app is `macos/build/neXal Connector.app`. It is not signed or
 notarized for distribution. Leave Gatekeeper and SIP enabled.
 
 ## Local preview enrollment

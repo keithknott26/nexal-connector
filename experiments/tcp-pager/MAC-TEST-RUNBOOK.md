@@ -1,4 +1,4 @@
-# Nexal Mac memory acceptance runbook
+# neXal Mac memory acceptance runbook
 
 Status: scripted research acceptance, not production memory expansion.
 For encrypted delivery through the coordinator instead of AirDrop, see
@@ -59,7 +59,7 @@ This builds the isolated tools and runs:
 
 It does not need the other Mac, download packages, modify system settings,
 change the default allocator, start a public listener, disable security or touch
-Nexal enrollment. Existing Go 1.26+ and Apple command-line tools are required.
+neXal enrollment. Existing Go 1.26+ and Apple command-line tools are required.
 
 The native observed cases hold the final cache mappings for one second while
 the vCPU is stopped, allowing the host counter sampler to run. This is not a

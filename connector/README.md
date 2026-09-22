@@ -1,4 +1,4 @@
-# Nexal Mac connector
+# neXal Mac connector
 
 An owner-first Go connector and **development private-pull prototype**, not a
 production marketplace worker or a certified post-quantum system. It runs one

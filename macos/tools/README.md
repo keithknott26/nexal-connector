@@ -15,7 +15,7 @@ xcrun swift macos/tools/probe-memory-capabilities.swift
 No administrator access, recovery-mode setting, VM installation or 100 GB
 allocation is requested. The script reads framework properties and writes JSON
 to standard output; the Swift toolchain can create its normal compilation cache.
-It does not change Nexal configuration, access credentials, or send telemetry.
+It does not change neXal configuration, access credentials, or send telemetry.
 
 ## Interpret the result
 

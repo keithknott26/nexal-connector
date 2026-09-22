@@ -12,7 +12,7 @@ import (
 	"nexal/connector/internal/drive"
 )
 
-// `nexal drive` is the owner's interface to Nexal Drive.
+// `nexal drive` is the owner's interface to neXal Drive.
 //
 // WHY IT ENCRYPTS ON THIS SIDE: the coordinator enforces the quota, indexes the
 // keys and meters the sizes, so it necessarily sees all three. It does NOT need

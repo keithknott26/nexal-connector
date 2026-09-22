@@ -1,6 +1,6 @@
-# Nexal bounded TCP-backed CPU-paging prototype
+# neXal bounded TCP-backed CPU-paging prototype
 
-This is a separate research module, not a feature in the installed Nexal Connector.
+This is a separate research module, not a feature in the installed neXal Connector.
 It contains a tested Go page transport/cache and a Mac-only C Hypervisor helper.
 The owner reported successful native build, signature verification and CPU-fault
 loopback acceptance on September 19, 2026; see [VALIDATION.md](VALIDATION.md).

@@ -14,7 +14,7 @@ import (
 // LAN discovery: DNS-SD over multicast DNS, hand-rolled on the standard library.
 //
 // What this file produces is a list of *candidates*: machines that claimed, over
-// unauthenticated multicast, to be Nexal hosts. A candidate is a hint about where
+// unauthenticated multicast, to be neXal hosts. A candidate is a hint about where
 // to look. It is never evidence of membership, and nothing here may widen the
 // mutual-TLS fingerprint allowlist in internal/pool. See peers.go.
 const (
@@ -143,7 +143,7 @@ func QueryPacket() ([]byte, error) {
 	}})
 }
 
-// ParseCandidates decodes a datagram and extracts Nexal candidates from it.
+// ParseCandidates decodes a datagram and extracts neXal candidates from it.
 //
 // Everything about this function is suspicious of its input by construction: it
 // requires a well-formed fingerprint and host id, refuses a TXT record whose

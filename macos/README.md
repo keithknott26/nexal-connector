@@ -1,7 +1,7 @@
-# Nexal Connector for macOS
+# neXal Connector for macOS
 
-The platform repository now includes double-click `Setup Nexal.command` and
-`Start Nexal.command` launchers. See its `docs/MAC-SETUP.md` for the recommended
+The platform repository now includes double-click `Setup neXal.command` and
+`Start neXal.command` launchers. See its `docs/MAC-SETUP.md` for the recommended
 native setup. Packaging builds into a separate staging directory and preserves
 the previous complete app on ordinary build failure; quit the app before updates.
 This is still an unsigned source-build workflow, not a notarized installer.
@@ -56,7 +56,7 @@ separate explicit permission for development private execution. Production
 dispatch remains closed in the Go core. A resumed policy or acceptance window
 is not evidence of running work.
 
-Nexal revision: an explicit **Use local development preview** option now creates
+neXal revision: an explicit **Use local development preview** option now creates
 the fixed numeric-loopback configuration in a separate `Nexal-Local-Preview`
 directory. Its file credentials are disclosed in the UI. It does not enable
 synthetic telemetry or, by itself, development pull execution. The new native UI
@@ -138,7 +138,7 @@ are **instructions to run on macOS**, not a claim they were run here.
 
 ```bash
 # Run from macos after packaging.
-APP="$PWD/build/Nexal Connector.app"
+APP="$PWD/build/neXal Connector.app"
 IDENTITY='Developer ID Application: YOUR ORGANIZATION (YOURTEAMID)'
 security find-identity -v -p codesigning
 

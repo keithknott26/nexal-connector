@@ -46,7 +46,7 @@ const (
 	// one.
 	//
 	// It is anchored on the founder's standing free-drive decision (§39.6,
-	// "RESOLVED: free drive is 5 GB"): a single free-tier Nexal Drive can
+	// "RESOLVED: free drive is 5 GB"): a single free-tier neXal Drive can
 	// legitimately place 5 GB of someone else's data on this host, so a floor
 	// below 5 GB could be consumed entirely by one account's allowance and
 	// leave the owner at zero. 10 GiB is that allowance plus an equal margin
@@ -57,7 +57,7 @@ const (
 	// The shape mirrors config.ReserveMemoryBytes, which is the existing
 	// precedent for the same idea in a different resource: reserve a slice for
 	// the owner and admit work only from what is left over. This is the disk
-	// equivalent of that reserve, not a guess at how much Nexal will store.
+	// equivalent of that reserve, not a guess at how much neXal will store.
 	MinFreeDiskBytesDefault = 10 << 30
 	// Owner-tunable bounds (config.ResourcePolicy.MinFreeDiskBytes). The floor
 	// is 1 GiB because below that macOS is already in trouble on its own and a
@@ -197,7 +197,7 @@ type Signals struct {
 
 	DiskKnown     bool   `json:"diskKnown"`
 	FreeDiskBytes uint64 `json:"freeDiskBytes"`
-	// DiskVolume is the path that was measured — the directory Nexal stores its
+	// DiskVolume is the path that was measured — the directory neXal stores its
 	// own data in — so a support conversation can tell an external-volume
 	// install from a boot-volume one. It is a local path and never leaves the
 	// machine's own status output.
@@ -444,7 +444,7 @@ func diskCondition(s Signals, p Policy, stale bool) Condition {
 	floor := p.MinFreeDisk()
 	if stale || !s.DiskKnown {
 		c.Value = "unknown"
-		c.Reason = "free space on the Nexal data volume could not be read, so it is not withholding; a failed statfs must not stop a healthy host"
+		c.Reason = "free space on the neXal data volume could not be read, so it is not withholding; a failed statfs must not stop a healthy host"
 		return c
 	}
 	c.Known = true

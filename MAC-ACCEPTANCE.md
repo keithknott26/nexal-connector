@@ -1,4 +1,4 @@
-# Nexal native Mac acceptance
+# neXal native Mac acceptance
 
 Evidence date: September 19, 2026. The owner ran the acceptance commands on the
 target Mac and supplied their terminal output. These are user-reported native

@@ -9,7 +9,7 @@ struct NexalMacApp: App {
             ConnectorPanel()
                 .environmentObject(model)
         } label: {
-            Label("Nexal", systemImage: model.contributes ? "cpu" : "pause.circle")
+            Label("neXal", systemImage: model.contributes ? "cpu" : "pause.circle")
         }
         .menuBarExtraStyle(.window)
 
@@ -59,7 +59,7 @@ private struct ConnectorPanel: View {
             Image(systemName: "square.stack.3d.up.fill")
                 .font(.title2).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Nexal Connector").font(.headline)
+                Text("neXal Connector").font(.headline)
                 Text("Your Mac. Your resources.").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()

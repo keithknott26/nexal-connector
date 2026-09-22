@@ -24,7 +24,7 @@ func authorizedSnapshot(peers ...AuthorizedPeer) Snapshot {
 func TestMDNSOnlyPeerNeverEntersAllowedPeers(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	// The hostile case, spelled out: a stranger on the same Wi-Fi advertises a
-	// well-formed Nexal record, from an address inside our own prefix, with a
+	// well-formed neXal record, from an address inside our own prefix, with a
 	// perfectly valid fingerprint. Everything about it is shaped like a peer.
 	stranger := Candidate{
 		Instance: "mac9." + ServiceName, HostID: "mac9", Fingerprint: fpThird,

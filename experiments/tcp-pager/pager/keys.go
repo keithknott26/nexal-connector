@@ -24,7 +24,7 @@ func NewKeys() (*KeySet, error) {
 	if err != nil {
 		return nil, err
 	}
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Nexal pager experiment"},
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "neXal pager experiment"},
 		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
 		KeyUsage: x509.KeyUsageCertSign}
 	der, err := x509.CreateCertificate(rand.Reader, ca, ca, pub, priv)

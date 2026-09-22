@@ -140,7 +140,7 @@ func bundleCommand(ctx context.Context, command string, args []string) error {
 		if err != nil {
 			return errors.New("cannot locate application support directory")
 		}
-		parent := filepath.Join(home, "Nexal Pager Lab")
+		parent := filepath.Join(home, "neXal Pager Lab")
 		if err := os.MkdirAll(parent, 0700); err != nil {
 			return errors.New("cannot create private receive parent")
 		}

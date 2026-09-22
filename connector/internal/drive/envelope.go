@@ -1,4 +1,4 @@
-// Package drive is the connector's client for Nexal Drive.
+// Package drive is the connector's client for neXal Drive.
 //
 // It encrypts object bodies on this Mac before they leave it, uploads them to
 // the coordinator, and decrypts them on the way back. The coordinator stores

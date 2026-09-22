@@ -47,7 +47,7 @@ func TestListenBrowseAndCloseOnRealSockets(t *testing.T) {
 		t.Skipf("multicast send refused in this environment: %v", err)
 	}
 	// Any candidate that does arrive must already have passed validation; an
-	// empty result is the normal outcome when no other Nexal host is present.
+	// empty result is the normal outcome when no other neXal host is present.
 	select {
 	case got := <-candidates:
 		for _, c := range got {

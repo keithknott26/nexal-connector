@@ -19,7 +19,7 @@ import (
 // peers.go for why a decoded record can never widen an allowlist.
 const (
 	// maxMessageBytes bounds a single datagram. RFC 6762 permits large
-	// multicast messages, but a Nexal announcement needs well under 1 KB, so
+	// multicast messages, but a neXal announcement needs well under 1 KB, so
 	// anything past this is either not ours or is trying to make us allocate.
 	maxMessageBytes = 9000
 	// maxName is the DNS wire limit for a fully qualified name.
@@ -31,7 +31,7 @@ const (
 	maxQuestions      = 8
 	maxSectionRecords = 64
 	maxTotalRecords   = 128
-	// TXT bounds. A Nexal TXT record carries three short keys; anything larger
+	// TXT bounds. A neXal TXT record carries three short keys; anything larger
 	// is not ours.
 	maxTXTStringLen = 255
 	maxTXTStrings   = 16
@@ -283,7 +283,7 @@ func decodeName(buf []byte, off int) (string, int, error) {
 			}
 			label := buf[cur+1 : cur+1+n]
 			for _, c := range label {
-				// Printable ASCII only, and never a dot: Nexal's own names are
+				// Printable ASCII only, and never a dot: neXal's own names are
 				// ASCII, and refusing the rest keeps a decoded name from being
 				// ambiguous when it is later compared or logged.
 				if c < 0x21 || c > 0x7e || c == '.' {

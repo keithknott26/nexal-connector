@@ -1,4 +1,4 @@
-# Nexal Connector setup diagnostics
+# neXal Connector setup diagnostics
 
 `nexal doctor` generates a read-only JSON report that is useful before starting
 the agent. It does not require an enrollment credential or a running coordinator,

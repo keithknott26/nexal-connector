@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -318,15 +319,46 @@ func writeFull(w io.Writer, p []byte) error {
 	return nil
 }
 
-// Numeric loopback/RFC1918/ULA only: no wildcard listener, DNS or public route.
+// Numeric loopback/RFC1918/ULA/link-local only: no wildcard listener, DNS or
+// public route.
+//
+// Link-local (169.254.0.0/16, fe80::/10) is accepted deliberately, and it is not
+// a loosening of this check. Two Macs cabled directly together -- a Thunderbolt
+// bridge or a straight Ethernet run, which is the topology this pager is FOR --
+// have no DHCP server between them, so each end self-assigns a link-local
+// address and nothing else. Rejecting that range made the intended two-machine
+// setup the one setup that could not run, while loopback-only single-host tests
+// passed and hid it.
+//
+// The range is non-routable by definition: routers must not forward it, so it
+// cannot leave the physical segment. That is a stronger confinement guarantee
+// than RFC1918, which this function already allowed and which does route across
+// a home network. Multicast and unspecified addresses stay rejected, so this
+// still admits only an address belonging to one directly-reachable peer.
 func PrivateAddress(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil || port == "" {
 		return errors.New("use a numeric private IP:port")
 	}
+	// An IPv6 link-local address is only meaningful with its zone (fe80::1%en0),
+	// and ParseIP rejects the zone, so split it off before parsing.
+	zone := ""
+	if i := strings.LastIndex(host, "%"); i >= 0 {
+		zone, host = host[i+1:], host[:i]
+	}
 	ip := net.ParseIP(host)
-	if ip == nil || (!ip.IsLoopback() && !ip.IsPrivate()) || ip.IsUnspecified() {
-		return errors.New("only numeric loopback/private addresses allowed")
+	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() ||
+		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+		return errors.New("use a numeric private IP:port")
+	}
+	if !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() {
+		return errors.New("only numeric loopback, private or link-local addresses allowed")
+	}
+	// A zone names a local interface and is only ever valid on a link-local
+	// address; accepting it elsewhere would let an operator think traffic was
+	// pinned to an interface when it was not.
+	if zone != "" && !ip.IsLinkLocalUnicast() {
+		return errors.New("interface zone is only valid on a link-local address")
 	}
 	return nil
 }

@@ -156,3 +156,38 @@ func TestLabReportsSuccessfulMutualTLS(t *testing.T) {
 		t.Fatalf("unexpected success diagnostics: %v", events)
 	}
 }
+
+// Two Macs cabled directly together have no DHCP between them and self-assign
+// link-local addresses. That is the topology the pager exists to serve, so it
+// must be accepted; rejecting it made the intended setup the only one that
+// could not run while loopback-only tests still passed.
+func TestPrivateAddressAcceptsDirectlyCabledPeers(t *testing.T) {
+	for _, addr := range []string{
+		"169.254.0.21:47811",  // IPv4 link-local: Thunderbolt bridge / direct Ethernet.
+		"[fe80::1%en0]:47811", // IPv6 link-local, zoned to an interface.
+		"127.0.0.1:47811",     // Loopback, single-host tests.
+		"192.168.1.10:47811",  // RFC1918.
+		"[fd00::1]:47811",     // ULA.
+	} {
+		if err := PrivateAddress(addr); err != nil {
+			t.Errorf("PrivateAddress(%q) = %v, want accepted", addr, err)
+		}
+	}
+}
+
+func TestPrivateAddressStillRejectsRoutableAndAmbiguous(t *testing.T) {
+	for _, addr := range []string{
+		"8.8.8.8:47811",       // Public route.
+		"0.0.0.0:47811",       // Wildcard listener.
+		"[::]:47811",          // IPv6 wildcard.
+		"224.0.0.1:47811",     // Multicast.
+		"[ff02::1]:47811",     // Link-local multicast, not a unicast peer.
+		"example.com:47811",   // DNS name, not numeric.
+		"169.254.0.21",        // No port.
+		"[fd00::1%en0]:47811", // Zone on a non-link-local address.
+	} {
+		if err := PrivateAddress(addr); err == nil {
+			t.Errorf("PrivateAddress(%q) = nil, want rejected", addr)
+		}
+	}
+}

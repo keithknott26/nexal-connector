@@ -382,7 +382,20 @@ func TestProcessGroupTeardown(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				t.Fatal("supervisor hung on descendant pipes")
 			}
-			for deadline := time.Now().Add(time.Second); time.Now().Before(deadline) && processRunning(pid); {
+			// The ASSERTION is that the descendant does not survive group
+			// cancellation. The deadline is only how long we are willing to wait for
+			// the kernel to get round to it, and one second was too short: under
+			// -race on a loaded CI runner this failed roughly half the time while
+			// the teardown itself was working correctly. A flaky gate here is not a
+			// cosmetic problem -- the Go job blocks the mac job, so this test
+			// randomly blocked every Swift check and every release.
+			//
+			// Waiting longer does not weaken the property. A descendant that truly
+			// survives cancellation still fails, because it is still running at the
+			// end of the wait however long the wait is; only the scheduling noise is
+			// removed. The loop still exits as soon as the process is gone, so the
+			// healthy path costs the same few milliseconds it always did.
+			for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) && processRunning(pid); {
 				time.Sleep(10 * time.Millisecond)
 			}
 			if processRunning(pid) {

@@ -264,6 +264,13 @@ func TestShareStartReachesTheScratchCheckWithEverythingElseSatisfied(t *testing.
 		"--samba-version", "4.21.3", "--samba-architecture", runtime.GOARCH,
 		"--samba-source-url", "https://download.samba.org/pub/samba/stable/samba-4.21.3.tar.gz",
 		"--verification-method", "fixture only; no publisher signature verified",
+		// Demand more scratch than any volume can have, so this test proves the
+		// scratch check is REACHED rather than depending on how full the machine
+		// running it happens to be. Previously it asserted a failure that only
+		// occurred because the volume had under the default 32 GiB free -- true
+		// in the Linux sandbox, false on the macOS release runner, where start
+		// got past the check and the test failed.
+		"--scratch-gib", "1048576",
 		"--port", "14450", "--time-box", "2s", "--max-size-gib", "64"})
 	if err == nil {
 		t.Fatal("a session started without the scratch space a streamed restore needs")

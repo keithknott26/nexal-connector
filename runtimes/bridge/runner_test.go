@@ -383,22 +383,23 @@ func TestProcessGroupTeardown(t *testing.T) {
 				t.Fatal("supervisor hung on descendant pipes")
 			}
 			// The ASSERTION is that the descendant does not survive group
-			// cancellation. The deadline is only how long we are willing to wait for
-			// the kernel to get round to it, and one second was too short: under
-			// -race on a loaded CI runner this failed roughly half the time while
-			// the teardown itself was working correctly. A flaky gate here is not a
-			// cosmetic problem -- the Go job blocks the mac job, so this test
-			// randomly blocked every Swift check and every release.
-			//
-			// Waiting longer does not weaken the property. A descendant that truly
-			// survives cancellation still fails, because it is still running at the
-			// end of the wait however long the wait is; only the scheduling noise is
-			// removed. The loop still exits as soon as the process is gone, so the
-			// healthy path costs the same few milliseconds it always did.
-			for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) && processRunning(pid); {
+			// cancellation. The deadline is only how long we wait for the kernel to
+			// get round to it; a descendant that truly survives is still running at
+			// the end of the wait however long it is, so waiting longer cannot
+			// weaken the property. The loop exits the moment the process is gone.
+			// ONE read decides both the loop and the verdict. Calling processRunning
+			// again after the loop was the actual bug: the two calls could disagree,
+			// and the failure was reported off the second one. The child becomes a
+			// zombie (loop exits, correctly), is then reaped between the two calls,
+			// and /proc/<pid>/stat vanishes -- so the second call cannot confirm the
+			// zombie and falls through to "running". A process that had just exited
+			// perfectly was reported as having survived.
+			running := processRunning(pid)
+			for deadline := time.Now().Add(15 * time.Second); running && time.Now().Before(deadline); {
 				time.Sleep(10 * time.Millisecond)
+				running = processRunning(pid)
 			}
-			if processRunning(pid) {
+			if running {
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 				t.Fatal("descendant survived group cancellation")
 			}
@@ -413,11 +414,16 @@ func processRunning(pid int) bool {
 	if runtime.GOOS == "linux" {
 		// Containers may have a PID 1 that does not reap orphan zombies.
 		data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-		if err == nil {
-			closeParen := bytes.LastIndexByte(data, ')')
-			if closeParen >= 0 && len(data) > closeParen+2 && data[closeParen+2] == 'Z' {
-				return false
-			}
+		if err != nil {
+			// No /proc entry means the kernel has no such task: it was reaped
+			// between the Kill probe above and this read. Falling through to
+			// "running" here reported "I could not tell" as "still alive", which
+			// is the strongest possible claim from the weakest evidence.
+			return false
+		}
+		closeParen := bytes.LastIndexByte(data, ')')
+		if closeParen >= 0 && len(data) > closeParen+2 && data[closeParen+2] == 'Z' {
+			return false
 		}
 	}
 	return true

@@ -19,6 +19,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var selection: ExecutableSelection?
     @Published private(set) var status: ConnectorStatus?
     @Published private(set) var busy = false
+    /// What the connector is doing RIGHT NOW, in the owner's language.
+    ///
+    /// `busy` alone only says "something is happening", so every operation looked
+    /// identical: a spinner with no subject. Enrolling contacts a coordinator,
+    /// minting a pairing contacts it again, starting the agent does not contact it
+    /// at all -- and when one of those stalled there was nothing on screen saying
+    /// which. This names the phase so a stall is attributable.
+    ///
+    /// Set only through `perform`, so it cannot be left stale after a throw: the
+    /// same defer that clears `busy` clears this.
+    @Published private(set) var activity: String?
     @Published private(set) var message: String?
     @Published private(set) var processOwned = false
     @Published private(set) var lastUpdated: Date?
@@ -44,9 +55,9 @@ final class AppModel: ObservableObject {
     /// Ticks once a second while a pairing is live, purely so the countdown text
     /// re-renders. It does not poll, and it never decides that a pairing expired.
     @Published private(set) var pairingTick = Date()
-    @Published var localPreview = false {
+    @Published var developmentEnvironment = false {
         didSet {
-            if oldValue != localPreview {
+            if oldValue != developmentEnvironment {
                 enrollmentCode = ""
                 consent = false
             }
@@ -62,7 +73,7 @@ final class AppModel: ObservableObject {
     private let capabilitySource: TransportCapabilityProviding
 
     var selectedConfig: URL {
-        localPreview ? ConnectorProcess.localPreviewConfigURL : ConnectorProcess.configURL
+        developmentEnvironment ? ConnectorProcess.developmentConfigURL : ConnectorProcess.configURL
     }
     var configurationExists: Bool {
         FileManager.default.fileExists(atPath: selectedConfig.path)
@@ -82,7 +93,7 @@ final class AppModel: ObservableObject {
     }
     var manualAcceptanceUnavailableReason: String? {
         ManualAcceptancePresentation.unavailableReason(
-            localPreview: localPreview, hasExecutable: selection != nil,
+            developmentEnvironment: developmentEnvironment, hasExecutable: selection != nil,
             configurationExists: configurationExists, status: status)
     }
     var pairingUnavailableReason: String? {
@@ -111,6 +122,28 @@ final class AppModel: ObservableObject {
            let approved = try? ExecutableSelection.approve(URL(fileURLWithPath: path)),
            approved.sha256 == hash {
             selection = approved
+        } else if let bundled = try? ExecutableSelection.approve(ExecutableSelection.bundledExecutable) {
+            // Adopt the connector shipped INSIDE this app bundle without asking.
+            //
+            // Choosing it was never a real decision. The helper lives in
+            // Contents/Helpers of this same signed, notarized bundle; it is
+            // codesigned as part of the app, and Gatekeeper already validated it
+            // before the app could launch. Making the owner pick it turned a
+            // certainty into a chore, and left every other control inert until
+            // they had performed a step whose only correct answer was "the one
+            // that shipped with me".
+            //
+            // This is not a weakening. ExecutableSelection.approve still runs in
+            // full: the path must be one of the two allowed locations, must not be
+            // a symlink, must be a regular file not writable by group or other,
+            // must be owned by this user or root, must be within the size bounds,
+            // and is pinned by SHA-256 and revalidated before every single
+            // invocation. An adopted binary that is later swapped still fails
+            // revalidate() with executableChanged, exactly as a hand-picked one
+            // would. "Choose installed..." remains for the override case.
+            selection = bundled
+            defaults.set(bundled.url.path, forKey: "approvedConnectorPath")
+            defaults.set(bundled.sha256, forKey: "approvedConnectorHash")
         }
     }
 
@@ -137,6 +170,7 @@ final class AppModel: ObservableObject {
         } catch { message = error.localizedDescription }
     }
 
+
     private func invoke(_ command: CLICommand, input: Data? = nil) async throws -> Data {
         guard let selection else { throw ShellError.noExecutable }
         let config = selectedConfig
@@ -147,21 +181,24 @@ final class AppModel: ObservableObject {
 
     func initializeAndEnroll() async {
         guard !busy, consent, !showsEnrollmentConfirmation else { return }
+        activity = "Contacting the coordinator\u{2026}"
         busy = true
-        defer { busy = false; enrollmentCode = "" }
+        defer { busy = false; activity = nil; enrollmentCode = "" }
         do {
             let code = enrollmentCode.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !code.isEmpty, code.utf8.count <= 255,
                   !code.contains("\n"), !code.contains("\r") else { throw ShellError.invalidCode }
             if !configurationExists {
-                if localPreview {
-                    _ = try await invoke(.initializeLocalPreview(name: hostName,
+                activity = "Creating this Mac\u{2019}s configuration\u{2026}"
+                if developmentEnvironment {
+                    _ = try await invoke(.initializeDevelopment(name: hostName,
                                                memoryMiB: memoryMiB, reserveMiB: reserveMiB))
                 } else {
                     _ = try await invoke(.initialize(coordinator: coordinator, name: hostName,
                                                memoryMiB: memoryMiB, reserveMiB: reserveMiB))
                 }
             }
+            activity = "Authenticating with the coordinator\u{2026}"
             _ = try await invoke(.enroll, input: Data((code + "\n").utf8))
             enrollmentPresentation.recordSuccess(for: selectedConfig)
             message = "Enrolled with contribution paused. Start the connector, then explicitly enable private resources."
@@ -170,8 +207,9 @@ final class AppModel: ObservableObject {
 
     func start() async {
         guard !busy else { return }
+        activity = "Starting the connector\u{2026}"
         busy = true
-        defer { busy = false }
+        defer { busy = false; activity = nil }
         do {
             // An app-owned daemon may still be starting after a failed first
             // status read. Retry that daemon; never launch a second process.
@@ -229,8 +267,9 @@ final class AppModel: ObservableObject {
 
     func refresh() async {
         guard !busy, selection != nil else { return }
+        activity = "Checking connector status\u{2026}"
         busy = true
-        defer { busy = false }
+        defer { busy = false; activity = nil }
         do { try await updateStatus() }
         catch {
             status = nil
@@ -243,7 +282,7 @@ final class AppModel: ObservableObject {
     }
 
     func acceptJobsNow() async {
-        guard !busy, localPreview else { return }
+        guard !busy, developmentEnvironment else { return }
         if let reason = manualAcceptanceUnavailableReason {
             message = reason
             return
@@ -273,8 +312,9 @@ final class AppModel: ObservableObject {
 
     func setContribution(_ enabled: Bool) async {
         guard !busy, status != nil else { return }
+        activity = "Updating resource policy\u{2026}"
         busy = true
-        defer { busy = false }
+        defer { busy = false; activity = nil }
         do {
             _ = try await invoke(enabled ? .resume : .pause)
             try await updateStatus()
@@ -301,8 +341,9 @@ final class AppModel: ObservableObject {
             pairingProblem = reason
             return
         }
+        activity = "Requesting a pairing code\u{2026}"
         busy = true
-        defer { busy = false }
+        defer { busy = false; activity = nil }
         pairingProblem = nil
         // A second pairing must not leave the first one open on the coordinator,
         // where it would stay scannable until it expired.

@@ -49,13 +49,13 @@ final class ManualAcceptancePresentationTests: XCTestCase {
     func testSetupRequirementsExplainDisabledButton() throws {
         let valid = try status()
         XCTAssertNotNil(ManualAcceptancePresentation.unavailableReason(
-            localPreview: false, hasExecutable: true, configurationExists: true, status: valid))
+            developmentEnvironment: false, hasExecutable: true, configurationExists: true, status: valid))
         XCTAssertNotNil(ManualAcceptancePresentation.unavailableReason(
-            localPreview: true, hasExecutable: false, configurationExists: true, status: valid))
+            developmentEnvironment: true, hasExecutable: false, configurationExists: true, status: valid))
         XCTAssertNotNil(ManualAcceptancePresentation.unavailableReason(
-            localPreview: true, hasExecutable: true, configurationExists: false, status: valid))
+            developmentEnvironment: true, hasExecutable: true, configurationExists: false, status: valid))
         XCTAssertNil(ManualAcceptancePresentation.unavailableReason(
-            localPreview: true, hasExecutable: true, configurationExists: true, status: nil))
+            developmentEnvironment: true, hasExecutable: true, configurationExists: true, status: nil))
     }
 
     func testOldAndUnenrolledConnectorsAreNotOfferedAcceptance() throws {
@@ -63,9 +63,9 @@ final class ManualAcceptancePresentationTests: XCTestCase {
         let unenrolled = try ConnectorStatus.decode(Data(#"{"paused":true,"manualAcceptanceSupported":true}"#.utf8))
         for value in [old, unenrolled] {
             XCTAssertNotNil(ManualAcceptancePresentation.unavailableReason(
-                localPreview: true, hasExecutable: true, configurationExists: true, status: value))
+                developmentEnvironment: true, hasExecutable: true, configurationExists: true, status: value))
         }
         XCTAssertNil(ManualAcceptancePresentation.unavailableReason(
-            localPreview: true, hasExecutable: true, configurationExists: true, status: try status()))
+            developmentEnvironment: true, hasExecutable: true, configurationExists: true, status: try status()))
     }
 }

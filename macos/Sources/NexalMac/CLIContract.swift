@@ -1,10 +1,31 @@
 import Foundation
 
+/// The coordinator origins this app knows by name.
+///
+/// Declared here, outside the @MainActor model, because `CLICommand.arguments`
+/// builds an argv from a nonisolated context and must be able to read them
+/// without hopping to the main actor.
+enum CoordinatorOrigins {
+    /// The deployed development environment. Development is a hosted environment
+    /// now, not a server the owner starts on their own machine.
+    static let development = "https://coordinator-dev.nexal.systems"
+    /// The production environment.
+    static let production = "https://coordinator.nexal.systems"
+}
+
 /// Thin adapter to connector/CLI-CONTRACT.md v1. No HTTP, credentials,
 /// scheduling, enrollment policy, or resource accounting is implemented here.
 enum CLICommand {
     case initialize(coordinator: String, name: String, memoryMiB: Int, reserveMiB: Int)
-    case initializeLocalPreview(name: String, memoryMiB: Int, reserveMiB: Int)
+    /// Initialize against the hosted DEVELOPMENT coordinator.
+    ///
+    /// This used to target http://127.0.0.1:8787, a coordinator the owner had to
+    /// run themselves. That local server is no longer how development works --
+    /// coordinator-dev.nexal.systems is deployed -- and pointing at a port nobody
+    /// is listening on made the option fail for a reason the panel could not
+    /// explain. It also forced the "cannot pair" caveat, because pairing requires
+    /// an https origin and a loopback http origin can never satisfy it.
+    case initializeDevelopment(name: String, memoryMiB: Int, reserveMiB: Int)
     case enroll, run, status, pause, resume, acceptJobs
     /// Mint a phone pairing and render it. `--no-poll` is deliberate: this app
     /// polls with `pairingStatus` through the SAME bounded `ConnectorProcess`
@@ -22,8 +43,14 @@ enum CLICommand {
             command = ["init", "--coordinator", coordinator, "--name", name,
                        "--memory-limit-mib", String(memoryMiB),
                        "--reserve-memory-mib", String(reserveMiB)]
-        case let .initializeLocalPreview(name, memoryMiB, reserveMiB):
-            command = ["init", "--coordinator", "http://127.0.0.1:8787", "--name", name,
+        case let .initializeDevelopment(name, memoryMiB, reserveMiB):
+            // --dev-loopback and --dev-secrets are retained deliberately. They are
+            // what keep this profile from doing public work or spending, and what
+            // route credentials to restricted-permission files instead of the
+            // Keychain, so a development identity is never mistaken for the real
+            // one. Only the coordinator changed, from an unhosted loopback port to
+            // the deployed development environment.
+            command = ["init", "--coordinator", CoordinatorOrigins.development, "--name", name,
                        "--memory-limit-mib", String(memoryMiB),
                        "--reserve-memory-mib", String(reserveMiB),
                        "--dev-loopback", "--dev-secrets"]
@@ -72,7 +99,11 @@ enum PairingRole: String, CaseIterable, Identifiable {
 }
 
 enum ShellError: LocalizedError {
-    case rejectedExecutable, executableChanged, commandFailed(Int32), timeout, oversizedOutput
+    case rejectedExecutable, executableChanged, timeout, oversizedOutput
+    /// `reason` is the connector's own message, decoded from its structured error
+    /// envelope. Nil when stderr carried nothing usable, which is the only case
+    /// that still falls back to naming the exit code.
+    case commandFailed(Int32, reason: String?)
     case invalidStatus, noExecutable, invalidCode, invalidPairing
 
     var errorDescription: String? {
@@ -81,8 +112,12 @@ enum ShellError: LocalizedError {
             return "Choose the nexal executable in this app’s Helpers folder or ~/Library/Application Support/Nexal/bin. It must not be a symlink or writable by other users."
         case .executableChanged:
             return "The selected connector changed. Review its signature and choose it again."
-        case .commandFailed(let code):
-            return "The Go connector rejected this operation (exit \(code)). Check the coordinator, invitation, and local configuration. Credentials are not displayed."
+        case let .commandFailed(code, reason):
+            // Prefer the connector's own words. It knows which precondition failed;
+            // this app can only guess, and its guess used to name three subsystems
+            // at once while pointing at none of them.
+            if let reason { return reason }
+            return "The connector could not complete this operation (exit \(code)) and gave no reason. Credentials are never displayed."
         case .timeout: return "The connector did not respond before the timeout."
         case .oversizedOutput: return "The connector returned too much data."
         case .invalidStatus: return "The connector status schema is not supported. Update the app and connector together."

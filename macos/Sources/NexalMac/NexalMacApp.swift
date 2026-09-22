@@ -63,7 +63,21 @@ private struct ConnectorPanel: View {
                 Text("Your Mac. Your resources.").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if model.busy { ProgressView().controlSize(.small) }
+            if model.busy {
+                // The spinner alone only said "something is happening", so every
+                // operation looked identical and a stall named nothing. The phase
+                // says which step is running, so a hang is attributable to it.
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    if let activity = model.activity {
+                        Text(activity)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("connector.activity")
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
         }
     }
 
@@ -284,7 +298,7 @@ private struct ConnectorPanel: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 CaveatDisclosure(title: "How pairing works",
-                                 text: "The Go connector asks your coordinator for a short-lived pairing and renders the code. The code is drawn on screen only and is never saved: it carries a one-time secret that lets the phone claim this Mac. Codes expire in a few minutes, and an https coordinator is required — the local development preview profile cannot pair.")
+                                 text: "The Go connector asks your coordinator for a short-lived pairing and renders the code. The code is drawn on screen only and is never saved: it carries a one-time secret that lets the phone claim this Mac. Codes expire in a few minutes. Pairing requires an https coordinator, which both the development and production environments now provide.")
             }
             // The connector's own explanation of a failure, kept beside the
             // controls rather than in the footer where it would scroll away.
@@ -310,10 +324,15 @@ private struct ConnectorPanel: View {
                     Text(selection.url.path).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Text("2. Join with a one-use invitation").font(.subheadline.weight(.medium))
-                Toggle("Use local development preview", isOn: $model.localPreview)
+                // .checkbox is the macOS idiom for an independent on/off option in a
+                // form. The default switch styling reads as a mode the whole panel
+                // swings between, which overstated what this does: it selects which
+                // coordinator a NEW configuration is created against.
+                Toggle("Use development environment", isOn: $model.developmentEnvironment)
+                    .toggleStyle(.checkbox)
                     .disabled(model.status != nil || model.processOwned)
-                if model.localPreview {
-                    Text("Local coordinator: http://127.0.0.1:8787. Uses a separate preview configuration and restricted-permission file credentials, not Keychain. No PQ tunnel or public execution is enabled.")
+                if model.developmentEnvironment {
+                    Text("Coordinator: \(CoordinatorOrigins.development). Uses a separate configuration and restricted-permission file credentials, not the Keychain, so a development identity is never confused with your real one. No public execution or external spending is enabled.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else {
                     TextField("HTTPS coordinator origin", text: $model.coordinator)

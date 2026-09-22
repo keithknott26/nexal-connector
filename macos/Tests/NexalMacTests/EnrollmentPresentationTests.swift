@@ -3,7 +3,7 @@ import XCTest
 @testable import NexalMac
 
 final class EnrollmentPresentationTests: XCTestCase {
-    private let preview = URL(fileURLWithPath: "/Users/test/Nexal-Local-Preview/config.json")
+    private let preview = URL(fileURLWithPath: "/Users/test/Nexal-Development/config.json")
     private let production = URL(fileURLWithPath: "/Users/test/Nexal/config.json")
 
     func testInitialStateDoesNotClaimEnrollment() {

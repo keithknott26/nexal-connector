@@ -25,11 +25,11 @@ struct ManualAcceptancePresentation {
     var isActive: Bool { activeUntil != nil }
     var buttonTitle: String { isActive ? "Accepting private jobs" : "Accept jobs now" }
 
-    static func unavailableReason(localPreview: Bool, hasExecutable: Bool,
+    static func unavailableReason(developmentEnvironment: Bool, hasExecutable: Bool,
                                   configurationExists: Bool, status: ConnectorStatus?) -> String? {
-        if !localPreview { return "Choose the local development preview profile to accept private jobs." }
+        if !developmentEnvironment { return "Select the development environment to accept private jobs." }
         if !hasExecutable { return "Choose the updated bundled connector in Setup first." }
-        if !configurationExists { return "Create and enroll the local preview configuration first." }
+        if !configurationExists { return "Create and enroll the development configuration first." }
         if let status, status.hostId?.isEmpty != false {
             return "Enroll this connector before accepting jobs."
         }

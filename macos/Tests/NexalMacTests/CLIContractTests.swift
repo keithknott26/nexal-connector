@@ -19,10 +19,15 @@ final class CLIContractTests: XCTestCase {
                        ["enroll", "--code-stdin", "--config", config.path])
     }
 
-    func testLocalPreviewIsExplicitAndLoopbackOnly() {
-        let args = CLICommand.initializeLocalPreview(name: "M4",
+    func testDevelopmentTargetsTheHostedCoordinatorAndKeepsDevFlags() {
+        let args = CLICommand.initializeDevelopment(name: "M4",
                   memoryMiB: 256, reserveMiB: 8192).arguments(config: config)
-        XCTAssertTrue(args.contains("http://127.0.0.1:8787"))
+        // Was http://127.0.0.1:8787, a coordinator the owner had to run
+        // themselves. Development is a deployed environment now, and the old
+        // loopback origin could never pair because pairing requires https.
+        XCTAssertTrue(args.contains(CoordinatorOrigins.development))
+        XCTAssertTrue(args.contains { $0.hasPrefix("https://") })
+        XCTAssertFalse(args.contains { $0.contains("127.0.0.1") })
         XCTAssertTrue(args.contains("--dev-loopback"))
         XCTAssertTrue(args.contains("--dev-secrets"))
         XCTAssertFalse(args.contains("--dev-assume-idle"))
@@ -33,9 +38,13 @@ final class CLIContractTests: XCTestCase {
         XCTAssertFalse(production.contains("--dev-secrets"))
     }
 
-    func testPreviewAndProductionConfigurationsAreSeparate() {
-        XCTAssertNotEqual(ConnectorProcess.configURL, ConnectorProcess.localPreviewConfigURL)
-        XCTAssertTrue(ConnectorProcess.localPreviewConfigURL.path.contains("Nexal-Local-Preview"))
+    func testDevelopmentAndProductionConfigurationsAreSeparate() {
+        XCTAssertNotEqual(ConnectorProcess.configURL, ConnectorProcess.developmentConfigURL)
+        // The directory rename is load-bearing, not cosmetic: a config.json left
+        // under the old name would make configurationExists true and skip init,
+        // pinning the profile to the dead loopback coordinator forever.
+        XCTAssertTrue(ConnectorProcess.developmentConfigURL.path.contains("Nexal-Development"))
+        XCTAssertFalse(ConnectorProcess.developmentConfigURL.path.contains("Local-Preview"))
         XCTAssertFalse(ConnectorProcess.configURL.path.contains("KWK"))
     }
 
@@ -102,7 +111,7 @@ final class CLIContractTests: XCTestCase {
         let model = AppModel()
         XCTAssertEqual(model.coordinator, "https://coordinator-dev.nexal.systems")
         XCTAssertTrue(model.coordinator.hasPrefix("https://"))
-        XCTAssertFalse(model.localPreview)
+        XCTAssertFalse(model.developmentEnvironment)
         // No default may point at the machine itself or at a private range.
         for host in ["127.0.0.1", "localhost", "0.0.0.0", "192.168.", "10.", "169.254."] {
             XCTAssertFalse(model.coordinator.contains(host), "default must not be local: \(host)")

@@ -13,12 +13,16 @@
 // reviewed instead of shipping unshaped and being retrofitted. Every status and
 // report surface says "not enforced" for exactly that reason.
 //
-// It is also only the first half of HARDENING-PLAN §16's requirement. §16 demands
-// "a per-donor monthly bandwidth budget, visible in the connector UI, with
-// cap-aware scheduling that throttles repair and relay work as a donor approaches
-// their limit". A bytes-per-second ceiling cannot bound a monthly volume — a
-// permanent 64 KiB/s metered ceiling still moves ~165 GB in a month — so the
-// monthly budget and cap-aware scheduling remain unimplemented and unclaimed.
+// It is also only HALF of HARDENING-PLAN §16's requirement, and deliberately stays
+// that half. §16 demands "a per-donor monthly bandwidth budget, visible in the
+// connector UI, with cap-aware scheduling that throttles repair and relay work as a
+// donor approaches their limit". A bytes-per-second ceiling cannot bound a monthly
+// volume — a permanent 64 KiB/s metered ceiling still moves ~165 GB in a month — so
+// the VOLUME half now lives in internal/budget, which persists its rolling window in
+// the coordinator so it survives a restart. This package holds only the seam (see
+// meter.go): the Meter interface plus NewMeteredWriter/NewMeteredReader. The
+// dependency points one way, budget -> throttle, because the rate shaper must not
+// need to know how a volume budget is persisted.
 package throttle
 
 import (
@@ -173,6 +177,10 @@ type Writer struct {
 	w       io.Writer
 	limiter *Limiter
 	ctx     context.Context
+	// meter is the §16 monthly VOLUME budget (meter.go), nil for the pre-budget
+	// constructors. Rate and volume are different limits and a shaper that enforces
+	// only the first still walks a donor into a 1.2 TB ISP cap.
+	meter Meter
 }
 
 func NewWriter(ctx context.Context, w io.Writer, l *Limiter) (*Writer, error) {
@@ -191,6 +199,12 @@ func (s *Writer) Write(p []byte) (int, error) {
 		chunk := int64(len(p) - written)
 		if chunk > s.limiter.Burst() {
 			chunk = s.limiter.Burst()
+		}
+		// Volume before rate: an exhausted budget must fail now, not after sleeping out
+		// a shaping delay for bytes the donor is not allowed to send. Charging per chunk
+		// rather than per Write also means a refusal costs at most one burst of overrun.
+		if err := charge(s.meter, chunk); err != nil {
+			return written, err
 		}
 		if err := s.limiter.Wait(s.ctx, chunk); err != nil {
 			return written, err
@@ -213,6 +227,8 @@ type Reader struct {
 	r       io.Reader
 	limiter *Limiter
 	ctx     context.Context
+	// See Writer.meter. Inbound bytes count against a residential cap too.
+	meter Meter
 }
 
 func NewReader(ctx context.Context, r io.Reader, l *Limiter) (*Reader, error) {
@@ -230,6 +246,13 @@ func (s *Reader) Read(p []byte) (int, error) {
 	}
 	if int64(len(p)) > s.limiter.Burst() {
 		p = p[:s.limiter.Burst()]
+	}
+	// Charged for the bytes we are about to ASK for, which is the only number known
+	// before the read. A short read therefore over-charges by the difference, and that is
+	// the deliberate direction: over-charging costs the donor a little speed, while
+	// under-charging costs them money.
+	if err := charge(s.meter, int64(len(p))); err != nil {
+		return 0, err
 	}
 	if err := s.limiter.Wait(s.ctx, int64(len(p))); err != nil {
 		return 0, err

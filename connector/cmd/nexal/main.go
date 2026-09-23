@@ -356,6 +356,21 @@ func runCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	defer unlock()
+	// Host-wide exclusion, on top of the per-configuration lock above.
+	//
+	// config.Lock only stops a second connector on the SAME configuration, so the
+	// macOS app's development profile in "Application Support/Nexal-Development" took
+	// its own lock and ran alongside production: two agents heartbeating, advertising
+	// addresses and answering as one host.
+	//
+	// Taken by `run` alone, and deliberately not by enroll/peers/share/self-test. Those
+	// are short-lived and frequently used WHILE the agent runs; a host-wide lock in
+	// config.Lock itself would make `nexal peers` fail whenever the agent is up.
+	unlockHost, err := config.LockMachine(*path)
+	if err != nil {
+		return err
+	}
+	defer unlockHost()
 	secrets, err := config.NewSecrets(*path, c)
 	if err != nil {
 		return err

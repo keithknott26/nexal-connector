@@ -15,6 +15,15 @@ multi-site route evidence, distributed compute and CPU paging still require
 integration or physical-host acceptance. CPU paging remains research; it is not
 additional macOS RAM or VRAM.
 
+Suricata network inspection is a required but not-yet-implemented connector
+capability. The Go connector will manage the local sensor, inspect selected PQS
+and/or conventional traffic after tunnel decryption, normalize EVE JSON locally,
+and report payload-free alerts and coverage evidence to the Cloudflare control
+plane. Linux may provide passive IDS and reviewed NFQUEUE/nftables inline IPS;
+macOS uses verified passive capture with Network Extension/Endpoint Security for
+enforcement. Authenticated neXal peer or Cloudflare provenance is event context,
+never a detection bypass. Raw packets do not flow through Workers.
+
 Go is the primary host language. Swift is limited to the native macOS interface.
 The Python MLX adapter under `runtimes/` is an isolated experimental compatibility
 layer for Apple's Python-facing MLX tooling; it is not the connector control plane

@@ -112,6 +112,15 @@ func (a *Agent) Handler(adminToken string) (http.Handler, error) {
 			writeJSON(w, 200, a.Snapshot())
 			return
 		}
+		// Read-only, like /v1/status: the Mac app polls it to list the other Macs.
+		if r.URL.Path == "/v1/peers" && r.Method == "GET" {
+			if r.ContentLength != 0 {
+				apiError(w, 400, "body_not_allowed")
+				return
+			}
+			writeJSON(w, 200, a.PeersSnapshot())
+			return
+		}
 		if r.Method != "POST" {
 			apiError(w, 405, "method_not_allowed")
 			return

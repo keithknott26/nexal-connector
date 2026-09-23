@@ -37,15 +37,25 @@ LOG_DIR="$HOME/Library/Logs/Nexal"
 # override, then $PATH, then the installed app, then a local build.
 find_nexal() {
   if [ -n "${NEXAL:-}" ]; then printf '%s' "$NEXAL"; return; fi
-  local c
+  local c repo
   c="$(command -v nexal 2>/dev/null || true)"
   if [ -n "$c" ]; then printf '%s' "$c"; return; fi
-  for c in \
-    "/Applications/Nexal Connector.app/Contents/Helpers/nexal" \
-    "$HOME/Applications/Nexal Connector.app/Contents/Helpers/nexal" \
-    "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/build/Nexal Connector.app/Contents/Helpers/nexal" \
-    "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/connector/nexal" \
-    /usr/local/bin/nexal /opt/homebrew/bin/nexal; do
+  repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
+
+  # GLOBBED, not spelled out. The repo disagrees with itself about the bundle name:
+  # macos/scripts/package-app.sh builds "Nexal Connector.app" while
+  # .github/workflows/release-dmg.yml builds and ships "neXal Connector.app" -- so the
+  # app installed from a release does not match the name a local package build
+  # produces. Matching any *Connector.app avoids encoding either spelling, and keeps
+  # working when the two are reconciled.
+  local d app
+  for d in /Applications "$HOME/Applications" "$repo/macos/build" "$repo/build"; do
+    [ -d "$d" ] || continue
+    for app in "$d"/*[Cc]onnector.app; do
+      [ -x "$app/Contents/Helpers/nexal" ] && { printf '%s' "$app/Contents/Helpers/nexal"; return; }
+    done
+  done
+  for c in "$repo/connector/nexal" "$repo/nexal" /usr/local/bin/nexal /opt/homebrew/bin/nexal; do
     [ -x "$c" ] && { printf '%s' "$c"; return; }
   done
   printf '%s' "nexal"
@@ -236,8 +246,12 @@ cmd_install() {
   require_config
   if [ ! -x "$NEXAL" ]; then
     no "Cannot find the nexal CLI"
-    plain "Looked for: nexal on PATH, then inside \"Nexal Connector.app/Contents/Helpers\""
-    plain "(the DMG installs it there, NOT in /usr/local/bin), then a local build."
+    plain "Looked on PATH, then in any *Connector.app/Contents/Helpers under"
+    plain "/Applications, ~/Applications and this checkout, then for a local build."
+    plain "The DMG puts it in the app bundle, NOT in /usr/local/bin."
+    plain ""
+    plain "If the app IS installed, find the binary with:"
+    plain "  find /Applications -maxdepth 4 -name nexal -type f 2>/dev/null"
     plain ""
     plain "Point at it explicitly:"
     plain "  NEXAL=\"/Applications/Nexal Connector.app/Contents/Helpers/nexal\" $0 install"

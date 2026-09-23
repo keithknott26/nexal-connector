@@ -3,7 +3,10 @@ package mesh
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 )
 
 // StartupPlan is persisted by the privileged adapter and rebuilt on every
@@ -25,7 +28,38 @@ type CommandRunner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
-	return exec.CommandContext(ctx, name, args...).Run()
+	path, err := trustedExecutable(name)
+	if err != nil {
+		return err
+	}
+	return exec.CommandContext(ctx, path, args...).Run()
+}
+
+// trustedExecutable deliberately does not search the inherited PATH. The menu
+// app strips ambient developer paths, and accepting whichever binary appears
+// first would let an unrelated package replace the secure-networking boundary.
+// Release packaging may place the runtime beside the neXal helper; the official
+// macOS installer uses /usr/local/bin, while Homebrew on Apple Silicon uses
+// /opt/homebrew/bin.
+func trustedExecutable(name string) (string, error) {
+	if name != "nexal-network" {
+		return "", errors.New("unsupported secure networking runtime")
+	}
+	candidates := []string{}
+	if current, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(current), name))
+	}
+	// Development fallbacks support an independently installed upstream runtime.
+	// Release builds always resolve the sibling neXal-branded executable first.
+	candidates = append(candidates, "/usr/local/bin/netbird", "/opt/homebrew/bin/netbird")
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 || info.Mode().Perm()&0o022 != 0 {
+			continue
+		}
+		return candidate, nil
+	}
+	return "", fmt.Errorf("secure networking runtime is not installed")
 }
 
 type StaticPlanStore struct{ Plan StartupPlan }
@@ -54,8 +88,11 @@ func (c Controller) reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := c.Runner.Run(ctx, "netbird", args...); err != nil {
-		return errors.New("secure networking service failed to start")
+	if err := c.Runner.Run(ctx, "nexal-network", args...); err != nil {
+		if errors.Is(err, os.ErrNotExist) || err.Error() == "secure networking runtime is not installed" {
+			return errors.New("secure networking runtime is not installed; reinstall neXal Connector 0.2.8 or later")
+		}
+		return errors.New("secure networking service rejected startup; verify its macOS system service is installed and running")
 	}
 	return nil
 }

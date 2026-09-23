@@ -61,14 +61,35 @@ install -m 755 "$BIN/NexalMac" "$CANDIDATE/Contents/MacOS/NexalMac"
 /usr/bin/lipo -create "$STAGE/nexal-arm64" "$STAGE/nexal-amd64" \
     -output "$CANDIDATE/Contents/Helpers/nexal"
 chmod 755 "$CANDIDATE/Contents/Helpers/nexal"
+# Build the pinned, headless mesh runtime into the neXal bundle. Customers must
+# never be sent to install a separately branded desktop application. The BSD
+# license permits redistribution; its notice is shipped beside the runtime.
+MESH_VERSION="${NEXAL_MESH_RUNTIME_VERSION:-v0.79.0}"
+MESH_SOURCE="$STAGE/mesh-source.tar.gz"
+MESH_SHA256="a74f9c260ef48cdf8332ffd5379114550f8ed3fe5cf8457449af80b1b9f17dc6"
+/usr/bin/curl -fL --proto '=https' --proto-redir '=https' \
+  -o "$MESH_SOURCE" "https://github.com/netbirdio/netbird/archive/refs/tags/$MESH_VERSION.tar.gz"
+printf '%s  %s\n' "$MESH_SHA256" "$MESH_SOURCE" | /usr/bin/shasum -a 256 -c -
+mkdir "$STAGE/mesh-source"
+/usr/bin/tar -xzf "$MESH_SOURCE" -C "$STAGE/mesh-source" --strip-components=1
+for ARCH in arm64 amd64; do
+  (cd "$STAGE/mesh-source" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" \
+    go build -trimpath -ldflags="-s -w -X github.com/netbirdio/netbird/version.version=${MESH_VERSION#v} -X main.commit=nexal-embedded -X main.builtBy=nexal" \
+      -o "$STAGE/mesh-$ARCH" ./client)
+done
+/usr/bin/lipo -create "$STAGE/mesh-arm64" "$STAGE/mesh-amd64" \
+    -output "$CANDIDATE/Contents/Helpers/nexal-network"
+chmod 755 "$CANDIDATE/Contents/Helpers/nexal-network"
+install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
 /usr/bin/plutil -lint "$CANDIDATE/Contents/Info.plist"
 test -x "$CANDIDATE/Contents/MacOS/NexalMac"
 test -x "$CANDIDATE/Contents/Helpers/nexal"
+test -x "$CANDIDATE/Contents/Helpers/nexal-network"
 # Fail loudly if either slice is missing. Without this a silent fallback to a
 # single-architecture build would ship an Intel-broken DMG that looks fine on
 # the arm64 machine that built it -- exactly the bug this replaces.
-for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal"; do
+for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network"; do
   ARCHS="$(/usr/bin/lipo -archs "$BINARY")"
   case " $ARCHS " in
     *" arm64 "*) ;;

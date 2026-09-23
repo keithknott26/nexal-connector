@@ -220,6 +220,6 @@ File Sharing and Screen Sharing are consent-preserving: the UI can open System
 Settings for the owner, but never enables either service or changes firewall
 rules. Finder and VNC actions appear only for policy-authorized peers with a
 reported active macOS service and a stable private
-`<device>.<network>.mesh.nexal.systems` hostname. Discovery status distinguishes
+`<short-id>.mesh.nexal.systems` hostname. Discovery status distinguishes
 Wide-Area Bonjour, the optional site gateway, and the authenticated bridge; it
 does not claim that multicast or a shared Ethernet segment spans sites.

@@ -15,7 +15,7 @@ The provider may expose SMB and Screen Sharing through three explicit seams:
    IDs and has a monotonic sequence, hop limit, TTL, and deterministic dedup key.
 
 The stable customer address is always
-`<device>.<network>.mesh.nexal.systems`. It is supplied by the platform/mesh
+`<short-id>.mesh.nexal.systems` (for example, `xycs14.mesh.nexal.systems`). It is supplied by the platform/mesh
 adapter, resolved by tenant-private DNS, and reported as `provisioned`,
 `resolving`, `ready`, `stale`, or `conflict`. Customer surfaces reject upstream
 provider hostnames.

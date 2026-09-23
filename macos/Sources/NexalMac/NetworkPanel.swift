@@ -7,19 +7,21 @@ struct NetworkPanel: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            switch model.networkScreen {
-            case .needsConnector(let reason): blocked(reason)
-            case .notLinked: readyToPair
-            case .linking(let linking): pairing(linking)
-            case .linked(let network): connected(network)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                switch model.networkScreen {
+                case .needsConnector(let reason): blocked(reason)
+                case .notLinked: readyToPair
+                case .linking(let linking): pairing(linking)
+                case .linked(let network): connected(network)
+                }
+                message
+                footer
             }
-            message
-            footer
+            .padding(20)
         }
-        .padding(20)
-        .frame(width: 380)
+        .frame(width: 460, height: 700)
         .task {
             while !Task.isCancelled {
                 await model.refresh()
@@ -92,12 +94,20 @@ struct NetworkPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("This Mac is connected", systemImage: "checkmark.circle.fill")
                 .font(.title3.weight(.semibold)).foregroundStyle(.green)
-            status(network.tunnel)
-            if network.peers.isEmpty {
+            if let mesh = model.status?.mesh {
+                meshSummary(mesh)
+            } else {
+                status(network.tunnel)
+                Text("The networking service has not reported peer routes yet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
+            Text("Connected computers").font(.subheadline.weight(.semibold))
+            if let peers = model.status?.mesh?.peers, !peers.isEmpty {
+                ForEach(peers) { peer in host(peer) }
+            } else if network.peers.isEmpty {
                 Text("No other computers are connected yet.").font(.caption).foregroundStyle(.secondary)
             } else {
-                Divider()
-                Text("Your computers").font(.subheadline.weight(.semibold))
                 ForEach(network.peers) { peer in
                     HStack(alignment: .top, spacing: 8) {
                         Circle().fill(peer.reachability.isConnectable ? Color.green : Color.secondary.opacity(0.4))
@@ -110,7 +120,123 @@ struct NetworkPanel: View {
                     }
                 }
             }
+            Divider()
+            activityGraphs
         }
+    }
+
+    private func meshSummary(_ mesh: ConnectorStatus.MeshStatus) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            LabeledContent("Tunnel", value: mesh.lifecycle.capitalized)
+            LabeledContent("Post-quantum protection", value: pqLabel(mesh.pq))
+            LabeledContent("Network path", value: pathSummary(mesh.peers))
+            if let step = mesh.authenticationStep, !step.isEmpty {
+                LabeledContent("Connection step", value: step)
+            }
+            if let updated = mesh.updatedAt, !updated.isEmpty {
+                Text("Evidence updated \(updated)").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .padding(12)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityIdentifier("mesh-summary")
+    }
+
+    private func host(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 6) {
+                LabeledContent("Connection", value: peer.lifecycle.capitalized)
+                LabeledContent("Post-quantum protection", value: pqLabel(peer.pq))
+                LabeledContent("Current path", value: routeLabel(peer))
+                if let step = peer.authenticationStep, !step.isEmpty { LabeledContent("Authentication", value: step) }
+                if let latency = peer.latencyMs { LabeledContent("Latency", value: latency.formatted(.number.precision(.fractionLength(0))) + " ms") }
+                if let loss = peer.packetLossPercent { LabeledContent("Packet loss", value: loss.formatted(.number.precision(.fractionLength(1))) + "%") }
+                LabeledContent("Traffic", value: "↑ \(bytes(peer.traffic.sentBytes)) · ↓ \(bytes(peer.traffic.receivedBytes))")
+                if let handshake = peer.lastHandshakeAt { LabeledContent("Last handshake", value: handshake) }
+                if let verified = peer.pqVerifiedAt { LabeledContent("PQ last verified", value: verified) }
+                if let hostname = peer.hostname?.hostname { LabeledContent("neXal address", value: hostname) }
+                Text("Operating system was not reported. This entry may be a Mac or Linux host.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .padding(.top, 6)
+        } label: {
+            HStack(spacing: 8) {
+                Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
+                    .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(peer.name.isEmpty ? peer.id : peer.name)
+                    Text("\(pqLabel(peer.pq)) · \(routeLabel(peer))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("host-\(peer.id)")
+    }
+
+    private var activityGraphs: some View {
+        DisclosureGroup("Activity graphs") {
+            VStack(alignment: .leading, spacing: 14) {
+                ChartCard(title: "Memory policy", caption: ConnectorHistory.memoryCaption,
+                          isEmpty: model.history.memoryPoints.isEmpty,
+                          emptyMessage: "No memory-policy samples yet.") {
+                    SeriesChart(points: model.history.memoryPoints, unit: "MiB")
+                }
+                ChartCard(title: "Job activity", caption: ConnectorHistory.jobActivityLimits,
+                          isEmpty: model.history.jobActivityPoints.isEmpty,
+                          emptyMessage: "No connector activity samples yet.") {
+                    SeriesChart(points: model.history.jobActivityPoints, unit: "Count")
+                }
+                ChartCard(title: "Owner activity", caption: ConnectorHistory.ownerActivityCaption,
+                          isEmpty: model.history.ownerActivityPoints.isEmpty,
+                          emptyMessage: "No owner-activity samples yet.") {
+                    SeriesChart(points: model.history.ownerActivityPoints, unit: "Active")
+                }
+            }
+            .padding(.top, 8)
+        }
+        .font(.subheadline.weight(.semibold))
+        .accessibilityIdentifier("activity-graphs")
+    }
+
+    private func pathSummary(_ peers: [ConnectorStatus.MeshPeer]) -> String {
+        guard !peers.isEmpty else { return "No peer route reported" }
+        let direct = peers.filter { $0.path == "direct" }.count
+        let relay = peers.filter { $0.path == "relay" }.count
+        let cloud = peers.filter { $0.path == "cloud" }.count
+        var parts: [String] = []
+        if direct > 0 { parts.append("\(direct) direct") }
+        if relay > 0 { parts.append("\(relay) via neXal Relay") }
+        if cloud > 0 { parts.append("\(cloud) via Cloudflare") }
+        let unknown = peers.count - direct - relay - cloud
+        if unknown > 0 { parts.append("\(unknown) unknown") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func routeLabel(_ peer: ConnectorStatus.MeshPeer) -> String {
+        switch peer.path {
+        case "direct": return peer.pathLabel.isEmpty ? "Direct WireGuard" : peer.pathLabel
+        case "relay": return peer.relayRegion.map { "neXal Relay — \($0)" } ?? "neXal Relay"
+        case "cloud": return "Cloudflare route"
+        default: return "Route unavailable"
+        }
+    }
+
+    private func pqLabel(_ value: String) -> String {
+        switch value {
+        case "protected": "Protected"
+        case "negotiating": "Negotiating"
+        case "rekeying": "Rotating keys"
+        case "degraded": "Degraded"
+        case "verification_stale": "Verification stale"
+        case "failed": "Failed"
+        default: "Unavailable"
+        }
+    }
+
+    private func bytes(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
     }
 
     private func status(_ tunnel: TunnelIndicator) -> some View {

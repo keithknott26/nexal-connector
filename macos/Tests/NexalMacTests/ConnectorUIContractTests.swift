@@ -16,6 +16,11 @@ final class ConnectorUIContractTests: XCTestCase {
         XCTAssertTrue(text.contains("Show pairing code"))
         XCTAssertTrue(text.contains("PAIR MANUALLY"))
         XCTAssertTrue(text.contains("tap Pair manually"))
+        XCTAssertTrue(text.contains("Connected computers"))
+        XCTAssertTrue(text.contains("Activity graphs"))
+        XCTAssertTrue(text.contains("Post-quantum protection"))
+        XCTAssertTrue(text.contains("Cloudflare route"))
+        XCTAssertTrue(text.contains("Direct WireGuard"))
     }
 
     func testImplementationDefaultsAreNotCustomerControls() throws {

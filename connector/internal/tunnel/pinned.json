@@ -1,0 +1,8 @@
+{
+  "version": "2026.9.1",
+  "architecture": "arm64",
+  "asset": "cloudflared-darwin-arm64.tgz",
+  "sourceUrl": "https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-darwin-arm64.tgz",
+  "sha256": "9a0b19f67dc7a3011bc6b972c7ce06a5fcea8784ac6bd599ffa382ea4aeb5a6e",
+  "verificationMethod": "SHA256 pinned from the official github.com/cloudflare/cloudflared release 2026.9.1 asset cloudflared-darwin-arm64.tgz, digest computed locally from the extracted binary. Publisher ships no checksum, signature, SBOM or in-toto attestation for this asset; GitHub artifact attestations return 404 for this digest. No independent publisher verification."
+}

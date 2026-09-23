@@ -182,8 +182,18 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 		t.Fatal(enrollErr)
 	}
 	c, err := config.Load(path)
-	if err != nil || c.HostID != "host1" || !c.Paused {
-		t.Fatal("enrollment config mismatch")
+	if err != nil {
+		t.Fatalf("load after enrollment: %v", err)
+	}
+	if c.HostID != "host1" {
+		t.Fatalf("host id after enrollment = %q, want host1", c.HostID)
+	}
+	// Paused now defaults to FALSE. This previously asserted true, which was the old
+	// init default; contributing is the purpose of joining, so a fresh configuration no
+	// longer starts withholding. Split out from the combined check above so a future
+	// failure names which fact broke instead of "config mismatch".
+	if c.Paused {
+		t.Error("a freshly initialized configuration should not start paused")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
@@ -403,5 +413,42 @@ func TestDoctorSTUNFlagIsOptIn(t *testing.T) {
 	}
 	if err := run(context.Background(), []string{"doctor", "--config", path, "--stun", "--extra"}); err == nil {
 		t.Fatal("unknown flag accepted alongside --stun")
+	}
+}
+
+// The sharing default, asserted directly rather than as a side effect of the end-to-end
+// test. The Mac app previously showed an "I agree to share resources" checkbox because
+// init wrote Paused: true, so a Mac that had just joined in order to share was withholding
+// until the owner turned it on.
+func TestInitDefaultsToContributing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	if err := run(context.Background(), []string{"init", "--config", path,
+		"--coordinator", "http://127.0.0.1:8787", "--name", "test mac",
+		"--dev-loopback", "--dev-secrets"}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Paused {
+		t.Error("init wrote paused=true; joining should contribute by default")
+	}
+}
+
+// The opt-out must still exist: a machine can join without contributing.
+func TestInitPausedFlagStillWithholds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	if err := run(context.Background(), []string{"init", "--config", path,
+		"--coordinator", "http://127.0.0.1:8787", "--name", "test mac",
+		"--dev-loopback", "--dev-secrets", "--paused"}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Paused {
+		t.Error("--paused did not withhold contribution")
 	}
 }

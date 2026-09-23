@@ -233,6 +233,9 @@ func initCommand(ctx context.Context, args []string) error {
 	devSecrets := f.Bool("dev-secrets", false, "nonproduction 0600 credentials")
 	memory := f.Uint64("memory-limit-mib", 256, "approved workload memory cap")
 	reserve := f.Uint64("reserve-memory-mib", 1024, "reserved owner memory")
+	// Default false. Contributing resources is the point of joining, so the opt-out is
+	// a flag rather than the starting state.
+	paused := f.Bool("paused", false, "join without contributing resources until resumed")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -244,8 +247,14 @@ func initCommand(ctx context.Context, args []string) error {
 	} else if !os.IsNotExist(err) {
 		return errors.New("cannot inspect configuration")
 	}
+	// Paused defaults to FALSE: sharing resources is the purpose of joining, so a new
+	// configuration that starts paused makes the owner turn on the one thing they just
+	// opted into. The resource and idle policies still gate what actually runs -- this
+	// changes the starting position, not the limits.
+	//
+	// --paused remains available for a machine that should join without contributing.
 	c := config.Config{Version: 1, Coordinator: strings.TrimRight(*base, "/"), Name: *name, Listen: *listen,
-		Development: *dev, DevSecrets: *devSecrets, Paused: true, MemoryLimitBytes: *memory << 20, ReserveMemoryBytes: *reserve << 20, IdleSeconds: 300}
+		Development: *dev, DevSecrets: *devSecrets, Paused: *paused, MemoryLimitBytes: *memory << 20, ReserveMemoryBytes: *reserve << 20, IdleSeconds: 300}
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -267,7 +276,9 @@ func initCommand(ctx context.Context, args []string) error {
 	if c.Development {
 		mode = "DEVELOPMENT PREVIEW — no public work or external spending"
 	}
-	return emit(map[string]any{"initialized": true, "paused": true, "marketplaceEnabled": false, "mode": mode})
+	// Reports the value actually written. This was hardcoded true, which was merely
+	// redundant while Paused was always true and would now be false reporting.
+	return emit(map[string]any{"initialized": true, "paused": *paused, "marketplaceEnabled": false, "mode": mode})
 }
 func enrollCommand(ctx context.Context, args []string) error {
 	f, path, err := flags("enroll")

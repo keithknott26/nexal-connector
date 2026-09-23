@@ -156,9 +156,25 @@ jobs:
           DMG="${{ steps.build.outputs.dmg }}"
           codesign --force --timestamp --keychain "$SIGNING_KEYCHAIN" \
             --sign "Developer ID Application: ${{ secrets.APPLE_SIGNING_IDENTITY_NAME }} ($TEAM_ID)" "$DMG"
-          # --wait blocks until Apple returns a verdict; a rejection fails the job.
+          # Preserve Apple's issue report when notarization rejects a build. The
+          # submission summary alone only says "Invalid", which is not enough to
+          # distinguish an entitlement problem from a malformed nested binary.
+          NOTARY_RESULT="$RUNNER_TEMP/notary-result.plist"
+          set +e
           xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" \
-            --team-id "$TEAM_ID" --password "$NOTARY_PASSWORD" --wait
+            --team-id "$TEAM_ID" --password "$NOTARY_PASSWORD" --wait \
+            --output-format plist > "$NOTARY_RESULT"
+          NOTARY_STATUS=$?
+          set -e
+          cat "$NOTARY_RESULT"
+          if [ "$NOTARY_STATUS" -ne 0 ]; then
+            SUBMISSION_ID="$(/usr/libexec/PlistBuddy -c 'Print :id' "$NOTARY_RESULT" 2>/dev/null || true)"
+            if [ -n "$SUBMISSION_ID" ]; then
+              xcrun notarytool log "$SUBMISSION_ID" --apple-id "$APPLE_ID" \
+                --team-id "$TEAM_ID" --password "$NOTARY_PASSWORD" || true
+            fi
+            exit "$NOTARY_STATUS"
+          fi
           # Stapling embeds the ticket so first launch works offline.
           xcrun stapler staple "$DMG"
           # Proves Gatekeeper will accept it, rather than assuming.

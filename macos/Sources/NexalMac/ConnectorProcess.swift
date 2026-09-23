@@ -115,6 +115,20 @@ enum ConnectorProcess {
         ExecutableSelection.supportDirectory.appendingPathComponent("config.json")
     }
 
+    /// Whether pairing has durably issued this Mac a coordinator host identity.
+    /// Reading this one non-secret field lets the menu app distinguish the normal
+    /// pre-pairing state (where no local agent should be listening yet) from an
+    /// enrolled connector that has stopped and should be restarted.
+    static func hasPersistedHostIdentity(at url: URL) -> Bool {
+        struct Identity: Decodable { let hostId: String? }
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONDecoder().decode(Identity.self, from: data),
+              let hostId = value.hostId?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+        return !hostId.isEmpty
+    }
+
     /// The development profile's configuration, kept in its own directory so a
     /// development identity and credentials can never be mistaken for the real
     /// ones. CLIContractTests asserts this is not equal to `configURL`.

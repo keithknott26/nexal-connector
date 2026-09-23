@@ -85,6 +85,9 @@ final class AppModel: ObservableObject {
     var configurationExists: Bool {
         FileManager.default.fileExists(atPath: selectedConfig.path)
     }
+    var hasPersistedHostIdentity: Bool {
+        ConnectorProcess.hasPersistedHostIdentity(at: selectedConfig)
+    }
     var title: String {
         guard let status else { return "Not connected" }
         return status.paused ? "Paused" : "Private resources enabled"
@@ -290,6 +293,31 @@ final class AppModel: ObservableObject {
 
     func refresh() async {
         guard !busy, selection != nil else { return }
+
+        // An unenrolled Mac intentionally has no running agent: pair-v2 talks
+        // directly to the coordinator and persists the host credential only after
+        // the phone approves it. Polling the local API in this state produced the
+        // alarming but expected "connector is not running" message every five
+        // seconds, overwriting the live pairing instructions.
+        guard hasPersistedHostIdentity else {
+            status = nil
+            lastUpdated = nil
+            observe(nil)
+            await updateTunnelEvidence()
+            return
+        }
+
+        // Pairing has now durably authorized this Mac. Start (or attach to) the
+        // connector automatically so the local API and tunnel come up without a
+        // hidden second setup step. `start` first probes for an existing service
+        // and never launches a duplicate.
+        if status == nil {
+            await start()
+            await updateTunnelEvidence()
+            await updatePeers()
+            return
+        }
+
         activity = "Checking connector status\u{2026}"
         busy = true
         defer { busy = false; activity = nil }

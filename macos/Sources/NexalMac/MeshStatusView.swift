@@ -11,6 +11,11 @@ struct MeshStatusView: View {
             if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
             Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum protection: \(mesh.pq.replacingOccurrences(of: "_", with: " "))")
                 .font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
+            Divider()
+            Label("Local threat detection not reporting", systemImage: "shield.lefthalf.filled.badge.checkmark")
+                .font(.caption.weight(.semibold))
+            Text("The encrypted mesh can be active without local traffic inspection. neXal will show detection, sensor routing, alerts, and containment only after the connector reports fresh evidence.")
+                .font(.caption2).foregroundStyle(.secondary)
             discoveryView
             ForEach(mesh.peers) { peer in
                 Divider()

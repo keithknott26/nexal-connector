@@ -31,7 +31,26 @@ SUPPORT="$HOME/Library/Application Support/Nexal"
 CONFIG="$SUPPORT/config.json"
 EVIDENCE="$SUPPORT/tunnel-evidence.json"
 LOG_DIR="$HOME/Library/Logs/Nexal"
-NEXAL="${NEXAL:-$(command -v nexal || echo /usr/local/bin/nexal)}"
+# The DMG does NOT install anything into /usr/local/bin: package-app.sh places the CLI
+# inside the bundle at Contents/Helpers/nexal. Defaulting to /usr/local/bin/nexal was
+# simply wrong, so the real locations are searched in order -- an explicit NEXAL
+# override, then $PATH, then the installed app, then a local build.
+find_nexal() {
+  if [ -n "${NEXAL:-}" ]; then printf '%s' "$NEXAL"; return; fi
+  local c
+  c="$(command -v nexal 2>/dev/null || true)"
+  if [ -n "$c" ]; then printf '%s' "$c"; return; fi
+  for c in \
+    "/Applications/Nexal Connector.app/Contents/Helpers/nexal" \
+    "$HOME/Applications/Nexal Connector.app/Contents/Helpers/nexal" \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/build/Nexal Connector.app/Contents/Helpers/nexal" \
+    "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/connector/nexal" \
+    /usr/local/bin/nexal /opt/homebrew/bin/nexal; do
+    [ -x "$c" ] && { printf '%s' "$c"; return; }
+  done
+  printf '%s' "nexal"
+}
+NEXAL="$(find_nexal)"
 
 b()  { printf '\033[1m%s\033[0m\n' "$1"; }
 ok() { printf '  \033[32m*\033[0m %s\n' "$1"; }
@@ -215,7 +234,19 @@ runners_section() {
 
 cmd_install() {
   require_config
-  [ -x "$NEXAL" ] || { no "nexal not found at $NEXAL (set NEXAL=/path/to/nexal)"; exit 1; }
+  if [ ! -x "$NEXAL" ]; then
+    no "Cannot find the nexal CLI"
+    plain "Looked for: nexal on PATH, then inside \"Nexal Connector.app/Contents/Helpers\""
+    plain "(the DMG installs it there, NOT in /usr/local/bin), then a local build."
+    plain ""
+    plain "Point at it explicitly:"
+    plain "  NEXAL=\"/Applications/Nexal Connector.app/Contents/Helpers/nexal\" $0 install"
+    plain ""
+    plain "Or build one from this checkout:"
+    plain "  (cd connector && go build -o ./nexal ./cmd/nexal)"
+    exit 1
+  fi
+  ok "Using $NEXAL"
   mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"
   # KeepAlive restarts the agent if it exits. Deliberately NOT RunAtLoad-only: this is
   # a server. Quarantine cancels work inside the agent rather than exiting, so a restart

@@ -27,6 +27,9 @@ enum CLICommand {
     /// an https origin and a loopback http origin can never satisfy it.
     case initializeDevelopment(name: String, memoryMiB: Int, reserveMiB: Int)
     case enroll, run, status, pause, resume, acceptJobs
+    /// The live peer view. Named peers-view in the CLI because `peers` is invitation
+    /// and enrollment management, which reports no addresses.
+    case peersView
     /// Mint a phone pairing and render it. `--no-poll` is deliberate: this app
     /// polls with `pairingStatus` through the SAME bounded `ConnectorProcess`
     /// execution as every other command, rather than holding a long-lived child
@@ -57,6 +60,7 @@ enum CLICommand {
         case .enroll: command = ["enroll", "--code-stdin"]
         case .run: command = ["run"]
         case .status: command = ["status"]
+        case .peersView: command = ["peers-view"]
         case .pause: command = ["pause"]
         case .resume: command = ["resume"]
         case .acceptJobs: command = ["accept-jobs"]

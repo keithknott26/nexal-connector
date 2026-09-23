@@ -6,10 +6,18 @@ struct NexalMacApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            ConnectorPanel()
+            // NetworkPanel replaces ConnectorPanel in the menu bar. The old panel is
+            // kept below and moved to Settings rather than deleted: it holds the
+            // connector picker, coordinator field and development-environment switch,
+            // which are still the only way to change those, and are simply not what the
+            // menu bar is for.
+            NetworkPanel()
                 .environmentObject(model)
         } label: {
-            Label("neXal", systemImage: model.contributes ? "cpu" : "pause.circle")
+            // Follows the tunnel rather than the contribution flag: the icon is the
+            // only always-visible indicator, so it should carry the state the owner
+            // cannot otherwise see without opening the panel.
+            Label("neXal", systemImage: model.menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
 

@@ -61,7 +61,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|policy|set-policy|pause|resume|accept-jobs|cancel|pair|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|policy|set-policy|pause|resume|accept-jobs|cancel|pair|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "coordinator-check":
@@ -76,7 +76,7 @@ func run(ctx context.Context, args []string) error {
 		return identityCommand(ctx, args[1:])
 	case "run":
 		return runCommand(ctx, args[1:])
-	case "status", "policy", "pause", "resume", "accept-jobs", "cancel":
+	case "status", "policy", "peers-view", "pause", "resume", "accept-jobs", "cancel":
 		return localCommand(ctx, args[0], args[1:])
 	case "set-policy":
 		return policyCommand(ctx, args[1:])
@@ -507,10 +507,16 @@ func localCommand(ctx context.Context, command string, args []string) error {
 		return err
 	}
 	method := "POST"
-	if command == "status" || command == "policy" {
+	if command == "status" || command == "policy" || command == "peers-view" {
 		method = "GET"
 	}
-	return localRequest(ctx, *path, method, command, nil)
+	// peers-view is named to avoid colliding with the existing `peers` command, which
+	// manages invitations and enrollment rather than reporting the live view.
+	route := command
+	if command == "peers-view" {
+		route = "peers"
+	}
+	return localRequest(ctx, *path, method, route, nil)
 }
 
 func policyCommand(ctx context.Context, args []string) error {

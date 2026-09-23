@@ -55,6 +55,13 @@ final class AppModel: ObservableObject {
     /// Ticks once a second while a pairing is live, purely so the countdown text
     /// re-renders. It does not poll, and it never decides that a pairing expired.
     @Published private(set) var pairingTick = Date()
+    /// Post-quantum tunnel evidence, read from tunnel-evidence.json beside the config.
+    /// Defaults to an empty value so an agent that has never run reads as "not
+    /// configured" rather than leaving the indicator blank.
+    @Published private(set) var tunnelEvidence = TunnelEvidence()
+    /// The other Macs, from `nexal peers-view`. Reachability is classified by the
+    /// connector; the app does not decide which address is dialable.
+    @Published private(set) var peersView = PeersView()
     @Published var developmentEnvironment = false {
         didSet {
             if oldValue != developmentEnvironment {
@@ -295,6 +302,45 @@ final class AppModel: ObservableObject {
             observe(nil)
             message = error.localizedDescription
         }
+        // Both feed the panel and neither may fail the poll: a missing evidence file is
+        // the normal state before the agent has ever run, and peers-view is unavailable
+        // while the agent is down. A throw here would blank the status the poll just
+        // successfully read.
+        await updateTunnelEvidence()
+        await updatePeers()
+    }
+
+    /// Reads tunnel-evidence.json, which `nexal run` writes beside config.json.
+    ///
+    /// Read from disk rather than requested from the agent because the agent writes it
+    /// on every observation and the file survives the agent being down -- which is
+    /// precisely when the owner wants to know what the tunnel was last doing.
+    private func updateTunnelEvidence() async {
+        // Beside the SELECTED config, not always the production one: a development
+        // profile lives in its own directory and writes its own evidence there, so
+        // hardcoding configURL would show production's tunnel while running development.
+        let url = selectedConfig
+            .deletingLastPathComponent()
+            .appendingPathComponent("tunnel-evidence.json")
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(TunnelEvidence.self, from: data) else {
+            // Absent or unreadable means "nothing observed", not "keep showing the last
+            // value" -- a stale green indicator is worse than an honest inactive one.
+            tunnelEvidence = TunnelEvidence()
+            return
+        }
+        tunnelEvidence = decoded
+    }
+
+    private func updatePeers() async {
+        guard let data = try? await invoke(.peersView),
+              let decoded = try? JSONDecoder().decode(PeersView.self, from: data) else {
+            // No agent, or a connector too old to serve peers-view. An empty list with
+            // remoteAccessAvailable false is the honest reading; the panel explains it.
+            peersView = PeersView()
+            return
+        }
+        peersView = decoded
     }
 
     func acceptJobsNow() async {

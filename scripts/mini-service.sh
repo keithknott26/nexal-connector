@@ -242,6 +242,80 @@ runners_section() {
   plain "A runner that is offline queues jobs rather than failing them."
 }
 
+# Lists running connectors as "pid<TAB>config", one per line.
+#
+# Why this is not `pgrep -f nexal.*run`: that pattern matched its own shell, pgrep
+# itself and the ps pipeline, reporting five connectors when two were running. It also
+# split the config path on whitespace, and the real paths contain spaces -- both
+# "Application Support" and "neXal Connector.app". Verified against real processes.
+scan_instances() {
+  python3 - <<'SCAN' 2>/dev/null || true
+import os, re, subprocess
+SELF = {os.getpid(), os.getppid()}
+NOISE = re.compile(r'pgrep|mini-service|python3|\bsed\b|\bgrep\b|\bps\b')
+EXE = re.compile(r'(?:^|/)nexal(?:\s|$)')
+RUN = re.compile(r'(?:^|\s)run(?:\s|$)')
+out = subprocess.run(["ps","-Ao","pid=,command="],capture_output=True,text=True).stdout
+for line in out.splitlines():
+    line = line.strip()
+    if not line: continue
+    pid_s, _, cmd = line.partition(" ")
+    try: pid = int(pid_s)
+    except ValueError: continue
+    if pid in SELF or NOISE.search(cmd): continue
+    m = EXE.search(cmd)
+    if not m or not RUN.search(cmd[m.end()-1:]): continue
+    cm = re.search(r'--config[= ]+(.+?)(?=\s--|\s-[a-zA-Z]|$)', cmd)
+    cfg = cm.group(1).strip().strip('"\'') if cm else "(default: Application Support/Nexal)"
+    print(f"{pid}\t{cfg}")
+SCAN
+}
+
+instances_section() {
+  b "RUNNING INSTANCES"
+  if ! have_python; then
+    plain "python3 unavailable; skipping the duplicate-instance check."
+    return 0
+  fi
+  local found count
+  found="$(scan_instances)"
+  count=0
+  [ -n "$found" ] && count="$(printf '%s\n' "$found" | grep -c .)"
+
+  if [ "$count" -eq 0 ]; then
+    hm "No connector process running"
+  elif [ "$count" -eq 1 ]; then
+    ok "1 connector process"
+  else
+    # config.Lock is scoped to the config file's DIRECTORY, so it stops a second
+    # connector on the SAME config and nothing else. The macOS app keeps a separate
+    # development profile in Application Support/Nexal-Development, so a dev connector
+    # and a production one each take their own lock and both run. Confirmed by testing
+    # config.Lock directly against two directories.
+    no "$count CONNECTORS RUNNING -- there should be exactly one"
+    plain "Both will heartbeat, both will advertise addresses, and both will answer as"
+    plain "this host. The per-config lock cannot stop this when the configs differ."
+  fi
+
+  # Printed at any count, because WHICH config each holds is the diagnosis: the same
+  # config twice would mean the lock is broken; two different configs is the known cause.
+  if [ -n "$found" ]; then
+    printf '%s\n' "$found" | while IFS="$(printf '\t')" read -r pid cfg; do
+      plain "pid $pid  config $cfg"
+      case "$cfg" in
+        *Nexal-Development*) plain "  ^ development profile -- its own lock, so it never conflicts" ;;
+      esac
+    done
+  fi
+
+  if [ "$count" -gt 1 ] && launchctl list 2>/dev/null | grep -q "$LABEL"; then
+    plain ""
+    plain "launchd owns one of these. If the menu bar app started the other, quit the app"
+    plain "rather than killing a pid -- KeepAlive would just restart this one."
+  fi
+  return 0
+}
+
 cmd_install() {
   require_config
   if [ ! -x "$NEXAL" ]; then
@@ -291,6 +365,19 @@ PLIST_EOF
 cmd_start() {
   require_config
   [ -f "$PLIST" ] || { no "Not installed. Run '$0 install' first."; exit 1; }
+  # Checked BEFORE starting. Starting a second connector is the exact problem this
+  # script is supposed to surface, so it must not be the thing that causes it.
+  local existing
+  existing="$(scan_instances)"
+  if [ -n "$existing" ] && ! launchctl list 2>/dev/null | grep -q "$LABEL"; then
+    no "A connector is already running and it is not this service:"
+    printf '%s\n' "$existing" | while IFS="$(printf '\t')" read -r pid cfg; do
+      plain "  pid $pid  config $cfg"
+    done
+    plain "That is probably the menu bar app's own child process. Quit the app first,"
+    plain "or run '$0 status' to see which config each instance holds."
+    exit 1
+  fi
   # bootstrap is the modern verb; load is the deprecated one. Either can report
   # "Input/output error" purely because the job is ALREADY loaded, which is not a
   # failure -- so the outcome is confirmed below rather than inferred from exit status.
@@ -343,6 +430,7 @@ cmd_status() {
   printf '\n'
   b "neXal service status -- $(date '+%Y-%m-%d %H:%M %Z')"
   printf '\n'
+  instances_section; printf '\n'
   agent_section; printf '\n'
   tunnel_section; printf '\n'
   runners_section; printf '\n'

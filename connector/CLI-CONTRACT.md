@@ -1,9 +1,25 @@
-# neXal connector CLI contract v1
+# neXal connector CLI contract v1 + enrollment v2
 
 The executable is `nexal`. Every subcommand accepts `--config /absolute/path/config.json`.
 Default config is `~/Library/Application Support/Nexal/config.json` on macOS and
 `~/.config/nexal/config.json` elsewhere. Output is JSON, including errors on stderr.
 No credential is printed. Successful commands exit 0; failures exit nonzero.
+
+Version 2 network enrollment is additive while legacy host enrollment migrates:
+
+- `nexal pair-v2 --create` creates a short-lived phone enrollment. It emits a
+  QR module matrix containing an HTTPS Universal Link on `link.nexal.systems`
+  and an independently generated `XXXX-XXXX` manual code. The URL credential
+  is in the fragment so it is not sent to the web origin or CDN logs.
+- `nexal pair-v2 --status UUID` reports `waiting`, `claimed`, `authorizing`,
+  `provisioning`, `joining`, `paired`, `cancelled`, `expired`, or `failed`.
+- `nexal pair-v2 --cancel UUID` invalidates an uncompleted enrollment.
+
+The polling token and completed network credential are Keychain-only. Completed
+non-secret account, network and device identifiers are saved in `config.json`.
+The connector never installs or pretends to supervise a privileged network
+daemon; its `mesh` status remains `unavailable` until an explicitly installed
+provider supplies runtime evidence.
 
 - `nexal init --coordinator https://coordinator.example --name "My Mac"`
   Creates private-by-default, paused config and random local admin credential.

@@ -96,6 +96,13 @@ struct NetworkPanel: View {
                     Spacer(minLength: 0)
                 }
             }
+			if let code = model.pairing?.manualCode {
+				Text(code).font(.system(.title2, design: .monospaced).weight(.semibold))
+					.frame(maxWidth: .infinity).textSelection(.enabled)
+					.accessibilityLabel("Manual pairing code \(code)")
+				Text("If the camera cannot scan the code, tap Pair manually in the neXal iPhone app and enter this code.")
+					.font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+			}
             Text(linking.statusLine)
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("linking-status")

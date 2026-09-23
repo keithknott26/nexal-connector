@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   go:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -28,7 +28,7 @@ jobs:
       - run: GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/nexal-darwin-amd64 ./cmd/nexal
         working-directory: connector
   mlx-policy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

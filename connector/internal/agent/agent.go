@@ -17,6 +17,7 @@ import (
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/contribution"
+	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/throttle"
 )
 
@@ -51,6 +52,7 @@ type Status struct {
 	// reported separately on purpose: the first is the owner's persisted decision,
 	// the second is automatic, transient and never written to disk.
 	Contribution ContributionStatus `json:"contribution"`
+	Mesh         mesh.Status        `json:"mesh"`
 }
 
 // UploadThrottle is the §26 "always see why" view of the upload dimension: the
@@ -118,7 +120,8 @@ type Agent struct {
 	// and this package's fixed error strings; never tokens, admin credentials,
 	// ciphertext, key material or coordinator URLs. The client package already
 	// reduces transport failures to fixed messages for the same reason.
-	logger *slog.Logger
+	logger       *slog.Logger
+	meshProvider mesh.Provider
 }
 
 // Option configures optional Agent behaviour. Options exist so observability can
@@ -143,6 +146,16 @@ func WithMeteredSource(m throttle.MeteredSource) Option {
 	return func(a *Agent) { a.metered = m }
 }
 
+// WithMeshProvider installs a read-only status adapter. It cannot install,
+// launch, or silently authorize privileged networking software.
+func WithMeshProvider(p mesh.Provider) Option {
+	return func(a *Agent) {
+		if p != nil {
+			a.meshProvider = p
+		}
+	}
+}
+
 func New(c config.Config, path string, api client.API, probe Probe, devPull bool, opts ...Option) (*Agent, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -153,7 +166,7 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 	if probe == nil {
 		return nil, errors.New("telemetry probe required")
 	}
-	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1),
+	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1), meshProvider: mesh.UnavailableProvider{},
 		logger: slog.New(slog.DiscardHandler)}
 	for _, opt := range opts {
 		opt(a)
@@ -214,7 +227,7 @@ func (a *Agent) Snapshot() Status {
 		OwnerActivityOverride: a.manualActiveLocked(), ExecutionBlocker: blocker,
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
-		ResourcePolicy:     a.cfg.ResourcePolicy(),
+		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: a.meshProvider.Snapshot(),
 		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
 }
 

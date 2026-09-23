@@ -197,6 +197,7 @@ private struct ConnectorPanel: View {
     /// the content here, because this is the screen the owner sees every day.
     private var pairedStage: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.rowSpacing) {
+			meshStatus
             IndicatorRow(state: model.resourceSharing.indicator, tint: .green)
             Divider()
             IndicatorRow(state: model.transport.indicator, tint: .teal)
@@ -210,6 +211,33 @@ private struct ConnectorPanel: View {
                              text: "Not in this build. `nexal drive` is object storage with put/get/list, not a mounted filesystem, and no FileProvider or SMB gateway exists yet. A drive in Finder needs that layer built; this panel will not pretend it is there.")
         }
     }
+
+	@ViewBuilder private var meshStatus: some View {
+		if let mesh = model.status?.mesh {
+			VStack(alignment: .leading, spacing: PanelMetrics.tightSpacing) {
+				Label(mesh.lifecycle.capitalized, systemImage: mesh.pq == "protected" ? "lock.shield.fill" : "network")
+					.font(.subheadline.weight(.semibold))
+				if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
+				Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum protection: \(mesh.pq.replacingOccurrences(of: "_", with: " "))")
+					.font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
+				ForEach(mesh.peers) { peer in
+					Divider()
+					VStack(alignment: .leading, spacing: 3) {
+						Text(peer.name.isEmpty ? peer.id : peer.name).font(.caption.weight(.semibold))
+						Text(peer.pathLabel).font(.caption)
+						if let region = peer.relayRegion, peer.path == "relay" { Text("neXal Relay — \(region)").font(.caption).foregroundStyle(.secondary) }
+						HStack {
+							if let latency = peer.latencyMs { Text(String(format: "%.1f ms", latency)) }
+							Text("↑ \(peer.traffic.sentBytes) B  ↓ \(peer.traffic.receivedBytes) B")
+						}.font(.caption2).foregroundStyle(.secondary)
+					}
+				}
+			}
+		} else {
+			Text("Secure network status unavailable — networking service is not installed or has not reported yet.")
+				.font(.caption).foregroundStyle(.secondary)
+		}
+	}
 
     private var header: some View {
         HStack {

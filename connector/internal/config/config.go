@@ -75,7 +75,19 @@ type Config struct {
 	// P2P gates the libp2p data plane (internal/p2p, TRANSPORT-NAT-DESIGN.md
 	// Phase 2) and carries its relay ceilings. Absent means OFF, so an upgrade
 	// starts no new transport. See p2p.go.
-	P2P *P2P `json:"p2p,omitempty"`
+	P2P        *P2P             `json:"p2p,omitempty"`
+	Enrollment *EnrollmentState `json:"enrollment,omitempty"`
+}
+
+// EnrollmentState contains durable, non-secret identifiers only. The credential
+// returned after successful pairing is stored under mesh-credential in Keychain.
+type EnrollmentState struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	Status        string `json:"status"`
+	AccountID     string `json:"accountId,omitempty"`
+	NetworkID     string `json:"networkId,omitempty"`
+	DeviceID      string `json:"deviceId,omitempty"`
+	PairedAt      string `json:"pairedAt,omitempty"`
 }
 
 // Discovery configures LAN/WAN peer discovery. Every gate defaults to false and
@@ -237,6 +249,19 @@ func (c Config) Validate() error {
 	if err := c.P2P.Validate(); err != nil {
 		return err
 	}
+	if c.Enrollment != nil {
+		if c.Enrollment.SchemaVersion != 2 {
+			return errors.New("unsupported enrollment state")
+		}
+		switch c.Enrollment.Status {
+		case "provisioning", "paired", "revoked":
+		default:
+			return errors.New("invalid enrollment state")
+		}
+		if c.Enrollment.Status == "paired" && (c.Enrollment.AccountID == "" || c.Enrollment.NetworkID == "" || !validDeviceFingerprint(c.Enrollment.DeviceID) || c.Enrollment.PairedAt == "") {
+			return errors.New("paired enrollment state is incomplete")
+		}
+	}
 	return c.ResourcePolicy().Validate()
 }
 
@@ -260,7 +285,7 @@ func Load(path string) (Config, error) {
 		if strings.EqualFold(key, "paused") {
 			hasPause = true
 		}
-		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") ||
+		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") || strings.EqualFold(key, "enrollment") ||
 			strings.EqualFold(key, "p2p") {
 			continue
 		}

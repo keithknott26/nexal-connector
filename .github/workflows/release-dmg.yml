@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   dmg:
-    runs-on: macos-15
+    runs-on: [self-hosted, macOS, ARM64]
     # Write is needed ONLY by the final publish step (gh release). The workflow
     # default above stays read so every other step runs with the lower privilege.
     permissions:

@@ -79,6 +79,15 @@ struct PeersView: Decodable, Equatable {
     var peers: [PeerRowDTO] = []
     var remoteAccessAvailable: Bool = false
     var directoryStale: Bool = false
+
+	private enum CodingKeys: String, CodingKey { case peers, remoteAccessAvailable, directoryStale }
+	init() {}
+	init(from decoder: Decoder) throws {
+		let c = try decoder.container(keyedBy: CodingKeys.self)
+		peers = (try? c.decode([PeerRowDTO].self, forKey: .peers)) ?? []
+		remoteAccessAvailable = (try? c.decode(Bool.self, forKey: .remoteAccessAvailable)) ?? false
+		directoryStale = (try? c.decode(Bool.self, forKey: .directoryStale)) ?? false
+	}
 }
 
 extension AppModel {

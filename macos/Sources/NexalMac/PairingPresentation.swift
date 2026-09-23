@@ -91,6 +91,7 @@ struct PairingPresentation: Equatable {
     let status: Status
     let expiresAt: Date?
     let symbol: PairingSymbol?
+	let manualCode: String?
 
     /// Builds the presentation from the CLI's mint record. Returns nil when the
     /// record cannot be displayed honestly (an unusable matrix, an unparseable
@@ -106,6 +107,7 @@ struct PairingPresentation: Equatable {
         status = Status(raw: pairing.status)
         expiresAt = PairingPresentation.date(from: pairing.expiresAt)
         self.symbol = symbol
+		manualCode = pairing.manualCode
     }
 
     /// Applies a later `pair --status` poll. The symbol and the role are carried
@@ -116,11 +118,11 @@ struct PairingPresentation: Equatable {
             pairingId: pairingId, role: role, rawRole: rawRole, coordinator: coordinator,
             status: state.pairingId == pairingId ? Status(raw: state.status) : status,
             expiresAt: PairingPresentation.date(from: state.expiresAt) ?? expiresAt,
-            symbol: symbol)
+            symbol: symbol, manualCode: manualCode)
     }
 
     init(pairingId: String, role: PairingRole?, rawRole: String, coordinator: String,
-         status: Status, expiresAt: Date?, symbol: PairingSymbol?) {
+         status: Status, expiresAt: Date?, symbol: PairingSymbol?, manualCode: String? = nil) {
         self.pairingId = pairingId
         self.role = role
         self.rawRole = rawRole
@@ -128,6 +130,7 @@ struct PairingPresentation: Equatable {
         self.status = status
         self.expiresAt = expiresAt
         self.symbol = symbol
+		self.manualCode = manualCode
     }
 
     /// Whole seconds left, floored, or nil when the connector did not give a
@@ -181,12 +184,7 @@ struct PairingPresentation: Equatable {
                                   status: ConnectorStatus?) -> String? {
         if !hasExecutable { return "Choose the Go connector under Setup before pairing a phone." }
         if !configurationExists { return "Create and enroll a connector configuration before pairing a phone." }
-        guard let status else {
-            return "Start or connect the connector first; pairing needs its enrolled host credential."
-        }
-        if status.hostId?.isEmpty != false {
-            return "Enroll this Mac before pairing a phone. Pairing is authenticated with the enrolled host credential."
-        }
+		_ = status // Version 2 intentionally starts before the coordinator issues a host identity.
         return nil
     }
 

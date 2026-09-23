@@ -126,14 +126,14 @@ final class CLIContractTests: XCTestCase {
     /// 20-second process bound and time out on every pairing nobody scans instantly.
     func testPairingCommandsMatchGoContract() {
         XCTAssertEqual(CLICommand.pair(role: .receiver).arguments(config: config),
-                       ["pair", "--role", "receiver", "--no-poll", "--config", config.path])
+                       ["pair-v2", "--create", "--config", config.path])
         XCTAssertEqual(CLICommand.pair(role: .donor).arguments(config: config),
-                       ["pair", "--role", "donor", "--no-poll", "--config", config.path])
+                       ["pair-v2", "--create", "--config", config.path])
         let id = "3f2a1b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b"
         XCTAssertEqual(CLICommand.pairingStatus(pairingId: id).arguments(config: config),
-                       ["pair", "--status", id, "--config", config.path])
+                       ["pair-v2", "--status", id, "--config", config.path])
         XCTAssertEqual(CLICommand.cancelPairing(pairingId: id).arguments(config: config),
-                       ["pair", "--cancel", id, "--config", config.path])
+                       ["pair-v2", "--cancel", id, "--config", config.path])
     }
 
     /// A pairing id arrives from the connector and goes back out as an argument.
@@ -143,7 +143,7 @@ final class CLIContractTests: XCTestCase {
     func testPairingIdentifierStaysOneArgument() {
         let hostile = "id; touch /tmp/not-executed --role donor"
         let args = CLICommand.cancelPairing(pairingId: hostile).arguments(config: config)
-        XCTAssertEqual(args, ["pair", "--cancel", hostile, "--config", config.path])
+        XCTAssertEqual(args, ["pair-v2", "--cancel", hostile, "--config", config.path])
         XCTAssertFalse(args.contains("/bin/sh"))
         XCTAssertEqual(args.filter { $0 == "--role" }.count, 0)
     }

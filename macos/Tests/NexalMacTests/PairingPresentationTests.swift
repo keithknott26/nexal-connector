@@ -43,7 +43,7 @@ final class PairingPresentationTests: XCTestCase {
         let mirrored = Mirror(reflecting: mint.pairing).children.compactMap(\.label)
         XCTAssertFalse(mirrored.contains("claimToken"))
         XCTAssertEqual(Set(mirrored),
-                       ["pairingId", "role", "coordinator", "expiresAt", "status", "qr"])
+                       ["pairingId", "role", "coordinator", "expiresAt", "status", "qr", "manualCode"])
     }
 
     /// The CLI emits one JSON object per line and may emit more than one; a
@@ -180,11 +180,11 @@ final class PairingPresentationTests: XCTestCase {
             hasExecutable: false, configurationExists: false, status: nil)).contains("Choose the Go connector"))
         XCTAssertTrue(try XCTUnwrap(PairingPresentation.unavailableReason(
             hasExecutable: true, configurationExists: false, status: nil)).contains("Create and enroll"))
-        XCTAssertTrue(try XCTUnwrap(PairingPresentation.unavailableReason(
-            hasExecutable: true, configurationExists: true, status: nil)).contains("Start or connect"))
+		XCTAssertNil(PairingPresentation.unavailableReason(
+			hasExecutable: true, configurationExists: true, status: nil))
         let unenrolled = try ConnectorStatus.decode(Data(#"{"paused":true}"#.utf8))
-        XCTAssertTrue(try XCTUnwrap(PairingPresentation.unavailableReason(
-            hasExecutable: true, configurationExists: true, status: unenrolled)).contains("Enroll this Mac"))
+		XCTAssertNil(PairingPresentation.unavailableReason(
+			hasExecutable: true, configurationExists: true, status: unenrolled))
         let enrolled = try ConnectorStatus.decode(Data(#"{"paused":true,"hostId":"host_1"}"#.utf8))
         XCTAssertNil(PairingPresentation.unavailableReason(
             hasExecutable: true, configurationExists: true, status: enrolled))

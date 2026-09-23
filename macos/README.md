@@ -6,6 +6,18 @@ native setup. Packaging builds into a separate staging directory and preserves
 the previous complete app on ordinary build failure; quit the app before updates.
 This is still an unsigned source-build workflow, not a notarized installer.
 
+The current enrollment UI uses an HTTPS Universal-Link QR plus a separately
+generated eight-character manual code. It persists successful account/network
+membership through the Go connector and Keychain. The status surface accepts
+vendor-neutral per-peer authentication, direct/relay path, traffic, latency and
+post-quantum evidence; it says unavailable when no privileged mesh provider is
+installed rather than simulating connectivity.
+
+For a local development artifact run `bash scripts/build-local-dmg.sh`. Install
+it explicitly with `bash scripts/install-local-dmg.sh --confirm-local-unsigned`.
+This is recoverable (an existing app is moved to Trash) and is not a substitute
+for the signed, notarized release workflow.
+
 Native SwiftUI menu-bar shell for **macOS 14 or newer**. Swift owns presentation
 and process lifecycle only; the **Go connector** owns enrollment, Keychain
 credentials, owner policies, limits, telemetry, heartbeat, pause/cancellation,

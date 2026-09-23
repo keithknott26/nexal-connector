@@ -65,11 +65,12 @@ enum CLICommand {
         case .resume: command = ["resume"]
         case .acceptJobs: command = ["accept-jobs"]
         case let .pair(role):
-            command = ["pair", "--role", role.rawValue, "--no-poll"]
+            _ = role // Compute role remains a policy chosen after network enrollment.
+            command = ["pair-v2", "--create"]
         case let .pairingStatus(pairingId):
-            command = ["pair", "--status", pairingId]
+            command = ["pair-v2", "--status", pairingId]
         case let .cancelPairing(pairingId):
-            command = ["pair", "--cancel", pairingId]
+            command = ["pair-v2", "--cancel", pairingId]
         }
         return command + ["--config", config.path]
     }
@@ -151,6 +152,24 @@ struct ConnectorStatus: Decodable {
     let lastOutcome: String?
     let coordinatorHealthy: Bool?
     let resourcePolicy: ResourcePolicy?
+	let mesh: MeshStatus?
+
+	struct MeshStatus: Decodable {
+		let providerAvailable: Bool
+		let lifecycle: String
+		let authenticationStep: String?
+		let pq: String
+		let updatedAt: String?
+		let peers: [MeshPeer]
+	}
+	struct MeshPeer: Decodable, Identifiable {
+		let id: String; let name: String; let lifecycle: String
+		let authenticationStep: String?; let path: String; let pathLabel: String
+		let relayRegion: String?; let latencyMs: Double?; let packetLossPercent: Double?
+		let lastHandshakeAt: String?; let pq: String; let pqVerifiedAt: String?
+		let traffic: MeshTraffic
+	}
+	struct MeshTraffic: Decodable { let receivedBytes: UInt64; let sentBytes: UInt64; let lastAt: String? }
 
     struct Telemetry: Decodable {
         let known: Bool
@@ -204,6 +223,7 @@ struct PairingMint: Decodable {
         let expiresAt: String
         let status: String
         let qr: Symbol
+		let manualCode: String?
 
         struct Symbol: Decodable {
             let version: Int
@@ -220,9 +240,25 @@ struct PairingMint: Decodable {
     }
 
     static func decode(_ data: Data) throws -> PairingMint {
-        do { return try JSONDecoder().decode(Self.self, from: firstLine(of: data)) }
+        do {
+            let line = firstLine(of: data)
+            if let current = try? JSONDecoder().decode(Self.self, from: line) { return current }
+            let v2 = try JSONDecoder().decode(V2Envelope.self, from: line)
+            return PairingMint(pairing: Pairing(pairingId: v2.enrollment.sessionId,
+                role: "receiver", coordinator: CoordinatorOrigins.production,
+                expiresAt: v2.enrollment.expiresAt, status: v2.enrollment.status,
+                qr: v2.enrollment.qr, manualCode: v2.enrollment.manualCode))
+        }
         catch { throw ShellError.invalidPairing }
     }
+
+	private struct V2Envelope: Decodable {
+		let enrollment: V2
+		struct V2: Decodable {
+			let schemaVersion: Int; let sessionId: String; let manualCode: String
+			let expiresAt: String; let status: String; let step: String; let qr: Pairing.Symbol
+		}
+	}
 }
 
 /// The `nexal pair --status <id>` record.
@@ -236,9 +272,16 @@ struct PairingStatusReport: Decodable {
     }
 
     static func decode(_ data: Data) throws -> PairingStatusReport {
-        do { return try JSONDecoder().decode(Self.self, from: firstLine(of: data)) }
+        do {
+			let line = firstLine(of: data)
+			if let current = try? JSONDecoder().decode(Self.self, from: line) { return current }
+			let v2 = try JSONDecoder().decode(V2Envelope.self, from: line).enrollmentStatus
+			let mapped = v2.status == "paired" ? "scanned" : (["cancelled", "expired"].contains(v2.status) ? v2.status : "waiting")
+			return PairingStatusReport(pairingStatus: State(pairingId: v2.sessionId, status: mapped, expiresAt: v2.expiresAt))
+		}
         catch { throw ShellError.invalidPairing }
     }
+	private struct V2Envelope: Decodable { let enrollmentStatus: V2; struct V2: Decodable { let sessionId: String; let status: String; let step: String; let expiresAt: String } }
 }
 
 /// The CLI emits one JSON object per line, and a future connector may emit more

@@ -13,6 +13,11 @@ test "$(uname -s)" = Darwin || { echo "Packaging requires macOS."; exit 1; }
 # an Intel host cannot produce arm64, so a universal bundle is impossible there.
 test "$(uname -m)" = arm64 || { echo "Universal packaging requires an Apple-silicon host."; exit 1; }
 export MACOSX_DEPLOYMENT_TARGET=14.0
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/private/tmp/nexal-connector-clang-cache}"
+export SWIFT_MODULECACHE_PATH="${SWIFT_MODULECACHE_PATH:-/private/tmp/nexal-connector-swift-cache}"
+export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+export GOCACHE="${GOCACHE:-/private/tmp/nexal-connector-go-cache}"
+SWIFT_SCRATCH="${SWIFT_SCRATCH:-/private/tmp/nexal-connector-swift-package}"
 if [ -L "$ROOT/build" ] || [ -L "$APP" ] || { [ -e "$APP" ] && [ ! -d "$APP" ]; }; then
   printf 'Refusing an unsafe or non-directory app destination.\n' >&2; exit 1
 fi
@@ -43,10 +48,10 @@ CANDIDATE="$STAGE/Nexal Connector.app"
 # Tests run on the host architecture only. A universal test bundle cannot be
 # executed for the foreign slice, so testing x86_64 here would require Rosetta
 # and would still not prove anything about a real Intel machine.
-(cd "$ROOT" && swift test --arch arm64)
-(cd "$ROOT" && swift build -c release --arch arm64 --arch x86_64)
+(cd "$ROOT" && swift test --scratch-path "$SWIFT_SCRATCH" --arch arm64)
+(cd "$ROOT" && swift build --scratch-path "$SWIFT_SCRATCH" -c release --arch arm64 --arch x86_64)
 mkdir -p "$CANDIDATE/Contents/MacOS" "$CANDIDATE/Contents/Helpers" "$CANDIDATE/Contents/Resources"
-BIN="$(cd "$ROOT" && swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+BIN="$(cd "$ROOT" && swift build --scratch-path "$SWIFT_SCRATCH" -c release --arch arm64 --arch x86_64 --show-bin-path)"
 install -m 755 "$BIN/NexalMac" "$CANDIDATE/Contents/MacOS/NexalMac"
 # Go has no universal output mode, so build each slice and join them with lipo.
 (cd "$ROOT/../connector" && CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \

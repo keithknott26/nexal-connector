@@ -39,20 +39,42 @@ jobs:
           python-version: "3.12"
       - run: PYTHONPATH=runtimes python -m unittest discover -s runtimes/tests -p 'test*.py'
   mac:
-    # Explicit manual run only: private macOS runners may incur charges.
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
+    # Self-hosted, and no longer gated to workflow_dispatch.
+    #
+    # It ran on macos-15 behind a manual gate to avoid hosted-macOS charges. The result
+    # was that the Mac app was never compiled on a push: the Swift sources are edited
+    # without a Swift toolchain available, so a type error could reach main and sit
+    # there. GitHub then refused to start hosted jobs at all when the account allowance
+    # was exhausted, which made the manual gate moot as well.
+    #
+    # Requires a runner registered against THIS repository. A personal account has no
+    # organization-wide runners, so the Mac must be registered per repo:
+    #   REPO=keithknott26/nexal-connector bash scripts/setup-self-hosted-runner.sh
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      # Persistent runners do not start clean, and a stale .build directory can mask a
+      # source file that no longer compiles.
+      - name: Discard previous Swift build output
+        run: rm -rf macos/.build
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.x"
           cache: false
       - run: go test -race ./...
         working-directory: connector
+      # Split from `swift test` on purpose: a compile failure and a failing assertion
+      # are different problems, and the build step names which one happened.
+      - name: Compile the Mac app
+        run: swift build 2>&1 | tee /tmp/swift-build.log
+        working-directory: macos
       - run: swift test
         working-directory: macos
-      - run: bash macos/scripts/package-app.sh
+      # Packaging is a release concern and needs a signing identity, so it stays behind
+      # an explicit manual run rather than gating every push on it.
+      - name: Package the app bundle
+        if: github.event_name == 'workflow_dispatch'
+        run: bash macos/scripts/package-app.sh

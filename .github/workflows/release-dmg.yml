@@ -224,24 +224,37 @@ jobs:
           steps.signing.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_HTTP_TIMEOUT: "120"
         run: |
           set -euo pipefail
-          PUBLISH_STATUS=1
-          for ATTEMPT in 1 2 3; do
-            if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-              gh release upload "${{ github.ref_name }}" \
-                "${{ steps.build.outputs.dmg }}" "${{ steps.build.outputs.dmg }}.sha256" --clobber \
-                && PUBLISH_STATUS=0 || PUBLISH_STATUS=$?
-            else
-              gh release create "${{ github.ref_name }}" --generate-notes --verify-tag \
-                "${{ steps.build.outputs.dmg }}" "${{ steps.build.outputs.dmg }}.sha256" \
-                && PUBLISH_STATUS=0 || PUBLISH_STATUS=$?
-            fi
-            [ "$PUBLISH_STATUS" -eq 0 ] && break
-            [ "$ATTEMPT" -eq 3 ] || sleep "$((ATTEMPT * 10))"
+          API="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          CURL=(curl -fsS --retry 5 --retry-delay 3 --retry-all-errors \
+            --connect-timeout 30 --max-time 300 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28")
+          RELEASE_JSON="$("${CURL[@]}" "$API/releases/tags/$GITHUB_REF_NAME" || true)"
+          RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | /opt/homebrew/bin/python3 -c \
+            'import json,sys; print(json.load(sys.stdin).get("id", ""))' 2>/dev/null || true)"
+          if [ -z "$RELEASE_ID" ]; then
+            PAYLOAD="$(TAG="$GITHUB_REF_NAME" /opt/homebrew/bin/python3 -c \
+              'import json,os; print(json.dumps({"tag_name":os.environ["TAG"],"name":"neXal Connector "+os.environ["TAG"].removeprefix("v"),"generate_release_notes":True}))')"
+            RELEASE_JSON="$("${CURL[@]}" -X POST -d "$PAYLOAD" "$API/releases")"
+            RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | /opt/homebrew/bin/python3 -c \
+              'import json,sys; print(json.load(sys.stdin)["id"])')"
+          fi
+          for ASSET in "${{ steps.build.outputs.dmg }}" "${{ steps.build.outputs.dmg }}.sha256"; do
+            NAME="$(basename "$ASSET")"
+            DIGEST="sha256:$(shasum -a 256 "$ASSET" | awk '{print $1}')"
+            MATCH="$(printf '%s' "$RELEASE_JSON" | /opt/homebrew/bin/python3 -c \
+              'import json,sys; a=next((x for x in json.load(sys.stdin).get("assets",[]) if x["name"]==sys.argv[1]),{}); print("same" if a.get("digest")==sys.argv[2] else a.get("id",""))' \
+              "$NAME" "$DIGEST")"
+            [ "$MATCH" = "same" ] && continue
+            [ -z "$MATCH" ] || "${CURL[@]}" -X DELETE "$API/releases/assets/$MATCH"
+            ENCODED_NAME="$(NAME="$NAME" /opt/homebrew/bin/python3 -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["NAME"]))')"
+            case "$NAME" in *.dmg) CONTENT_TYPE="application/x-apple-diskimage";; *) CONTENT_TYPE="application/octet-stream";; esac
+            "${CURL[@]}" -H "Content-Type: $CONTENT_TYPE" --data-binary "@$ASSET" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$ENCODED_NAME" >/dev/null
           done
-          exit "$PUBLISH_STATUS"
 
       - name: Cleanup keychain
         if: always()

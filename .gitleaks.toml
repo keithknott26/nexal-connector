@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Supported post-quantum key-agreement group identifiers"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^X25519(?:MLKEM768|Kyber768Draft00)$''']

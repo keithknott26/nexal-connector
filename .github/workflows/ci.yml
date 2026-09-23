@@ -56,6 +56,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Verify local Xcode toolchain is licensed
+        run: xcodebuild -version
       # Persistent runners do not start clean, and a stale .build directory can mask a
       # source file that no longer compiles.
       - name: Discard previous Swift build output

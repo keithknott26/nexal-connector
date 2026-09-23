@@ -4,7 +4,10 @@
 // separately before a provider can report anything other than unavailable.
 package mesh
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Lifecycle string
 
@@ -44,35 +47,132 @@ type Traffic struct {
 	LastAt        string `json:"lastAt,omitempty"`
 }
 
+// FileSharing is reported by the privileged provider only after platform policy
+// authorizes SMB for this peer. Address is a sanitized private neXal hostname;
+// it must never be inferred from an observed public endpoint.
+type FileSharing struct {
+	Authorized bool   `json:"authorized"`
+	Available  bool   `json:"available"`
+	Address    string `json:"address,omitempty"`
+	ShareName  string `json:"shareName,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+type HostnameStatus struct {
+	State    string `json:"state"` // unavailable, provisioned, resolving, ready, stale, conflict
+	Hostname string `json:"hostname,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
+type ScreenSharing struct {
+	Authorized bool   `json:"authorized"`
+	Available  bool   `json:"available"`
+	Address    string `json:"address,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+type DiscoveryStatus struct {
+	WideAreaBonjour bool   `json:"wideAreaBonjour"`
+	Gateway         string `json:"gateway"` // unavailable, discovering, active, degraded
+	Bridge          string `json:"bridge"`  // unavailable, connecting, active, degraded
+	SiteID          string `json:"siteId,omitempty"`
+	LastRecordAt    string `json:"lastRecordAt,omitempty"`
+	Detail          string `json:"detail,omitempty"`
+}
+
 type Peer struct {
-	ID                 string    `json:"id"`
-	Name               string    `json:"name"`
-	Lifecycle          Lifecycle `json:"lifecycle"`
-	AuthenticationStep string    `json:"authenticationStep,omitempty"`
-	Path               PathKind  `json:"path"`
-	PathLabel          string    `json:"pathLabel"`
-	RelayRegion        string    `json:"relayRegion,omitempty"`
-	LatencyMS          float64   `json:"latencyMs,omitempty"`
-	PacketLossPercent  float64   `json:"packetLossPercent,omitempty"`
-	LastHandshakeAt    string    `json:"lastHandshakeAt,omitempty"`
-	PQ                 PQState   `json:"pq"`
-	PQVerifiedAt       string    `json:"pqVerifiedAt,omitempty"`
-	Traffic            Traffic   `json:"traffic"`
+	ID                 string         `json:"id"`
+	Name               string         `json:"name"`
+	Lifecycle          Lifecycle      `json:"lifecycle"`
+	AuthenticationStep string         `json:"authenticationStep,omitempty"`
+	Path               PathKind       `json:"path"`
+	PathLabel          string         `json:"pathLabel"`
+	RelayRegion        string         `json:"relayRegion,omitempty"`
+	LatencyMS          float64        `json:"latencyMs,omitempty"`
+	PacketLossPercent  float64        `json:"packetLossPercent,omitempty"`
+	LastHandshakeAt    string         `json:"lastHandshakeAt,omitempty"`
+	PQ                 PQState        `json:"pq"`
+	PQVerifiedAt       string         `json:"pqVerifiedAt,omitempty"`
+	Traffic            Traffic        `json:"traffic"`
+	FileSharing        FileSharing    `json:"fileSharing"`
+	ScreenSharing      ScreenSharing  `json:"screenSharing"`
+	Hostname           HostnameStatus `json:"hostname"`
 }
 
 type Status struct {
-	ProviderAvailable  bool      `json:"providerAvailable"`
-	Lifecycle          Lifecycle `json:"lifecycle"`
-	AuthenticationStep string    `json:"authenticationStep,omitempty"`
-	PQ                 PQState   `json:"pq"`
-	UpdatedAt          string    `json:"updatedAt,omitempty"`
-	Peers              []Peer    `json:"peers"`
+	ProviderAvailable  bool            `json:"providerAvailable"`
+	Lifecycle          Lifecycle       `json:"lifecycle"`
+	AuthenticationStep string          `json:"authenticationStep,omitempty"`
+	PQ                 PQState         `json:"pq"`
+	UpdatedAt          string          `json:"updatedAt,omitempty"`
+	Peers              []Peer          `json:"peers"`
+	Discovery          DiscoveryStatus `json:"discovery"`
 }
 
 // Provider is the only dependency neXal takes on a mesh implementation.
 // Implementations must return sanitized product terminology and must never
 // expose upstream product names, raw relay hosts, setup keys, or private keys.
 type Provider interface{ Snapshot() Status }
+
+// SanitizeSnapshot is the final customer-surface boundary. It prevents a
+// provider bug from exposing an upstream hostname or making an unauthorized
+// sharing service actionable.
+func SanitizeSnapshot(s Status) Status {
+	now := time.Now()
+	for i := range s.Peers {
+		peer := &s.Peers[i]
+		if !validHostnameState(peer.Hostname.State) || !isNexalHostname(peer.Hostname.Hostname) {
+			peer.Hostname = HostnameStatus{State: "unavailable", Detail: "Private neXal hostname unavailable."}
+		}
+		if peer.Hostname.State != "ready" || !peer.FileSharing.Authorized || !peer.FileSharing.Available || peer.FileSharing.Address != peer.Hostname.Hostname {
+			peer.FileSharing.Available, peer.FileSharing.Address = false, ""
+		}
+		if peer.Hostname.State != "ready" || !peer.ScreenSharing.Authorized || !peer.ScreenSharing.Available || peer.ScreenSharing.Address != peer.Hostname.Hostname {
+			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
+		}
+		verified, err := time.Parse(time.RFC3339Nano, peer.PQVerifiedAt)
+		if peer.PQ != PQProtected || err != nil || verified.After(now.Add(5*time.Second)) || now.Sub(verified) > 2*time.Minute {
+			peer.FileSharing.Available, peer.FileSharing.Address = false, ""
+			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
+			if peer.Lifecycle == LifecycleConnected {
+				peer.Lifecycle = LifecycleDegraded
+			}
+		}
+	}
+	return s
+}
+
+func (s Status) StrictPQReady() bool {
+	return s.StrictPQReadyAt(time.Now(), 2*time.Minute)
+}
+
+func (s Status) StrictPQReadyAt(now time.Time, maxAge time.Duration) bool {
+	if s.PQ != PQProtected || len(s.Peers) == 0 {
+		return false
+	}
+	for _, peer := range s.Peers {
+		verified, err := time.Parse(time.RFC3339Nano, peer.PQVerifiedAt)
+		if peer.Lifecycle != LifecycleConnected || peer.PQ != PQProtected || err != nil || verified.After(now.Add(5*time.Second)) || now.Sub(verified) > maxAge {
+			return false
+		}
+	}
+	return true
+}
+
+func validHostnameState(state string) bool {
+	switch state {
+	case "provisioned", "resolving", "ready", "stale", "conflict":
+		return true
+	default:
+		return false
+	}
+}
+
+func isNexalHostname(host string) bool {
+	return len(host) > len(".mesh.nexal.systems") && len(host) <= 253 &&
+		strings.HasSuffix(strings.ToLower(host), ".mesh.nexal.systems") &&
+		!strings.ContainsAny(host, "/\\@ \t\r\n")
+}
 
 type UnavailableProvider struct{}
 

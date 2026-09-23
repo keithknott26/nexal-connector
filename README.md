@@ -1,7 +1,36 @@
-# neXal Connector
+# neXal@home connector
 
-Private Mac connector and experimental LAN CPU pager. **Engineering preview:
-not added macOS RAM/VRAM, a production marketplace, or verified PQ dispatch.**
+The connector is the trusted Go host component for neXal@home. It joins a Mac or
+Linux computer to the customer's private network, reports verified tunnel and
+route state, enforces host policy, presents approved local services, and provides
+the execution boundary for MCP tools, security monitoring and distributed work.
+
+Implemented foundations include secure QR/manual pairing, strict Rosenpass mesh
+startup, tunnel evidence, coordinator-driven access rules, SMB and screen-sharing
+presentation, wide-area discovery contracts, privacy-preserving security baseline
+states, and signed encrypted model/rule bundle verification with anti-rollback.
+
+Direct private-mesh MCP, production Endpoint Security/eBPF collection, live
+multi-site route evidence, distributed compute and CPU paging still require
+integration or physical-host acceptance. CPU paging remains research; it is not
+additional macOS RAM or VRAM.
+
+Go is the primary host language. Swift is limited to the native macOS interface.
+The Python MLX adapter under `runtimes/` is an isolated experimental compatibility
+layer for Apple's Python-facing MLX tooling; it is not the connector control plane
+and should be replaced if a reviewed native interface reaches feature parity.
+
+## Production network boundary
+
+The production peer network is the managed neXal mesh over WireGuard. Connector
+startup and reconnect always require Rosenpass;
+saved configuration or command success alone is not proof of protection. Peer
+traffic, including MCP requests and results, goes directly to the destination's
+private mesh address. Cloudflare coordinates enrollment, private address
+metadata, tool/schema pins, signed short-lived grants, policy, revocation and
+audit, but is not in the peer payload path. The connector reports runtime path
+evidence as `direct_mesh` or `relay_mesh` and exposes relays with neXal product
+terminology. No second peer overlay is part of the production design.
 
 ## M4 donor
 

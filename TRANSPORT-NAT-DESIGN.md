@@ -1,5 +1,18 @@
 # Peer transport and NAT traversal: decision record
 
+> **Superseded on 2026-09-23.** This document is retained as historical design
+> context only. The libp2p/DCUtR/Circuit Relay overlay described below was never
+> wired into the connector runtime and has been removed. The production network
+> is the managed neXal mesh backed by NetBird/WireGuard with Rosenpass required on
+> every startup and reconnect. Peer payloads, including MCP requests and results,
+> travel directly to the destination's private mesh address; Cloudflare is the
+> enrollment, metadata, signed-grant, policy, revocation and audit control plane,
+> not a payload proxy. Path evidence is reported by the privileged mesh adapter as
+> `direct_mesh` or `relay_mesh`, and a tunnel is not presented as quantum-safe
+> without fresh runtime Rosenpass evidence. The STUN and static-peer material in
+> this record remains useful diagnostic/history, but does not define production
+> routing.
+
 Scope: `connector/` only. This records what the peer transport does **today**, what
 changed in Phase 1 and Phase 2, what is deliberately **not** built, and how the one
 conflict with the platform hardening plan was resolved.

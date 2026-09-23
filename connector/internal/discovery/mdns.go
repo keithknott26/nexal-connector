@@ -475,7 +475,13 @@ func (m *MDNS) Run(ctx context.Context, sink func([]Candidate)) {
 	}
 	<-ctx.Done()
 	m.Close()
-	wg.Wait()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		m.logger.Debug("mdns read shutdown exceeded deadline")
+	}
 }
 
 func (m *MDNS) handle(payload []byte, from netip.AddrPort, conn *net.UDPConn, sink func([]Candidate)) {
@@ -520,12 +526,17 @@ func (m *MDNS) Browse() error {
 
 func (m *MDNS) Close() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.closed {
+		m.mu.Unlock()
 		return
 	}
 	m.closed = true
-	for _, conn := range m.conns {
-		_ = conn.Close()
+	conns := append([]*net.UDPConn(nil), m.conns...)
+	m.mu.Unlock()
+	for _, conn := range conns {
+		// A deadline explicitly wakes multicast reads on macOS versions where a
+		// concurrent Close alone may not interrupt ReadFrom promptly.
+		_ = conn.SetReadDeadline(time.Now())
+		go func(c *net.UDPConn) { _ = c.Close() }(conn)
 	}
 }

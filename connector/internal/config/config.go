@@ -71,23 +71,22 @@ type Config struct {
 	// A configured address is a dial hint, never authorization (§30.2): the
 	// fingerprint is what peer TLS pins, and the coordinator's list still decides
 	// AllowedPeers.
-	StaticPeers []StaticPeer `json:"staticPeers,omitempty"`
-	// P2P gates the libp2p data plane (internal/p2p, TRANSPORT-NAT-DESIGN.md
-	// Phase 2) and carries its relay ceilings. Absent means OFF, so an upgrade
-	// starts no new transport. See p2p.go.
-	P2P        *P2P             `json:"p2p,omitempty"`
-	Enrollment *EnrollmentState `json:"enrollment,omitempty"`
+	StaticPeers []StaticPeer     `json:"staticPeers,omitempty"`
+	Enrollment  *EnrollmentState `json:"enrollment,omitempty"`
 }
 
 // EnrollmentState contains durable, non-secret identifiers only. The credential
 // returned after successful pairing is stored under mesh-credential in Keychain.
 type EnrollmentState struct {
 	SchemaVersion int    `json:"schemaVersion"`
+	SessionID     string `json:"sessionId,omitempty"`
 	Status        string `json:"status"`
 	AccountID     string `json:"accountId,omitempty"`
 	NetworkID     string `json:"networkId,omitempty"`
 	DeviceID      string `json:"deviceId,omitempty"`
+	ManagementURL string `json:"managementUrl,omitempty"`
 	PairedAt      string `json:"pairedAt,omitempty"`
+	ExpiresAt     string `json:"expiresAt,omitempty"`
 }
 
 // Discovery configures LAN/WAN peer discovery. Every gate defaults to false and
@@ -246,19 +245,16 @@ func (c Config) Validate() error {
 	if err := ValidateStaticPeers(c.StaticPeers); err != nil {
 		return err
 	}
-	if err := c.P2P.Validate(); err != nil {
-		return err
-	}
 	if c.Enrollment != nil {
 		if c.Enrollment.SchemaVersion != 2 {
 			return errors.New("unsupported enrollment state")
 		}
 		switch c.Enrollment.Status {
-		case "provisioning", "paired", "revoked":
+		case "provisioning", "joining", "paired", "revoked":
 		default:
 			return errors.New("invalid enrollment state")
 		}
-		if c.Enrollment.Status == "paired" && (c.Enrollment.AccountID == "" || c.Enrollment.NetworkID == "" || !validDeviceFingerprint(c.Enrollment.DeviceID) || c.Enrollment.PairedAt == "") {
+		if (c.Enrollment.Status == "joining" || c.Enrollment.Status == "paired") && (c.Enrollment.AccountID == "" || c.Enrollment.NetworkID == "" || !validDeviceFingerprint(c.Enrollment.DeviceID) || c.Enrollment.PairedAt == "" || ValidateURL(c.Enrollment.ManagementURL, false) != nil) {
 			return errors.New("paired enrollment state is incomplete")
 		}
 	}
@@ -285,8 +281,7 @@ func Load(path string) (Config, error) {
 		if strings.EqualFold(key, "paused") {
 			hasPause = true
 		}
-		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") || strings.EqualFold(key, "enrollment") ||
-			strings.EqualFold(key, "p2p") {
+		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") || strings.EqualFold(key, "enrollment") {
 			continue
 		}
 		if strings.TrimSpace(string(value)) == "null" {

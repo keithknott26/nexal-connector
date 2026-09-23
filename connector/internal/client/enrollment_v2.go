@@ -43,6 +43,7 @@ type EnrollmentSessionStatus struct {
 	Credential     string `json:"credential,omitempty"`
 	HostID         string `json:"hostId,omitempty"`
 	HostCredential string `json:"hostCredential,omitempty"`
+	ManagementURL  string `json:"managementUrl,omitempty"`
 	ExpiresAt      string `json:"expiresAt"`
 }
 
@@ -54,7 +55,7 @@ func (s EnrollmentSession) Validate(coordinator string) error {
 	base, baseErr := url.Parse(coordinator)
 	ownedLinkHost := strings.EqualFold(u.Host, "link.nexal.systems") || strings.EqualFold(u.Host, base.Host)
 	if err != nil || baseErr != nil || u.Scheme != "https" || !ownedLinkHost ||
-		!strings.HasPrefix(u.EscapedPath(), "/pair/") || u.RawQuery != "" || !validDigest(u.Fragment) || u.User != nil {
+		u.EscapedPath() != "/pair/"+s.SessionID || u.RawQuery != "" || !validDigest(u.Fragment) || u.User != nil {
 		return errors.New("invalid enrollment universal link")
 	}
 	if s.Status != "waiting" {
@@ -98,10 +99,35 @@ func (c *Client) EnrollmentSessionState(ctx context.Context, id string) (Enrollm
 	default:
 		return EnrollmentSessionStatus{}, errors.New("unknown enrollment status")
 	}
-	if out.Status == "paired" && (!ValidID(out.AccountID) || !ValidID(out.NetworkID) || !validDigest(out.DeviceID) || len(out.Credential) < 16 || !ValidID(out.HostID) || len(out.HostCredential) < 16) {
-		return EnrollmentSessionStatus{}, errors.New("paired enrollment is incomplete")
+	if out.Step == "" || strings.ContainsAny(out.Step, "\r\n\t") {
+		return EnrollmentSessionStatus{}, errors.New("invalid enrollment step")
+	}
+	expires, err := time.Parse(time.RFC3339Nano, out.ExpiresAt)
+	if err != nil || (out.Status == "waiting" && !expires.After(time.Now())) {
+		return EnrollmentSessionStatus{}, errors.New("invalid enrollment status expiry")
+	}
+	if out.Status == "joining" || out.Status == "paired" {
+		if !ValidID(out.AccountID) || !ValidID(out.NetworkID) || !validDigest(out.DeviceID) || !ValidID(out.HostID) || !validHTTPSOrigin(out.ManagementURL) {
+			return EnrollmentSessionStatus{}, errors.New("enrollment identity bundle is incomplete")
+		}
+		// Credentials are delivered together before the durable-storage ACK and
+		// omitted together afterward. A partial pair is never a valid response.
+		hasMeshCredential := out.Credential != ""
+		hasHostCredential := out.HostCredential != ""
+		if hasMeshCredential != hasHostCredential || (hasMeshCredential && (len(out.Credential) < 16 || len(out.HostCredential) < 16)) {
+			return EnrollmentSessionStatus{}, errors.New("enrollment credential bundle is incomplete")
+		}
+	} else if out.Credential != "" || out.HostCredential != "" || out.AccountID != "" || out.NetworkID != "" || out.DeviceID != "" || out.HostID != "" || out.ManagementURL != "" {
+		return EnrollmentSessionStatus{}, errors.New("enrollment identity was returned before joining")
 	}
 	return out, nil
+}
+
+func validHTTPSOrigin(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Path == "" &&
+		u.RawPath == "" && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.Opaque == "" &&
+		!strings.ContainsAny(raw, "\\\r\n\t ")
 }
 
 func (c *Client) CancelEnrollmentSession(ctx context.Context, id string) error {
@@ -116,6 +142,22 @@ func (c *Client) CancelEnrollmentSession(ctx context.Context, id string) error {
 	}
 	if !out.Cancelled {
 		return errors.New("coordinator did not confirm enrollment cancellation")
+	}
+	return nil
+}
+
+func (c *Client) AcknowledgeEnrollmentCredentials(ctx context.Context, id string) error {
+	if !canonicalUUID.MatchString(id) {
+		return errors.New("invalid enrollment session id")
+	}
+	var out struct {
+		Acknowledged bool `json:"acknowledged"`
+	}
+	if err := c.call(ctx, "POST", "/api/v2/enrollment-sessions/"+url.PathEscape(id)+"/credentials/ack", struct{}{}, &out); err != nil {
+		return err
+	}
+	if !out.Acknowledged {
+		return errors.New("coordinator did not acknowledge credential storage")
 	}
 	return nil
 }

@@ -203,10 +203,8 @@ struct NetworkPanel: View {
                     if let ssh = peer.sshCommand(user: model.loginName) {
                         Button("Copy ssh command") { copy(ssh) }
                     }
-                    if let vnc = peer.vncURL() {
-                        Button("Open screen sharing") { open(vnc) }
-                        Button("Copy VNC address") { copy(vnc) }
-                    }
+					// Screen Sharing actions live in MeshStatusView, where both
+					// server policy and the Mac's reported service state are required.
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -244,7 +242,4 @@ struct NetworkPanel: View {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
-    private func open(_ url: String) {
-        if let u = URL(string: url) { NSWorkspace.shared.open(u) }
-    }
 }

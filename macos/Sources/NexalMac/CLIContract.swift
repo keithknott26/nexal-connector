@@ -161,6 +161,11 @@ struct ConnectorStatus: Decodable {
 		let pq: String
 		let updatedAt: String?
 		let peers: [MeshPeer]
+		let discovery: MeshDiscovery?
+	}
+	struct MeshDiscovery: Decodable {
+		let wideAreaBonjour: Bool; let gateway: String; let bridge: String
+		let siteId: String?; let lastRecordAt: String?; let detail: String?
 	}
 	struct MeshPeer: Decodable, Identifiable {
 		let id: String; let name: String; let lifecycle: String
@@ -168,8 +173,19 @@ struct ConnectorStatus: Decodable {
 		let relayRegion: String?; let latencyMs: Double?; let packetLossPercent: Double?
 		let lastHandshakeAt: String?; let pq: String; let pqVerifiedAt: String?
 		let traffic: MeshTraffic
+		let fileSharing: MeshFileSharing?
+		let screenSharing: MeshScreenSharing?
+		let hostname: MeshHostname?
 	}
 	struct MeshTraffic: Decodable { let receivedBytes: UInt64; let sentBytes: UInt64; let lastAt: String? }
+	struct MeshFileSharing: Decodable {
+		let authorized: Bool; let available: Bool; let address: String?
+		let shareName: String?; let detail: String?
+	}
+	struct MeshScreenSharing: Decodable {
+		let authorized: Bool; let available: Bool; let address: String?; let detail: String?
+	}
+	struct MeshHostname: Decodable { let state: String; let hostname: String?; let detail: String? }
 
     struct Telemetry: Decodable {
         let known: Bool

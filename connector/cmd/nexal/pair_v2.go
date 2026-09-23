@@ -9,6 +9,7 @@ import (
 
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/peeridentity"
 	"nexal/connector/internal/qr"
 )
@@ -126,7 +127,8 @@ func statusPairV2(ctx context.Context, path, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	if state.Status == "paired" {
+	hasCredentials := state.Credential != "" || state.HostCredential != ""
+	if (state.Status == "joining" || state.Status == "paired") && hasCredentials {
 		if err := secrets.Put(ctx, "mesh-credential", state.Credential); err != nil {
 			return err
 		}
@@ -136,12 +138,62 @@ func statusPairV2(ctx context.Context, path, sessionID string) error {
 		state.Credential = ""
 		state.HostCredential = ""
 		cfg.HostID = state.HostID
-		cfg.Enrollment = &config.EnrollmentState{SchemaVersion: 2, Status: "paired", AccountID: state.AccountID, NetworkID: state.NetworkID, DeviceID: state.DeviceID, PairedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+		cfg.Enrollment = &config.EnrollmentState{SchemaVersion: 2, SessionID: sessionID, Status: state.Status, AccountID: state.AccountID, NetworkID: state.NetworkID, DeviceID: state.DeviceID, ManagementURL: state.ManagementURL, PairedAt: time.Now().UTC().Format(time.RFC3339Nano), ExpiresAt: state.ExpiresAt}
 		if err := config.Save(path, cfg); err != nil {
+			return err
+		}
+		if err := acknowledgePersistedCredentials(ctx, api, sessionID); err != nil {
+			return err
+		}
+		if err := startPersistedMesh(ctx, secrets, cfg.Enrollment.ManagementURL); err != nil {
+			return err
+		}
+	} else if state.Status == "joining" || state.Status == "paired" {
+		if !persistedEnrollment(cfg, sessionID) {
+			return errors.New("enrollment credentials are unavailable before durable local storage")
+		}
+		cfg.Enrollment.Status = state.Status
+		cfg.Enrollment.ManagementURL = state.ManagementURL
+		if err := config.Save(path, cfg); err != nil {
+			return err
+		}
+		if err := startPersistedMesh(ctx, secrets, cfg.Enrollment.ManagementURL); err != nil {
 			return err
 		}
 	}
 	return emit(map[string]any{"enrollmentStatus": state})
+}
+
+func startPersistedMesh(ctx context.Context, secrets config.Secrets, managementURL string) error {
+	setupKey, err := secrets.Get(ctx, "mesh-credential")
+	if err != nil {
+		return errors.New("secure networking credential unavailable")
+	}
+	controller := mesh.Controller{
+		Plans:  mesh.StaticPlanStore{Plan: mesh.StartupPlan{SetupKey: setupKey, ManagementURL: managementURL}},
+		Runner: mesh.ExecRunner{},
+	}
+	return controller.Start(ctx)
+}
+
+func persistedEnrollment(cfg config.Config, sessionID string) bool {
+	return cfg.Enrollment != nil && (cfg.Enrollment.Status == "joining" || cfg.Enrollment.Status == "paired") && cfg.Enrollment.SessionID == sessionID && cfg.HostID != ""
+}
+
+type enrollmentAcknowledger interface {
+	AcknowledgeEnrollmentCredentials(context.Context, string) error
+}
+
+func acknowledgePersistedCredentials(ctx context.Context, api enrollmentAcknowledger, sessionID string) error {
+	// The platform ACK is idempotent. Never reinterpret authentication or state
+	// errors as success: a lost response is recovered by retrying the same ACK.
+	return api.AcknowledgeEnrollmentCredentials(ctx, sessionID)
+}
+
+func enrollmentStatusFromConfig(cfg config.Config, sessionID string) client.EnrollmentSessionStatus {
+	e := cfg.Enrollment
+	return client.EnrollmentSessionStatus{SchemaVersion: 2, SessionID: sessionID, Status: "paired", Step: "paired",
+		AccountID: e.AccountID, NetworkID: e.NetworkID, DeviceID: e.DeviceID, HostID: cfg.HostID, ManagementURL: e.ManagementURL, ExpiresAt: e.ExpiresAt}
 }
 
 func cancelPairV2(ctx context.Context, path, sessionID string) error {

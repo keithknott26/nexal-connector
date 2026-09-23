@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -205,34 +206,14 @@ private struct ConnectorPanel: View {
                 Text("Host: \(hostID)").font(.caption2)
                     .foregroundStyle(.secondary).textSelection(.enabled)
             }
-            // The shared drive is not built yet (`nexal drive` is object storage, not
-            // a filesystem). Saying so is better than a button that does nothing.
-            CaveatDisclosure(title: "Shared drive in Finder",
-                             text: "Not in this build. `nexal drive` is object storage with put/get/list, not a mounted filesystem, and no FileProvider or SMB gateway exists yet. A drive in Finder needs that layer built; this panel will not pretend it is there.")
+            CaveatDisclosure(title: "Shared files and screens",
+                             text: "Access is denied by default and appears per computer only after platform policy authorizes it and macOS reports the matching Sharing service enabled. neXal never turns on File Sharing, Screen Sharing, Remote Management, or firewall rules for you.")
         }
     }
 
 	@ViewBuilder private var meshStatus: some View {
 		if let mesh = model.status?.mesh {
-			VStack(alignment: .leading, spacing: PanelMetrics.tightSpacing) {
-				Label(mesh.lifecycle.capitalized, systemImage: mesh.pq == "protected" ? "lock.shield.fill" : "network")
-					.font(.subheadline.weight(.semibold))
-				if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
-				Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum protection: \(mesh.pq.replacingOccurrences(of: "_", with: " "))")
-					.font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
-				ForEach(mesh.peers) { peer in
-					Divider()
-					VStack(alignment: .leading, spacing: 3) {
-						Text(peer.name.isEmpty ? peer.id : peer.name).font(.caption.weight(.semibold))
-						Text(peer.pathLabel).font(.caption)
-						if let region = peer.relayRegion, peer.path == "relay" { Text("neXal Relay — \(region)").font(.caption).foregroundStyle(.secondary) }
-						HStack {
-							if let latency = peer.latencyMs { Text(String(format: "%.1f ms", latency)) }
-							Text("↑ \(peer.traffic.sentBytes) B  ↓ \(peer.traffic.receivedBytes) B")
-						}.font(.caption2).foregroundStyle(.secondary)
-					}
-				}
-			}
+			MeshStatusView(mesh: mesh)
 		} else {
 			Text("Secure network status unavailable — networking service is not installed or has not reported yet.")
 				.font(.caption).foregroundStyle(.secondary)

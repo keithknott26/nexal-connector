@@ -227,7 +227,7 @@ func (a *Agent) Snapshot() Status {
 		OwnerActivityOverride: a.manualActiveLocked(), ExecutionBlocker: blocker,
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
-		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: a.meshProvider.Snapshot(),
+		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
 		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
 }
 
@@ -398,6 +398,12 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	}
 	if a.cfg.Paused {
 		return errors.New("host paused by owner")
+	}
+	if a.cfg.Enrollment != nil {
+		status := mesh.SanitizeSnapshot(a.meshProvider.Snapshot())
+		if !status.StrictPQReady() {
+			return errors.New("quantum-safe peer verification required before compute or sharing")
+		}
 	}
 	// §36.4: default-on contribution must be CONDITIONAL. This is checked AFTER
 	// the owner's pause and as a separate clause, so the two never merge: the
@@ -703,8 +709,18 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 		h.AvailableMemoryBytes = a.telemetry.AvailableMemoryBytes
 	}
 	hostID := a.cfg.HostID
+	enrolledMesh := a.cfg.Enrollment != nil
+	provider := a.meshProvider
 	a.mu.Unlock()
+	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
 	err := a.api.Heartbeat(ctx, hostID, h)
+	if err == nil && enrolledMesh {
+		if reporter, ok := a.api.(interface {
+			ReportTunnelStatus(context.Context, string, mesh.Status) error
+		}); ok {
+			err = reporter.ReportTunnelStatus(ctx, hostID, meshStatus)
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if generation != a.stateGeneration || heartbeat != a.heartbeatGeneration {

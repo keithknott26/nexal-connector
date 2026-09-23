@@ -39,6 +39,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify local Xcode toolchain is licensed
+        run: xcodebuild -version
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26.x"
@@ -110,7 +113,7 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          APP="macos/build/neXal Connector.app"
+          APP="macos/build/Nexal Connector.app"
           IDENTITY="Developer ID Application: ${{ secrets.APPLE_SIGNING_IDENTITY_NAME }} ($TEAM_ID)"
           codesign --force --timestamp --options runtime \
             --keychain "$SIGNING_KEYCHAIN" --sign "$IDENTITY" \
@@ -132,7 +135,7 @@ jobs:
           fi
           STAGE="$RUNNER_TEMP/dmg"
           mkdir -p "$STAGE"
-          cp -R "macos/build/neXal Connector.app" "$STAGE/"
+          cp -R "macos/build/Nexal Connector.app" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
           # UDZO is compressed and read-only, which is what Gatekeeper expects.
           hdiutil create -volname "neXal Connector" -srcfolder "$STAGE" \
@@ -203,4 +206,6 @@ jobs:
       - name: Cleanup keychain
         if: always()
         run: |
-          security delete-keychain "$SIGNING_KEYCHAIN" 2>/dev/null || true
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" 2>/dev/null || true
+          fi

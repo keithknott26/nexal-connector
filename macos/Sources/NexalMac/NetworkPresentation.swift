@@ -156,11 +156,6 @@ struct NetworkPeer: Equatable, Identifiable {
         return "ssh \(user)@\(address)"
     }
 
-    func vncURL() -> String? {
-        guard case .sameNetwork(let address, _) = reachability else { return nil }
-        return "vnc://\(address)"
-    }
-
     var statusNote: String {
         switch reachability {
         case .sameNetwork:  return "On this network"

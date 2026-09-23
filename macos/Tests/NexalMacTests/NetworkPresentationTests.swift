@@ -124,7 +124,6 @@ final class NetworkPresentationTests: XCTestCase {
                                reachability: .sameNetwork(address: "192.168.1.42", port: 8443))
         XCTAssertEqual(peer.displayAddress, "192.168.1.42")
         XCTAssertEqual(peer.sshCommand(user: "kknott"), "ssh kknott@192.168.1.42")
-        XCTAssertEqual(peer.vncURL(), "vnc://192.168.1.42")
         XCTAssertTrue(peer.reachability.isConnectable)
     }
 
@@ -134,7 +133,6 @@ final class NetworkPresentationTests: XCTestCase {
         let peer = NetworkPeer(id: "h2", name: "MacBook", reachability: .remoteNoRoute)
         XCTAssertNil(peer.displayAddress)
         XCTAssertNil(peer.sshCommand(user: "kknott"))
-        XCTAssertNil(peer.vncURL())
         XCTAssertFalse(peer.reachability.isConnectable)
         XCTAssertTrue(peer.statusNote.lowercased().contains("no private route"),
                       "the reason must be stated, not left as a blank field")

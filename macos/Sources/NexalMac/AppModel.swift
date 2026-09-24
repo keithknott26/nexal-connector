@@ -447,6 +447,19 @@ final class AppModel: ObservableObject {
         pairingWatch?.cancel(); pairingWatch = nil
         pairing = nil; pairingProblem = nil; message = nil
 
+        // The running agent holds the configuration lock for its whole life, and
+        // leaving must rewrite that configuration. Stop the agent this app launched
+        // first; `pair-v2 --leave` stops one started elsewhere by itself. `child` is
+        // cleared before terminating so its handler does not report a crash.
+        if let owned = child {
+            child = nil
+            processOwned = false
+            if owned.isRunning {
+                owned.terminate()
+                await Task.detached(priority: .userInitiated) { owned.waitUntilExit() }.value
+            }
+        }
+
         leavePhase = .leaving
         activity = "Leaving the neXal network\u{2026}"
         do {
@@ -455,14 +468,6 @@ final class AppModel: ObservableObject {
             busy = false; activity = nil
             leavePhase = .failed(reason: "\(error.localizedDescription) This Mac may still be on the network; try again.")
             return
-        }
-
-        // The agent this app launched has no identity left; stop it. Clear `child`
-        // first so its termination handler does not report an unexpected stop.
-        if let owned = child {
-            child = nil
-            processOwned = false
-            if owned.isRunning { owned.terminate() }
         }
         status = nil; peersView = PeersView(); tunnelEvidence = TunnelEvidence(); timeMachine = nil
         enrollmentPresentation = EnrollmentPresentation()

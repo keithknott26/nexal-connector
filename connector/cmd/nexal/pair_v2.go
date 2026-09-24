@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"os"
 	"runtime"
+	"syscall"
 	"time"
 
 	"nexal/connector/internal/client"
@@ -95,7 +97,7 @@ func rejoinPairV2(ctx context.Context, path string) error {
 }
 
 func leavePairV2(ctx context.Context, path string) error {
-	unlock, err := config.Lock(path)
+	unlock, err := lockStoppingAgent(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -339,4 +341,50 @@ func cancelPairV2(ctx context.Context, path, sessionID string) error {
 		return err
 	}
 	return emit(map[string]any{"enrollmentCancelled": true, "sessionId": sessionID})
+}
+
+// lockStoppingAgent takes the configuration lock for leaving the network. The
+// running agent (`nexal run`) holds that lock for its whole lifetime, so leaving
+// failed with "another connector process holds this configuration" whenever the
+// Mac was connected, which is the only time leaving makes sense. An agent running
+// THIS configuration is asked to stop (SIGTERM, which it handles by shutting down
+// cleanly) and the lock is retried; an agent on another configuration, or a lock
+// held by anything else, is left alone and reported.
+func lockStoppingAgent(ctx context.Context, path string) (func(), error) {
+	unlock, err := config.Lock(path)
+	if err == nil {
+		return unlock, nil
+	}
+	pid, holderConfig, ok := config.RunningAgent()
+	if !ok || !sameConfigFile(holderConfig, path) {
+		return nil, err
+	}
+	if kerr := syscall.Kill(pid, syscall.SIGTERM); kerr != nil {
+		return nil, err
+	}
+	// The macOS app kills any CLI command after 20s; leave room for the coordinator call.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+		if unlock, lerr := config.Lock(path); lerr == nil {
+			return unlock, nil
+		}
+	}
+	return nil, errors.New("the running connector did not stop within 10 seconds; quit neXal Connector and try again")
+}
+
+func sameConfigFile(a, b string) bool {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	sb, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(sa, sb)
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -124,4 +125,47 @@ func readHolder(f *os.File) string {
 		return "config " + cfg
 	}
 	return ""
+}
+
+// RunningAgent reports the process that currently holds the host-wide connector lock
+// (the long-running `nexal run` agent) and the configuration it was started with. ok
+// is false when no agent holds it.
+//
+// The recorded pid is trusted only while the lock is actually held: an agent that
+// crashed leaves its pid in the file, and that number may since belong to an unrelated
+// process. A shared, non-blocking probe distinguishes the two without taking the lock
+// from a real holder.
+func RunningAgent() (pid int, configPath string, ok bool) {
+	dir, err := machineStateDir()
+	if err != nil {
+		return 0, "", false
+	}
+	path := filepath.Join(dir, machineLockName)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if err != nil {
+		return 0, "", false
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	if err := syscall.Flock(fd, syscall.LOCK_SH|syscall.LOCK_NB); err == nil {
+		_ = syscall.Flock(fd, syscall.LOCK_UN)
+		return 0, "", false // nobody is running
+	}
+	buf := make([]byte, 512)
+	n, _ := f.ReadAt(buf, 0)
+	var pidText string
+	for _, line := range strings.Split(string(buf[:max(n, 0)]), "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "pid "):
+			pidText = strings.TrimSpace(strings.TrimPrefix(line, "pid "))
+		case strings.HasPrefix(line, "config "):
+			configPath = strings.TrimSpace(strings.TrimPrefix(line, "config "))
+		}
+	}
+	pid, err = strconv.Atoi(pidText)
+	if err != nil || pid <= 1 || configPath == "" {
+		return 0, "", false
+	}
+	return pid, configPath, true
 }

@@ -5,6 +5,7 @@ import SwiftUI
 /// Implementation defaults and account policy do not belong in this menu.
 struct NetworkPanel: View {
     @EnvironmentObject var model: AppModel
+    @State private var confirmingLeave = false
 
     var body: some View {
         ScrollView {
@@ -22,6 +23,12 @@ struct NetworkPanel: View {
             .padding(20)
         }
         .frame(width: 460, height: 700)
+        .confirmationDialog("Leave the neXal network?", isPresented: $confirmingLeave, titleVisibility: .visible) {
+            Button("Leave network", role: .destructive) { Task { await model.leaveNetwork() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This revokes this Mac, disconnects its tunnel, and removes its local network credentials.")
+        }
         .task {
             while !Task.isCancelled {
                 await model.refresh()
@@ -48,7 +55,6 @@ struct NetworkPanel: View {
                  detail: "Open neXal on your iPhone and sign in with Apple.", symbol: "apple.logo")
             step(number: "2", title: "Pair this Mac",
                  detail: "Show a one-time code here, then scan it with the neXal iPhone app.", symbol: "qrcode")
-            coordinatorPicker
             Button { Task { await model.startPairing() } } label: {
                 Label("Show pairing code", systemImage: "qrcode").frame(maxWidth: .infinity)
             }
@@ -61,27 +67,6 @@ struct NetworkPanel: View {
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
-    }
-
-    /// Pre-production only: choose which hosted coordinator `init` writes into a
-    /// new config. Once config.json exists its origin is fixed, so the picker is
-    /// locked and shows the saved value instead. Remove this before production.
-    private var coordinatorPicker: some View {
-        Picker("Coordinator", selection: $model.coordinator) {
-            Text("Development").tag(CoordinatorOrigins.development)
-            Text("Production").tag(CoordinatorOrigins.production)
-            if let saved = model.configuredCoordinator,
-               ![CoordinatorOrigins.development, CoordinatorOrigins.production].contains(saved) {
-                Text(URL(string: saved)?.host ?? saved).tag(saved)
-            }
-        }
-        .pickerStyle(.menu)
-        .disabled(model.busy || model.configurationExists)
-        .help(model.configurationExists
-              ? "Fixed by this Mac's saved configuration. Remove config.json to choose again."
-              : "Which neXal coordinator this Mac pairs with.")
-        .onAppear { if let saved = model.configuredCoordinator { model.coordinator = saved } }
-        .accessibilityIdentifier("coordinator-picker")
     }
 
     private func pairing(_ linking: LinkingState) -> some View {
@@ -150,6 +135,10 @@ struct NetworkPanel: View {
                     Task { await model.resetUnfinishedPairing() }
                 }.disabled(model.busy)
             }
+            Divider()
+            Button("Leave neXal network", role: .destructive) {
+                confirmingLeave = true
+            }.disabled(model.busy)
         }
     }
 
@@ -229,7 +218,7 @@ struct NetworkPanel: View {
     }
 
     private func pathSummary(_ peers: [ConnectorStatus.MeshPeer]) -> String {
-        guard !peers.isEmpty else { return "No peer route reported" }
+        guard !peers.isEmpty else { return "Waiting for another computer" }
         let direct = peers.filter { $0.path == "direct" }.count
         let relay = peers.filter { $0.path == "relay" }.count
         let cloud = peers.filter { $0.path == "cloud" }.count
@@ -244,8 +233,8 @@ struct NetworkPanel: View {
 
     private func routeLabel(_ peer: ConnectorStatus.MeshPeer) -> String {
         switch peer.path {
-        case "direct": return peer.pathLabel.isEmpty ? "Direct WireGuard" : peer.pathLabel
-        case "relay": return peer.relayRegion.map { "neXal Relay — \($0)" } ?? "neXal Relay"
+        case "direct": return peer.pathLabel.isEmpty ? "P2P — direct" : peer.pathLabel
+        case "relay": return peer.relayRegion.map { "neXal Relay — \($0) · metered" } ?? "neXal Relay · metered"
         case "cloud": return "Cloudflare route"
         default: return "Route unavailable"
         }

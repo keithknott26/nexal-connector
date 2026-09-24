@@ -25,6 +25,7 @@ func pairV2Command(ctx context.Context, args []string) error {
 	statusID := f.String("status", "", "read a version 2 enrollment session")
 	cancelID := f.String("cancel", "", "cancel a version 2 enrollment session")
 	resetLocal := f.Bool("reset-local", false, "clear an unfinished local enrollment")
+	leave := f.Bool("leave", false, "leave the current neXal network")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -41,8 +42,11 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *resetLocal {
 		modes++
 	}
+	if *leave {
+		modes++
+	}
 	if modes != 1 {
-		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, or --reset-local")
+		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, --reset-local, or --leave")
 	}
 	if *create {
 		return createPairV2(ctx, *path)
@@ -53,7 +57,53 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *resetLocal {
 		return resetLocalPairV2(ctx, *path)
 	}
+	if *leave {
+		return leavePairV2(ctx, *path)
+	}
 	return statusPairV2(ctx, *path, *statusID)
+}
+
+func leavePairV2(ctx context.Context, path string) error {
+	unlock, err := config.Lock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if cfg.Enrollment == nil || cfg.HostID == "" {
+		return emit(map[string]any{"left": true})
+	}
+	secrets, err := config.NewSecrets(path, cfg)
+	if err != nil {
+		return err
+	}
+	hostToken, err := secrets.Get(ctx, "host")
+	if err != nil {
+		return errors.New("host credential unavailable; remove this computer from the iPhone app")
+	}
+	api, err := client.New(cfg.Coordinator, hostToken, cfg.Development)
+	if err != nil {
+		return err
+	}
+	if err := api.LeaveMeshNetwork(ctx); err != nil {
+		return err
+	}
+	// Server revocation is authoritative. Stopping the local runtime is best
+	// effort because an already-revoked machine must still become locally reset.
+	_ = (mesh.ExecRunner{}).Run(ctx, "nexal-network", "down")
+	for _, name := range []string{"host", "mesh-credential", "enrollment-session-" + cfg.Enrollment.SessionID} {
+		if err := secrets.Delete(ctx, name); err != nil {
+			return err
+		}
+	}
+	cfg.HostID, cfg.Enrollment, cfg.Tunnel = "", nil, nil
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	return emit(map[string]any{"left": true})
 }
 
 func resetLocalPairV2(ctx context.Context, path string) error {

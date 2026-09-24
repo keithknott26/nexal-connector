@@ -20,7 +20,9 @@ final class ConnectorUIContractTests: XCTestCase {
         XCTAssertTrue(text.contains("Activity graphs"))
         XCTAssertTrue(text.contains("Post-quantum protection"))
         XCTAssertTrue(text.contains("Cloudflare route"))
-        XCTAssertTrue(text.contains("Direct WireGuard"))
+        XCTAssertTrue(text.contains("P2P — direct"))
+        XCTAssertTrue(text.contains("Leave neXal network"))
+        XCTAssertTrue(text.contains("metered"))
     }
 
     func testImplementationDefaultsAreNotCustomerControls() throws {

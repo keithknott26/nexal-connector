@@ -354,6 +354,20 @@ final class AppModel: ObservableObject {
         await updatePeers()
     }
 
+    func leaveNetwork() async {
+        guard !busy, isLinked else { return }
+        activity = "Leaving the neXal network\u{2026}"
+        busy = true
+        defer { busy = false; activity = nil }
+        do {
+            _ = try await invoke(.leaveNetwork)
+            status = nil; pairing = nil; peersView = PeersView(); tunnelEvidence = TunnelEvidence()
+            enrollmentPresentation = EnrollmentPresentation()
+            lastUpdated = nil
+            message = "This Mac left the neXal network. You can pair it again at any time."
+        } catch { message = error.localizedDescription }
+    }
+
     /// Reads tunnel-evidence.json, which `nexal run` writes beside config.json.
     ///
     /// Read from disk rather than requested from the agent because the agent writes it

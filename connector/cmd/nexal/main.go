@@ -25,6 +25,7 @@ import (
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/diagnostics"
 	"nexal/connector/internal/discovery"
+	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/tunnel"
 )
 
@@ -466,6 +467,13 @@ func runCommand(ctx context.Context, args []string) error {
 			Config:      c.Discovery,
 			StaticPeers: agent.StaticPeersFrom(c.StaticPeers),
 		}))
+	}
+	// Version-2 enrollment always uses the bundled secure-networking runtime.
+	// Feed its live peer/path evidence into status; otherwise Agent's safe
+	// default is UnavailableProvider and the native UI can never show peers even
+	// while the overlay is healthy.
+	if c.Enrollment != nil {
+		opts = append(opts, agent.WithMeshProvider(mesh.NewRuntimeProvider()))
 	}
 	a, err := agent.New(c, *path, api, probe, *pull, opts...)
 	if err != nil {

@@ -162,6 +162,19 @@ func (c *Client) AcknowledgeEnrollmentCredentials(ctx context.Context, id string
 	return nil
 }
 
+func (c *Client) LeaveMeshNetwork(ctx context.Context) error {
+	var out struct {
+		Left bool `json:"left"`
+	}
+	if err := c.call(ctx, "POST", "/api/v2/mesh/leave", struct{}{}, &out); err != nil {
+		return err
+	}
+	if !out.Left {
+		return errors.New("coordinator did not confirm network departure")
+	}
+	return nil
+}
+
 func validDigest(v string) bool {
 	if len(v) != 64 {
 		return false

@@ -3,10 +3,20 @@ package timemachine
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func validConfig() Config {
 	return Config{Enabled: true, Entitled: true, Revision: 1, ShareName: "NexalBackup", MountPath: "/mnt/nexal-backup", Backend: BackendJuiceFS, QuotaBytes: 500 << 30, MeshCIDRs: []string{"100.64.0.0/10", "10.20.0.0/16"}, Advertise: true}
+}
+
+func TestShortLivedCredentialIsValidatedAndAlwaysRedacted(t *testing.T) {
+	now:=time.Now(); c:=Credentials{AccessKeyID:"access",SecretAccessKey:"secret",SessionToken:"session",Bucket:"bucket",Prefix:"tenants/t/time-machine/n/",Permission:"object-read-write",Endpoint:"https://account.example.test",ExpiresAt:now.Add(time.Hour).UTC().Format(time.RFC3339Nano),TTLSeconds:3600,MaxTTLSeconds:3600,WritesAreAccounted:false}
+	if err:=c.Validate(now);err!=nil{t.Fatal(err)}
+	if strings.Contains(c.String(),c.SecretAccessKey){t.Fatal("formatted credential disclosed secret")}
+	c.Zero();if c.AccessKeyID!=""||c.SecretAccessKey!=""||c.SessionToken!=""{t.Fatal("credential was not cleared")}
+	c=Credentials{AccessKeyID:"a",SecretAccessKey:"s",SessionToken:"t",Bucket:"b",Prefix:"p",Permission:"object-read-write",Endpoint:"http://plain.test",ExpiresAt:now.Add(time.Hour).Format(time.RFC3339Nano),TTLSeconds:3600,MaxTTLSeconds:3600}
+	if c.Validate(now)==nil{t.Fatal("plaintext credential endpoint accepted")}
 }
 
 func TestDisabledIsClosedAndNeedsNoConfig(t *testing.T) {
@@ -66,5 +76,22 @@ func TestSambaStanzaIsFruitCapableQuotaBoundAndMeshOnly(t *testing.T) {
 		if !strings.Contains(b, want) {
 			t.Errorf("missing %q", want)
 		}
+	}
+}
+
+func TestDeployedCoordinatorShapeAcceptsDefaultShareAndRejectsTraversal(t *testing.T) {
+	w := CoordinatorConfig{Enabled: true, NetworkID: "23027787-ec10-462d-aeac-c87ac011f7da", Protocol: "smb", Port: 445, QuotaBytes: 100 << 30, RefreshAfterSeconds: 60}
+	w.Bonjour.ServiceType = "_adisk._tcp"
+	w.Bonjour.ShareName = "neXal Time Machine"
+	w.Storage.Driver = "juicefs"
+	w.Storage.Backend = "r2"
+	w.Storage.ObjectPrefix = "tenants/t/time-machine/n/"
+	w.Storage.CredentialEndpoint = "/api/v2/devices/h/time-machine/credentials"
+	if _, err := w.Local(); err != nil {
+		t.Fatalf("deployed shape rejected: %v", err)
+	}
+	w.NetworkID = "../../private"
+	if _, err := w.Local(); err == nil {
+		t.Fatal("path traversal network id accepted")
 	}
 }

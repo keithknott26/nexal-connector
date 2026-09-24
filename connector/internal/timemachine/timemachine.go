@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net/netip"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -31,6 +33,105 @@ type Config struct {
 	QuotaBytes uint64   `json:"quotaBytes,omitempty"`
 	MeshCIDRs  []string `json:"meshCidrs,omitempty"`
 	Advertise  bool     `json:"advertise"`
+}
+
+type CoordinatorConfig struct {
+	Enabled      bool   `json:"enabled"`
+	ServiceState string `json:"serviceState"`
+	ComputerID   string `json:"computerId"`
+	NetworkID    string `json:"networkId"`
+	Protocol     string `json:"protocol"`
+	Port         uint16 `json:"port"`
+	Bonjour      struct {
+		ServiceType string `json:"serviceType"`
+		ShareName   string `json:"shareName"`
+	} `json:"bonjour"`
+	Storage struct {
+		Driver              string `json:"driver"`
+		Backend             string `json:"backend"`
+		ObjectPrefix        string `json:"objectPrefix"`
+		CredentialEndpoint  string `json:"credentialEndpoint"`
+		CredentialsIncluded bool   `json:"credentialsIncluded"`
+	} `json:"storage"`
+	QuotaBytes          uint64 `json:"quotaBytes"`
+	RefreshAfterSeconds uint64 `json:"refreshAfterSeconds"`
+}
+
+func (w CoordinatorConfig) Local() (Config, error) {
+	if !w.Enabled {
+		return Config{}, nil
+	}
+	validID := regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+	if w.Protocol != "smb" || w.Port != 445 || w.Bonjour.ServiceType != "_adisk._tcp" || w.Storage.Driver != "juicefs" || w.Storage.Backend != "r2" || w.Storage.CredentialsIncluded || w.RefreshAfterSeconds < 15 || w.RefreshAfterSeconds > 3600 || !validID.MatchString(w.NetworkID) || !strings.HasPrefix(w.Storage.ObjectPrefix, "tenants/") || strings.Contains(w.Storage.ObjectPrefix, "..") || !strings.HasSuffix(w.Storage.CredentialEndpoint, "/time-machine/credentials") {
+		return Config{}, errors.New("invalid Time Machine coordinator configuration")
+	}
+	c := Config{Enabled: true, Entitled: true, Revision: w.RefreshAfterSeconds, ShareName: w.Bonjour.ShareName, Backend: BackendJuiceFS, QuotaBytes: w.QuotaBytes, Advertise: true,
+		MountPath: filepath.Join("/var/lib/nexal/time-machine", w.NetworkID), MeshCIDRs: []string{"100.64.0.0/10"}}
+	return c, c.Validate()
+}
+
+type Credentials struct {
+	AccessKeyID        string `json:"accessKeyId"`
+	SecretAccessKey    string `json:"secretAccessKey"`
+	SessionToken       string `json:"sessionToken"`
+	Bucket             string `json:"bucket"`
+	Prefix             string `json:"prefix"`
+	Permission         string `json:"permission"`
+	Endpoint           string `json:"endpoint"`
+	ExpiresAt          string `json:"expiresAt"`
+	TTLSeconds         uint64 `json:"ttlSeconds"`
+	MaxTTLSeconds      uint64 `json:"maxTtlSeconds"`
+	WritesAreAccounted bool   `json:"writesAreAccounted"`
+}
+
+func (Credentials) String() string { return "time-machine-credentials:[redacted]" }
+func (c Credentials) Validate(now time.Time) error {
+	exp, err := time.Parse(time.RFC3339Nano, c.ExpiresAt)
+	if err != nil || !exp.After(now.Add(30*time.Second)) || exp.After(now.Add(61*time.Minute)) || c.TTLSeconds == 0 || c.TTLSeconds > 3600 || c.MaxTTLSeconds > 3600 || c.Permission != "object-read-write" || c.WritesAreAccounted || c.AccessKeyID == "" || c.SecretAccessKey == "" || c.SessionToken == "" || c.Bucket == "" || c.Prefix == "" {
+		return errors.New("invalid Time Machine storage credential")
+	}
+	if !strings.HasPrefix(c.Endpoint, "https://") || strings.ContainsAny(c.Endpoint, " \r\n\t") {
+		return errors.New("invalid Time Machine storage endpoint")
+	}
+	return nil
+}
+func (c *Credentials) Zero() {
+	if c == nil {
+		return
+	}
+	c.AccessKeyID = ""
+	c.SecretAccessKey = ""
+	c.SessionToken = ""
+}
+
+type Usage struct {
+	SampleID           string `json:"sampleId"`
+	UsedBytes          uint64 `json:"usedBytes"`
+	BillableUsageBytes uint64 `json:"billableUsageBytes"`
+	ObservedAt         string `json:"observedAt"`
+}
+
+func (u Usage) Validate() error {
+	if len(u.SampleID) < 8 || len(u.SampleID) > 120 || strings.ContainsAny(u.SampleID, " \r\n\t") {
+		return errors.New("invalid usage sample id")
+	}
+	t, e := time.Parse(time.RFC3339Nano, u.ObservedAt)
+	if e != nil || t.After(time.Now().Add(time.Minute)) {
+		return errors.New("invalid usage observation time")
+	}
+	return nil
+}
+func CoordinatorState(s Status) (string, string) {
+	switch s.State {
+	case "disabled":
+		return "disabled", ""
+	case "ready":
+		return "advertising", ""
+	case "configuring", "action_required":
+		return "pending", s.DetailCode
+	default:
+		return "error", first(s.DetailCode, "time_machine_unavailable")
+	}
 }
 
 func (c Config) Validate() error {
@@ -79,12 +180,12 @@ func meshAddress(a netip.Addr) bool {
 }
 
 func validateName(s string) error {
-	if s == "" || len(s) > 32 || strings.HasPrefix(s, "-") {
+	if s == "" || len(s) > 64 || strings.TrimSpace(s) != s || strings.HasPrefix(s, "-") {
 		return errors.New("invalid Time Machine share name")
 	}
 	for _, r := range s {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
-			return errors.New("Time Machine share name may contain only letters, digits, dash and underscore")
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == ' ') {
+			return errors.New("Time Machine share name may contain only letters, digits, spaces, dash and underscore")
 		}
 	}
 	return nil

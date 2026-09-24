@@ -17,8 +17,15 @@ authoritative backend usage, not the configured quota or client-reported bytes.
 ## Required external provisioning
 
 - An active paid entitlement and enabled development feature flag.
-- A dedicated JuiceFS mount backed by R2. JuiceFS/R2 credentials are provisioned
-  outside connector configuration and must never be returned by the coordinator.
+- A dedicated JuiceFS mount backed by R2. Short-lived R2 credentials come from
+  the separate host-authenticated credential endpoint and are never embedded in
+  configuration, status, logs, command arguments, or the native UI.
+- A tenant-scoped JuiceFS metadata service. The current Worker contract returns
+  temporary R2/S3 object credentials but no JuiceFS metadata URL or credential;
+  R2 is object storage, not the metadata engine JuiceFS requires. Until that
+  contract exists, `nexal time-machine` reports
+  `juicefs_metadata_unconfigured`, does not mint the R2 credential, and does not
+  create or advertise a share.
 - A privileged, signed helper to install/reconcile the SMB configuration and
   Bonjour advertisement. The unprivileged connector does not silently elevate.
 - On Linux, Samba built with `vfs_fruit` and an isolated `nexal-timemachine`
@@ -32,6 +39,8 @@ authoritative backend usage, not the configured quota or client-reported bytes.
 
 - `GET /api/v2/devices/{hostID}/time-machine/config`
 - `POST /api/v2/devices/{hostID}/time-machine/status`
+- `POST /api/v2/devices/{hostID}/time-machine/credentials`
+- `POST /api/v2/devices/{hostID}/time-machine/usage`
 
 Both use the existing host bearer credential. A missing, invalid, revoked, or
 unentitled configuration fails closed. The status state is one of `disabled`,

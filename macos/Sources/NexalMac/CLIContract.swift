@@ -30,6 +30,7 @@ enum CLICommand {
     /// The live peer view. Named peers-view in the CLI because `peers` is invitation
     /// and enrollment management, which reports no addresses.
     case peersView
+	case timeMachine
     /// Mint a phone pairing and render it. `--no-poll` is deliberate: this app
     /// polls with `pairingStatus` through the SAME bounded `ConnectorProcess`
     /// execution as every other command, rather than holding a long-lived child
@@ -63,6 +64,7 @@ enum CLICommand {
         case .run: command = ["run"]
         case .status: command = ["status"]
         case .peersView: command = ["peers-view"]
+		case .timeMachine: command = ["time-machine"]
         case .pause: command = ["pause"]
         case .resume: command = ["resume"]
         case .acceptJobs: command = ["accept-jobs"]
@@ -138,6 +140,20 @@ enum ShellError: LocalizedError {
             return "The connector returned a pairing this app cannot display. Update the app and connector together; no code is shown rather than showing one that may not scan."
         }
     }
+}
+
+struct TimeMachineReport: Decodable {
+	struct State: Decodable {
+		let state: String; let enabled: Bool; let entitled: Bool
+		let capacityBytes: UInt64?; let freeBytes: UInt64?; let shareName: String?
+		let advertised: Bool; let detailCode: String?
+	}
+	let timeMachine: State
+	let action: String?
+	static func decode(_ data: Data) throws -> Self {
+		do { return try JSONDecoder().decode(Self.self, from: data) }
+		catch { throw ShellError.invalidStatus }
+	}
 }
 
 struct ConnectorStatus: Decodable {

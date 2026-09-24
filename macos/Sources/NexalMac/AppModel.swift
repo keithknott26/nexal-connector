@@ -62,6 +62,7 @@ final class AppModel: ObservableObject {
     /// The other Macs, from `nexal peers-view`. Reachability is classified by the
     /// connector; the app does not decide which address is dialable.
     @Published private(set) var peersView = PeersView()
+	@Published private(set) var timeMachine: TimeMachineReport?
     @Published var developmentEnvironment = false {
         didSet {
             if oldValue != developmentEnvironment {
@@ -75,6 +76,7 @@ final class AppModel: ObservableObject {
     /// the panel's single status poll because a pairing lives for five minutes and
     /// must be watched more closely than that poll's ten-second cadence.
     private var pairingWatch: Task<Void, Never>?
+	private var lastTimeMachineCheck: Date?
     /// The only place a capability source is named. Swapping the implementation
     /// changes no view, presenter or chart.
     private let capabilitySource: TransportCapabilityProviding
@@ -331,6 +333,7 @@ final class AppModel: ObservableObject {
             await start()
             await updateTunnelEvidence()
             await updatePeers()
+			await updateTimeMachine()
             return
         }
 
@@ -352,6 +355,7 @@ final class AppModel: ObservableObject {
         // successfully read.
         await updateTunnelEvidence()
         await updatePeers()
+		await updateTimeMachine()
     }
 
     func leaveNetwork() async {
@@ -400,6 +404,17 @@ final class AppModel: ObservableObject {
         }
         peersView = decoded
     }
+
+	func updateTimeMachine(force: Bool = false) async {
+		if !force, let lastTimeMachineCheck, Date().timeIntervalSince(lastTimeMachineCheck) < 60 { return }
+		lastTimeMachineCheck = Date()
+		guard hasPersistedHostIdentity, let data = try? await invoke(.timeMachine),
+		      let decoded = try? TimeMachineReport.decode(data) else {
+			timeMachine = nil
+			return
+		}
+		timeMachine = decoded
+	}
 
     func acceptJobsNow() async {
         guard !busy, developmentEnvironment else { return }

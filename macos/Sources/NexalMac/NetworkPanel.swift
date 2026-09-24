@@ -129,6 +129,10 @@ struct NetworkPanel: View {
             }
             Divider()
             activityGraphs
+			if let report = model.timeMachine, report.timeMachine.enabled {
+				Divider()
+				timeMachine(report)
+			}
             if model.hasUnfinishedEnrollment {
                 Divider()
                 Button("Clear failed pairing and start over", role: .destructive) {
@@ -216,6 +220,35 @@ struct NetworkPanel: View {
         .font(.subheadline.weight(.semibold))
         .accessibilityIdentifier("activity-graphs")
     }
+
+	private func timeMachine(_ report: TimeMachineReport) -> some View {
+		VStack(alignment: .leading, spacing: 7) {
+			Label("Time Machine", systemImage: "externaldrive.badge.timemachine")
+				.font(.subheadline.weight(.semibold))
+			LabeledContent("Status", value: report.timeMachine.state.replacingOccurrences(of: "_", with: " ").capitalized)
+			if let name = report.timeMachine.shareName { LabeledContent("Backup destination", value: name) }
+			if let cap = report.timeMachine.capacityBytes { LabeledContent("Storage limit", value: bytes(cap)) }
+			if let code = report.timeMachine.detailCode {
+				Text(timeMachineDetail(code)).font(.caption).foregroundStyle(.secondary)
+			}
+			if let action = report.action { Text(action).font(.caption2).foregroundStyle(.secondary) }
+			Button("Check again") { Task { await model.updateTimeMachine(force: true) } }.disabled(model.busy)
+		}
+		.font(.caption)
+		.padding(12)
+		.background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+		.accessibilityIdentifier("time-machine-status")
+	}
+
+	private func timeMachineDetail(_ code: String) -> String {
+		switch code {
+		case "juicefs_metadata_unconfigured": return "Cloud backup storage is not ready on this computer yet. No storage credential was downloaded."
+		case "paid_entitlement_required": return "This feature requires an eligible subscription."
+		case "administrator_approval_required": return "Administrator approval is required to publish the backup destination."
+		case "bonjour_advertisement_missing": return "The backup share is running but is not currently discoverable."
+		default: return "The backup destination needs attention (\(code))."
+		}
+	}
 
     private func pathSummary(_ peers: [ConnectorStatus.MeshPeer]) -> String {
         guard !peers.isEmpty else { return "Waiting for another computer" }

@@ -11,12 +11,22 @@ func validConfig() Config {
 }
 
 func TestShortLivedCredentialIsValidatedAndAlwaysRedacted(t *testing.T) {
-	now:=time.Now(); c:=Credentials{AccessKeyID:"access",SecretAccessKey:"secret",SessionToken:"session",Bucket:"bucket",Prefix:"tenants/t/time-machine/n/",Permission:"object-read-write",Endpoint:"https://account.example.test",ExpiresAt:now.Add(time.Hour).UTC().Format(time.RFC3339Nano),TTLSeconds:3600,MaxTTLSeconds:3600,WritesAreAccounted:false}
-	if err:=c.Validate(now);err!=nil{t.Fatal(err)}
-	if strings.Contains(c.String(),c.SecretAccessKey){t.Fatal("formatted credential disclosed secret")}
-	c.Zero();if c.AccessKeyID!=""||c.SecretAccessKey!=""||c.SessionToken!=""{t.Fatal("credential was not cleared")}
-	c=Credentials{AccessKeyID:"a",SecretAccessKey:"s",SessionToken:"t",Bucket:"b",Prefix:"p",Permission:"object-read-write",Endpoint:"http://plain.test",ExpiresAt:now.Add(time.Hour).Format(time.RFC3339Nano),TTLSeconds:3600,MaxTTLSeconds:3600}
-	if c.Validate(now)==nil{t.Fatal("plaintext credential endpoint accepted")}
+	now := time.Now()
+	c := Credentials{AccessKeyID: "access", SecretAccessKey: "secret", SessionToken: "session", Bucket: "bucket", Prefix: "tenants/t/time-machine/n/", Permission: "object-read-write", Endpoint: "https://account.example.test", ExpiresAt: now.Add(time.Hour).UTC().Format(time.RFC3339Nano), TTLSeconds: 3600, MaxTTLSeconds: 3600, WritesAreAccounted: false}
+	if err := c.Validate(now); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(c.String(), c.SecretAccessKey) {
+		t.Fatal("formatted credential disclosed secret")
+	}
+	c.Zero()
+	if c.AccessKeyID != "" || c.SecretAccessKey != "" || c.SessionToken != "" {
+		t.Fatal("credential was not cleared")
+	}
+	c = Credentials{AccessKeyID: "a", SecretAccessKey: "s", SessionToken: "t", Bucket: "b", Prefix: "p", Permission: "object-read-write", Endpoint: "http://plain.test", ExpiresAt: now.Add(time.Hour).Format(time.RFC3339Nano), TTLSeconds: 3600, MaxTTLSeconds: 3600}
+	if c.Validate(now) == nil {
+		t.Fatal("plaintext credential endpoint accepted")
+	}
 }
 
 func TestDisabledIsClosedAndNeedsNoConfig(t *testing.T) {

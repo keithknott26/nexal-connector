@@ -63,6 +63,9 @@ final class AppModel: ObservableObject {
     /// connector; the app does not decide which address is dialable.
     @Published private(set) var peersView = PeersView()
 	@Published private(set) var timeMachine: TimeMachineReport?
+    /// The "Leave neXal network" flow, rendered as a banner at the top of the panel.
+    /// nil when no leave has been asked for.
+    @Published private(set) var leavePhase: LeavePhase?
     @Published var developmentEnvironment = false {
         didSet {
             if oldValue != developmentEnvironment {
@@ -341,6 +344,8 @@ final class AppModel: ObservableObject {
 
     private func updateStatus() async throws {
         status = try ConnectorStatus.decode(try await invoke(.status))
+        // Paired again after leaving: the "Left the network" notice is stale.
+        if leavePhase == .left, isLinked { leavePhase = nil }
         enrollmentPresentation.observeHost(status?.hostId, for: selectedConfig)
         lastUpdated = Date()
         observe(status)
@@ -402,18 +407,73 @@ final class AppModel: ObservableObject {
 		await updateTimeMachine()
     }
 
+    /// First click on "Leave neXal network": ask inline. A dialog is not used
+    /// because MenuBarExtra windows do not reliably present one.
+    func requestLeave() {
+        guard leavePhase?.inProgress != true else { return }
+        guard isLinked else {
+            leavePhase = .failed(reason: "This Mac is not linked to a neXal network right now, so there is nothing to leave.")
+            return
+        }
+        leavePhase = .confirming
+    }
+
+    func cancelLeave() {
+        if leavePhase == .confirming { leavePhase = nil }
+    }
+
+    func dismissLeaveNotice() {
+        if leavePhase?.inProgress != true { leavePhase = nil }
+    }
+
     func leaveNetwork() async {
-        guard !busy, isLinked else { return }
-        activity = "Leaving the neXal network\u{2026}"
+        guard leavePhase == .confirming else { return }
+        leavePhase = .preparing
+        // The panel polls status every five seconds and that poll holds `busy`.
+        // Returning here (as before) silently swallowed the click; wait it out.
+        for _ in 0..<100 where busy {
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { break }
+        }
+        guard !busy else {
+            leavePhase = .failed(reason: "Another operation is still running. Try again in a moment; this Mac is still on the network.")
+            return
+        }
+        guard isLinked else {
+            leavePhase = .failed(reason: "This Mac is not linked to a neXal network right now, so there is nothing to leave.")
+            return
+        }
         busy = true
-        defer { busy = false; activity = nil }
+        activity = "Preparing to leave the neXal network\u{2026}"
+        pairingWatch?.cancel(); pairingWatch = nil
+        pairing = nil; pairingProblem = nil; message = nil
+
+        leavePhase = .leaving
+        activity = "Leaving the neXal network\u{2026}"
         do {
             _ = try await invoke(.leaveNetwork)
-            status = nil; pairing = nil; peersView = PeersView(); tunnelEvidence = TunnelEvidence()
-            enrollmentPresentation = EnrollmentPresentation()
-            lastUpdated = nil
-            message = "This Mac left the neXal network. You can pair it again at any time."
-        } catch { message = error.localizedDescription }
+        } catch {
+            busy = false; activity = nil
+            leavePhase = .failed(reason: "\(error.localizedDescription) This Mac may still be on the network; try again.")
+            return
+        }
+
+        // The agent this app launched has no identity left; stop it. Clear `child`
+        // first so its termination handler does not report an unexpected stop.
+        if let owned = child {
+            child = nil
+            processOwned = false
+            if owned.isRunning { owned.terminate() }
+        }
+        status = nil; peersView = PeersView(); tunnelEvidence = TunnelEvidence(); timeMachine = nil
+        enrollmentPresentation = EnrollmentPresentation()
+        lastUpdated = nil
+        observe(nil)
+        busy = false; activity = nil
+        leavePhase = .left
+
+        // Back to pairing: show a fresh QR and manual code straight away. If a code
+        // cannot be minted, the pairing screen shows why and offers the button.
+        await startPairing()
     }
 
     /// Reads tunnel-evidence.json, which `nexal run` writes beside config.json.

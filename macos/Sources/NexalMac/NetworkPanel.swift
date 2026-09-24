@@ -5,30 +5,32 @@ import SwiftUI
 /// Implementation defaults and account policy do not belong in this menu.
 struct NetworkPanel: View {
     @EnvironmentObject var model: AppModel
-    @State private var confirmingLeave = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                switch model.networkScreen {
-                case .needsConnector(let reason): blocked(reason)
-                case .notLinked: readyToPair
-                case .linking(let linking): pairing(linking)
-                case .linked(let network): connected(network)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    leaveBanner.id("leave-banner")
+                    switch model.networkScreen {
+                    case .needsConnector(let reason): blocked(reason)
+                    case .notLinked: readyToPair
+                    case .linking(let linking): pairing(linking)
+                    case .linked(let network): connected(network)
+                    }
+                    message
+                    footer
                 }
-                message
-                footer
+                .padding(20)
             }
-            .padding(20)
+            // The Leave button sits at the bottom of a long panel; bring the progress
+            // and result into view instead of changing something off screen.
+            .onChange(of: model.leavePhase) { _, phase in
+                guard let phase, phase != .confirming else { return }
+                withAnimation { proxy.scrollTo("leave-banner", anchor: .top) }
+            }
         }
         .frame(width: 460, height: 700)
-        .confirmationDialog("Leave the neXal network?", isPresented: $confirmingLeave, titleVisibility: .visible) {
-            Button("Leave network", role: .destructive) { Task { await model.leaveNetwork() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This revokes this Mac, disconnects its tunnel, and removes its local network credentials.")
-        }
         .task {
             while !Task.isCancelled {
                 await model.refresh()
@@ -141,9 +143,60 @@ struct NetworkPanel: View {
                 }.disabled(model.busy)
             }
             Divider()
-            Button("Leave neXal network", role: .destructive) {
-                confirmingLeave = true
-            }.disabled(model.busy)
+            if model.leavePhase == .confirming {
+                leaveConfirmation
+            } else {
+                Button("Leave neXal network", role: .destructive) { model.requestLeave() }
+                    .disabled(model.leavePhase?.inProgress == true)
+                    .accessibilityIdentifier("leave-network")
+            }
+        }
+    }
+
+    /// Inline instead of a dialog: MenuBarExtra windows do not reliably present one.
+    private var leaveConfirmation: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(LeavePhase.confirming.title, systemImage: LeavePhase.confirming.symbol)
+                .font(.subheadline.weight(.semibold))
+            Text(LeavePhase.confirming.detail)
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Cancel", role: .cancel) { model.cancelLeave() }
+                Spacer()
+                Button("Leave network", role: .destructive) { Task { await model.leaveNetwork() } }
+                    .buttonStyle(.borderedProminent).tint(.red)
+                    .accessibilityIdentifier("confirm-leave-network")
+            }
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Progress and outcome of leaving, at the top of the panel. Stays visible
+    /// above the new pairing code after a successful leave.
+    @ViewBuilder private var leaveBanner: some View {
+        if let phase = model.leavePhase, phase != .confirming,
+           !(phase == .left && model.isLinked) {
+            HStack(alignment: .top, spacing: 10) {
+                if phase.inProgress {
+                    ProgressView().controlSize(.small).padding(.top, 2)
+                } else {
+                    Image(systemName: phase.symbol).foregroundStyle(color(phase.severity))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(phase.title).font(.subheadline.weight(.semibold))
+                    Text(phase.detail).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                Spacer(minLength: 0)
+                if !phase.inProgress {
+                    Button { model.dismissLeaveNotice() } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless).accessibilityLabel("Dismiss")
+                }
+            }
+            .padding(12)
+            .background(color(phase.severity).opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityIdentifier("leave-status")
         }
     }
 

@@ -34,7 +34,7 @@ func TestStartupFailureDoesNotLeakSetupKey(t *testing.T) {
 }
 
 func TestStartupAlwaysRequiresRosenpassWithoutPermissiveMode(t *testing.T) {
-	args, err := (StartupPlan{SetupKey: "secret", ManagementURL: "https://management.example"}).Arguments()
+	args, err := (StartupPlan{SetupKey: "secret", ManagementURL: "https://management.example"}).Arguments("/private/tmp/credential")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +43,17 @@ func TestStartupAlwaysRequiresRosenpassWithoutPermissiveMode(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(args, " "), "rosenpass-permissive") {
 		t.Fatalf("permissive mode is forbidden: %v", args)
+	}
+}
+
+func TestStartupNeverPlacesCredentialInArguments(t *testing.T) {
+	runner := &runnerFixture{}
+	if err := (Controller{Plans: &planFixture{}, Runner: runner}).Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(runner.calls[0], " ")
+	if strings.Contains(joined, "secret") || !strings.Contains(joined, "--setup-key-file") || strings.Contains(joined, "--setup-key ") {
+		t.Fatalf("credential was not isolated from process arguments: %s", joined)
 	}
 }
 

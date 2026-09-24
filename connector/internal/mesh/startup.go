@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 // StartupPlan is persisted by the privileged adapter and rebuilt on every
@@ -84,11 +85,33 @@ func (c Controller) reconcile(ctx context.Context) error {
 	if err != nil {
 		return errors.New("cannot load mesh startup configuration")
 	}
-	args, err := plan.Arguments()
+	credential, err := os.CreateTemp("", "nexal-mesh-credential-*")
+	if err != nil {
+		return errors.New("cannot prepare secure networking credential")
+	}
+	credentialPath := credential.Name()
+	defer os.Remove(credentialPath)
+	if err := credential.Chmod(0o600); err != nil {
+		credential.Close()
+		return errors.New("cannot protect secure networking credential")
+	}
+	if _, err := credential.WriteString(plan.SetupKey); err != nil {
+		credential.Close()
+		return errors.New("cannot prepare secure networking credential")
+	}
+	if err := credential.Close(); err != nil {
+		return errors.New("cannot prepare secure networking credential")
+	}
+	args, err := plan.Arguments(credentialPath)
 	if err != nil {
 		return err
 	}
-	if err := c.Runner.Run(ctx, "nexal-network", args...); err != nil {
+	startupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := c.Runner.Run(startupCtx, "nexal-network", args...); err != nil {
+		if ctx.Err() == nil && errors.Is(startupCtx.Err(), context.DeadlineExceeded) {
+			return errors.New("secure networking service did not finish authentication; restart the neXal networking service and retry")
+		}
 		if errors.Is(err, os.ErrNotExist) || err.Error() == "secure networking runtime is not installed" {
 			return errors.New("secure networking runtime is not installed; reinstall neXal Connector 0.2.8 or later")
 		}
@@ -97,11 +120,11 @@ func (c Controller) reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (p StartupPlan) Arguments() ([]string, error) {
-	if p.SetupKey == "" || p.ManagementURL == "" {
+func (p StartupPlan) Arguments(credentialPath string) ([]string, error) {
+	if p.SetupKey == "" || p.ManagementURL == "" || credentialPath == "" {
 		return nil, errors.New("mesh startup configuration is incomplete")
 	}
-	return []string{"up", "--setup-key", p.SetupKey, "--management-url", p.ManagementURL, "--enable-rosenpass"}, nil
+	return []string{"up", "--setup-key-file", credentialPath, "--management-url", p.ManagementURL, "--enable-rosenpass"}, nil
 }
 
 // RuntimePeerEvidence is the only evidence that may lift strict-PQ gates.

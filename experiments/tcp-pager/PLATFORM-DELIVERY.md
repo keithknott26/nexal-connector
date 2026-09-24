@@ -28,7 +28,7 @@ bash experiments/tcp-pager/scripts/setup-lan-macos.sh \
 ```
 
 For the M2 use `--name "M2 mini"`. The default shared coordinator is
-`https://nexal-coordinator-dev.nexal.systems`. The named profile above uses
+`https://coordinator-dev.nexal.systems`. The named profile above uses
 `~/Library/Application Support/Nexal-Profiles/private-lan/config.json` on each
 Mac separately, preserving the original default
 `~/Library/Application Support/Nexal/config.json`. Without `--profile`, the

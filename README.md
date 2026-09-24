@@ -106,7 +106,7 @@ Use `--network-info` instead of enrollment/donor flags to list
 numbered connections without starting a listener.
 
 **Shared pilot ready for owner acceptance (2026-09-19):**
-[Open the dashboard](https://nexal-coordinator-dev.nexal.systems/) and use its
+[Open the dashboard](https://dashboard-dev.nexal.systems/) and use its
 neXal owner credential, not a Cloudflare API token, to authorize the tab.
 Dashboard assets, relay and confirmed host deletion are deployed. Both Macs
 have saved identities, currently both labeled `M4 mini`; compare IDs and CPU/RAM

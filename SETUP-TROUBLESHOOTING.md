@@ -23,7 +23,7 @@ active enrollment; its failed new `private-lan` enrollment is separate.
 
 ## Shared dashboard and owner credentials
 
-Open https://nexal-coordinator-dev.nexal.systems/ and authorize with the
+Open https://dashboard-dev.nexal.systems/ and authorize with the
 neXal owner credential provisioned for this coordinator. A Cloudflare API token
 deploys infrastructure; it is not a neXal dashboard or host credential.
 

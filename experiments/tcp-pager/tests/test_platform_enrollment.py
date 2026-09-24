@@ -13,7 +13,7 @@ import time
 import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts"
-ORIGIN = "https://nexal-coordinator-dev.nexal.systems"
+ORIGIN = "https://coordinator-dev.nexal.systems"
 INVITATION = "enr_" + "a" * 64
 
 

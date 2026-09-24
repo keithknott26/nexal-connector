@@ -123,7 +123,7 @@ now prepares the Go connector and prompts privately for a one-use invitation.
 `--prepare-only` stops before enrollment. Existing profiles are preserved,
 coordinator mismatches refused, and saved host IDs skip re-enrollment without
 claiming live credential verification. Defaults target the shared HTTPS
-`nexal-coordinator-dev.nexal.systems` and the normal neXal Keychain profile.
+`coordinator-dev.nexal.systems` and the normal neXal Keychain profile.
 No donor/agent/jobs start and no deployment occurs from the enrollment script.
 The shared-dev relay is now deployed separately. See `PLATFORM-DELIVERY.md`.
 Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pending.

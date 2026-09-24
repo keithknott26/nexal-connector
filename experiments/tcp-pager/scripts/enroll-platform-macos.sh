@@ -8,7 +8,7 @@ unset LD_PRELOAD LD_LIBRARY_PATH
 export GOTOOLCHAIN=local
 umask 077
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-COORDINATOR="https://nexal-coordinator-dev.nexal.systems"
+COORDINATOR="https://coordinator-dev.nexal.systems"
 CONFIG="$HOME/Library/Application Support/Nexal/config.json"
 NAME="Nexal Mac"
 NAME_EXPLICIT=false

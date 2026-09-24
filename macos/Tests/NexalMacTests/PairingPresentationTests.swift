@@ -178,8 +178,9 @@ final class PairingPresentationTests: XCTestCase {
     func testUnavailableReasonsNameTheActualBlocker() throws {
         XCTAssertTrue(try XCTUnwrap(PairingPresentation.unavailableReason(
             hasExecutable: false, configurationExists: false, status: nil)).contains("Choose the Go connector"))
-        XCTAssertTrue(try XCTUnwrap(PairingPresentation.unavailableReason(
-            hasExecutable: true, configurationExists: false, status: nil)).contains("Create and enroll"))
+        // No configuration is not a blocker: startPairing runs `init` first.
+        XCTAssertNil(PairingPresentation.unavailableReason(
+            hasExecutable: true, configurationExists: false, status: nil))
 		XCTAssertNil(PairingPresentation.unavailableReason(
 			hasExecutable: true, configurationExists: true, status: nil))
         let unenrolled = try ConnectorStatus.decode(Data(#"{"paused":true}"#.utf8))

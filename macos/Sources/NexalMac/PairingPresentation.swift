@@ -183,7 +183,12 @@ struct PairingPresentation: Equatable {
     static func unavailableReason(hasExecutable: Bool, configurationExists: Bool,
                                   status: ConnectorStatus?) -> String? {
         if !hasExecutable { return "Choose the Go connector under Setup before pairing a phone." }
-        if !configurationExists { return "Create and enroll a connector configuration before pairing a phone." }
+        // A missing configuration is not a blocker: `startPairing` creates it with
+        // `nexal init` first. Version 2 pairing IS enrollment, so nothing else is
+        // needed before a code can be shown. The customer panel has no separate
+        // create-and-enroll form, so gating on the file here left the only button
+        // permanently disabled on a fresh install.
+        _ = configurationExists
 		_ = status // Version 2 intentionally starts before the coordinator issues a host identity.
         return nil
     }

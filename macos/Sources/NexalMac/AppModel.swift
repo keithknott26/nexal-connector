@@ -85,6 +85,21 @@ final class AppModel: ObservableObject {
     var configurationExists: Bool {
         FileManager.default.fileExists(atPath: selectedConfig.path)
     }
+    /// The coordinator origin saved in the selected config.json, if any. `init`
+    /// writes it once and every later command reads it, so a config left by an
+    /// older build keeps pointing at its old origin even after an app update.
+    var configuredCoordinator: String? {
+        guard let data = try? Data(contentsOf: selectedConfig),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["coordinator"] as? String
+    }
+    /// Non-nil when the saved config targets an origin this build does not know.
+    var coordinatorMismatch: String? {
+        guard let saved = configuredCoordinator else { return nil }
+        let known = [CoordinatorOrigins.development, CoordinatorOrigins.production]
+        return known.contains(saved) ? nil : saved
+    }
     var hasPersistedHostIdentity: Bool {
         ConnectorProcess.hasPersistedHostIdentity(at: selectedConfig)
     }
@@ -436,6 +451,22 @@ final class AppModel: ObservableObject {
         busy = true
         defer { busy = false; activity = nil }
         pairingProblem = nil
+        if !configurationExists {
+            activity = "Creating this Mac\u{2019}s configuration\u{2026}"
+            do {
+                if developmentEnvironment {
+                    _ = try await invoke(.initializeDevelopment(name: hostName,
+                                               memoryMiB: memoryMiB, reserveMiB: reserveMiB))
+                } else {
+                    _ = try await invoke(.initialize(coordinator: coordinator, name: hostName,
+                                               memoryMiB: memoryMiB, reserveMiB: reserveMiB))
+                }
+            } catch {
+                pairingProblem = error.localizedDescription
+                return
+            }
+            activity = "Requesting a pairing code\u{2026}"
+        }
         // A second pairing must not leave the first one open on the coordinator,
         // where it would stay scannable until it expired.
         await cancelPairing(silently: true)

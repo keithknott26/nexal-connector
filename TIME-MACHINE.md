@@ -1,5 +1,18 @@
 # Paid Time Machine destination (next release)
 
+## Gateway mode (current direction, development)
+
+Macs are backup **clients** of an operator-run storage gateway reached directly
+over the NetBird mesh. The gateway itself is operator infrastructure and is
+not part of this repository.
+`nexal time-machine` reports readiness and `nexal time-machine -connect` adds
+the gateway with `tmutil setdestination -a` after checking that the gateway
+name resolves only to mesh (100.64.0.0/10) addresses. The coordinator config
+document carries `role: "client"` and a `destination`; the SMB password comes
+only from `POST …/time-machine/credentials`. The connector-hosted design below
+is retained for reference and remains fail-closed.
+
+
 This connector contains the closed-by-default host contract for the paid Time
 Machine destination. The coordinator supplies only non-secret desired state and
 an active entitlement. The connector reports observed readiness; configuration

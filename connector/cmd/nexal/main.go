@@ -470,13 +470,10 @@ func runCommand(ctx context.Context, args []string) error {
 			StaticPeers: agent.StaticPeersFrom(c.StaticPeers),
 		}))
 	}
-	// Version-2 enrollment always uses the bundled secure-networking runtime.
-	// Feed its live peer/path evidence into status; otherwise Agent's safe
-	// default is UnavailableProvider and the native UI can never show peers even
-	// while the overlay is healthy.
-	if c.Enrollment != nil {
-		opts = append(opts, agent.WithMeshProvider(mesh.NewRuntimeProvider()))
-	}
+	// A paired Mac reports its real tunnel state. The gate re-reads the saved
+	// configuration, so a Mac paired while this agent is running starts
+	// reporting (and listing its peers) without an agent restart.
+	opts = append(opts, agent.WithMeshProvider(enrollmentGatedMesh{path: *path, inner: mesh.NewRuntimeProvider()}))
 	a, err := agent.New(c, *path, api, probe, *pull, opts...)
 	if err != nil {
 		return err
@@ -687,4 +684,23 @@ func selfTestCommand(ctx context.Context, args []string) error {
 	}
 	return emit(map[string]any{"mode": "owner-initiated offline self-test", "template": agent.Template, "result": result,
 		"networkUsed": false, "marketplaceEnabled": false, "ledgerEffects": false})
+}
+
+// enrollmentGatedMesh exposes the tunnel runtime only while the saved
+// configuration holds an enrollment.
+type enrollmentGatedMesh struct {
+	path  string
+	inner mesh.Provider
+}
+
+func (p enrollmentGatedMesh) Enrolled() bool {
+	c, err := config.Load(p.path)
+	return err == nil && c.Enrollment != nil
+}
+
+func (p enrollmentGatedMesh) Snapshot() mesh.Status {
+	if !p.Enrolled() {
+		return mesh.UnavailableProvider{}.Snapshot()
+	}
+	return p.inner.Snapshot()
 }

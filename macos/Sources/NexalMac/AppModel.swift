@@ -189,6 +189,31 @@ final class AppModel: ObservableObject {
             defaults.set(bundled.url.path, forKey: "approvedConnectorPath")
             defaults.set(bundled.sha256, forKey: "approvedConnectorHash")
         }
+        // Set up the secure networking service as soon as the app starts, so
+        // nobody has to run a terminal command after installing the DMG. Only
+        // the installed app does this: tests and `swift run` have no bundle.
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            Task { [weak self] in await self?.ensureNetworkServiceAtLaunch() }
+        }
+    }
+
+    /// One administrator prompt at launch when the service is missing or stopped
+    /// (first install, or after an update left it stopped). Cancelling is
+    /// respected: the panel keeps the Install button and says why it matters.
+    func ensureNetworkServiceAtLaunch() async {
+        guard (try? NetworkService.validatedHelper()) != nil else { return }
+        // installNetworkService() rejoins on success; otherwise rejoin directly.
+        if NetworkService.isRunning { await rejoinNetworkIfEnrolled() } else { await installNetworkService() }
+    }
+
+    /// An enrolled Mac only joined its network while a pairing was being
+    /// polled, so after a reinstall or reboot it could sit off the network
+    /// forever. Rejoin with the saved credential whenever the service is up.
+    func rejoinNetworkIfEnrolled() async {
+        guard NetworkService.isRunning, selection != nil, configurationExists,
+              hasPersistedHostIdentity || hasUnfinishedEnrollment else { return }
+        do { _ = try await invoke(.rejoinNetwork) }
+        catch { pairingProblem = error.localizedDescription }
     }
 
     func chooseConnector() {
@@ -496,6 +521,15 @@ final class AppModel: ObservableObject {
             }
             activity = "Requesting a pairing code\u{2026}"
         }
+        // Pairing ends with this Mac joining the secure network, which needs the
+        // root networking service. Install it BEFORE showing a code: finding out
+        // after the phone has scanned leaves both devices stuck on "joining".
+        if !NetworkService.isRunning {
+            activity = "Installing the secure networking service\u{2026}"
+            do { try await Task.detached(priority: .userInitiated) { try NetworkService.install() }.value }
+            catch { pairingProblem = error.localizedDescription; return }
+            activity = "Requesting a pairing code\u{2026}"
+        }
         // A second pairing must not leave the first one open on the coordinator,
         // where it would stay scannable until it expired.
         await cancelPairing(silently: true)
@@ -551,6 +585,33 @@ final class AppModel: ObservableObject {
     }
 
     /// Poll this pairing's status through the CLI until it stops being live.
+    /// True when the networking service is absent or stopped. Every neXal Mac
+    /// needs it, so the panel offers the install whenever it is missing.
+    var needsNetworkService: Bool {
+        !NetworkService.isRunning && (try? NetworkService.validatedHelper()) != nil
+    }
+
+    /// Install the networking service for a Mac that is already enrolling (the
+    /// case where pairing started before this app installed it). The next status
+    /// poll re-runs the join with the saved credential.
+    func installNetworkService() async {
+        guard !busy else { return }
+        busy = true
+        activity = "Installing the secure networking service\u{2026}"
+        do {
+            try await Task.detached(priority: .userInitiated) { try NetworkService.install() }.value
+            pairingProblem = nil
+            message = "Secure networking service installed. Finishing the join\u{2026}"
+        } catch {
+            pairingProblem = error.localizedDescription
+        }
+        // Cleared before refreshing: refresh() does nothing while busy.
+        busy = false
+        activity = nil
+        await rejoinNetworkIfEnrolled()
+        await refresh()
+    }
+
     private func watchPairing() {
         pairingWatch?.cancel()
         pairingWatch = Task { [weak self] in

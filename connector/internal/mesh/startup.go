@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -33,7 +34,41 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	return exec.CommandContext(ctx, path, args...).Run()
+	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
+	if err != nil {
+		return &RunError{Err: err, Output: string(out)}
+	}
+	return nil
+}
+
+// RunError carries the runtime's own output so a failure can say WHY it failed
+// ("daemon is not running", "invalid setup key") instead of a fixed guess.
+type RunError struct {
+	Err    error
+	Output string
+}
+
+func (e *RunError) Error() string { return e.Err.Error() }
+func (e *RunError) Unwrap() error { return e.Err }
+
+// runtimeDetail returns a short, single-line tail of the runtime's output with
+// the credential file path removed. The setup key itself is never on the
+// command line or in this output path; the file path is scrubbed anyway so no
+// temp-file name leaks into UI text or logs.
+func runtimeDetail(err error, credentialPath string) string {
+	var re *RunError
+	if !errors.As(err, &re) {
+		return ""
+	}
+	text := strings.Join(strings.Fields(re.Output), " ")
+	if credentialPath != "" {
+		text = strings.ReplaceAll(text, credentialPath, "<credential>")
+	}
+	const limit = 300
+	if len(text) > limit {
+		text = "…" + text[len(text)-limit:]
+	}
+	return text
 }
 
 // trustedExecutable deliberately does not search the inherited PATH. The menu
@@ -115,7 +150,11 @@ func (c Controller) reconcile(ctx context.Context) error {
 		if errors.Is(err, os.ErrNotExist) || err.Error() == "secure networking runtime is not installed" {
 			return errors.New("secure networking runtime is not installed; reinstall neXal Connector 0.2.8 or later")
 		}
-		return errors.New("secure networking service rejected startup; verify its macOS system service is installed and running")
+		msg := "secure networking service rejected startup; verify its macOS system service is installed and running"
+		if detail := runtimeDetail(err, credentialPath); detail != "" {
+			msg += " (" + detail + ")"
+		}
+		return errors.New(msg)
 	}
 	return nil
 }

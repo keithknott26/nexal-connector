@@ -4,6 +4,9 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strings"
+
+	"nexal/connector/internal/mesh"
 )
 
 // PeerRow is one row of the "other Macs on the network" surface.
@@ -99,6 +102,21 @@ func (a *Agent) PeersSnapshot() PeersResponse {
 		out.Peers = append(out.Peers, row)
 	}
 
+	// Macs on the secure network. These come from the tunnel runtime, not LAN
+	// discovery, so they appear wherever the two Macs are.
+	a.mu.Lock()
+	provider := a.meshProvider
+	a.mu.Unlock()
+	if _, none := provider.(mesh.UnavailableProvider); !none && provider != nil {
+		status := mesh.SanitizeSnapshot(provider.Snapshot())
+		if status.ProviderAvailable {
+			out.RemoteAccessAvailable = true
+			for _, p := range status.Peers {
+				out.Peers = append(out.Peers, meshPeerRow(p))
+			}
+		}
+	}
+
 	// Reachable peers first, then by name, so the list a user can act on is at the top
 	// and the order does not churn between polls.
 	sort.SliceStable(out.Peers, func(i, j int) bool {
@@ -118,6 +136,23 @@ func (a *Agent) PeersSnapshot() PeersResponse {
 		}
 	}
 	return out
+}
+
+func meshPeerRow(p mesh.Peer) PeerRow {
+	row := PeerRow{HostID: "mesh:" + p.ID, Name: p.Name, Fingerprint: p.ID, Authorized: true, Configured: true}
+	up := p.Lifecycle == mesh.LifecycleConnected || p.Lifecycle == mesh.LifecycleDegraded
+	if up && p.TunnelAddress != "" {
+		row.Reachability, row.Address = "same-network", p.TunnelAddress
+		path := p.PathLabel
+		if path == "" {
+			path = "Secure network"
+		}
+		row.Note = strings.TrimSpace("Connected · " + path)
+		return row
+	}
+	row.Reachability = "unknown"
+	row.Note = "On your secure network; not connected right now."
+	return row
 }
 
 func (r PeerRow) displayName() string {

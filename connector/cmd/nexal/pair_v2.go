@@ -26,6 +26,7 @@ func pairV2Command(ctx context.Context, args []string) error {
 	cancelID := f.String("cancel", "", "cancel a version 2 enrollment session")
 	resetLocal := f.Bool("reset-local", false, "clear an unfinished local enrollment")
 	leave := f.Bool("leave", false, "leave the current neXal network")
+	rejoin := f.Bool("rejoin", false, "reconnect an enrolled Mac to its secure network using the saved credential")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -45,8 +46,11 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *leave {
 		modes++
 	}
+	if *rejoin {
+		modes++
+	}
 	if modes != 1 {
-		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, --reset-local, or --leave")
+		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, --reset-local, --leave, or --rejoin")
 	}
 	if *create {
 		return createPairV2(ctx, *path)
@@ -60,7 +64,34 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *leave {
 		return leavePairV2(ctx, *path)
 	}
+	if *rejoin {
+		return rejoinPairV2(ctx, *path)
+	}
 	return statusPairV2(ctx, *path, *statusID)
+}
+
+// rejoinPairV2 re-runs the network join for a Mac that already finished
+// enrollment. The join otherwise only happens while a pairing is being polled,
+// so after a reinstall, a service restart, or a reboot before the runtime saved
+// its login, an enrolled Mac would sit off the network with nothing to retry.
+// It is idempotent: joining an already-joined runtime is a no-op for it.
+func rejoinPairV2(ctx context.Context, path string) error {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if cfg.Enrollment == nil || cfg.Enrollment.ManagementURL == "" ||
+		(cfg.Enrollment.Status != "joining" && cfg.Enrollment.Status != "paired") {
+		return emit(map[string]any{"rejoined": false, "reason": "not_enrolled"})
+	}
+	secrets, err := config.NewSecrets(path, cfg)
+	if err != nil {
+		return err
+	}
+	if err := startPersistedMesh(ctx, secrets, cfg.Enrollment.ManagementURL); err != nil {
+		return err
+	}
+	return emit(map[string]any{"rejoined": true})
 }
 
 func leavePairV2(ctx context.Context, path string) error {

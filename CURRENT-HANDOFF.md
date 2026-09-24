@@ -379,3 +379,20 @@ E2E test through the actual Worker handler and real local D1 passed. No owner
 Mac delivery, new Keychain acceptance or remote deployment performed. User
 still chooses donor bundle and compares public fingerprints; background automatic
 folder collection and a dashboard transfer button are not implemented.
+
+## TODO: macOS firewall settings the installer must handle
+
+Found on 2026-09-23 while bringing up M2 ↔ M4 over the secure network. Direct
+(P2P) connections only worked after these were changed by hand:
+
+- Allow incoming for `neXal Connector.app/Contents/Helpers/nexal-network`
+  (done automatically now: `NetworkService.install()` runs
+  `socketfilterfw --add` and `--unblockapp` under the admin prompt).
+- **Block all incoming connections** had to be turned OFF on the M4. It
+  overrides every per-app rule, so the rule above does nothing while it is on.
+  Installer must detect `socketfilterfw --getblockall` and turn it off
+  (`--setblockall off`), telling the user in the admin prompt.
+- **Stealth mode** was also turned OFF on the M4 (`--setstealthmode off`) so
+  peers can ping each other. Installer must do this too.
+- Firewall rules are tied to the binary's code signature; ad-hoc builds lose
+  them on every rebuild. Developer ID signing fixes that.

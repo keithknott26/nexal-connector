@@ -55,6 +55,7 @@ struct NetworkPanel: View {
                  detail: "Open neXal on your iPhone and sign in with Apple.", symbol: "apple.logo")
             step(number: "2", title: "Pair this Mac",
                  detail: "Show a one-time code here, then scan it with the neXal iPhone app.", symbol: "qrcode")
+            CoordinatorChoice()
             Button { Task { await model.startPairing() } } label: {
                 Label("Show pairing code", systemImage: "qrcode").frame(maxWidth: .infinity)
             }
@@ -325,6 +326,16 @@ struct NetworkPanel: View {
         if let text = model.pairingProblem ?? model.message, !text.isEmpty {
             Divider()
             Text(text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        if model.needsNetworkService {
+            Button { Task { await model.installNetworkService() } } label: {
+                Label("Install secure networking service", systemImage: "lock.shield").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.busy)
+            .accessibilityIdentifier("install-network-service")
+            Text("Asks for your Mac password once. Required for this Mac to join your network.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 

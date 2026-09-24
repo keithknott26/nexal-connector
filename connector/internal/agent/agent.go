@@ -712,6 +712,11 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	enrolledMesh := a.cfg.Enrollment != nil
 	provider := a.meshProvider
 	a.mu.Unlock()
+	if gate, ok := provider.(interface{ Enrolled() bool }); ok {
+		// Pairing runs in another process; trust the saved enrollment over the
+		// configuration this agent loaded at start.
+		enrolledMesh = gate.Enrolled()
+	}
 	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
 	err := a.api.Heartbeat(ctx, hostID, h)
 	if err == nil && enrolledMesh {

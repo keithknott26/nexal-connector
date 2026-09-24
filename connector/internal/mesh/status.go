@@ -97,6 +97,9 @@ type Peer struct {
 	FileSharing        FileSharing    `json:"fileSharing"`
 	ScreenSharing      ScreenSharing  `json:"screenSharing"`
 	Hostname           HostnameStatus `json:"hostname"`
+	// TunnelAddress is the peer's private tunnel IP. It stays in-process (the
+	// local peers surface) and is never sent to the coordinator.
+	TunnelAddress string `json:"-"`
 }
 
 type Status struct {

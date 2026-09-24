@@ -41,6 +41,9 @@ enum CLICommand {
     case cancelPairing(pairingId: String)
     case resetLocalPairing
     case leaveNetwork
+    /// Reconnect an already-enrolled Mac to its secure network (after a
+    /// reinstall, service restart or reboot). Harmless when not enrolled.
+    case rejoinNetwork
 
     func arguments(config: URL) -> [String] {
         let command: [String]
@@ -79,6 +82,8 @@ enum CLICommand {
             command = ["pair-v2", "--reset-local"]
         case .leaveNetwork:
             command = ["pair-v2", "--leave"]
+        case .rejoinNetwork:
+            command = ["pair-v2", "--rejoin"]
         }
         return command + ["--config", config.path]
     }

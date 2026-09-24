@@ -390,9 +390,11 @@ Found on 2026-09-23 while bringing up M2 ↔ M4 over the secure network. Direct
   `socketfilterfw --add` and `--unblockapp` under the admin prompt).
 - **Block all incoming connections** had to be turned OFF on the M4. It
   overrides every per-app rule, so the rule above does nothing while it is on.
-  Installer must detect `socketfilterfw --getblockall` and turn it off
-  (`--setblockall off`), telling the user in the admin prompt.
+  Done: `NetworkService.install()` now runs `--setblockall off`, and at launch
+  `AppModel.repairFirewallIfNeeded()` checks `--getblockall`/`--getstealthmode`
+  and runs `NetworkService.repairFirewall()` (one admin prompt) on Macs whose
+  service was already installed.
 - **Stealth mode** was also turned OFF on the M4 (`--setstealthmode off`) so
-  peers can ping each other. Installer must do this too.
+  peers can ping each other. Done by the same install/repair commands.
 - Firewall rules are tied to the binary's code signature; ad-hoc builds lose
   them on every rebuild. Developer ID signing fixes that.

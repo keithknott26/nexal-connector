@@ -203,7 +203,26 @@ final class AppModel: ObservableObject {
     func ensureNetworkServiceAtLaunch() async {
         guard (try? NetworkService.validatedHelper()) != nil else { return }
         // installNetworkService() rejoins on success; otherwise rejoin directly.
-        if NetworkService.isRunning { await rejoinNetworkIfEnrolled() } else { await installNetworkService() }
+        if NetworkService.isRunning {
+            // Already-installed Macs never re-run install(), so fix the firewall
+            // here if "Block all incoming connections" or stealth mode is on.
+            await repairFirewallIfNeeded()
+            await rejoinNetworkIfEnrolled()
+        } else {
+            await installNetworkService()
+        }
+    }
+
+    /// One administrator prompt when the macOS firewall would block peers.
+    func repairFirewallIfNeeded() async {
+        let blocked = await Task.detached(priority: .utility) { NetworkService.firewallBlocksPeers }.value
+        guard blocked else { return }
+        do {
+            try await Task.detached(priority: .userInitiated) { try NetworkService.repairFirewall() }.value
+            message = "macOS firewall updated: incoming peer connections are allowed."
+        } catch {
+            pairingProblem = error.localizedDescription
+        }
     }
 
     /// An enrolled Mac only joined its network while a pairing was being

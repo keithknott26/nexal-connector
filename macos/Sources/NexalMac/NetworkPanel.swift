@@ -122,6 +122,12 @@ struct NetworkPanel: View {
             }
             Divider()
             activityGraphs
+            if model.hasUnfinishedEnrollment {
+                Divider()
+                Button("Clear failed pairing and start over", role: .destructive) {
+                    Task { await model.resetUnfinishedPairing() }
+                }.disabled(model.busy)
+            }
         }
     }
 

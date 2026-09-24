@@ -129,6 +129,16 @@ enum ConnectorProcess {
         return !hostId.isEmpty
     }
 
+    static func hasUnfinishedEnrollment(at url: URL) -> Bool {
+        struct Stored: Decodable {
+            struct Enrollment: Decodable { let status: String }
+            let enrollment: Enrollment?
+        }
+        guard let data = try? Data(contentsOf: url),
+              let value = try? JSONDecoder().decode(Stored.self, from: data) else { return false }
+        return value.enrollment.map { $0.status == "joining" || $0.status == "provisioning" } ?? false
+    }
+
     /// The development profile's configuration, kept in its own directory so a
     /// development identity and credentials can never be mistaken for the real
     /// ones. CLIContractTests asserts this is not equal to `configURL`.

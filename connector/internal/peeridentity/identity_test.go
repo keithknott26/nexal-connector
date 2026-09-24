@@ -52,6 +52,7 @@ func (m *memSecrets) Put(_ context.Context, name, value string) error {
 	m.values[name] = value
 	return nil
 }
+func (m *memSecrets) Delete(_ context.Context, name string) error { delete(m.values, name); return nil }
 
 func TestEnsureIdentityCreatesThenReuses(t *testing.T) {
 	m := newMem()

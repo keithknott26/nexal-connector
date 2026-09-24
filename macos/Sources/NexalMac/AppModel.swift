@@ -88,6 +88,7 @@ final class AppModel: ObservableObject {
     var hasPersistedHostIdentity: Bool {
         ConnectorProcess.hasPersistedHostIdentity(at: selectedConfig)
     }
+    var hasUnfinishedEnrollment: Bool { ConnectorProcess.hasUnfinishedEnrollment(at: selectedConfig) }
     var title: String {
         guard let status else { return "Not connected" }
         return status.paused ? "Paused" : "Private resources enabled"
@@ -475,6 +476,18 @@ final class AppModel: ObservableObject {
                 watchPairing()
             }
         }
+    }
+
+    func resetUnfinishedPairing() async {
+        guard !busy, hasUnfinishedEnrollment else { return }
+        busy = true; activity = "Clearing the failed pairing…"
+        defer { busy = false; activity = nil }
+        do {
+            _ = try await invoke(.resetLocalPairing)
+            pairingWatch?.cancel(); pairingWatch = nil
+            pairing = nil; status = nil; lastUpdated = nil; pairingProblem = nil
+            message = "The failed pairing was cleared. Generate a new code and scan it again."
+        } catch { message = error.localizedDescription }
     }
 
     /// Poll this pairing's status through the CLI until it stops being live.

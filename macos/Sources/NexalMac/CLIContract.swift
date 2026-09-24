@@ -38,6 +38,7 @@ enum CLICommand {
     case pair(role: PairingRole)
     case pairingStatus(pairingId: String)
     case cancelPairing(pairingId: String)
+    case resetLocalPairing
 
     func arguments(config: URL) -> [String] {
         let command: [String]
@@ -71,6 +72,8 @@ enum CLICommand {
             command = ["pair-v2", "--status", pairingId]
         case let .cancelPairing(pairingId):
             command = ["pair-v2", "--cancel", pairingId]
+        case .resetLocalPairing:
+            command = ["pair-v2", "--reset-local"]
         }
         return command + ["--config", config.path]
     }

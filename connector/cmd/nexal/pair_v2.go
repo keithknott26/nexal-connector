@@ -24,6 +24,7 @@ func pairV2Command(ctx context.Context, args []string) error {
 	create := f.Bool("create", false, "create a version 2 enrollment session")
 	statusID := f.String("status", "", "read a version 2 enrollment session")
 	cancelID := f.String("cancel", "", "cancel a version 2 enrollment session")
+	resetLocal := f.Bool("reset-local", false, "clear an unfinished local enrollment")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -37,8 +38,11 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *cancelID != "" {
 		modes++
 	}
+	if *resetLocal {
+		modes++
+	}
 	if modes != 1 {
-		return errors.New("pair-v2 requires exactly one of --create, --status, or --cancel")
+		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, or --reset-local")
 	}
 	if *create {
 		return createPairV2(ctx, *path)
@@ -46,7 +50,44 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *cancelID != "" {
 		return cancelPairV2(ctx, *path, *cancelID)
 	}
+	if *resetLocal {
+		return resetLocalPairV2(ctx, *path)
+	}
 	return statusPairV2(ctx, *path, *statusID)
+}
+
+func resetLocalPairV2(ctx context.Context, path string) error {
+	unlock, err := config.Lock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if cfg.Enrollment == nil {
+		return emit(map[string]any{"localEnrollmentReset": true})
+	}
+	if cfg.Enrollment.Status == "paired" {
+		return errors.New("a paired Mac must be removed from the iPhone app before resetting it locally")
+	}
+	secrets, err := config.NewSecrets(path, cfg)
+	if err != nil {
+		return err
+	}
+	for _, name := range []string{"host", "mesh-credential", "enrollment-session-" + cfg.Enrollment.SessionID} {
+		if err := secrets.Delete(ctx, name); err != nil {
+			return err
+		}
+	}
+	cfg.HostID = ""
+	cfg.Enrollment = nil
+	cfg.Tunnel = nil
+	if err := config.Save(path, cfg); err != nil {
+		return err
+	}
+	return emit(map[string]any{"localEnrollmentReset": true})
 }
 
 func createPairV2(ctx context.Context, path string) error {

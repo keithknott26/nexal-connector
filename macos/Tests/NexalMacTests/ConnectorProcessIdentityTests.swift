@@ -17,4 +17,13 @@ final class ConnectorProcessIdentityTests: XCTestCase {
         try Data(#"{"version":1,"hostId":"host-authorized","unknown":true}"#.utf8).write(to: config)
         XCTAssertTrue(ConnectorProcess.hasPersistedHostIdentity(at: config))
     }
+
+    func testOnlyUnfinishedEnrollmentCanBeReset() throws {
+        let config = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: config) }
+        try Data(#"{"enrollment":{"status":"joining"}}"#.utf8).write(to: config)
+        XCTAssertTrue(ConnectorProcess.hasUnfinishedEnrollment(at: config))
+        try Data(#"{"enrollment":{"status":"paired"}}"#.utf8).write(to: config)
+        XCTAssertFalse(ConnectorProcess.hasUnfinishedEnrollment(at: config))
+    }
 }

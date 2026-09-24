@@ -46,3 +46,13 @@ func TestRecoveredStatusContainsNoCredentialMaterial(t *testing.T) {
 		t.Fatalf("unsafe recovered status: %#v", got)
 	}
 }
+
+func TestV2EnrollmentSupersedesStaleCloudflaredConfiguration(t *testing.T) {
+	legacy := &config.Tunnel{TokenFile: "/obsolete/token"}
+	if !shouldRunLegacyTunnel(config.Config{Tunnel: legacy}) {
+		t.Fatal("a legacy-only configuration unexpectedly lost its tunnel")
+	}
+	if shouldRunLegacyTunnel(config.Config{Tunnel: legacy, Enrollment: &config.EnrollmentState{SchemaVersion: 2, Status: "joining"}}) {
+		t.Fatal("stale cloudflared configuration can still abort a v2 mesh connector")
+	}
+}

@@ -134,6 +134,8 @@ final class CLIContractTests: XCTestCase {
                        ["pair-v2", "--status", id, "--config", config.path])
         XCTAssertEqual(CLICommand.cancelPairing(pairingId: id).arguments(config: config),
                        ["pair-v2", "--cancel", id, "--config", config.path])
+        XCTAssertEqual(CLICommand.resetLocalPairing.arguments(config: config),
+                       ["pair-v2", "--reset-local", "--config", config.path])
     }
 
     /// A pairing id arrives from the connector and goes back out as an argument.

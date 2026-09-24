@@ -100,9 +100,20 @@ for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/
     *) printf 'Missing x86_64 slice in %s (got: %s)\n' "$BINARY" "$ARCHS" >&2; exit 1 ;;
   esac
 done
+if [ -n "${NEXAL_CODE_SIGN_IDENTITY:-}" ]; then
+  for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/MacOS/NexalMac"; do
+    /usr/bin/codesign --force --options runtime --timestamp=none --sign "$NEXAL_CODE_SIGN_IDENTITY" "$BINARY"
+  done
+  /usr/bin/codesign --force --options runtime --timestamp=none --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE"
+  /usr/bin/codesign --verify --deep --strict --verbose=2 "$CANDIDATE"
+fi
 # Same-filesystem rename only after every build/test/validation succeeded.
 # SIGKILL/power loss during the two renames can require manual recovery from
 # .nexal-stage.*/previous.app. Do not claim a transactional filesystem install.
 if [ -d "$APP" ]; then mv "$APP" "$STAGE/previous.app"; fi
 mv "$CANDIDATE" "$APP"
-printf 'Unsigned app assembled: %s\nFollow README signing and notarization gates before distribution.\n' "$APP"
+if [ -n "${NEXAL_CODE_SIGN_IDENTITY:-}" ]; then
+  printf 'Locally signed app assembled: %s\nDeveloper ID signing and notarization are still required for distribution.\n' "$APP"
+else
+  printf 'Unsigned app assembled: %s\nFollow README signing and notarization gates before distribution.\n' "$APP"
+fi

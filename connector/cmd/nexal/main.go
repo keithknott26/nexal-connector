@@ -478,7 +478,12 @@ func runCommand(ctx context.Context, args []string) error {
 	wg.Add(2)
 	go func() { defer wg.Done(); results <- a.Serve(ctx, admin) }()
 	go func() { defer wg.Done(); results <- a.Run(ctx) }()
-	if c.Tunnel != nil {
+	// Version-2 enrollment uses the embedded peer-to-peer mesh runtime. Older
+	// installations may still carry a cloudflared tunnel block in config.json;
+	// starting that legacy supervisor as well makes a missing old token abort the
+	// local API before the mesh can report status. Keep the legacy path only for
+	// pre-v2 configurations that have not migrated to mesh enrollment.
+	if shouldRunLegacyTunnel(c) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -500,6 +505,8 @@ func runCommand(ctx context.Context, args []string) error {
 	wg.Wait()
 	return err
 }
+
+func shouldRunLegacyTunnel(c config.Config) bool { return c.Tunnel != nil && c.Enrollment == nil }
 func localCommand(ctx context.Context, command string, args []string) error {
 	f, path, err := flags(command)
 	if err != nil {

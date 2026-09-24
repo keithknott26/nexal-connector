@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -16,6 +17,7 @@ import (
 type Secrets interface {
 	Get(context.Context, string) (string, error)
 	Put(context.Context, string, string) error
+	Delete(context.Context, string) error
 }
 
 func RandomToken() (string, error) {
@@ -91,6 +93,16 @@ func (s FileSecrets) Put(_ context.Context, name, token string) error {
 	}
 	return AtomicPrivate(filepath.Join(s.Dir, name), []byte(token))
 }
+func (s FileSecrets) Delete(_ context.Context, name string) error {
+	if !secretName(name) {
+		return errors.New("invalid credential scope")
+	}
+	err := os.Remove(filepath.Join(s.Dir, name))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errors.New("credential removal failed")
+	}
+	return nil
+}
 
 // Keychain uses security's stdin interpreter for writes, never a password in
 // argv or environment. Both output streams are suppressed to avoid interpreter
@@ -133,6 +145,20 @@ func (k Keychain) Put(ctx context.Context, name, token string) error {
 	got, err := k.Get(ctx, name)
 	if err != nil || got != token {
 		return errors.New("Keychain write verification failed")
+	}
+	return nil
+}
+func (k Keychain) Delete(ctx context.Context, name string) error {
+	if !secretName(name) {
+		return errors.New("invalid credential scope")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", k.Service, "-a", name)
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 { return nil }
+		return errors.New("Keychain credential removal failed or access denied")
 	}
 	return nil
 }

@@ -9,205 +9,171 @@ import (
 	"net/url"
 	"time"
 
+	"nexal/connector/internal/wol"
 	"nexal/connector/internal/wsclient"
 )
 
-// WakeInfo is what the coordinator needs to have this Mac woken by another
-// neXal Mac on the same local network (PUT /api/v2/hosts/wake-info).
-type WakeInfo struct {
-	// MACs are 1..8 lowercase, colon-separated unicast hardware addresses.
-	MACs []string `json:"macs"`
-	// LANKey is the hex SHA-256 of this host's sorted private IPv4 network
-	// prefixes; the coordinator binds it to the public source address itself.
-	LANKey string `json:"lanKey"`
-	// WakeForNetwork reports the macOS "Wake for network access" setting.
-	WakeForNetwork bool `json:"wakeForNetwork"`
-	// TunnelAddress is this host's secure-network IPv4, when known.
-	TunnelAddress string `json:"tunnelAddress,omitempty"`
+// Live presence and Wake-on-LAN: the three v2 host endpoints the connector uses.
+//
+//	GET  /api/v2/hosts/events         WebSocket; see internal/presence
+//	PUT  /api/v2/hosts/wake-info      this Mac's MACs, lanKey, wake setting
+//	POST /api/v2/hosts/{hostId}/wake  ask the coordinator to relay a wake
+//
+// All three authenticate with the host bearer token, exactly like heartbeat,
+// and all three are newer than every other route here, so an older coordinator
+// answers 404 (or 503 while a feature flag is off). IsNotSupported names that
+// case so callers can stay quiet about it instead of logging a fault.
+
+// Wake request failures the coordinator names with an error code. Each has a
+// fixed message written for the owner; the coordinator's own message is never
+// shown (see StatusError).
+var (
+	// ErrNoWakeRelay is 409 no_wake_relay: no awake neXal Mac shares a LAN with
+	// the target.
+	ErrNoWakeRelay = errors.New("No awake neXal Mac on that computer's network can wake it.")
+	// ErrWakeRateLimited is 429 rate_limited: the coordinator bounds how often
+	// one target may be woken.
+	ErrWakeRateLimited = errors.New("Too many wake requests for that computer; try again in a minute.")
+	// ErrWakeTargetNotFound is 404 wake_target_not_found: no such host in this
+	// tenant (or it has been removed).
+	ErrWakeTargetNotFound = errors.New("The coordinator does not know that computer; it may have been removed from the network.")
+)
+
+// IsNotSupported reports whether err is an older coordinator's "no such
+// route" (404), "not implemented" (501) or "feature unavailable" (503).
+func IsNotSupported(err error) bool {
+	var s *StatusError
+	return errors.As(err, &s) && (s.Status == http.StatusNotFound || s.Status == http.StatusNotImplemented ||
+		s.Status == http.StatusServiceUnavailable)
 }
 
-// WakeResult is the coordinator's 202 answer to a wake request.
-type WakeResult struct {
-	RequestID            string `json:"requestId"`
-	Relays               int    `json:"relays"`
-	TargetWakeForNetwork bool   `json:"targetWakeForNetwork"`
-}
-
-// MaxWakeMACs bounds WakeInfo.MACs, matching the coordinator.
-const MaxWakeMACs = 8
-
-var tunnelPrefix = netip.MustParsePrefix("100.64.0.0/10")
-
-// ValidTunnelAddress reports whether s is a canonical secure-network IPv4.
-func ValidTunnelAddress(s string) bool {
-	ip, err := netip.ParseAddr(s)
-	return err == nil && ip.Is4() && ip.String() == s && tunnelPrefix.Contains(ip)
-}
-
-// ValidWakeMAC reports whether s is a lowercase colon-separated unicast MAC.
-func ValidWakeMAC(s string) bool {
-	if len(s) != 17 {
-		return false
-	}
-	nonZero := false
-	for i := 0; i < 17; i++ {
-		c := s[i]
-		if i%3 == 2 {
-			if c != ':' {
-				return false
-			}
-			continue
-		}
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-		if c != '0' {
-			nonZero = true
-		}
-	}
-	// The low bit of the first octet marks a group (multicast) address.
-	first := hexNibble(s[0])<<4 | hexNibble(s[1])
-	return nonZero && first&1 == 0
-}
-
-func hexNibble(c byte) byte {
-	if c >= 'a' {
-		return c - 'a' + 10
-	}
-	return c - '0'
-}
-
-func validLANKey(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if c := s[i]; !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
-			return false
-		}
-	}
-	return true
-}
-
-// Validate applies the coordinator's schema locally, so a bad value never
-// leaves this process.
-func (w WakeInfo) Validate() error {
-	if len(w.MACs) < 1 || len(w.MACs) > MaxWakeMACs {
-		return errors.New("wake info needs 1 to 8 hardware addresses")
-	}
-	seen := map[string]bool{}
-	for _, m := range w.MACs {
-		if !ValidWakeMAC(m) || seen[m] {
-			return errors.New("invalid wake hardware address")
-		}
-		seen[m] = true
-	}
-	if !validLANKey(w.LANKey) {
-		return errors.New("invalid wake network key")
-	}
-	if w.TunnelAddress != "" && !ValidTunnelAddress(w.TunnelAddress) {
-		return errors.New("invalid wake tunnel address")
-	}
-	return nil
-}
-
-// PutWakeInfo publishes this host's Wake-on-LAN details.
-func (c *Client) PutWakeInfo(ctx context.Context, w WakeInfo) error {
-	if err := w.Validate(); err != nil {
-		return err
-	}
-	var out struct {
-		OK             bool `json:"ok"`
-		MACCount       int  `json:"macCount"`
-		WakeForNetwork bool `json:"wakeForNetwork"`
-	}
-	if err := c.call(ctx, "PUT", "/api/v2/hosts/wake-info", w, &out); err != nil {
-		return err
-	}
-	if !out.OK || out.MACCount != len(w.MACs) {
-		return errors.New("wake info not accepted")
-	}
-	return nil
-}
-
-// WakeByTunnel asks the coordinator to wake the Mac with this secure-network
-// address.
-func (c *Client) WakeByTunnel(ctx context.Context, tunnelAddress string) (WakeResult, error) {
-	if !ValidTunnelAddress(tunnelAddress) {
-		return WakeResult{}, errors.New("invalid wake tunnel address")
-	}
-	return c.wake(ctx, "/api/v2/hosts/wake", map[string]string{"tunnelAddress": tunnelAddress})
-}
-
-// WakeHost asks the coordinator to wake the host with this id.
-func (c *Client) WakeHost(ctx context.Context, hostID string) (WakeResult, error) {
-	if !ValidID(hostID) {
-		return WakeResult{}, errors.New("invalid host id")
-	}
-	return c.wake(ctx, "/api/v2/hosts/"+url.PathEscape(hostID)+"/wake", nil)
-}
-
-func (c *Client) wake(ctx context.Context, path string, body any) (WakeResult, error) {
-	var out WakeResult
-	if err := c.call(ctx, "POST", path, body, &out); err != nil {
-		return WakeResult{}, err
-	}
-	if !ValidID(out.RequestID) || out.Relays < 0 {
-		return WakeResult{}, errors.New("invalid coordinator response schema")
-	}
-	return out, nil
-}
-
-// EventsPath is the coordinator's host event stream.
-const EventsPath = "/api/v2/hosts/events"
-
-// DialEvents opens the host event WebSocket with this client's host token.
-// It uses wss:// for an https coordinator and ws:// only for the plain-HTTP
-// development loopback origin that New already restricts http to. The TLS
-// configuration is the one the REST transport uses (TLS 1.3 floor). A non-101
-// answer is returned as *StatusError; other failures carry fixed messages only.
-func (c *Client) DialEvents(ctx context.Context) (*wsclient.Conn, error) {
+// DialHostEvents opens the presence WebSocket. It reuses this client's origin,
+// which client.New already validated with config.ValidateURL, and its dev flag,
+// which is the only thing that permits plain-http numeric loopback — so the
+// socket obeys exactly the same origin policy as every REST call. Errors are
+// reduced to the same fixed messages: a refused upgrade becomes a StatusError
+// (status only), and transport failures go through transportError.
+func (c *Client) DialHostEvents(ctx context.Context) (*wsclient.Conn, error) {
 	if c.token == "" {
-		return nil, errors.New("host credential required for coordinator events")
+		return nil, errors.New("host credential required for the presence stream")
 	}
-	u, err := url.Parse(c.base)
+	h := http.Header{}
+	h.Set("Authorization", "Bearer "+c.token)
+	conn, err := wsclient.Dial(ctx, wsclient.Options{URL: c.base + "/api/v2/hosts/events", Header: h,
+		AllowLoopbackHTTP: c.dev, TLSConfig: c.tlsConfig(), HandshakeTimeout: 10 * time.Second})
 	if err != nil {
-		return nil, errors.New("invalid coordinator URL")
-	}
-	switch u.Scheme {
-	case "https":
-		u.Scheme = "wss"
-	case "http":
-		if !c.dev {
-			return nil, errors.New("HTTPS required for coordinator events")
-		}
-		u.Scheme = "ws"
-	default:
-		return nil, errors.New("invalid coordinator URL")
-	}
-	u.Path = EventsPath
-	var tlsConfig *tls.Config
-	if tr, ok := c.http.Transport.(*http.Transport); ok && tr.TLSClientConfig != nil {
-		tlsConfig = tr.TLSClientConfig
-	} else {
-		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS13}
-	}
-	dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	conn, err := wsclient.Dial(dctx, u.String(), wsclient.Options{
-		Header:     http.Header{"Authorization": {"Bearer " + c.token}},
-		TLSConfig:  tlsConfig,
-		MaxMessage: 64 << 10,
-	})
-	if err != nil {
-		var he *wsclient.HandshakeError
+		var hs *wsclient.HandshakeError
 		switch {
-		case errors.As(err, &he):
-			return nil, &StatusError{Status: he.Status}
-		case errors.Is(err, wsclient.ErrBadHandshake):
-			return nil, errors.New("coordinator event stream handshake was invalid")
+		case errors.As(err, &hs):
+			return nil, &StatusError{Status: hs.Status}
+		case errors.Is(err, wsclient.ErrProtocol):
+			return nil, errors.New("coordinator presence stream failed [protocol]: the server did not complete a WebSocket upgrade")
 		}
 		return nil, transportError(err)
 	}
 	return conn, nil
+}
+
+// tlsConfig returns the REST transport's TLS settings so the WebSocket trusts
+// exactly the roots the REST calls trust (tests install a private root there).
+func (c *Client) tlsConfig() *tls.Config {
+	if tr, ok := c.http.Transport.(*http.Transport); ok && tr.TLSClientConfig != nil {
+		return tr.TLSClientConfig.Clone()
+	}
+	return nil
+}
+
+// WakeInfo is the body of PUT /api/v2/hosts/wake-info.
+type WakeInfo struct {
+	MACs           []string `json:"macs"`
+	LANKey         string   `json:"lanKey"`
+	WakeForNetwork bool     `json:"wakeForNetwork"`
+	// TunnelAddress is this host's own secure-network IPv4 (100.64/10), so a
+	// peer that knows it only by that address can name it as a wake target
+	// (POST /api/v2/hosts/wake). Omitted when unknown.
+	TunnelAddress string `json:"tunnelAddress,omitempty"`
+}
+
+// ValidTunnelAddress reports whether s is a canonical IPv4 in 100.64.0.0/10.
+func ValidTunnelAddress(s string) bool {
+	a, err := netip.ParseAddr(s)
+	return err == nil && a.Is4() && a.String() == s && netip.MustParsePrefix("100.64.0.0/10").Contains(a)
+}
+
+// ReportWakeInfo publishes this host's wake facts. It is a full replacement,
+// so repeating it is idempotent. The response body is not interpreted.
+func (c *Client) ReportWakeInfo(ctx context.Context, w WakeInfo) error {
+	if len(w.MACs) < 1 || len(w.MACs) > wol.MaxMACs || !validDigest(w.LANKey) {
+		return errors.New("invalid wake info")
+	}
+	macs := make([]string, 0, len(w.MACs))
+	for _, m := range w.MACs {
+		hw, err := wol.ParseMAC(m)
+		if err != nil {
+			return errors.New("invalid wake info")
+		}
+		macs = append(macs, hw.String())
+	}
+	w.MACs = macs
+	if w.TunnelAddress != "" && !ValidTunnelAddress(w.TunnelAddress) {
+		return errors.New("invalid wake info")
+	}
+	return c.callLenient(ctx, "PUT", "/api/v2/hosts/wake-info", w, nil)
+}
+
+// WakeAck is the coordinator's answer to a wake request: HTTP 202 with
+// {requestId, relays, targetWakeForNetwork}. There is no "requested" field;
+// any 2xx carrying a valid requestId and a sane relay count is success.
+type WakeAck struct {
+	RequestID string `json:"requestId"`
+	Relays    int    `json:"relays"`
+	// TargetWakeForNetwork is the target's last reported "Wake for network
+	// access" setting. False means the packet was relayed but the target has
+	// said it will probably not wake from it.
+	TargetWakeForNetwork bool `json:"targetWakeForNetwork"`
+}
+
+// RequestWake asks the coordinator to have an awake Mac on the target's LAN
+// send a magic packet. Coded failures map to ErrNoWakeRelay (409
+// no_wake_relay), ErrWakeRateLimited (429) and ErrWakeTargetNotFound (404
+// wake_target_not_found); a 503 (feature_unavailable, events_unavailable,
+// wake_gate_unavailable) or an uncoded 404 from an older coordinator satisfies
+// IsNotSupported.
+func (c *Client) RequestWake(ctx context.Context, hostID string) (WakeAck, error) {
+	if !ValidID(hostID) {
+		return WakeAck{}, errors.New("invalid host id")
+	}
+	return c.requestWake(ctx, "/api/v2/hosts/"+url.PathEscape(hostID)+"/wake", struct{}{})
+}
+
+// RequestWakeByTunnel is RequestWake for a target known only by its tunnel
+// address (POST /api/v2/hosts/wake {"tunnelAddress"}), which is how the
+// menu-bar peer list knows other Macs. Same errors as RequestWake.
+func (c *Client) RequestWakeByTunnel(ctx context.Context, tunnelAddress string) (WakeAck, error) {
+	if !ValidTunnelAddress(tunnelAddress) {
+		return WakeAck{}, errors.New("invalid tunnel address")
+	}
+	return c.requestWake(ctx, "/api/v2/hosts/wake", map[string]string{"tunnelAddress": tunnelAddress})
+}
+
+func (c *Client) requestWake(ctx context.Context, path string, body any) (WakeAck, error) {
+	var out WakeAck
+	if err := c.callLenient(ctx, "POST", path, body, &out); err != nil {
+		var s *StatusError
+		if errors.As(err, &s) {
+			switch {
+			case s.Status == http.StatusConflict && s.Code == "no_wake_relay":
+				return WakeAck{}, ErrNoWakeRelay
+			case s.Status == http.StatusTooManyRequests:
+				return WakeAck{}, ErrWakeRateLimited
+			case s.Status == http.StatusNotFound && s.Code == "wake_target_not_found":
+				return WakeAck{}, ErrWakeTargetNotFound
+			}
+		}
+		return WakeAck{}, err
+	}
+	if !ValidID(out.RequestID) || out.Relays < 0 || out.Relays > 1000 {
+		return WakeAck{}, errors.New("invalid coordinator wake response")
+	}
+	return out, nil
 }

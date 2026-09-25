@@ -153,6 +153,7 @@ extension AppModel {
     /// so it reports the tunnel rather than the contribution flag -- and a tunnel that is
     /// merely connected does not get the same symbol as one confirmed post-quantum.
     var menuBarSymbol: String {
+        if leavePhase?.inProgress == true { return "arrow.triangle.2.circlepath" }
         guard isLinked else { return "circle.dashed" }
         switch tunnelEvidence.indicator {
         case .quantumSafe:           return "lock.shield.fill"

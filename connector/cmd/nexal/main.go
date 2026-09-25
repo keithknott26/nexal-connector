@@ -26,7 +26,9 @@ import (
 	"nexal/connector/internal/diagnostics"
 	"nexal/connector/internal/discovery"
 	"nexal/connector/internal/mesh"
+	"nexal/connector/internal/presence"
 	"nexal/connector/internal/tunnel"
+	"nexal/connector/internal/wol"
 )
 
 func emit(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
@@ -34,7 +36,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
-		_ = json.NewEncoder(os.Stderr).Encode(map[string]any{"error": map[string]string{"code": "connector_error", "message": err.Error()}})
+		_ = json.NewEncoder(os.Stderr).Encode(map[string]any{"error": map[string]string{"code": errorCode(err), "message": err.Error()}})
 		os.Exit(1)
 	}
 }
@@ -62,7 +64,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|wake|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "coordinator-check":
@@ -476,6 +478,24 @@ func runCommand(ctx context.Context, args []string) error {
 	// configuration, so a Mac paired while this agent is running starts
 	// reporting (and listing its peers) without an agent restart.
 	opts = append(opts, agent.WithMeshProvider(enrollmentGatedMesh{path: *path, inner: mesh.NewRuntimeProvider()}))
+	// Live presence (GET /api/v2/hosts/events) and Wake-on-LAN. The stream uses
+	// the same client, so the same origin/TLS/no-proxy policy and host token as
+	// every REST call. A coordinator without these routes answers 404 and both
+	// loops back off quietly; neither affects admission or heartbeats. A relayed
+	// wake.request is sent with wol.Send; the online set authorizes nothing.
+	pres, err := presence.New(presence.Options{HostID: c.HostID, Wake: wol.Send,
+		Logger: logger.With("component", "presence"),
+		Dial: func(ctx context.Context) (presence.Conn, error) {
+			conn, err := api.DialHostEvents(ctx)
+			if err != nil {
+				return nil, err // never a typed-nil *wsclient.Conn in the interface
+			}
+			return conn, nil
+		}})
+	if err != nil {
+		return err
+	}
+	opts = append(opts, agent.WithPresence(pres), agent.WithWakeInfo(api))
 	a, err := agent.New(c, *path, api, probe, *pull, opts...)
 	if err != nil {
 		return err

@@ -185,3 +185,67 @@ struct NetworkState: Equatable {
         peers.isEmpty ? "No other Macs linked yet. Link another Mac with the neXal app." : nil
     }
 }
+
+/// Where a "Leave neXal network" request is.
+///
+/// The old button opened a `confirmationDialog`, which a `MenuBarExtra` window does
+/// not reliably present, so the click looked dead: no question, no progress, no
+/// result. Every phase is now rendered inside the panel itself, and the menu bar
+/// glyph changes while the leave is in flight, so the owner always sees that the
+/// click registered and what happened.
+enum LeavePhase: Equatable {
+    /// Asked inline, next to the button, rather than in a dialog.
+    case confirming
+    /// Waiting for an in-flight status check and stopping pairing activity.
+    case preparing
+    /// The connector is revoking this Mac with the coordinator.
+    case leaving
+    /// Done: the panel is back on the pairing screen.
+    case left
+    case failed(reason: String)
+
+    var title: String {
+        switch self {
+        case .confirming: return "Leave the neXal network?"
+        case .preparing:  return "Preparing to leave the neXal network\u{2026}"
+        case .leaving:    return "Leaving the neXal network\u{2026}"
+        case .left:       return "Left the neXal network"
+        case .failed:     return "Could not leave the neXal network"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .confirming:
+            return "This revokes this Mac, disconnects its tunnel, and removes its local network credentials. You can pair it again afterwards."
+        case .preparing:
+            return "Finishing the current status check and stopping pairing activity."
+        case .leaving:
+            return "Revoking this Mac with the coordinator and disconnecting its tunnel."
+        case .left:
+            return "This Mac is no longer on the neXal network. To pair it again, scan the code below with the neXal iPhone app or enter the manual pairing code."
+        case .failed(let reason):
+            return reason
+        }
+    }
+
+    var inProgress: Bool { self == .preparing || self == .leaving }
+
+    var symbol: String {
+        switch self {
+        case .confirming:           return "questionmark.circle"
+        case .preparing, .leaving:  return "arrow.triangle.2.circlepath"
+        case .left:                 return "checkmark.circle"
+        case .failed:               return "exclamationmark.triangle"
+        }
+    }
+
+    var severity: IndicatorSeverity {
+        switch self {
+        case .confirming:           return .warning
+        case .preparing, .leaving:  return .pending
+        case .left:                 return .good
+        case .failed:               return .bad
+        }
+    }
+}

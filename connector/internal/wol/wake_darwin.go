@@ -3,24 +3,40 @@
 package wol
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os/exec"
 	"time"
 )
 
-// pmsetCustom is replaced in tests.
-var pmsetCustom = func() ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+// wakeForNetwork runs `/usr/bin/pmset -g` with the same discipline as the
+// agent's diagnostic(): absolute path, no shell, a 2 s timeout, WaitDelay so a
+// child holding the pipe cannot stall us, bounded output and a fixed
+// environment. That helper lives in internal/agent, which imports this package,
+// so the few lines are repeated here rather than creating an import cycle.
+func wakeForNetwork(ctx context.Context) string {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "/usr/bin/pmset", "-g", "custom").Output()
+	cmd := exec.CommandContext(ctx, "/usr/bin/pmset", "-g")
+	cmd.WaitDelay = time.Second
+	out := &boundedBuffer{max: 256 << 10}
+	cmd.Stdout = out
+	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C"}
+	if err := cmd.Run(); err != nil {
+		return WakeUnknown
+	}
+	return ParseWomp(out.Bytes())
 }
 
-// WakeForNetwork reports whether macOS "Wake for network access" is on for
-// every power source (pmset womp=1). Any failure reads as false.
-func WakeForNetwork() bool {
-	out, err := pmsetCustom()
-	if err != nil || len(out) > 64<<10 {
-		return false
+type boundedBuffer struct {
+	bytes.Buffer
+	max int
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > b.max {
+		return 0, errors.New("pmset output limit exceeded")
 	}
-	return parseWakeOnMagicPacket(string(out))
+	return b.Buffer.Write(p)
 }

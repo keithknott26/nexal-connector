@@ -239,3 +239,27 @@ func TestLockMachineExcludesASecondProcess(t *testing.T) {
 		t.Errorf("refusal did not identify the holding process (parent pid %d): %s", os.Getpid(), out)
 	}
 }
+
+// Leaving the network stops the running agent by the pid it recorded, so that pid
+// must be reported only while the agent really holds the lock.
+func TestRunningAgentReportsOnlyALiveHolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	prod := writeConfigIn(t, home, filepath.Join("Library", "Application Support", "Nexal"))
+
+	if _, _, ok := RunningAgent(); ok {
+		t.Fatal("no agent has run yet, but one was reported")
+	}
+	unlock, err := LockMachine(prod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, cfg, ok := RunningAgent()
+	if !ok || pid != os.Getpid() || cfg != prod {
+		t.Fatalf("RunningAgent() = %d, %q, %v; want %d, %q, true", pid, cfg, ok, os.Getpid(), prod)
+	}
+	unlock()
+	if _, _, ok := RunningAgent(); ok {
+		t.Fatal("a released lock must not report a running agent")
+	}
+}

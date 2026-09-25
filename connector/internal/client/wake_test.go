@@ -2,201 +2,284 @@ package client
 
 import (
 	"context"
-	"crypto/sha1"
-	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"nexal/connector/internal/wsclient"
 )
 
-const testLANKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+const wakeTestKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-func TestPutWakeInfoContract(t *testing.T) {
+func TestReportWakeInfo(t *testing.T) {
 	var got map[string]any
+	status := 200
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "PUT" || r.URL.Path != "/api/v2/hosts/wake-info" || r.Header.Get("Authorization") != "Bearer host-token-123456" {
-			t.Errorf("%s %s", r.Method, r.URL.Path)
+		if r.Method != "PUT" || r.URL.Path != "/api/v2/hosts/wake-info" || r.Header.Get("Authorization") != "Bearer host-scoped-secret" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 		got = nil
 		_ = json.NewDecoder(r.Body).Decode(&got)
-		ioJSON(w, map[string]any{"ok": true, "macCount": len(got["macs"].([]any)), "wakeForNetwork": got["wakeForNetwork"]})
-	}))
-	defer srv.Close()
-	c, _ := New(srv.URL, "host-token-123456", true)
-	ctx := context.Background()
-	if err := c.PutWakeInfo(ctx, WakeInfo{MACs: []string{"a4:83:e7:12:34:56", "3c:22:fb:00:00:01"}, LANKey: testLANKey, WakeForNetwork: true, TunnelAddress: "100.113.174.101"}); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{"macs": []any{"a4:83:e7:12:34:56", "3c:22:fb:00:00:01"}, "lanKey": testLANKey, "wakeForNetwork": true, "tunnelAddress": "100.113.174.101"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("body %v", got)
-	}
-	if err := c.PutWakeInfo(ctx, WakeInfo{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: testLANKey}); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := got["tunnelAddress"]; ok || len(got) != 3 {
-		t.Fatalf("unknown tunnel address must be omitted: %v", got)
-	}
-}
-
-func TestWakeInfoValidation(t *testing.T) {
-	ok := WakeInfo{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: testLANKey}
-	if err := ok.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	nine := make([]string, 9)
-	for i := range nine {
-		nine[i] = "a4:83:e7:12:34:5" + string(rune('0'+i))
-	}
-	bad := []WakeInfo{
-		{LANKey: testLANKey},
-		{MACs: nine, LANKey: testLANKey},
-		{MACs: []string{"A4:83:E7:12:34:56"}, LANKey: testLANKey},
-		{MACs: []string{"a4-83-e7-12-34-56"}, LANKey: testLANKey},
-		{MACs: []string{"01:00:5e:00:00:01"}, LANKey: testLANKey}, // multicast
-		{MACs: []string{"00:00:00:00:00:00"}, LANKey: testLANKey},
-		{MACs: []string{"a4:83:e7:12:34:56", "a4:83:e7:12:34:56"}, LANKey: testLANKey},
-		{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: strings.ToUpper(testLANKey)},
-		{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: testLANKey[:63]},
-		{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: testLANKey, TunnelAddress: "192.168.1.2"},
-		{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: testLANKey, TunnelAddress: "100.128.0.1"},
-	}
-	c, _ := New("http://127.0.0.1:1", "host-token-123456", true)
-	for i, w := range bad {
-		if w.Validate() == nil {
-			t.Errorf("case %d accepted", i)
-		}
-		if c.PutWakeInfo(context.Background(), w) == nil {
-			t.Errorf("case %d sent", i)
-		}
-	}
-}
-
-func TestWakeRequestsContract(t *testing.T) {
-	var method, path, body string
-	status := 202
-	resp := `{"requestId":"6f1c2a52-8a4b-4d5e-9c1f-0a1b2c3d4e5f","relays":2,"targetWakeForNetwork":true}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		method, path, body = r.Method, r.URL.Path, string(b)
-		if r.Header.Get("Authorization") != "Bearer host-token-123456" {
-			t.Error("missing host auth")
-		}
 		w.WriteHeader(status)
-		_, _ = io.WriteString(w, resp)
+		// Unknown fields are tolerated on this new endpoint (HARDENING-PLAN §43).
+		_, _ = w.Write([]byte(`{"ok":true,"someFutureField":1}`))
 	}))
 	defer srv.Close()
-	c, _ := New(srv.URL, "host-token-123456", true)
+	c, _ := New(srv.URL, "host-scoped-secret", true)
 	ctx := context.Background()
-	res, err := c.WakeByTunnel(ctx, "100.113.99.69")
-	if err != nil || res.RequestID != "6f1c2a52-8a4b-4d5e-9c1f-0a1b2c3d4e5f" || res.Relays != 2 || !res.TargetWakeForNetwork {
-		t.Fatalf("%+v %v", res, err)
+	err := c.ReportWakeInfo(ctx, WakeInfo{MACs: []string{"3C-22-FB-01-02-03"}, LANKey: wakeTestKey, WakeForNetwork: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if method != "POST" || path != "/api/v2/hosts/wake" || body != `{"tunnelAddress":"100.113.99.69"}` {
-		t.Fatalf("%s %s %s", method, path, body)
+	if macs, _ := got["macs"].([]any); len(macs) != 1 || macs[0] != "3c:22:fb:01:02:03" || got["lanKey"] != wakeTestKey || got["wakeForNetwork"] != true {
+		t.Fatalf("body = %v", got)
 	}
-	if _, err = c.WakeHost(ctx, "host_abc"); err != nil || path != "/api/v2/hosts/host_abc/wake" || body != "" {
-		t.Fatalf("%s %q %v", path, body, err)
-	}
-	for _, code := range []int{400, 404, 409, 429, 503} {
-		status = code
-		var se *StatusError
-		if _, err = c.WakeHost(ctx, "host_abc"); !errors.As(err, &se) || se.Status != code {
-			t.Fatalf("status %d: %v", code, err)
+	for _, bad := range []WakeInfo{
+		{MACs: nil, LANKey: wakeTestKey},
+		{MACs: []string{"ff:ff:ff:ff:ff:ff"}, LANKey: wakeTestKey},
+		{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: "short"},
+		{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: strings.ToUpper(wakeTestKey)},
+	} {
+		if c.ReportWakeInfo(ctx, bad) == nil {
+			t.Errorf("accepted invalid wake info %+v", bad)
 		}
 	}
-	status = 202
-	resp = `{"requestId":"r1","relays":0,"targetWakeForNetwork":false,"extra":1}`
-	if _, err = c.WakeHost(ctx, "host_abc"); err == nil {
-		t.Fatal("unknown response field accepted")
+	for _, s := range []int{404, 503} {
+		status = s
+		if err := c.ReportWakeInfo(ctx, WakeInfo{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: wakeTestKey}); !IsNotSupported(err) {
+			t.Fatalf("HTTP %d: IsNotSupported(%v) = false", s, err)
+		}
 	}
-	resp = `{"requestId":"","relays":0,"targetWakeForNetwork":false}`
-	if _, err = c.WakeHost(ctx, "host_abc"); err == nil {
-		t.Fatal("empty request id accepted")
+	status = 500
+	if err := c.ReportWakeInfo(ctx, WakeInfo{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: wakeTestKey}); err == nil || IsNotSupported(err) {
+		t.Fatalf("HTTP 500 = %v; want a real failure", err)
 	}
-	if _, err = c.WakeByTunnel(ctx, "10.0.0.1"); err == nil {
-		t.Fatal("non-tunnel address accepted")
+}
+
+func TestRequestWake(t *testing.T) {
+	reply := func(w http.ResponseWriter, status int, body string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
 	}
-	if _, err = c.WakeHost(ctx, "../x"); err == nil {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("method %s", r.Method)
+		}
+		switch r.URL.Path {
+		case "/api/v2/hosts/ok-host/wake":
+			// The coordinator's real answer: 202, no "requested" field.
+			reply(w, 202, `{"requestId":"6f1c2a4e-9b1d-4c8e-8a57-3f0e2d1b9c77","relays":2,"targetWakeForNetwork":true,"extra":"ignored"}`)
+		case "/api/v2/hosts/zero-relay/wake":
+			reply(w, 200, `{"requestId":"req_0","relays":0,"targetWakeForNetwork":false}`)
+		case "/api/v2/hosts/busy/wake":
+			reply(w, 429, `{"error":{"code":"rate_limited","message":"x"}}`)
+		case "/api/v2/hosts/gone/wake":
+			reply(w, 404, `{"error":{"code":"wake_target_not_found","message":"x"}}`)
+		case "/api/v2/hosts/gated/wake":
+			reply(w, 503, `{"error":{"code":"wake_gate_unavailable","message":"x"}}`)
+		case "/api/v2/hosts/too-many-relays/wake":
+			reply(w, 202, `{"requestId":"req_3","relays":1001}`)
+		case "/api/v2/hosts/no-id/wake":
+			reply(w, 202, `{"relays":1}`)
+		case "/api/v2/hosts/lonely/wake":
+			reply(w, 409, `{"error":{"code":"no_wake_relay","message":"<script>untrusted prose</script>"}}`)
+		case "/api/v2/hosts/other-conflict/wake":
+			reply(w, 409, `{"error":{"code":"host_awake","message":"x"}}`)
+		case "/api/v2/hosts/weird-code/wake":
+			reply(w, 409, `{"error":{"code":"No Wake Relay\u001b[31m","message":"x"}}`)
+		default:
+			reply(w, 404, `{}`)
+		}
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "host-scoped-secret", true)
+	ctx := context.Background()
+	ack, err := c.RequestWake(ctx, "ok-host")
+	if err != nil || ack.RequestID != "6f1c2a4e-9b1d-4c8e-8a57-3f0e2d1b9c77" || ack.Relays != 2 || !ack.TargetWakeForNetwork {
+		t.Fatalf("202 ack = %+v, %v", ack, err)
+	}
+	if ack, err := c.RequestWake(ctx, "zero-relay"); err != nil || ack.Relays != 0 || ack.TargetWakeForNetwork {
+		t.Fatalf("200 zero-relay ack = %+v, %v", ack, err)
+	}
+	if _, err := c.RequestWake(ctx, "busy"); !errors.Is(err, ErrWakeRateLimited) {
+		t.Fatalf("429 = %v", err)
+	}
+	if _, err := c.RequestWake(ctx, "gone"); !errors.Is(err, ErrWakeTargetNotFound) || IsNotSupported(err) {
+		t.Fatalf("404 wake_target_not_found = %v", err)
+	}
+	if _, err := c.RequestWake(ctx, "gated"); !IsNotSupported(err) {
+		t.Fatalf("503 = %v", err)
+	}
+	for _, id := range []string{"too-many-relays", "no-id"} {
+		if _, err := c.RequestWake(ctx, id); err == nil {
+			t.Fatalf("%s accepted", id)
+		}
+	}
+	if _, err := c.RequestWake(ctx, "lonely"); !errors.Is(err, ErrNoWakeRelay) {
+		t.Fatalf("409 no_wake_relay = %v", err)
+	}
+	var s *StatusError
+	_, err = c.RequestWake(ctx, "other-conflict")
+	if !errors.As(err, &s) || s.Status != 409 || s.Code != "host_awake" || errors.Is(err, ErrNoWakeRelay) {
+		t.Fatalf("other 409 = %v", err)
+	}
+	if strings.Contains(err.Error(), "host_awake") {
+		// Error() is unchanged by the Code field.
+		t.Fatal("StatusError.Error() now prints the code")
+	}
+	if _, err := c.RequestWake(ctx, "weird-code"); !errors.As(err, &s) || s.Code != "" {
+		t.Fatalf("unsanitary code kept: %+v", s)
+	}
+	if _, err := c.RequestWake(ctx, "missing"); !IsNotSupported(err) {
+		t.Fatalf("404 = %v", err)
+	}
+	if _, err := c.RequestWake(ctx, "../etc"); err == nil {
 		t.Fatal("invalid host id accepted")
 	}
 }
 
-// upgrade is a minimal server-side WebSocket accept that then sends one text
-// frame.
-func upgrade(t *testing.T, w http.ResponseWriter, r *http.Request, text string) {
-	conn, rw, err := http.NewResponseController(w).Hijack()
-	if err != nil {
-		t.Error(err)
-		return
+// TestCallLenientAccepts2xx pins that the lenient path treats the whole 2xx
+// range as success, including 202 Accepted (wake) and 204 No Content.
+func TestCallLenientAccepts2xx(t *testing.T) {
+	for _, status := range []int{200, 201, 202, 204} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			if status != 204 {
+				_, _ = w.Write([]byte(`{"requestId":"r1","relays":1,"unknown":true}`))
+			}
+		}))
+		c, _ := New(srv.URL, "host-scoped-secret", true)
+		if err := c.callLenient(context.Background(), "PUT", "/x", struct{}{}, nil); err != nil {
+			t.Errorf("HTTP %d with nil out: %v", status, err)
+		}
+		if status != 204 {
+			var out WakeAck
+			if err := c.callLenient(context.Background(), "POST", "/x", struct{}{}, &out); err != nil || out.RequestID != "r1" {
+				t.Errorf("HTTP %d decode: %+v %v", status, out, err)
+			}
+		}
+		srv.Close()
 	}
-	defer conn.Close()
-	sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-	_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
-		base64.StdEncoding.EncodeToString(sum[:]) + "\r\n\r\n")
-	_, _ = rw.Write(append([]byte{0x81, byte(len(text))}, text...))
-	_ = rw.Flush()
-	_, _ = rw.ReadByte() // wait for the client's close
 }
 
-func TestDialEvents(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != EventsPath {
-			t.Errorf("path %s", r.URL.Path)
+func TestDialHostEvents(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/hosts/events" {
+			w.WriteHeader(404)
+			return
 		}
-		if r.Header.Get("Authorization") != "Bearer host-token-123456" {
+		if r.Header.Get("Authorization") != "Bearer host-scoped-secret" {
 			w.WriteHeader(401)
 			return
 		}
-		upgrade(t, w, r, `{"v":1,"type":"snapshot","online":[],"at":"x"}`)
-	})
-	srv := httptest.NewServer(handler)
+		conn, rw, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.Close()
+		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " +
+			wsclient.AcceptKey(r.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n")
+		msg := `{"v":1,"type":"snapshot","online":[],"at":"2026-09-24T00:00:00Z"}`
+		_, _ = rw.Write(append([]byte{0x81, byte(len(msg))}, msg...))
+		_ = rw.Flush()
+		time.Sleep(200 * time.Millisecond)
+	}))
 	defer srv.Close()
-	c, _ := New(srv.URL, "host-token-123456", true)
-	conn, err := c.DialEvents(context.Background())
+	c, _ := New(srv.URL, "host-scoped-secret", true)
+	conn, err := c.DialHostEvents(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, msg, err := conn.ReadMessage(); err != nil || !strings.Contains(string(msg), "snapshot") {
 		t.Fatalf("%q %v", msg, err)
 	}
-	conn.Close(1000)
+	_ = conn.Close()
 
-	bad, _ := New(srv.URL, "wrong-token-123456", true)
-	var se *StatusError
-	if _, err := bad.DialEvents(context.Background()); !errors.As(err, &se) || se.Status != 401 {
-		t.Fatalf("err %v", err)
+	wrong, _ := New(srv.URL, "wrong-token-value", true)
+	_, err = wrong.DialHostEvents(context.Background())
+	var s *StatusError
+	if !errors.As(err, &s) || s.Status != 401 || strings.Contains(err.Error(), srv.URL) {
+		t.Fatalf("401 upgrade = %v", err)
 	}
+	// Production (dev=false) must refuse plain http even for loopback — the same
+	// rule as every REST call — and must not leak the URL.
+	if _, err := New(srv.URL, "host-scoped-secret", false); err == nil {
+		t.Fatal("production client accepted an http origin")
+	}
+	closed := httptest.NewServer(http.NotFoundHandler())
+	url := closed.URL
+	closed.Close()
+	down, _ := New(url, "host-scoped-secret", true)
+	if _, err := down.DialHostEvents(context.Background()); err == nil || strings.Contains(err.Error(), url) ||
+		!strings.Contains(err.Error(), "coordinator request failed") {
+		t.Fatalf("transport error not sanitized: %v", err)
+	}
+}
 
-	// wss:// with the REST transport's TLS configuration (TLS 1.3 floor).
-	tlsSrv := httptest.NewTLSServer(handler)
-	defer tlsSrv.Close()
-	sc, err := New(tlsSrv.URL, "host-token-123456", false)
-	if err != nil {
+func TestRequestWakeByTunnel(t *testing.T) {
+	var body map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v2/hosts/wake" {
+			t.Errorf("%s %s", r.Method, r.URL.Path)
+		}
+		body = nil
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		if body["tunnelAddress"] == "100.64.0.9" {
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":{"code":"wake_target_not_found","message":"x"}}`))
+			return
+		}
+		w.WriteHeader(202)
+		_, _ = w.Write([]byte(`{"requestId":"6f1c2a4e-9b1d-4c8e-8a57-3f0e2d1b9c77","relays":1,"targetWakeForNetwork":false}`))
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "host-scoped-secret", true)
+	ack, err := c.RequestWakeByTunnel(context.Background(), "100.113.99.69")
+	if err != nil || ack.Relays != 1 || ack.TargetWakeForNetwork || body["tunnelAddress"] != "100.113.99.69" || len(body) != 1 {
+		t.Fatalf("ack %+v err %v body %v", ack, err, body)
+	}
+	if _, err := c.RequestWakeByTunnel(context.Background(), "100.64.0.9"); !errors.Is(err, ErrWakeTargetNotFound) {
+		t.Fatalf("want ErrWakeTargetNotFound, got %v", err)
+	}
+	for _, bad := range []string{"192.168.1.5", "100.128.0.1", "100.064.0.1", ""} {
+		if _, err := c.RequestWakeByTunnel(context.Background(), bad); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}
+
+func TestReportWakeInfoTunnelAddress(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = nil
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"macCount":1,"wakeForNetwork":true}`))
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "host-scoped-secret", true)
+	key := strings.Repeat("a", 64)
+	if err := c.ReportWakeInfo(context.Background(), WakeInfo{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: key, WakeForNetwork: true, TunnelAddress: "100.113.174.101"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sc.DialEvents(context.Background()); err == nil {
-		t.Fatal("untrusted certificate accepted")
+	if got["tunnelAddress"] != "100.113.174.101" {
+		t.Fatalf("body %v", got)
 	}
-	cfg := sc.http.Transport.(*http.Transport).TLSClientConfig
-	cfg.RootCAs = tlsSrv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
-	var version uint16
-	cfg.VerifyConnection = func(cs tls.ConnectionState) error { version = cs.Version; return nil }
-	conn, err = sc.DialEvents(context.Background())
-	if err != nil {
+	if err := c.ReportWakeInfo(context.Background(), WakeInfo{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: key}); err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(1000)
-	if version != tls.VersionTLS13 {
-		t.Fatalf("TLS version %#x", version)
+	if _, present := got["tunnelAddress"]; present {
+		t.Fatalf("empty tunnelAddress must be omitted: %v", got)
 	}
-	if _, msg, err := conn.ReadMessage(); err != nil || !strings.Contains(string(msg), "snapshot") {
-		t.Fatalf("%q %v", msg, err)
+	if err := c.ReportWakeInfo(context.Background(), WakeInfo{MACs: []string{"a4:83:e7:12:34:56"}, LANKey: key, TunnelAddress: "10.0.0.1"}); err == nil {
+		t.Fatal("non-tunnel address accepted")
 	}
 }

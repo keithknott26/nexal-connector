@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"nexal/connector/internal/contribution"
 	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/throttle"
+	"nexal/connector/internal/wol"
 )
 
 type Record struct {
@@ -53,6 +55,14 @@ type Status struct {
 	// the second is automatic, transient and never written to disk.
 	Contribution ContributionStatus `json:"contribution"`
 	Mesh         mesh.Status        `json:"mesh"`
+	// Presence and Wake are additive (see presence.go). Presence is the
+	// coordinator's live online set; Wake is this Mac's own Wake-on-LAN facts.
+	Presence PresenceStatus `json:"presence"`
+	Wake     WakeStatus     `json:"wake"`
+
+	// CredentialRejected: the coordinator no longer accepts this Mac's credential;
+	// the owner must leave and pair again. Additive; false when unknown.
+	CredentialRejected bool `json:"credentialRejected"`
 }
 
 // UploadThrottle is the §26 "always see why" view of the upload dimension: the
@@ -82,6 +92,13 @@ type Agent struct {
 	lastOutcome   string
 	records       map[string]Record
 	lastHeartbeat time.Time
+
+	// credentialRejectedAt is set when the coordinator answers a heartbeat with 401:
+	// this host's credential was revoked or expired (removed from the phone, or
+	// released on the server). Retrying every 15 s cannot fix that, so heartbeats
+	// back off to credentialRetryInterval and status tells the app to re-pair.
+	credentialRejectedAt time.Time
+
 	heartbeatWake chan struct{}
 	// A consent change fences asynchronous observations started under the old
 	// policy. Per-operation sequence numbers also prevent out-of-order results.
@@ -122,12 +139,18 @@ type Agent struct {
 	// reduces transport failures to fixed messages for the same reason.
 	logger       *slog.Logger
 	meshProvider mesh.Provider
-	// dialEvents overrides the coordinator event-stream dialer (tests only).
-	dialEvents func(context.Context) (eventStream, error)
-	// online is the coordinator's presence view from the event stream, guarded
-	// by presenceMu (not mu) so a burst of events never contends with admission.
-	presenceMu sync.Mutex
-	online     map[string]struct{}
+	// presence is the live online-set stream; nil unless WithPresence. It has
+	// its own lock and never takes a.mu, so reading it under a.mu is safe.
+	presence PresenceSource
+	// wakeReporter publishes wake facts; nil unless WithWakeInfo. wakeFacts is
+	// the local collector (wol.CollectLocal), replaceable by tests. wake is the
+	// last collected view for status, guarded by mu.
+	wakeReporter WakeInfoReporter
+	wakeFacts    func(context.Context) wol.Facts
+	wake         WakeStatus
+	// wakeInfoEvery overrides both wake-info waits when nonzero. Tests only;
+	// production leaves it zero and gets wakeInfoInterval/RetryInterval.
+	wakeInfoEvery time.Duration
 }
 
 // Option configures optional Agent behaviour. Options exist so observability can
@@ -173,7 +196,8 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 		return nil, errors.New("telemetry probe required")
 	}
 	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1), meshProvider: mesh.UnavailableProvider{},
-		logger: slog.New(slog.DiscardHandler)}
+		logger: slog.New(slog.DiscardHandler), wakeFacts: wol.CollectLocal,
+		wake: WakeStatus{MACs: []string{}, WakeForNetwork: wol.WakeUnknown}}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -234,7 +258,9 @@ func (a *Agent) Snapshot() Status {
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
 		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
-		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
+		Presence: a.presenceStatusLocked(), Wake: a.wakeStatusLocked(),
+		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second,
+		CredentialRejected: !a.credentialRejectedAt.IsZero()}
 }
 
 // AcceptJobsNow is explicit, local owner consent for ten minutes of zero-cost
@@ -679,11 +705,37 @@ func errorText(err error) string {
 // abandoned attempt look spontaneous. trigger distinguishes the scheduled beat
 // from the consent-change beat, which is the difference between a network problem
 // and an owner action.
+// credentialRetryInterval is how often a host whose credential was rejected still
+// checks in: often enough to recover if the rejection was transient, rare enough
+// not to fill the coordinator's logs with 401s from a Mac nobody re-paired.
+const credentialRetryInterval = 10 * time.Minute
+
 func (a *Agent) heartbeat(ctx context.Context, trigger string) {
-	if err := a.hostHeartbeat(ctx); err != nil {
+	a.mu.Lock()
+	rejected := a.credentialRejectedAt
+	a.mu.Unlock()
+	if !rejected.IsZero() && trigger == "interval" && time.Since(rejected) < credentialRetryInterval {
+		return
+	}
+	err := a.hostHeartbeat(ctx)
+	var status *client.StatusError
+	a.mu.Lock()
+	switch {
+	case err == nil:
+		a.credentialRejectedAt = time.Time{}
+	case errors.As(err, &status) && status.Status == http.StatusUnauthorized:
+		a.credentialRejectedAt = time.Now()
+	}
+	a.mu.Unlock()
+	if err != nil {
 		if ctx.Err() != nil {
 			// Shutdown, not a fault.
 			a.logger.Debug("host heartbeat abandoned during shutdown", "trigger", trigger)
+			return
+		}
+		if status != nil && status.Status == http.StatusUnauthorized {
+			a.logger.Warn("coordinator no longer accepts this host's credential; leave and pair this Mac again",
+				"retryIn", credentialRetryInterval.String())
 			return
 		}
 		a.logger.Warn("host heartbeat failed", "trigger", trigger, "error", errorText(err))
@@ -761,13 +813,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup
 	wg.Add(6)
-	// Coordinator event stream: presence, and wake requests for sleeping Macs
-	// on this LAN. Returns immediately when the API has no event stream.
+	// Live presence and wake-info reporting are their own goroutines for the
+	// same reason discovery is: a stalled WebSocket, a slow pmset or a slow
+	// coordinator write must never delay a heartbeat or an attempt poll.
+	// runPresence returns at once when presence is not configured.
 	go func() {
 		defer wg.Done()
-		a.runEvents(ctx, hostID)
+		a.runPresence(ctx)
 	}()
-	// Wake-on-LAN details, so another Mac on this LAN can wake this one.
 	go func() {
 		defer wg.Done()
 		a.runWakeInfo(ctx)

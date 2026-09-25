@@ -46,6 +46,18 @@ func transportError(err error) error {
 		kind, hint = "unreachable", "no working route to the coordinator"
 	case errors.Is(err, syscall.ECONNRESET), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		kind, hint = "connection_closed", "connection closed before a complete response"
+	case errors.Is(err, syscall.EPERM), errors.Is(err, syscall.EACCES):
+		// macOS returns EPERM from connect() when a network filter (a firewall app
+		// such as Little Snitch or LuLu, a VPN/content filter, or an MDM policy)
+		// refuses this process. It was previously reported as a generic failure,
+		// which sent owners looking at their router instead of their firewall app.
+		kind, hint = "blocked", "the connection was blocked on this Mac by a firewall app, content filter or network policy; allow neXal Connector's nexal helper to reach the coordinator"
+	}
+	// For an unclassified failure, name the OS error (a fixed errno string such
+	// as "no route to host", never attacker-controlled text) so it can be diagnosed.
+	var errno syscall.Errno
+	if kind == "network" && errors.As(err, &errno) {
+		hint += " (" + errno.Error() + ")"
 	}
 	return fmt.Errorf("coordinator request failed [%s]: %s; automatic proxy settings are not used", kind, hint)
 }

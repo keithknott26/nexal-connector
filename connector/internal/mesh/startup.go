@@ -16,6 +16,9 @@ import (
 type StartupPlan struct {
 	SetupKey      string `json:"setupKey"`
 	ManagementURL string `json:"managementUrl"`
+	// Hostname is the name registered with the secure network (see PeerName).
+	// Empty leaves the runtime's default, the Mac's own hostname.
+	Hostname string `json:"hostname,omitempty"`
 }
 
 type PlanStore interface {
@@ -165,7 +168,11 @@ func (p StartupPlan) Arguments(credentialPath string) ([]string, error) {
 	}
 	// Lazy connections are disabled through the service environment
 	// (NB_LAZY_CONN=off, set by the macOS app); `up` flags no longer control them.
-	return []string{"up", "--setup-key-file", credentialPath, "--management-url", p.ManagementURL, "--enable-rosenpass"}, nil
+	args := []string{"up", "--setup-key-file", credentialPath, "--management-url", p.ManagementURL, "--enable-rosenpass"}
+	if name := PeerName("", p.Hostname); name != "" {
+		args = append(args, "--hostname", name)
+	}
+	return args, nil
 }
 
 // RuntimePeerEvidence is the only evidence that may lift strict-PQ gates.

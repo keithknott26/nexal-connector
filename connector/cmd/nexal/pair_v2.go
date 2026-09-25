@@ -306,7 +306,8 @@ func startPersistedMesh(ctx context.Context, secrets config.Secrets, managementU
 		return errors.New("secure networking credential unavailable")
 	}
 	controller := mesh.Controller{
-		Plans:  mesh.StaticPlanStore{Plan: mesh.StartupPlan{SetupKey: setupKey, ManagementURL: managementURL}},
+		Plans: mesh.StaticPlanStore{Plan: mesh.StartupPlan{SetupKey: setupKey, ManagementURL: managementURL,
+			Hostname: mesh.LocalPeerName(ctx)}},
 		Runner: mesh.ExecRunner{},
 	}
 	return controller.Start(ctx)

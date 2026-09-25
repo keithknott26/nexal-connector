@@ -2,6 +2,7 @@ package timemachine
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -42,11 +43,21 @@ func TestSMBCredentialURLAndRedaction(t *testing.T) {
 	if err := c.Validate(dest()); err != nil {
 		t.Fatal(err)
 	}
-	if got := c.TmutilURL(); got != "smb://tm33333333333343338333:abcdefghijklmnopqrstuvwx-_12@tm-gw-1.netbird.cloud/tm33333333333343338333" {
+	if got := c.DestinationURL(); got != "smb://tm33333333333343338333@tm-gw-1.netbird.cloud/tm33333333333343338333" || got != c.RedactedURL() {
 		t.Fatal(got)
 	}
-	if strings.Contains(c.RedactedURL(), c.Password) || strings.Contains(c.String(), c.Password) {
-		t.Fatal("password leaked")
+	if s := fmt.Sprintf("%v %+v %#v %s", c, c, c, c); strings.Contains(s, c.Password) {
+		t.Fatal("password leaked: " + s)
+	}
+	odd := SMBCredential{Destination: Destination{Username: "a@b c:d", Host: "100.92.3.4", Share: "s h/x"}}
+	if got := odd.DestinationURL(); got != "smb://a%40b%20c%3Ad@100.92.3.4/s%20h/x" {
+		t.Fatal(got)
+	}
+	withURL := c
+	withURL.URL = "smb://u:" + c.Password + "@h/s"
+	withURL.Zero()
+	if withURL.Password != "" || withURL.URL != "" {
+		t.Fatal("Zero left secret fields")
 	}
 	other := dest()
 	other.Host = "evil.example.com"

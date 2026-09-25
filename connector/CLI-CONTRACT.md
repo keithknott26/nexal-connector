@@ -301,13 +301,51 @@ limits: `experiments/tcp-pager/PLATFORM-DELIVERY.md` in the repository.
 
 ## `wake` (coordinator-direct)
 
-`nexal wake --tunnel <100.64/10 address> --config <abs>` or `--host <host id>`.
-Asks the coordinator (`POST /api/hosts/:id/wake`) to wake a sleeping peer. The
-coordinator relays the request to awake connectors last seen from the target's
-WAN address (`GET /api/hosts/:id/wake-requests`, polled every 10 s by `run`),
-which broadcast a magic packet on UDP 9/7 and acknowledge it
-(`POST …/wake-requests/:id/sent`). When this Mac shares the target's WAN
-address it also broadcasts directly. Output:
-`{"ok":true,"requestId":"…","targetOnline":false,"relays":1,"sentLocally":false}`.
-Each heartbeat reports `wake: {mac, broadcast, tunnel}` for the default-route
-interface so this Mac can be woken later.
+`nexal wake --tunnel <100.64/10 address> --config <abs>` or
+`nexal wake --host <host id> --config <abs>` (exactly one of the two).
+Asks the coordinator to wake a sleeping peer with this host's token:
+`POST /api/v2/hosts/wake` with body `{"tunnelAddress":"100.x.y.z"}`, or
+`POST /api/v2/hosts/{hostId}/wake` with an empty body. The coordinator pushes a
+`wake.request` over the event stream to awake neXal Macs on the target's local
+network; each broadcasts the magic packet. This command sends no packet itself
+(if this Mac shares the target's network it is one of those relays). Output
+(202):
+`{"ok":true,"requestId":"…","relays":1,"targetWakeForNetwork":true}`.
+`targetWakeForNetwork` is the target's reported macOS "Wake for network access"
+setting; when false the packet is sent but the Mac may not wake. Errors
+(`connector_error` message):
+
+| HTTP | message |
+| ---- | ------- |
+| 404 | `that Mac has not reported Wake-on-LAN details yet, or is not on your network` |
+| 409 | `no other neXal Mac on that Mac's local network is awake to send the wake packet` |
+| 429 | `too many wake requests; wait a minute` |
+| 503 | `wake is temporarily unavailable` |
+| other | `coordinator rejected request (HTTP n)` |
+
+While `run` is active the connector also:
+
+- publishes `PUT /api/v2/hosts/wake-info`
+  `{"macs":[…],"lanKey":"<64 hex>","wakeForNetwork":bool,"tunnelAddress"?:"100.x.y.z"}`
+  at startup, then every 60 s when the content changed and at least every
+  10 min. `macs` are the (≤ 8, sorted) unicast hardware addresses of up,
+  broadcast-capable, non-loopback, non-point-to-point physical interfaces that
+  carry an RFC 1918 IPv4 address (VM/container bridges and tunnels excluded);
+  `lanKey` is the hex SHA-256 of those interfaces' sorted, deduplicated network
+  prefixes (for example `192.168.68.0/22`) joined with `\n`; `wakeForNetwork`
+  is true only when every `womp` line of `pmset -g custom` is 1 (always false
+  off macOS); `tunnelAddress` is omitted when this host's secure-network
+  address is unknown. Nothing is published when there is no such interface.
+- keeps the WebSocket `GET /api/v2/hosts/events` open (bearer host token,
+  `wss://`; `ws://` only for the development loopback coordinator), sends the
+  text frame `ping` every 30 s, keeps an in-memory presence set from
+  `snapshot` / `host.online` / `host.offline` / `host.removed` (cleared while
+  disconnected; not exposed on the local API yet), and on `wake.request`
+  broadcasts a magic packet for each listed MAC to 255.255.255.255 and each
+  eligible interface's subnet broadcast on UDP 9 and 7. Unknown event types are
+  ignored. Close code 4001 (credential gone) or 4002 (superseded by a newer
+  socket for this host) stops the stream until the next `run`; anything else
+  reconnects with jittered exponential backoff (1 s to 60 s, reset after a
+  connection that lasted over 60 s).
+
+Heartbeats carry no wake details.

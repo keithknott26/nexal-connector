@@ -393,6 +393,10 @@ final class AppModel: ObservableObject {
     private func observe(_ status: ConnectorStatus?) {
         capability = capabilitySource.capability(from: status)
         history.record(status)
+        // A peer that has reconnected no longer needs its "wake sent" note.
+        for peer in status?.mesh?.peers ?? [] where peer.lifecycle == "connected" {
+            wakeStatus[peer.id] = nil
+        }
     }
 
     func refresh() async {
@@ -488,18 +492,22 @@ final class AppModel: ObservableObject {
     func wake(_ peer: ConnectorStatus.MeshPeer) async {
         guard let tunnel = peer.tunnelAddress else { return }
         wakeStatus[peer.id] = "Sending wake request\u{2026}"
-        struct Reply: Decodable { let relays: Int; let sentLocally: Bool; let targetOnline: Bool }
+        struct Reply: Decodable { let relays: Int; let targetWakeForNetwork: Bool }
         do {
             let reply = try JSONDecoder().decode(Reply.self, from: try await invoke(.wake(tunnelAddress: tunnel)))
-            let senders = reply.relays + (reply.sentLocally ? 1 : 0)
-            if reply.targetOnline {
-                wakeStatus[peer.id] = "That Mac is already awake; a wake packet was still sent."
-            } else if senders == 0 {
-                wakeStatus[peer.id] = "Wake queued, but no awake neXal Mac is on its network right now."
-            } else {
-                wakeStatus[peer.id] = "Wake packet sent from \(senders) Mac\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
+            let senders = reply.relays
+            guard senders > 0 else {
+                wakeStatus[peer.id] = "No other neXal Mac on that Mac\u{2019}s local network is awake to send the wake packet."
+                return
             }
+            var text = "Wake packet sent by \(senders) Mac\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
+            if !reply.targetWakeForNetwork {
+                text += " Wake for network access is off on that Mac, so it may not wake \u{2014} open neXal Connector on it once while it\u{2019}s awake to fix that."
+            }
+            wakeStatus[peer.id] = text
         } catch {
+            // ShellError.commandFailed carries the connector's own stderr message
+            // (e.g. "too many wake requests; wait a minute"), so this is friendly text.
             wakeStatus[peer.id] = error.localizedDescription
         }
     }

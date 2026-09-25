@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -11,11 +12,11 @@ func init() {
 }
 
 func TestProbeServicesReportsOpenPortsAndCaches(t *testing.T) {
-	calls := 0
+	var calls atomic.Int32
 	prev := dialService
 	defer func() { dialService = prev }()
 	dialService = func(addr string) bool {
-		calls++
+		calls.Add(1)
 		return addr == "100.64.0.9:22" || addr == "100.64.0.9:445"
 	}
 	got := probeServices("100.64.0.9")
@@ -23,8 +24,8 @@ func TestProbeServicesReportsOpenPortsAndCaches(t *testing.T) {
 		t.Fatalf("services = %v", got)
 	}
 	probeServices("100.64.0.9")
-	if calls != len(servicePorts) {
-		t.Fatalf("expected cached second probe, dialed %d times", calls)
+	if int(calls.Load()) != len(servicePorts) {
+		t.Fatalf("expected cached second probe, dialed %d times", calls.Load())
 	}
 }
 

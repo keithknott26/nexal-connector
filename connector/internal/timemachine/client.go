@@ -93,22 +93,28 @@ func (c SMBCredential) Validate(expected Destination) error {
 	return nil
 }
 
-// TmutilURL is the argument for `tmutil setdestination -a`. It contains the
-// password and must never be logged.
-func (c SMBCredential) TmutilURL() string {
-	u := url.URL{Scheme: "smb", User: url.UserPassword(c.Username, c.Password), Host: c.Host, Path: "/" + c.Share}
-	return u.String()
-}
-
-// RedactedURL is safe to print.
-func (c SMBCredential) RedactedURL() string {
+// DestinationURL is the password-free argument for
+// `tmutil setdestination -a -p`: smb://user@host/share with user and share
+// percent-escaped by net/url. The password is never part of any URL handed to
+// a process; it is typed into tmutil's -p prompt instead (see cmd/nexal).
+func (c SMBCredential) DestinationURL() string {
 	u := url.URL{Scheme: "smb", User: url.User(c.Username), Host: c.Host, Path: "/" + c.Share}
 	return u.String()
 }
 
+// RedactedURL is safe to print. It is the same password-free URL.
+func (c SMBCredential) RedactedURL() string { return c.DestinationURL() }
+
+// GoString keeps %#v from printing the password.
+func (c SMBCredential) GoString() string { return c.String() }
+
+// Zero drops the secret fields. URL is coordinator-supplied, unused, and may
+// embed the password, so it is dropped too. (Go strings cannot be overwritten
+// in place; this releases the only references this package holds.)
 func (c *SMBCredential) Zero() {
 	if c != nil {
 		c.Password = ""
+		c.URL = ""
 	}
 }
 

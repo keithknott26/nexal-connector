@@ -3,12 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"nexal/connector/internal/config"
 )
@@ -81,9 +86,9 @@ func TestTimeMachineGatewayClientConnect(t *testing.T) {
 	}))
 	defer s.Close()
 	p := writeTimeMachineTestConfig(t, s.URL)
-	var got string
+	var got, gotPassword string
 	oldSet, oldLookup := setDestination, meshLookup
-	setDestination = func(_ context.Context, u string) error { got = u; return nil }
+	setDestination = func(_ context.Context, u string, pw []byte) error { got, gotPassword = u, string(pw); return nil }
 	meshLookup = func(string) ([]string, error) { return []string{"100.101.2.3"}, nil }
 	defer func() { setDestination, meshLookup = oldSet, oldLookup }()
 	if err := timeMachineCommand(context.Background(), []string{"-config", p, "-connect", "-dry-run"}); err != nil {
@@ -96,7 +101,7 @@ func TestTimeMachineGatewayClientConnect(t *testing.T) {
 		if err := timeMachineCommand(context.Background(), []string{"-config", p, "-connect"}); err != nil {
 			t.Fatal(err)
 		}
-		if got != "smb://"+share+":abcdefghijklmnopqrstuvwx-_12@tm-gw-1.netbird.cloud/"+share {
+		if got != "smb://"+share+"@tm-gw-1.netbird.cloud/"+share || gotPassword != "abcdefghijklmnopqrstuvwx-_12" {
 			t.Fatal(got)
 		}
 	}
@@ -126,4 +131,99 @@ func writeTimeMachineTestConfig(t *testing.T, coordinator string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+const tmTestPassword = "abcdefghijklmnopqrstuvwx-_12"
+const tmTestURL = "smb://tm33333333333343338333@tm-gw-1.netbird.cloud/tm33333333333343338333"
+
+func stubTmutil(t *testing.T, terminal bool, run func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) error) {
+	t.Helper()
+	oldRun, oldTTY := runTmutil, hasTerminal
+	runTmutil, hasTerminal = run, func() bool { return terminal }
+	t.Cleanup(func() { runTmutil, hasTerminal = oldRun, oldTTY })
+}
+
+func TestSetDestinationKeepsPasswordOutOfArgv(t *testing.T) {
+	for _, terminal := range []bool{true, false} {
+		var argv []string
+		var typed []byte
+		stubTmutil(t, terminal, func(_ context.Context, a []string, stdin io.Reader, stdout, _ io.Writer) error {
+			argv = a
+			_, _ = io.WriteString(stdout, "Destination password: ")
+			var err error
+			typed, err = io.ReadAll(stdin)
+			return err
+		})
+		pw := []byte(tmTestPassword)
+		if err := setDestination(context.Background(), tmTestURL, pw); err != nil {
+			t.Fatal(err)
+		}
+		if string(typed) != tmTestPassword+"\n" {
+			t.Fatalf("stdin=%q", typed)
+		}
+		for _, a := range argv {
+			if strings.Contains(a, tmTestPassword) || strings.Contains(a, "abcdefgh") {
+				t.Fatalf("password in argv: %q", argv)
+			}
+		}
+		want := []string{"/usr/bin/sudo", "--", "/usr/bin/script", "-q", "/dev/null", "/usr/bin/tmutil", "setdestination", "-a", "-p", tmTestURL}
+		if !terminal {
+			want = slices.Insert(want, 1, "-n")
+		}
+		if !slices.Equal(argv, want) || slices.Contains(argv, "-S") {
+			t.Fatalf("argv=%q", argv)
+		}
+		if string(pw) != tmTestPassword {
+			t.Fatal("setDestination must not mutate the caller's buffer; the caller clears it")
+		}
+	}
+}
+
+func TestSetDestinationWithholdsPasswordUntilPrompt(t *testing.T) {
+	stubTmutil(t, true, func(ctx context.Context, _ []string, stdin io.Reader, stdout, _ io.Writer) error {
+		got := make(chan []byte, 1)
+		go func() { b, _ := io.ReadAll(stdin); got <- b }()
+		select {
+		case b := <-got:
+			return errors.New("stdin released before prompt: " + string(b))
+		case <-time.After(50 * time.Millisecond):
+		}
+		_, _ = io.WriteString(stdout, "warning: "+tmTestPassword+" echoed\n")
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	err := setDestination(ctx, tmTestURL, []byte(tmTestPassword))
+	if err == nil || !strings.Contains(err.Error(), "timed out before tmutil asked") {
+		t.Fatalf("err=%v", err)
+	}
+	if strings.Contains(err.Error(), tmTestPassword) {
+		t.Fatal("password in error")
+	}
+}
+
+func TestSetDestinationFailureRedactsOutput(t *testing.T) {
+	stubTmutil(t, false, func(_ context.Context, _ []string, stdin io.Reader, stdout, _ io.Writer) error {
+		_, _ = io.WriteString(stdout, "Password:")
+		b, _ := io.ReadAll(stdin)
+		_, _ = stdout.Write(b)
+		return errors.New("exit status 1")
+	})
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = w
+	err = setDestination(context.Background(), tmTestURL, []byte(tmTestPassword))
+	os.Stderr = oldStderr
+	_ = w.Close()
+	printed, _ := io.ReadAll(r)
+	if err == nil || !strings.Contains(err.Error(), "run `nexal time-machine -connect` in Terminal") {
+		t.Fatalf("err=%v", err)
+	}
+	if strings.Contains(string(printed), tmTestPassword) || !strings.Contains(string(printed), "[redacted]") {
+		t.Fatalf("stderr=%q", printed)
+	}
 }

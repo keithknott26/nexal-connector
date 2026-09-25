@@ -149,6 +149,10 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 			completed++
 			mu.Unlock()
 			respond(map[string]bool{"accepted": true})
+		case "/api/v2/hosts/events", "/api/v2/hosts/wake-info":
+			// Wake-on-LAN push features are not part of this loop; answer as a
+			// coordinator that has not deployed them (the agent backs off).
+			w.WriteHeader(404)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(404)

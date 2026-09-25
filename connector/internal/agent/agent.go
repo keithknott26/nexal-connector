@@ -122,6 +122,12 @@ type Agent struct {
 	// reduces transport failures to fixed messages for the same reason.
 	logger       *slog.Logger
 	meshProvider mesh.Provider
+	// dialEvents overrides the coordinator event-stream dialer (tests only).
+	dialEvents func(context.Context) (eventStream, error)
+	// online is the coordinator's presence view from the event stream, guarded
+	// by presenceMu (not mu) so a burst of events never contends with admission.
+	presenceMu sync.Mutex
+	online     map[string]struct{}
 }
 
 // Option configures optional Agent behaviour. Options exist so observability can
@@ -718,7 +724,6 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 		enrolledMesh = gate.Enrolled()
 	}
 	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
-	h.Wake = wakeInfo(meshStatus.SelfTunnelAddress)
 	err := a.api.Heartbeat(ctx, hostID, h)
 	if err == nil && enrolledMesh {
 		if reporter, ok := a.api.(interface {
@@ -755,11 +760,17 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.Refresh(ctx)
 	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup
-	wg.Add(5)
-	// Wake-on-LAN relay: broadcast wake requests for sleeping Macs on this LAN.
+	wg.Add(6)
+	// Coordinator event stream: presence, and wake requests for sleeping Macs
+	// on this LAN. Returns immediately when the API has no event stream.
 	go func() {
 		defer wg.Done()
-		a.runWakeRelay(ctx, hostID)
+		a.runEvents(ctx, hostID)
+	}()
+	// Wake-on-LAN details, so another Mac on this LAN can wake this one.
+	go func() {
+		defer wg.Done()
+		a.runWakeInfo(ctx)
 	}()
 	// §36.4 power/thermal/disk sampling is its own goroutine on its own slower
 	// cadence: it spawns processes, so it must never sit in the 2 s telemetry path,

@@ -119,7 +119,7 @@ type Status struct {
 	Peers              []Peer          `json:"peers"`
 	Discovery          DiscoveryStatus `json:"discovery"`
 	// SelfTunnelAddress is this host's own tunnel IP. Reported to the coordinator
-	// only as the wake-on-LAN lookup key (client.WakeInfo.Tunnel).
+	// only as the Wake-on-LAN lookup key (client.WakeInfo.TunnelAddress).
 	SelfTunnelAddress string `json:"-"`
 }
 

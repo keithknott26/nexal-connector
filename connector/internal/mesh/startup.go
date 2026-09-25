@@ -163,10 +163,9 @@ func (p StartupPlan) Arguments(credentialPath string) ([]string, error) {
 	if p.SetupKey == "" || p.ManagementURL == "" || credentialPath == "" {
 		return nil, errors.New("mesh startup configuration is incomplete")
 	}
-	// Lazy connections leave peers idle with no tunnel until traffic arrives,
-	// so the first request to a peer stalls. Keep every tunnel up; passing the
-	// flag on every `up` also rewrites any value already saved in the config.
-	return []string{"up", "--setup-key-file", credentialPath, "--management-url", p.ManagementURL, "--enable-rosenpass", "--enable-lazy-connection=false"}, nil
+	// Lazy connections are disabled through the service environment
+	// (NB_LAZY_CONN=off, set by the macOS app); `up` flags no longer control them.
+	return []string{"up", "--setup-key-file", credentialPath, "--management-url", p.ManagementURL, "--enable-rosenpass"}, nil
 }
 
 // RuntimePeerEvidence is the only evidence that may lift strict-PQ gates.

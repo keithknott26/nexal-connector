@@ -46,16 +46,6 @@ func TestStartupAlwaysRequiresRosenpassWithoutPermissiveMode(t *testing.T) {
 	}
 }
 
-func TestStartupAlwaysDisablesLazyConnections(t *testing.T) {
-	args, err := (StartupPlan{SetupKey: "secret", ManagementURL: "https://management.example"}).Arguments("/private/tmp/credential")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(args, "--enable-lazy-connection=false") {
-		t.Fatalf("lazy connections must be disabled: %v", args)
-	}
-}
-
 func TestStartupNeverPlacesCredentialInArguments(t *testing.T) {
 	runner := &runnerFixture{}
 	if err := (Controller{Plans: &planFixture{}, Runner: runner}).Start(context.Background()); err != nil {

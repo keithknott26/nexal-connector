@@ -156,7 +156,7 @@ struct NetworkPanel: View {
                 LabeledContent("Connection step", value: step)
             }
             if let updated = mesh.updatedAt, !updated.isEmpty {
-                Text("Evidence updated \(updated)").font(.caption2).foregroundStyle(.secondary)
+                Text("Evidence updated \(clockTime(updated))").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .font(.caption)
@@ -168,6 +168,7 @@ struct NetworkPanel: View {
     private func host(_ peer: ConnectorStatus.MeshPeer) -> some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
+                quickLinks(peer)
                 LabeledContent("Connection", value: peer.lifecycle.capitalized)
                 LabeledContent("Post-quantum protection", value: pqLabel(peer.pq))
                 LabeledContent("Current path", value: routeLabel(peer))
@@ -187,14 +188,78 @@ struct NetworkPanel: View {
             HStack(spacing: 8) {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(peer.name.isEmpty ? peer.id : peer.name)
-                    Text("\(pqLabel(peer.pq)) · \(routeLabel(peer))")
-                        .font(.caption2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    let info = model.peerNetInfo[peer.id]
+                    HStack(spacing: 6) {
+                        Text(peer.name.isEmpty ? peer.id : peer.name)
+                        Text("Public IP: \(info?.publicAddress ?? "—")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("Direct IP: \(peer.directAddress ?? "—")   Location: \(info?.location ?? "—")")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Quantum Safe: \(peer.pq == "protected" ? "On" : "Off")")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
+                .textSelection(.enabled)
             }
         }
         .accessibilityIdentifier("host-\(peer.id)")
+    }
+
+    /// RFC 3339 timestamp (any fractional precision) → local "HH:MM:SS TZ",
+    /// e.g. "03:18:59 EDT". Falls back to the raw string if it cannot parse.
+    private func clockTime(_ stamp: String) -> String {
+        let trimmed = stamp.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
+        guard let date = ISO8601DateFormatter().date(from: trimmed) else { return stamp }
+        let out = DateFormatter()
+        out.locale = Locale(identifier: "en_US_POSIX")
+        out.dateFormat = "HH:mm:ss zzz"
+        return out.string(from: date)
+    }
+
+    /// SSH, VNC and file-sharing links for services the peer offers. An
+    /// advertised neXal address wins; otherwise the tunnel address is used.
+    @ViewBuilder
+    private func quickLinks(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        let services = Set(peer.services ?? [])
+        let tunnel = peer.tunnelAddress
+        HStack(spacing: 6) {
+            if services.contains("ssh"), let host = tunnel {
+                linkButton("SSH", "terminal", "ssh://\(host)")
+            }
+            if let host = (peer.screenSharing?.available == true ? peer.screenSharing?.address : nil)
+                ?? (services.contains("vnc") ? tunnel : nil) {
+                linkButton("VNC", "display", "vnc://\(host)")
+            }
+            if let host = (peer.fileSharing?.available == true ? peer.fileSharing?.address : nil)
+                ?? (services.contains("smb") ? tunnel : nil) {
+                linkButton("Files", "folder", "smb://\(host)")
+            }
+            if tunnel != nil {
+                Button {
+                    Task { await model.wake(peer) }
+                } label: {
+                    Label("Wake up", systemImage: "power")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Send a Wake-on-LAN packet through a neXal Mac on its network")
+            }
+        }
+        if let note = model.wakeStatus[peer.id] {
+            Text(note).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func linkButton(_ title: String, _ symbol: String, _ link: String) -> some View {
+        Button {
+            if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+        } label: {
+            Label(title, systemImage: symbol)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("\(title): \(link)")
     }
 
     private var activityGraphs: some View {

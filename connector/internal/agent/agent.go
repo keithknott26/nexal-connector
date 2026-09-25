@@ -718,6 +718,7 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 		enrolledMesh = gate.Enrolled()
 	}
 	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
+	h.Wake = wakeInfo(meshStatus.SelfTunnelAddress)
 	err := a.api.Heartbeat(ctx, hostID, h)
 	if err == nil && enrolledMesh {
 		if reporter, ok := a.api.(interface {
@@ -754,7 +755,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.Refresh(ctx)
 	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
+	// Wake-on-LAN relay: broadcast wake requests for sleeping Macs on this LAN.
+	go func() {
+		defer wg.Done()
+		a.runWakeRelay(ctx, hostID)
+	}()
 	// §36.4 power/thermal/disk sampling is its own goroutine on its own slower
 	// cadence: it spawns processes, so it must never sit in the 2 s telemetry path,
 	// and a slow pmset must not delay a heartbeat.

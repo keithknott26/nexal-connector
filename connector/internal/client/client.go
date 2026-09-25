@@ -44,6 +44,16 @@ type Heartbeat struct {
 	AvailableMemoryBytes uint64 `json:"availableMemoryBytes"`
 	PQ                   PQ     `json:"pq"`
 	Version              string `json:"version"`
+	// Wake lets the coordinator relay Wake-on-LAN requests for this host.
+	Wake *WakeInfo `json:"wake,omitempty"`
+}
+
+// WakeInfo is the interface another Mac needs to wake this one, plus this
+// host's own tunnel address so peers that know it only by that can name it.
+type WakeInfo struct {
+	MAC       string `json:"mac,omitempty"`
+	Broadcast string `json:"broadcast,omitempty"`
+	Tunnel    string `json:"tunnel,omitempty"`
 }
 type Renewal struct {
 	OK              bool      `json:"ok"`
@@ -213,8 +223,9 @@ func (c *Client) Heartbeat(ctx context.Context, host string, h Heartbeat) error 
 		return errors.New("invalid host id")
 	}
 	var out struct {
-		OK           bool `json:"ok"`
-		LeaseSeconds int  `json:"leaseSeconds"`
+		OK               bool `json:"ok"`
+		LeaseSeconds     int  `json:"leaseSeconds"`
+		HeartbeatSeconds int  `json:"heartbeatSeconds"`
 	}
 	if err := c.call(ctx, "POST", "/api/hosts/"+url.PathEscape(host)+"/heartbeat", h, &out); err != nil {
 		return err

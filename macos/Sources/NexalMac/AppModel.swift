@@ -17,6 +17,10 @@ final class AppModel: ObservableObject {
     @Published var memoryMiB = 256
     @Published var reserveMiB = 4096
     @Published private(set) var selection: ExecutableSelection?
+    /// Last Wake-on-LAN outcome per mesh peer id, shown under its quick links.
+    @Published private(set) var wakeStatus: [String: String] = [:]
+    /// Public IP and location per mesh peer id, filled in after each status poll.
+    @Published private(set) var peerNetInfo: [String: PeerNetInfo] = [:]
     @Published private(set) var status: ConnectorStatus?
     @Published private(set) var busy = false
     /// What the connector is doing RIGHT NOW, in the owner's language.
@@ -193,7 +197,23 @@ final class AppModel: ObservableObject {
         // nobody has to run a terminal command after installing the DMG. Only
         // the installed app does this: tests and `swift run` have no bundle.
         if Bundle.main.bundleURL.pathExtension == "app" {
-            Task { [weak self] in await self?.ensureNetworkServiceAtLaunch() }
+            Task { [weak self] in
+                await self?.ensureNetworkServiceAtLaunch()
+                await self?.keepAgentRunning()
+            }
+        }
+    }
+
+    /// The panel's own poll only runs while the menu-bar panel is open, so on
+    /// its own the agent would not start after launch or an update until the
+    /// owner clicked the icon. This background loop starts (or re-attaches to)
+    /// the agent at launch and restarts it within 30 s if it stops.
+    private func keepAgentRunning() async {
+        while !Task.isCancelled {
+            if hasPersistedHostIdentity, child == nil || status == nil {
+                await refresh()
+            }
+            do { try await Task.sleep(for: .seconds(30)) } catch { return }
         }
     }
 
@@ -213,13 +233,18 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// One administrator prompt when the macOS firewall would block peers.
+    /// One administrator prompt when the macOS firewall would block peers or
+    /// the service has lazy connections on.
     func repairFirewallIfNeeded() async {
-        let blocked = await Task.detached(priority: .utility) { NetworkService.firewallBlocksPeers }.value
-        guard blocked else { return }
+        let (firewall, lazy, wake) = await Task.detached(priority: .utility) {
+            (NetworkService.firewallBlocksPeers, NetworkService.lazyConnectionsOn, NetworkService.wakeForNetworkOff)
+        }.value
+        guard firewall || lazy || wake else { return }
         do {
-            try await Task.detached(priority: .userInitiated) { try NetworkService.repairFirewall() }.value
-            message = "macOS firewall updated: incoming peer connections are allowed."
+            try await Task.detached(priority: .userInitiated) {
+                try NetworkService.repairHostSettings(firewall: firewall, lazy: lazy, wake: wake)
+            }.value
+            message = "Network settings updated: incoming peer connections allowed, lazy connections off, Wake for network access on."
         } catch {
             pairingProblem = error.localizedDescription
         }
@@ -305,6 +330,17 @@ final class AppModel: ObservableObject {
                 try await updateStatus()
                 return
             }
+            // An agent left running by an earlier install still runs the old
+            // code; stop it so the current build is launched below.
+            if let selection {
+                let url = selection.url
+                let stale = await Task.detached(priority: .userInitiated) { () -> [pid_t] in
+                    let pids = StaleAgent.pids(for: url)
+                    StaleAgent.stop(for: url)
+                    return pids
+                }.value
+                if !stale.isEmpty { AgentLog.note("stopped stale agent(s) \(stale)") }
+            }
             // Attach to an existing Go service rather than launch a duplicate.
             if let data = try? await invoke(.status),
                let existing = try? ConnectorStatus.decode(data) {
@@ -319,17 +355,23 @@ final class AppModel: ObservableObject {
             let process = try ConnectorProcess.make(selection, .run, config: selectedConfig)
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
+            // The agent logs sanitized JSON to stderr; keep it so a connector
+            // that stops can be diagnosed (~/Library/Logs/Nexal/agent.log).
+            process.standardError = AgentLog.handle() ?? FileHandle.nullDevice
             process.terminationHandler = { [weak self] completed in
+                let code = completed.terminationStatus
+                let reason = completed.terminationReason == .uncaughtSignal ? "signal \(code)" : "exit \(code)"
+                AgentLog.note("agent stopped (\(reason))")
                 Task { @MainActor in
                     guard let self, self.child === completed else { return }
                     self.child = nil
                     self.processOwned = false
                     self.status = nil
                     self.capability = self.capabilitySource.capability(from: nil)
-                    self.message = "Connector stopped. Review the Go CLI configuration before restarting."
+                    self.message = "Connector stopped (\(reason)). Details: ~/Library/Logs/Nexal/agent.log"
                 }
             }
+            AgentLog.note("starting agent: \(selection.url.path)")
             try process.run()
             child = process
             processOwned = true
@@ -377,6 +419,7 @@ final class AppModel: ObservableObject {
             await start()
             await updateTunnelEvidence()
             await updatePeers()
+            await updatePeerLocations()
 			await updateTimeMachine()
             return
         }
@@ -399,6 +442,7 @@ final class AppModel: ObservableObject {
         // successfully read.
         await updateTunnelEvidence()
         await updatePeers()
+        await updatePeerLocations()
 		await updateTimeMachine()
     }
 
@@ -436,6 +480,38 @@ final class AppModel: ObservableObject {
             return
         }
         tunnelEvidence = decoded
+    }
+
+    /// Wake a sleeping peer: the coordinator relays a magic packet through an
+    /// awake neXal Mac on the peer's network (and this Mac sends one too when it
+    /// shares that network).
+    func wake(_ peer: ConnectorStatus.MeshPeer) async {
+        guard let tunnel = peer.tunnelAddress else { return }
+        wakeStatus[peer.id] = "Sending wake request\u{2026}"
+        struct Reply: Decodable { let relays: Int; let sentLocally: Bool; let targetOnline: Bool }
+        do {
+            let reply = try JSONDecoder().decode(Reply.self, from: try await invoke(.wake(tunnelAddress: tunnel)))
+            let senders = reply.relays + (reply.sentLocally ? 1 : 0)
+            if reply.targetOnline {
+                wakeStatus[peer.id] = "That Mac is already awake; a wake packet was still sent."
+            } else if senders == 0 {
+                wakeStatus[peer.id] = "Wake queued, but no awake neXal Mac is on its network right now."
+            } else {
+                wakeStatus[peer.id] = "Wake packet sent from \(senders) Mac\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
+            }
+        } catch {
+            wakeStatus[peer.id] = error.localizedDescription
+        }
+    }
+
+    private func updatePeerLocations() async {
+        let peers = status?.mesh?.peers ?? []
+        var next: [String: PeerNetInfo] = [:]
+        for peer in peers where peer.directAddress != nil {
+            next[peer.id] = await PeerLocator.shared.info(directAddress: peer.directAddress,
+                                                         directIsPrivate: peer.directIsPrivate ?? false)
+        }
+        if next != peerNetInfo { peerNetInfo = next }
     }
 
     private func updatePeers() async {

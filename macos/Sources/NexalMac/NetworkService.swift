@@ -69,10 +69,12 @@ enum NetworkService {
             // back to a relay (or fails). Allowing it is scoped to this binary.
             // "Block all incoming connections" overrides every per-app rule, and
             // stealth mode drops peer probes, so both are turned off here too.
-            "do shell script p & \" service install >/dev/null 2>&1; \" "
+            "do shell script p & \" service install --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
+                + "& p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
+                + "& \"\(wakeForNetworkCommand)\" "
                 + "& firewallCommands "
                 + "& p & \" service start\" "
-                + "with prompt \"neXal needs to install its secure networking service and allow incoming peer connections in the macOS firewall (this turns off Block all incoming connections and stealth mode).\" "
+                + "with prompt \"neXal needs to install its secure networking service, allow incoming peer connections in the macOS firewall (turning off Block all incoming connections and stealth mode), and turn on Wake for network access so other Macs can wake this one.\" "
                 + "with administrator privileges",
             "end run",
         ]
@@ -121,22 +123,81 @@ enum NetworkService {
         isOn(firewallSetting("--getblockall")) || isOn(firewallSetting("--getstealthmode"))
     }
 
-    /// Blocking: one administrator prompt that turns off block-all and stealth
-    /// mode and re-allows the bundled runtime. For Macs whose service is already
-    /// installed (so `install()` never runs again). Call off the main actor.
-    static func repairFirewall() throws {
+    /// True when the running service reports lazy connections on. Lazy peers
+    /// have no tunnel until traffic arrives, so the first request stalls. The
+    /// account setting turns them on; NB_LAZY_CONN=off in the service
+    /// environment overrides it on this Mac (the `up` flag is ignored since 0.75).
+    static var lazyConnectionsOn: Bool {
+        guard isRunning, let helper = try? validatedHelper() else { return false }
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = ["status"]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return text.range(of: "Lazy connection: true", options: .caseInsensitive) != nil
+    }
+
+    /// `pmset -a womp 1` = System Settings > Energy > "Wake for network access",
+    /// on every power source. Lets a magic packet relayed by another neXal Mac
+    /// wake this one. Ends in "; " so it can be prefixed to another command.
+    static let wakeForNetworkCommand = "/usr/bin/pmset -a womp 1 >/dev/null 2>&1; "
+
+    /// True when this Mac supports Wake for network access and it is off for
+    /// any power source. `pmset -g custom` needs no root; a Mac that does not
+    /// list `womp` at all cannot be woken this way and is left alone.
+    static var wakeForNetworkOff: Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pmset")
+        process.arguments = ["-g", "custom"]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let values = text.split(separator: "\n").compactMap { line -> String? in
+            let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            return fields.count >= 2 && fields[0] == "womp" ? String(fields[1]) : nil
+        }
+        return values.contains("0")
+    }
+
+    /// Blocking: one administrator prompt that fixes what `install()` sets on a
+    /// Mac whose service was already installed (so `install()` never runs
+    /// again): the firewall and/or lazy connections. Call off the main actor.
+    static func repairHostSettings(firewall: Bool, lazy: Bool, wake: Bool = false) throws {
+        guard firewall || lazy || wake else { return }
         let helper = try validatedHelper()
+        var command = "\"\""
+        if firewall { command += " & " + firewallCommandsExpression }
+        if wake { command += " & \"\(wakeForNetworkCommand)\"" }
+        if lazy {
+            command += " & p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
+                + "& p & \" service start >/dev/null 2>&1; \""
+        }
+        let what = [firewall ? "allow incoming peer connections in the macOS firewall (turning off Block all incoming connections and stealth mode)" : nil,
+                    lazy ? "keep peer connections always on (turning off lazy connections)" : nil,
+                    wake ? "turn on Wake for network access so other Macs can wake this one" : nil]
+            .compactMap { $0 }.joined(separator: " and ")
         let script = [
             "on run argv",
             "set p to quoted form of (item 1 of argv)",
             "set fw to \"\(firewallTool)\"",
-            "do shell script " + firewallCommandsExpression + " & \"true\" "
-                + "with prompt \"neXal needs to allow incoming peer connections in the macOS firewall. This turns off Block all incoming connections and stealth mode.\" "
+            "do shell script " + command + " & \"true\" "
+                + "with prompt \"neXal needs to \(what).\" "
                 + "with administrator privileges",
             "end run",
         ]
         try runAdminScript(script, argument: helper.path)
-        guard !firewallBlocksPeers else {
+        if lazy { for _ in 0..<30 where !isRunning { Thread.sleep(forTimeInterval: 0.5) } }
+        if wake && wakeForNetworkOff {
+            throw Failure.failed("macOS still reports Wake for network access as off. A configuration profile (MDM) may be enforcing it.")
+        }
+        if firewall && firewallBlocksPeers {
             throw Failure.failed("macOS still reports Block all incoming connections or stealth mode as on. A configuration profile (MDM) may be enforcing it.")
         }
     }

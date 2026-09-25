@@ -97,9 +97,17 @@ type Peer struct {
 	FileSharing        FileSharing    `json:"fileSharing"`
 	ScreenSharing      ScreenSharing  `json:"screenSharing"`
 	Hostname           HostnameStatus `json:"hostname"`
-	// TunnelAddress is the peer's private tunnel IP. It stays in-process (the
-	// local peers surface) and is never sent to the coordinator.
-	TunnelAddress string `json:"-"`
+	// Local-only fields for the owner's own panel. The coordinator report is
+	// built by client.TunnelReportFromRuntime, which never copies them.
+	//
+	// TunnelAddress is the peer's private tunnel IP.
+	TunnelAddress string `json:"tunnelAddress,omitempty"`
+	// DirectAddress is the peer endpoint of a P2P tunnel (no port); private when
+	// both Macs share a LAN.
+	DirectAddress   string `json:"directAddress,omitempty"`
+	DirectIsPrivate bool   `json:"directIsPrivate,omitempty"`
+	// Services lists what answered on the tunnel address: "ssh", "vnc", "smb".
+	Services []string `json:"services,omitempty"`
 }
 
 type Status struct {
@@ -110,6 +118,9 @@ type Status struct {
 	UpdatedAt          string          `json:"updatedAt,omitempty"`
 	Peers              []Peer          `json:"peers"`
 	Discovery          DiscoveryStatus `json:"discovery"`
+	// SelfTunnelAddress is this host's own tunnel IP. Reported to the coordinator
+	// only as the wake-on-LAN lookup key (client.WakeInfo.Tunnel).
+	SelfTunnelAddress string `json:"-"`
 }
 
 // Provider is the only dependency neXal takes on a mesh implementation.

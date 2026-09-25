@@ -298,3 +298,16 @@ changes enrollment, pauses the running agent or requires its exclusive config lo
 Keychain authorization may prompt on macOS. No bearer tokens or private keys
 are accepted in command arguments. Full platform protocol, prerequisites and
 limits: `experiments/tcp-pager/PLATFORM-DELIVERY.md` in the repository.
+
+## `wake` (coordinator-direct)
+
+`nexal wake --tunnel <100.64/10 address> --config <abs>` or `--host <host id>`.
+Asks the coordinator (`POST /api/hosts/:id/wake`) to wake a sleeping peer. The
+coordinator relays the request to awake connectors last seen from the target's
+WAN address (`GET /api/hosts/:id/wake-requests`, polled every 10 s by `run`),
+which broadcast a magic packet on UDP 9/7 and acknowledge it
+(`POST …/wake-requests/:id/sent`). When this Mac shares the target's WAN
+address it also broadcasts directly. Output:
+`{"ok":true,"requestId":"…","targetOnline":false,"relays":1,"sentLocally":false}`.
+Each heartbeat reports `wake: {mac, broadcast, tunnel}` for the default-route
+interface so this Mac can be woken later.

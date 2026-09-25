@@ -44,6 +44,8 @@ enum CLICommand {
     /// Reconnect an already-enrolled Mac to its secure network (after a
     /// reinstall, service restart or reboot). Harmless when not enrolled.
     case rejoinNetwork
+    /// Ask the coordinator to wake a sleeping peer, named by its tunnel address.
+    case wake(tunnelAddress: String)
 
     func arguments(config: URL) -> [String] {
         let command: [String]
@@ -84,6 +86,8 @@ enum CLICommand {
             command = ["pair-v2", "--leave"]
         case .rejoinNetwork:
             command = ["pair-v2", "--rejoin"]
+        case let .wake(tunnelAddress):
+            command = ["wake", "--tunnel", tunnelAddress]
         }
         return command + ["--config", config.path]
     }
@@ -203,6 +207,11 @@ struct ConnectorStatus: Decodable {
 		let fileSharing: MeshFileSharing?
 		let screenSharing: MeshScreenSharing?
 		let hostname: MeshHostname?
+		// Local-only details for the owner's panel.
+		let tunnelAddress: String?
+		let directAddress: String?
+		let directIsPrivate: Bool?
+		let services: [String]?
 	}
 	struct MeshTraffic: Decodable { let receivedBytes: UInt64; let sentBytes: UInt64; let lastAt: String? }
 	struct MeshFileSharing: Decodable {

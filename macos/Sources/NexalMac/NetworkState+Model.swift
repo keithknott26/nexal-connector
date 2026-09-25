@@ -103,10 +103,14 @@ extension AppModel {
     /// Linked means this Mac has a host identity from the coordinator. A running
     /// connector that has never enrolled is not linked, which is exactly the state the
     /// join button exists for.
+    ///
+    /// When the agent is not answering (stopped, restarting after an update)
+    /// there is no status, but the saved host identity still says this Mac is
+    /// paired. Offering a new pairing code then would wrongly look like the Mac
+    /// lost its association, so the saved identity counts as linked.
     var isLinked: Bool {
-        guard let status else { return false }
-        guard let hostId = status.hostId else { return false }
-        return !hostId.isEmpty
+        if let hostId = status?.hostId { return !hostId.isEmpty }
+        return hasPersistedHostIdentity
     }
 
     var networkState: NetworkState {

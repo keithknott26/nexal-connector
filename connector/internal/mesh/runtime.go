@@ -3,6 +3,7 @@ package mesh
 import (
 	"context"
 	"encoding/json"
+	"net/netip"
 	"os/exec"
 	"strings"
 	"time"
@@ -37,7 +38,8 @@ type runtimeStatus struct {
 	Management struct {
 		Connected bool `json:"connected"`
 	} `json:"management"`
-	QuantumResistance bool `json:"quantumResistance"`
+	QuantumResistance bool   `json:"quantumResistance"`
+	NetbirdIP         string `json:"netbirdIp"`
 	Peers             struct {
 		Details []runtimePeer `json:"details"`
 	} `json:"peers"`
@@ -54,6 +56,14 @@ type runtimePeer struct {
 	TransferSent      int64           `json:"transferSent"`
 	QuantumResistance bool            `json:"quantumResistance"`
 	Latency           json.RawMessage `json:"latency"`
+	ICECandidateType  struct {
+		Local  string `json:"local"`
+		Remote string `json:"remote"`
+	} `json:"iceCandidateType"`
+	ICECandidateEndpoint struct {
+		Local  string `json:"local"`
+		Remote string `json:"remote"`
+	} `json:"iceCandidateEndpoint"`
 }
 
 func (p RuntimeProvider) Snapshot() Status {
@@ -84,6 +94,9 @@ func translateRuntime(out []byte, now time.Time) Status {
 	}
 	s := Status{ProviderAvailable: true, Lifecycle: LifecycleAuthenticating, PQ: PQUnsupported,
 		UpdatedAt: FreshRFC3339(now), Peers: []Peer{}}
+	if ip, _, _ := strings.Cut(rs.NetbirdIP, "/"); ip != "" {
+		s.SelfTunnelAddress = ip
+	}
 	if rs.Management.Connected {
 		// This Mac is on its network. Peers are reported separately: the first
 		// Mac in a network has none, and must still be able to finish pairing.
@@ -107,6 +120,13 @@ func translateRuntime(out []byte, now time.Time) Status {
 		switch strings.ToLower(rp.ConnectionType) {
 		case "p2p":
 			peer.Path, peer.PathLabel = PathDirect, "P2P — direct"
+			// The address the encrypted tunnel actually reaches the peer on: a
+			// LAN address when both Macs share a network, otherwise the peer's
+			// public (NAT) address.
+			if ap, err := netip.ParseAddrPort(rp.ICECandidateEndpoint.Remote); err == nil {
+				peer.DirectAddress = ap.Addr().Unmap().String()
+				peer.DirectIsPrivate = ap.Addr().IsPrivate() || ap.Addr().IsLinkLocalUnicast()
+			}
 		case "relayed":
 			peer.Path, peer.PathLabel = PathRelay, "neXal Relay — metered"
 		}
@@ -121,6 +141,9 @@ func translateRuntime(out []byte, now time.Time) Status {
 			peer.PQ, peer.PQVerifiedAt = PQProtected, FreshRFC3339(now)
 		} else {
 			allProtected = false
+		}
+		if peer.Lifecycle == LifecycleConnected && peer.TunnelAddress != "" {
+			peer.Services = probeServices(peer.TunnelAddress)
 		}
 		s.Peers = append(s.Peers, peer)
 	}

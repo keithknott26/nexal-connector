@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nexal/connector/internal/mesh"
+	"nexal/connector/internal/remoteservice"
 )
 
 type TunnelStatusReport struct {
@@ -21,6 +22,27 @@ type TunnelStatusReport struct {
 	// Services this computer offers (ssh, vnc, smb). A pointer so that "none"
 	// is sent as [] (closing their ports) while an unset value is omitted.
 	Services *[]string `json:"services,omitempty"`
+	// ServiceCapabilities is additive to Services for older coordinators. It
+	// distinguishes observation from authorization; neither is a request to
+	// enable a macOS service.
+	ServiceCapabilities []remoteservice.Capability `json:"serviceCapabilities,omitempty"`
+	// Peers preserves the per-peer evidence needed by iOS/macOS graphs. The
+	// scalar Path and Traffic above remain for deployed coordinator versions.
+	Peers []TunnelPeerReport `json:"peers,omitempty"`
+	// ControlPlaneTraffic is intentionally absent until the HTTP transport owns
+	// trustworthy counters. Peer totals must not be mislabeled coordinator I/O.
+	ControlPlaneTraffic *TunnelTraffic `json:"controlPlaneTraffic,omitempty"`
+}
+
+type TunnelPeerReport struct {
+	ID              string        `json:"id"`
+	Name            string        `json:"name"`
+	Lifecycle       string        `json:"lifecycle"`
+	Path            TunnelPath    `json:"path"`
+	Traffic         TunnelTraffic `json:"traffic"`
+	LastHandshakeAt string        `json:"lastHandshakeAt,omitempty"`
+	LastTrafficAt   string        `json:"lastTrafficAt,omitempty"`
+	PQVerifiedAt    string        `json:"pqVerifiedAt,omitempty"`
 }
 
 type TunnelPath struct {
@@ -62,6 +84,20 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 		default:
 			report.SecurityState = "degraded"
 		}
+	}
+	for _, peer := range status.Peers {
+		if peer.Lifecycle != mesh.LifecycleConnected && peer.Lifecycle != mesh.LifecycleDegraded {
+			continue
+		}
+		item := TunnelPeerReport{ID: peer.ID, Name: peer.Name, Lifecycle: string(peer.Lifecycle),
+			Path: TunnelPath{Type: platformPath(peer.Path), RelayRegion: peer.RelayRegion,
+				LatencyMS: uint64(math.Max(0, math.Round(peer.LatencyMS))), LossPercent: math.Max(0, math.Min(100, peer.PacketLossPercent))},
+			Traffic:         TunnelTraffic{BytesSent: peer.Traffic.SentBytes, BytesReceived: peer.Traffic.ReceivedBytes},
+			LastHandshakeAt: wireTimestamp(peer.LastHandshakeAt), LastTrafficAt: wireTimestamp(peer.Traffic.LastAt)}
+		if peer.PQ == mesh.PQProtected {
+			item.PQVerifiedAt = wireTimestamp(peer.PQVerifiedAt)
+		}
+		report.Peers = append(report.Peers, item)
 	}
 	peer := bestRuntimePeer(status.Peers)
 	if peer == nil {
@@ -123,6 +159,7 @@ func (c *Client) ReportTunnelStatus(ctx context.Context, hostID string, status m
 	report := TunnelReportFromRuntime(status, time.Now())
 	services := append([]string{}, mesh.LocalServices()...)
 	report.Services = &services
+	report.ServiceCapabilities = remoteservice.Capabilities(services, nil, time.Now())
 	var out struct {
 		OK bool `json:"ok"`
 	}

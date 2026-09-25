@@ -1,6 +1,8 @@
 package client
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +23,26 @@ func TestTunnelReportMapsOnlyFreshVerifiedRuntimeEvidence(t *testing.T) {
 	}
 	if report.Traffic.BytesSent != 12 || report.Traffic.BytesReceived != 34 {
 		t.Fatalf("traffic lost: %#v", report.Traffic)
+	}
+}
+
+func TestTunnelReportCarriesEveryConnectedPeerWithoutInventingCoordinatorTraffic(t *testing.T) {
+	now := time.Now().UTC()
+	status := mesh.Status{Lifecycle: mesh.LifecycleConnected, Peers: []mesh.Peer{
+		{ID: "a", Name: "Studio", Lifecycle: mesh.LifecycleConnected, Path: mesh.PathDirect, LatencyMS: 4.4, Traffic: mesh.Traffic{SentBytes: 10, ReceivedBytes: 20}},
+		{ID: "b", Name: "Office", Lifecycle: mesh.LifecycleDegraded, Path: mesh.PathRelay, RelayRegion: "New York", LatencyMS: 21, Traffic: mesh.Traffic{SentBytes: 30, ReceivedBytes: 40}},
+		{ID: "offline", Lifecycle: mesh.LifecycleUnavailable},
+	}}
+	report := TunnelReportFromRuntime(status, now)
+	if len(report.Peers) != 2 || report.Peers[0].ID != "a" || report.Peers[1].Traffic.BytesReceived != 40 {
+		t.Fatalf("per-peer telemetry = %+v", report.Peers)
+	}
+	wire, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "controlPlaneTraffic") {
+		t.Fatalf("invented coordinator traffic: %s", wire)
 	}
 }
 

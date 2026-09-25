@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,10 @@ type Status struct {
 	// coordinator's live online set; Wake is this Mac's own Wake-on-LAN facts.
 	Presence PresenceStatus `json:"presence"`
 	Wake     WakeStatus     `json:"wake"`
+
+	// CredentialRejected: the coordinator no longer accepts this Mac's credential;
+	// the owner must leave and pair again. Additive; false when unknown.
+	CredentialRejected bool `json:"credentialRejected"`
 }
 
 // UploadThrottle is the §26 "always see why" view of the upload dimension: the
@@ -87,6 +92,13 @@ type Agent struct {
 	lastOutcome   string
 	records       map[string]Record
 	lastHeartbeat time.Time
+
+	// credentialRejectedAt is set when the coordinator answers a heartbeat with 401:
+	// this host's credential was revoked or expired (removed from the phone, or
+	// released on the server). Retrying every 15 s cannot fix that, so heartbeats
+	// back off to credentialRetryInterval and status tells the app to re-pair.
+	credentialRejectedAt time.Time
+
 	heartbeatWake chan struct{}
 	// A consent change fences asynchronous observations started under the old
 	// policy. Per-operation sequence numbers also prevent out-of-order results.
@@ -247,7 +259,8 @@ func (a *Agent) Snapshot() Status {
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
 		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
 		Presence: a.presenceStatusLocked(), Wake: a.wakeStatusLocked(),
-		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
+		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second,
+		CredentialRejected: !a.credentialRejectedAt.IsZero()}
 }
 
 // AcceptJobsNow is explicit, local owner consent for ten minutes of zero-cost
@@ -692,11 +705,37 @@ func errorText(err error) string {
 // abandoned attempt look spontaneous. trigger distinguishes the scheduled beat
 // from the consent-change beat, which is the difference between a network problem
 // and an owner action.
+// credentialRetryInterval is how often a host whose credential was rejected still
+// checks in: often enough to recover if the rejection was transient, rare enough
+// not to fill the coordinator's logs with 401s from a Mac nobody re-paired.
+const credentialRetryInterval = 10 * time.Minute
+
 func (a *Agent) heartbeat(ctx context.Context, trigger string) {
-	if err := a.hostHeartbeat(ctx); err != nil {
+	a.mu.Lock()
+	rejected := a.credentialRejectedAt
+	a.mu.Unlock()
+	if !rejected.IsZero() && trigger == "interval" && time.Since(rejected) < credentialRetryInterval {
+		return
+	}
+	err := a.hostHeartbeat(ctx)
+	var status *client.StatusError
+	a.mu.Lock()
+	switch {
+	case err == nil:
+		a.credentialRejectedAt = time.Time{}
+	case errors.As(err, &status) && status.Status == http.StatusUnauthorized:
+		a.credentialRejectedAt = time.Now()
+	}
+	a.mu.Unlock()
+	if err != nil {
 		if ctx.Err() != nil {
 			// Shutdown, not a fault.
 			a.logger.Debug("host heartbeat abandoned during shutdown", "trigger", trigger)
+			return
+		}
+		if status != nil && status.Status == http.StatusUnauthorized {
+			a.logger.Warn("coordinator no longer accepts this host's credential; leave and pair this Mac again",
+				"retryIn", credentialRetryInterval.String())
 			return
 		}
 		a.logger.Warn("host heartbeat failed", "trigger", trigger, "error", errorText(err))

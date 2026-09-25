@@ -178,6 +178,9 @@ struct ConnectorStatus: Decodable {
     let executionBlocker: String?
     let lastOutcome: String?
     let coordinatorHealthy: Bool?
+    /// The coordinator answers this Mac's heartbeat with 401: its credential was
+    /// revoked or expired. Absent from older connectors.
+    let credentialRejected: Bool?
     let resourcePolicy: ResourcePolicy?
 	let mesh: MeshStatus?
 

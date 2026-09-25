@@ -109,8 +109,20 @@ struct NetworkPanel: View {
 
     private func connected(_ network: NetworkState) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("This Mac is connected", systemImage: "checkmark.circle.fill")
-                .font(.title3.weight(.semibold)).foregroundStyle(.green)
+            if model.status?.credentialRejected == true {
+                // The tunnel can still look up while the coordinator has already
+                // dropped this Mac, so this outranks the green "connected" line.
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("This Mac needs to be paired again", systemImage: "exclamationmark.triangle.fill")
+                        .font(.title3.weight(.semibold)).foregroundStyle(.orange)
+                    Text("neXal no longer accepts this Mac's credential. It was removed from the network or its pairing expired. Leave the network below, then pair it again from your iPhone.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("credential-rejected")
+            } else {
+                Label("This Mac is connected", systemImage: "checkmark.circle.fill")
+                    .font(.title3.weight(.semibold)).foregroundStyle(.green)
+            }
             if let mesh = model.status?.mesh {
                 meshSummary(mesh)
             } else {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"net/http"
 	"os"
 	"runtime"
 	"syscall"
@@ -121,8 +122,19 @@ func leavePairV2(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	// 401 means the coordinator no longer accepts this host's credential: it was
+	// already revoked (removed from the iPhone app, left before, re-paired
+	// elsewhere) or it expired. The coordinator therefore already treats this Mac
+	// as gone, and refusing to reset locally would strand it "connected" with a
+	// credential nobody honours. Any other failure (network, 5xx) is not proof of
+	// revocation, so it still aborts and leaves everything in place.
+	alreadyRevoked := false
 	if err := api.LeaveMeshNetwork(ctx); err != nil {
-		return err
+		var status *client.StatusError
+		if !errors.As(err, &status) || status.Status != http.StatusUnauthorized {
+			return err
+		}
+		alreadyRevoked = true
 	}
 	// Server revocation is authoritative. Stopping the local runtime is best
 	// effort because an already-revoked machine must still become locally reset.
@@ -136,7 +148,7 @@ func leavePairV2(ctx context.Context, path string) error {
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
-	return emit(map[string]any{"left": true})
+	return emit(map[string]any{"left": true, "alreadyRevoked": alreadyRevoked})
 }
 
 func resetLocalPairV2(ctx context.Context, path string) error {

@@ -152,6 +152,27 @@ extension AppModel {
     /// The menu bar glyph. This is the only indicator visible without opening the panel,
     /// so it reports the tunnel rather than the contribution flag -- and a tunnel that is
     /// merely connected does not get the same symbol as one confirmed post-quantum.
+    /// Colour of the menu-bar icon. The secure network decides it when this Mac
+    /// is in one: green with at least one computer connected, yellow while
+    /// connecting or alone, red when the tunnel failed; otherwise the transport
+    /// indicator's own severity. Grey when not paired.
+    var menuBarSeverity: IndicatorSeverity {
+        if leavePhase?.inProgress == true { return .pending }
+        guard isLinked else { return .inactive }
+        if let mesh = status?.mesh, mesh.providerAvailable {
+            switch mesh.lifecycle {
+            case "failed": return .bad
+            case "connected", "degraded":
+                if mesh.peers.contains(where: { $0.lifecycle == "connected" }) {
+                    return mesh.lifecycle == "degraded" ? .warning : .good
+                }
+                return .pending
+            default: return .pending
+            }
+        }
+        return tunnelEvidence.indicator.severity
+    }
+
     var menuBarSymbol: String {
         if leavePhase?.inProgress == true { return "arrow.triangle.2.circlepath" }
         guard isLinked else { return "circle.dashed" }

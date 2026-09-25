@@ -34,7 +34,7 @@ func TestStatusPresenceAndWakeShape(t *testing.T) {
 			t.Fatalf("existing status field %q disappeared", key)
 		}
 	}
-	if string(m["presence"]) != `{"connected":false,"online":[],"updatedAt":"","detail":"live presence is not running"}` {
+	if string(m["presence"]) != `{"hosts":[],"connected":false,"online":[],"updatedAt":"","detail":"live presence is not running"}` {
 		t.Fatalf("presence without a stream = %s", m["presence"])
 	}
 	if string(m["wake"]) != `{"macs":[],"wakeForNetwork":"unknown","reported":false}` {
@@ -44,7 +44,7 @@ func TestStatusPresenceAndWakeShape(t *testing.T) {
 	at := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 	a.presence = fakePresence{presence.Snapshot{Connected: true, Online: []string{"a", "b"}, UpdatedAt: at}}
 	got := a.Snapshot().Presence
-	want := PresenceStatus{Connected: true, Online: []string{"a", "b"}, UpdatedAt: "2026-09-24T12:00:00.000Z"}
+	want := PresenceStatus{Connected: true, Online: []string{"a", "b"}, Hosts: []PresenceHost{}, UpdatedAt: "2026-09-24T12:00:00.000Z"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("connected presence = %+v", got)
 	}

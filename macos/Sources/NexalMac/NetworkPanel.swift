@@ -221,14 +221,14 @@ struct NetworkPanel: View {
 
     private func meshSummary(_ mesh: ConnectorStatus.MeshStatus) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            LabeledContent("Tunnel", value: mesh.lifecycle.capitalized)
-            LabeledContent("Post-quantum protection", value: pqLabel(mesh.pq))
+            LabeledContent("Tunnel") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(mesh.lifecycle.capitalized)") }
+            LabeledContent("Post-quantum protection") { pqText(mesh.pq) }
             LabeledContent("Network path", value: pathSummary(mesh.peers))
             if let step = mesh.authenticationStep, !step.isEmpty {
                 LabeledContent("Connection step", value: step)
             }
             if let updated = mesh.updatedAt, !updated.isEmpty {
-                Text("Evidence updated \(clockTime(updated))").font(.caption2).foregroundStyle(.secondary)
+                Text("Evidence updated \(friendlyTime(updated))").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .font(.caption)
@@ -238,44 +238,154 @@ struct NetworkPanel: View {
     }
 
     private func host(_ peer: ConnectorStatus.MeshPeer) -> some View {
-        DisclosureGroup {
+        let details = hostDetails(for: peer)
+        let info = model.peerNetInfo[peer.id]
+        let publicIP = details?.publicIp ?? info?.publicAddress
+        let location = details?.location ?? info?.location
+        return DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
                 quickLinks(peer)
-                LabeledContent("Connection", value: peer.lifecycle.capitalized)
-                LabeledContent("Post-quantum protection", value: pqLabel(peer.pq))
-                LabeledContent("Current path", value: routeLabel(peer))
+                LabeledContent("Connection") { Text("\(lifecycleEmoji(peer.lifecycle)) \(peer.lifecycle.capitalized)") }
+                LabeledContent("Post-quantum protection") { pqText(peer.pq) }
+                LabeledContent("Current path") { routeText(peer) }
                 if let step = peer.authenticationStep, !step.isEmpty { LabeledContent("Authentication", value: step) }
                 if let latency = peer.latencyMs { LabeledContent("Latency", value: latency.formatted(.number.precision(.fractionLength(0))) + " ms") }
                 if let loss = peer.packetLossPercent { LabeledContent("Packet loss", value: loss.formatted(.number.precision(.fractionLength(1))) + "%") }
-                LabeledContent("Traffic", value: "↑ \(bytes(peer.traffic.sentBytes)) · ↓ \(bytes(peer.traffic.receivedBytes))")
-                if let handshake = peer.lastHandshakeAt { LabeledContent("Last handshake", value: handshake) }
-                if let verified = peer.pqVerifiedAt { LabeledContent("PQ last verified", value: verified) }
+                LabeledContent("Traffic", value: "↑ \(bytes(peer.traffic.sentBytes)) sent · ↓ \(bytes(peer.traffic.receivedBytes)) received")
+                if let handshake = peer.lastHandshakeAt { LabeledContent("Last handshake", value: friendlyTime(handshake)) }
+                if let verified = peer.pqVerifiedAt { LabeledContent("PQ last verified", value: friendlyTime(verified)) }
                 if let hostname = peer.hostname?.hostname { LabeledContent("neXal address", value: hostname) }
-                Text("Operating system was not reported. This entry may be a Mac or Linux host.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Divider().padding(.vertical, 2)
+                systemDetails(details)
             }
             .font(.caption)
             .padding(.top, 6)
         } label: {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
-                    .frame(width: 7, height: 7)
+                    .frame(width: 7, height: 7).padding(.top, 5)
                 VStack(alignment: .leading, spacing: 2) {
-                    let info = model.peerNetInfo[peer.id]
-                    HStack(spacing: 6) {
-                        Text(peer.name.isEmpty ? peer.id : peer.name)
-                        Text("Public IP: \(info?.publicAddress ?? "—")")
-                            .font(.caption).foregroundStyle(.secondary)
+                    Text(peer.name.isEmpty ? peer.id : peer.name).font(.subheadline.weight(.semibold))
+                    Group {
+                        Text("Public IP: \(publicIP ?? "—")")
+                        Text("Direct IP: \(peer.directAddress ?? "—")")
+                        Text("Location: \(location ?? "—")")
+                        Text("Quantum Safe: ") + Text(peer.pq == "protected" ? "🔐 On" : "Off")
+                            .foregroundColor(peer.pq == "protected" ? .green : .secondary)
                     }
-                    Text("Direct IP: \(peer.directAddress ?? "—")   Location: \(info?.location ?? "—")")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("Quantum Safe: \(peer.pq == "protected" ? "On" : "Off")")
-                        .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
                 }
                 .textSelection(.enabled)
             }
         }
         .accessibilityIdentifier("host-\(peer.id)")
+    }
+
+    /// The other computer's self-reported details, matched by tunnel address.
+    private func hostDetails(for peer: ConnectorStatus.MeshPeer) -> ConnectorStatus.HostDetails? {
+        guard let tunnel = peer.tunnelAddress else { return nil }
+        return model.status?.presence?.hosts?.first { $0.info.tunnelAddress == tunnel }?.info
+    }
+
+    @ViewBuilder
+    private func systemDetails(_ d: ConnectorStatus.HostDetails?) -> some View {
+        if let d {
+            if let os = d.os { LabeledContent("Operating system", value: "🍎 \(os)") }
+            if let model = d.model { LabeledContent("Model", value: model) }
+            if let chip = d.chip { LabeledContent("Processor", value: chip) }
+            if let cores = d.cores {
+                let split = (d.performanceCores ?? 0) > 0 && (d.efficiencyCores ?? 0) > 0
+                    ? " (\(d.performanceCores!) performance + \(d.efficiencyCores!) efficiency)" : ""
+                LabeledContent("Cores", value: "\(cores)\(split)")
+            }
+            if let memory = d.memoryBytes { LabeledContent("Memory", value: memoryText(memory)) }
+            if let total = d.diskTotalBytes {
+                let free = d.diskFreeBytes.map { "\(diskText($0)) free of " } ?? ""
+                LabeledContent("Disk", value: "💾 \(free)\(diskText(total))")
+            }
+            if let thermal = d.thermal {
+                LabeledContent("Thermal") {
+                    switch thermal {
+                    case "nominal": Text("🌡️ Normal").foregroundStyle(.green)
+                    case "throttled": Text("🔥 Throttling (hot)").foregroundStyle(.orange)
+                    default: Text("Unknown")
+                    }
+                }
+            }
+            if let percent = d.batteryPercent, let state = d.batteryState {
+                LabeledContent("Battery") {
+                    Text("\(state == "discharging" ? (percent <= 20 ? "🪫" : "🔋") : "🔌") \(percent)% · \(batteryStateText(state))")
+                        .foregroundStyle(percent <= 20 && state == "discharging" ? .red : .primary)
+                }
+            }
+        } else {
+            Text("System details have not been reported yet. They appear once that computer runs the latest neXal Connector.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func memoryText(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .memory)
+    }
+    private func diskText(_ value: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: value), countStyle: .file)
+    }
+    private func batteryStateText(_ state: String) -> String {
+        switch state {
+        case "charging": "charging"
+        case "charged": "fully charged"
+        case "ac": "on power adapter"
+        default: "on battery"
+        }
+    }
+
+    private func lifecycleEmoji(_ lifecycle: String) -> String {
+        switch lifecycle {
+        case "connected": "🟢"
+        case "failed": "🔴"
+        case "degraded": "🟠"
+        default: "🟡"
+        }
+    }
+
+    /// "Protected" in green with the negotiated scheme in words. The secure
+    /// network adds Rosenpass to WireGuard: a post-quantum key exchange built on
+    /// ML-KEM (Kyber) and Classic McEliece, mixed into WireGuard's X25519 keys.
+    @ViewBuilder
+    private func pqText(_ value: String) -> some View {
+        if value == "protected" {
+            VStack(alignment: .trailing, spacing: 1) {
+                Text("🔐 Protected").foregroundStyle(.green).fontWeight(.semibold)
+                Text("ML-KEM (Kyber) + Classic McEliece via Rosenpass, with WireGuard X25519")
+                    .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+            }
+        } else {
+            Text(pqLabel(value)).foregroundStyle(value == "failed" ? .red : .orange)
+        }
+    }
+
+    @ViewBuilder
+    private func routeText(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        if peer.path == "direct" {
+            Text("⚡️ P2P Direct").foregroundStyle(.green).fontWeight(.semibold)
+        } else {
+            Text(routeLabel(peer)).foregroundStyle(peer.path == "relay" ? .orange : .secondary)
+        }
+    }
+
+    /// RFC 3339 timestamp → "01:13:22 EDT · 12 seconds ago", or with the date
+    /// ("Sep 24, 01:13:22 EDT") when it is not today. Raw string if unparseable.
+    private func friendlyTime(_ stamp: String) -> String {
+        let trimmed = stamp.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)
+        guard let date = ISO8601DateFormatter().date(from: trimmed) else { return stamp }
+        if date.timeIntervalSince1970 < 86_400 { return "never" }
+        let out = DateFormatter()
+        out.locale = Locale(identifier: "en_US_POSIX")
+        out.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm:ss zzz" : "MMM d, HH:mm:ss zzz"
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .full
+        let ago = abs(date.timeIntervalSinceNow) < 5 ? "just now" : relative.localizedString(for: date, relativeTo: Date())
+        return "\(out.string(from: date)) · \(ago)"
     }
 
     /// RFC 3339 timestamp (any fractional precision) → local "HH:MM:SS TZ",
@@ -337,20 +447,20 @@ struct NetworkPanel: View {
     private var activityGraphs: some View {
         DisclosureGroup("Activity graphs") {
             VStack(alignment: .leading, spacing: 14) {
-                ChartCard(title: "Memory policy", caption: ConnectorHistory.memoryCaption,
-                          isEmpty: model.history.memoryPoints.isEmpty,
-                          emptyMessage: "No memory-policy samples yet.") {
-                    SeriesChart(points: model.history.memoryPoints, unit: "MiB")
+                ChartCard(title: "neXal network latency", caption: ConnectorHistory.networkLatencyCaption,
+                          isEmpty: model.history.networkLatencyPoints.isEmpty,
+                          emptyMessage: "No latency yet: no other computer is connected.") {
+                    SeriesChart(points: model.history.networkLatencyPoints, unit: "ms")
                 }
-                ChartCard(title: "Job activity", caption: ConnectorHistory.jobActivityLimits,
-                          isEmpty: model.history.jobActivityPoints.isEmpty,
-                          emptyMessage: "No connector activity samples yet.") {
-                    SeriesChart(points: model.history.jobActivityPoints, unit: "Count")
+                ChartCard(title: "Peer latency", caption: ConnectorHistory.peerLatencyCaption,
+                          isEmpty: model.history.peerLatencyPoints.isEmpty,
+                          emptyMessage: "No peer latency samples yet.") {
+                    SeriesChart(points: model.history.peerLatencyPoints, unit: "ms")
                 }
-                ChartCard(title: "Owner activity", caption: ConnectorHistory.ownerActivityCaption,
-                          isEmpty: model.history.ownerActivityPoints.isEmpty,
-                          emptyMessage: "No owner-activity samples yet.") {
-                    SeriesChart(points: model.history.ownerActivityPoints, unit: "Active")
+                ChartCard(title: "Traffic in / out", caption: ConnectorHistory.trafficCaption,
+                          isEmpty: model.history.trafficPoints.isEmpty,
+                          emptyMessage: "No traffic samples yet (needs two polls with a connected peer).") {
+                    SeriesChart(points: model.history.trafficPoints, unit: "KB/s")
                 }
             }
             .padding(.top, 8)

@@ -9,6 +9,15 @@
 //	{"v":1,"type":"host.offline","hostId":"...","at":"..."}
 //	{"v":1,"type":"host.removed","hostId":"...","at":"..."}
 //	{"v":1,"type":"wake.request","requestId":"...","targetHostId":"...","macs":[...],"at":"..."}
+//	{"v":1,"type":"host.info","hostId":"...","info":{...},"at":"..."}
+//
+// and the snapshot may carry "info":{"<hostId>":{...}} for hosts online now.
+//
+// HOST DETAILS ride this same socket in the other direction: after each
+// snapshot this Mac sends {"v":1,"type":"host.info","info":{...}} (OS, chip,
+// cores, memory, disk, thermal state, tunnel address), then re-checks every
+// InfoCheckInterval and sends again only when something changed materially
+// (sysinfo.Material). No extra HTTP request, no polling, no database write.
 //
 // plus the text "pong" answering our "ping" every PingInterval, and close code
 // 4001 when this host has been removed (4002, "superseded by a newer connection
@@ -37,10 +46,12 @@ import (
 	"math/rand/v2"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"nexal/connector/internal/client"
+	"nexal/connector/internal/sysinfo"
 	"nexal/connector/internal/wol"
 	"nexal/connector/internal/wsclient"
 )
@@ -82,6 +93,12 @@ const (
 	wakeMinSpacing = time.Second
 	// recentWakeIDs bounds the requestId de-duplication memory.
 	recentWakeIDs = 64
+	// InfoCheckInterval is how often this Mac re-reads its own details. A frame
+	// is sent only when they changed materially, so this costs nothing on the
+	// wire while nothing changes.
+	InfoCheckInterval = 5 * time.Minute
+	// maxInfoText bounds each text field accepted from a peer.
+	maxInfoText = 120
 )
 
 // Conn is the subset of *wsclient.Conn this package uses, so tests can drive
@@ -108,8 +125,12 @@ type Options struct {
 	HostID string
 	Dial   Dialer
 	// Wake is nil to disable relaying.
-	Wake   WakeSender
-	Logger *slog.Logger
+	Wake WakeSender
+	// Info returns this Mac's details for the host.info frame; nil disables it.
+	Info func(ctx context.Context) sysinfo.Info
+	// InfoEvery overrides InfoCheckInterval (tests).
+	InfoEvery time.Duration
+	Logger    *slog.Logger
 	// Clock and Sleep are injectable for tests; nil means real time.
 	Clock func() time.Time
 	Sleep func(ctx context.Context, d time.Duration) error
@@ -131,6 +152,9 @@ type Snapshot struct {
 	LastError string
 	// Removed is true once the coordinator said this host was removed.
 	Removed bool
+	// Infos holds each other host's last reported details, by host id. Kept
+	// across disconnects like Online; dropped when a host is removed.
+	Infos map[string]sysinfo.Info
 }
 
 // Client maintains the presence stream.
@@ -143,6 +167,7 @@ type Client struct {
 	updatedAt time.Time
 	lastError string
 	removed   bool
+	infos     map[string]sysinfo.Info
 
 	// Wake relay state, touched only by the read loop goroutine.
 	lastWake time.Time
@@ -166,7 +191,8 @@ func New(o Options) (*Client, error) {
 	if o.Sleep == nil {
 		o.Sleep = sleepCtx
 	}
-	return &Client{opts: o, online: map[string]struct{}{}, lastError: "connecting to the coordinator"}, nil
+	return &Client{opts: o, online: map[string]struct{}{}, infos: map[string]sysinfo.Info{},
+		lastError: "connecting to the coordinator"}, nil
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {
@@ -189,7 +215,11 @@ func (c *Client) Snapshot() Snapshot {
 		online = append(online, id)
 	}
 	sort.Strings(online)
-	s := Snapshot{Connected: c.connected, Online: online, UpdatedAt: c.updatedAt, Removed: c.removed}
+	infos := make(map[string]sysinfo.Info, len(c.infos))
+	for id, info := range c.infos {
+		infos[id] = info
+	}
+	s := Snapshot{Connected: c.connected, Online: online, UpdatedAt: c.updatedAt, Removed: c.removed, Infos: infos}
 	if !c.connected {
 		s.LastError = c.lastError
 	}
@@ -327,6 +357,17 @@ func (c *Client) session(ctx context.Context) error {
 			}
 		}
 	}()
+	// Host details go out once the first snapshot has arrived (the stream is
+	// then known to be accepted), and again only on material change.
+	snapshotSeen := make(chan struct{})
+	var snapshotOnce sync.Once
+	if c.opts.Info != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.reportInfo(sessCtx, conn, snapshotSeen)
+		}()
+	}
 	// Cancellation must interrupt a blocked read.
 	stop := context.AfterFunc(sessCtx, func() { _ = conn.Close() })
 	defer stop()
@@ -348,7 +389,9 @@ func (c *Client) session(ctx context.Context) error {
 		if bytes.Equal(data, []byte("pong")) {
 			continue
 		}
-		c.handle(data)
+		if c.handle(data) {
+			snapshotOnce.Do(func() { close(snapshotSeen) })
+		}
 		if c.isRemoved() {
 			return nil
 		}
@@ -376,25 +419,29 @@ type event struct {
 	RequestID    string   `json:"requestId"`
 	TargetHostID string   `json:"targetHostId"`
 	MACs         []string `json:"macs"`
+	// Info is one host's details (host.info); Infos is the snapshot's map.
+	Info  *sysinfo.Info           `json:"info"`
+	Infos map[string]sysinfo.Info `json:"infos"`
 }
 
-func (c *Client) handle(data []byte) {
+// handle applies one event and reports whether it was a snapshot.
+func (c *Client) handle(data []byte) bool {
 	var e event
 	if err := json.Unmarshal(data, &e); err != nil || e.V != 1 {
 		c.opts.Logger.Debug("presence event ignored", "reason", "not a v1 JSON event")
-		return
+		return false
 	}
 	switch e.Type {
 	case "snapshot":
 		if len(e.Online) > maxOnline {
 			c.opts.Logger.Warn("presence snapshot ignored", "reason", "too many hosts")
-			return
+			return false
 		}
 		next := make(map[string]struct{}, len(e.Online))
 		for _, id := range e.Online {
 			if !client.ValidID(id) {
 				c.opts.Logger.Warn("presence snapshot ignored", "reason", "invalid host id")
-				return
+				return false
 			}
 			next[id] = struct{}{}
 		}
@@ -403,15 +450,21 @@ func (c *Client) handle(data []byte) {
 		c.connected = true
 		c.lastError = ""
 		c.updatedAt = c.opts.Clock()
+		for id, info := range e.Infos {
+			if client.ValidID(id) && id != c.opts.HostID && len(c.infos) < maxOnline {
+				c.infos[id] = cleanInfo(info)
+			}
+		}
 		c.mu.Unlock()
+		return true
 	case "host.online", "host.offline", "host.removed":
 		if !client.ValidID(e.HostID) {
 			c.opts.Logger.Debug("presence event ignored", "reason", "invalid host id")
-			return
+			return false
 		}
 		if e.Type == "host.removed" && e.HostID == c.opts.HostID {
 			c.markRemoved()
-			return
+			return false
 		}
 		c.mu.Lock()
 		if e.Type == "host.online" {
@@ -421,13 +474,75 @@ func (c *Client) handle(data []byte) {
 		} else {
 			delete(c.online, e.HostID)
 		}
+		if e.Type == "host.removed" {
+			delete(c.infos, e.HostID)
+		}
 		c.updatedAt = c.opts.Clock()
+		c.mu.Unlock()
+	case "host.info":
+		if !client.ValidID(e.HostID) || e.HostID == c.opts.HostID || e.Info == nil {
+			return false
+		}
+		c.mu.Lock()
+		if _, known := c.infos[e.HostID]; known || len(c.infos) < maxOnline {
+			c.infos[e.HostID] = cleanInfo(*e.Info)
+		}
 		c.mu.Unlock()
 	case "wake.request":
 		c.relayWake(e)
 	default:
 		// A newer coordinator's event type; not an error.
 	}
+	return false
+}
+
+// reportInfo sends this Mac's details after the first snapshot, then re-checks
+// every InfoCheckInterval and sends only on a material change.
+func (c *Client) reportInfo(ctx context.Context, conn Conn, snapshotSeen <-chan struct{}) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-snapshotSeen:
+	}
+	every := c.opts.InfoEvery
+	if every <= 0 {
+		every = InfoCheckInterval
+	}
+	var last sysinfo.Info
+	sent := false
+	for {
+		info := c.opts.Info(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if !sent || sysinfo.Material(last, info) {
+			frame, err := json.Marshal(map[string]any{"v": 1, "type": "host.info", "info": info})
+			if err == nil && conn.WriteText(frame) == nil {
+				last, sent = info, true
+			}
+		}
+		if c.opts.Sleep(ctx, every) != nil {
+			return
+		}
+	}
+}
+
+// cleanInfo bounds every text field received from a peer.
+func cleanInfo(info sysinfo.Info) sysinfo.Info {
+	for _, field := range []*string{&info.OS, &info.Model, &info.Chip, &info.Thermal, &info.TunnelAddress,
+		&info.BatteryState, &info.PublicIP, &info.Location} {
+		text := strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f {
+				return -1
+			}
+			return r
+		}, *field)
+		if len(text) > maxInfoText {
+			text = text[:maxInfoText]
+		}
+		*field = text
+	}
+	return info
 }
 
 // relayWake sends the magic packet for a wake the coordinator routed here

@@ -187,6 +187,28 @@ struct ConnectorStatus: Decodable {
     let credentialRejected: Bool?
     let resourcePolicy: ResourcePolicy?
 	let mesh: MeshStatus?
+	/// Live presence, including other computers' self-reported details.
+	/// Absent from connectors older than host details.
+	let presence: Presence?
+
+	struct Presence: Decodable {
+		let connected: Bool?
+		let hosts: [PresenceHost]?
+	}
+	struct PresenceHost: Decodable {
+		let hostId: String
+		let online: Bool?
+		let info: HostDetails
+	}
+	/// Another computer's details. Every field optional: absent means not reported.
+	/// publicIp and location are added by the coordinator, not the computer.
+	struct HostDetails: Decodable, Equatable {
+		let os: String?; let model: String?; let chip: String?
+		let cores: Int?; let performanceCores: Int?; let efficiencyCores: Int?
+		let memoryBytes: UInt64?; let diskTotalBytes: UInt64?; let diskFreeBytes: UInt64?
+		let thermal: String?; let batteryPercent: Int?; let batteryState: String?
+		let tunnelAddress: String?; let publicIp: String?; let location: String?
+	}
 
 	struct MeshStatus: Decodable {
 		let providerAvailable: Bool

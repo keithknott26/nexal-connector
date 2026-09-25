@@ -27,6 +27,7 @@ import (
 	"nexal/connector/internal/discovery"
 	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/presence"
+	"nexal/connector/internal/sysinfo"
 	"nexal/connector/internal/tunnel"
 	"nexal/connector/internal/wol"
 )
@@ -477,7 +478,11 @@ func runCommand(ctx context.Context, args []string) error {
 	// A paired Mac reports its real tunnel state. The gate re-reads the saved
 	// configuration, so a Mac paired while this agent is running starts
 	// reporting (and listing its peers) without an agent restart.
-	opts = append(opts, agent.WithMeshProvider(enrollmentGatedMesh{path: *path, inner: mesh.NewRuntimeProvider()}))
+	meshProvider := enrollmentGatedMesh{path: *path, inner: mesh.NewRuntimeProvider()}
+	opts = append(opts, agent.WithMeshProvider(meshProvider))
+	// This Mac's details for the other computers' panels, sent over the
+	// presence stream below (one frame, only on material change).
+	hostInfo := sysinfo.NewCollector()
 	// Live presence (GET /api/v2/hosts/events) and Wake-on-LAN. The stream uses
 	// the same client, so the same origin/TLS/no-proxy policy and host token as
 	// every REST call. A coordinator without these routes answers 404 and both
@@ -485,6 +490,13 @@ func runCommand(ctx context.Context, args []string) error {
 	// wake.request is sent with wol.Send; the online set authorizes nothing.
 	pres, err := presence.New(presence.Options{HostID: c.HostID, Wake: wol.Send,
 		Logger: logger.With("component", "presence"),
+		Info: func(ctx context.Context) sysinfo.Info {
+			info := hostInfo.Collect(ctx)
+			if ip := meshProvider.Snapshot().SelfTunnelAddress; client.ValidTunnelAddress(ip) {
+				info.TunnelAddress = ip
+			}
+			return info
+		},
 		Dial: func(ctx context.Context) (presence.Conn, error) {
 			conn, err := api.DialHostEvents(ctx)
 			if err != nil {

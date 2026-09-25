@@ -18,7 +18,32 @@ struct NexalMacApp: App {
 /// Observes the model so the menu-bar symbol follows connection state.
 private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
-    var body: some View { Label("neXal", systemImage: model.menuBarSymbol) }
+    var body: some View {
+        // A plain SF Symbol label is drawn as a template (monochrome) in the menu
+        // bar, so colour must come from a non-template image.
+        if let image = Self.tinted(model.menuBarSymbol, model.menuBarSeverity) {
+            Image(nsImage: image).accessibilityLabel("neXal")
+        } else {
+            Label("neXal", systemImage: model.menuBarSymbol)
+        }
+    }
+
+    static func tinted(_ symbol: String, _ severity: IndicatorSeverity) -> NSImage? {
+        let color: NSColor
+        switch severity {
+        case .good: color = .systemGreen
+        case .pending: color = .systemYellow
+        case .warning: color = .systemOrange
+        case .bad: color = .systemRed
+        case .inactive: return nil // grey = the normal template look
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "neXal")?
+            .withSymbolConfiguration(config) else { return nil }
+        image.isTemplate = false
+        return image
+    }
 }
 
 /// A menu-bar-only app is easy to lose: on a MacBook with a notch, or a crowded

@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/presence"
+	"nexal/connector/internal/sysinfo"
 	"nexal/connector/internal/wol"
 )
 
@@ -64,7 +66,16 @@ func WithWakeInfo(r WakeInfoReporter) Option {
 }
 
 // PresenceStatus is the "presence" object in /v1/status.
+// PresenceHost is another host's reported details, for the panel. The Mac app
+// matches it to a tunnel peer by TunnelAddress.
+type PresenceHost struct {
+	HostID string       `json:"hostId"`
+	Online bool         `json:"online"`
+	Info   sysinfo.Info `json:"info"`
+}
+
 type PresenceStatus struct {
+	Hosts []PresenceHost `json:"hosts"`
 	// Connected is true while the stream is open and has delivered a snapshot.
 	Connected bool `json:"connected"`
 	// Online is the sorted list of host ids the coordinator last reported
@@ -91,10 +102,14 @@ type WakeStatus struct {
 
 func (a *Agent) presenceStatusLocked() PresenceStatus {
 	if a.presence == nil {
-		return PresenceStatus{Online: []string{}, Detail: "live presence is not running"}
+		return PresenceStatus{Online: []string{}, Hosts: []PresenceHost{}, Detail: "live presence is not running"}
 	}
 	s := a.presence.Snapshot()
-	out := PresenceStatus{Connected: s.Connected, Online: s.Online}
+	out := PresenceStatus{Connected: s.Connected, Online: s.Online, Hosts: []PresenceHost{}}
+	for id, info := range s.Infos {
+		out.Hosts = append(out.Hosts, PresenceHost{HostID: id, Online: slices.Contains(s.Online, id), Info: info})
+	}
+	slices.SortFunc(out.Hosts, func(x, y PresenceHost) int { return strings.Compare(x.HostID, y.HostID) })
 	if out.Online == nil {
 		out.Online = []string{}
 	}

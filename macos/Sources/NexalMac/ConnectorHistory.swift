@@ -66,7 +66,30 @@ struct ConnectorHistory: Equatable {
         /// Completions this app actually observed between the previous poll and
         /// this one. Go owns the real outcome; this counts transitions only.
         let completionsObserved: Int
+        /// Each secure-network peer as the connector reported it at this poll.
+        var peers: [PeerSample] = []
     }
+
+    /// One peer's latency and cumulative traffic counters at one poll.
+    struct PeerSample: Equatable {
+        let id: String
+        let name: String
+        let connected: Bool
+        let latencyMs: Double?
+        let sentBytes: UInt64
+        let receivedBytes: UInt64
+    }
+
+    static let networkLatencyCaption = """
+        Average round-trip time to the connected computers in your neXal network, \
+        as the secure-network runtime measures it. Gaps are polls with no connected peer.
+        """
+    static let peerLatencyCaption = """
+        Round-trip time to each computer, one line per peer.
+        """
+    static let trafficCaption = """
+        Data sent to (out) and received from (in) each computer, averaged between polls.
+        """
 
     /// One point in one chart series.
     struct SeriesPoint: Identifiable, Equatable {
@@ -100,7 +123,12 @@ struct ConnectorHistory: Equatable {
             ownerActive: known ? telemetry?.ownerActive : nil,
             syntheticTelemetry: telemetry?.synthetic == true,
             attemptRunning: !attempt.isEmpty,
-            completionsObserved: completed))
+            completionsObserved: completed,
+            peers: (status?.mesh?.peers ?? []).map {
+                PeerSample(id: $0.id, name: $0.name.isEmpty ? $0.id : $0.name,
+                           connected: $0.lifecycle == "connected", latencyMs: $0.latencyMs,
+                           sentBytes: $0.traffic.sentBytes, receivedBytes: $0.traffic.receivedBytes)
+            }))
         nextID += 1
         if samples.count > Self.capacity {
             samples.removeFirst(samples.count - Self.capacity)
@@ -148,6 +176,51 @@ struct ConnectorHistory: Equatable {
             points.append(SeriesPoint(id: sample.id * 4 + 4, at: sample.at,
                                       series: Series.completed,
                                       value: Double(sample.completionsObserved)))
+        }
+        return points
+    }
+
+    /// Mean latency across connected peers, one point per poll that had any.
+    var networkLatencyPoints: [SeriesPoint] {
+        samples.compactMap { sample -> SeriesPoint? in
+            let values = sample.peers.filter(\.connected).compactMap(\.latencyMs).filter { $0 > 0 }
+            guard !values.isEmpty else { return nil }
+            return SeriesPoint(id: sample.id, at: sample.at, series: "neXal network",
+                               value: values.reduce(0, +) / Double(values.count))
+        }
+    }
+
+    /// Latency per peer; the series name is the peer's name.
+    var peerLatencyPoints: [SeriesPoint] {
+        var points: [SeriesPoint] = []
+        for sample in samples {
+            for peer in sample.peers where peer.connected {
+                guard let latency = peer.latencyMs, latency > 0 else { continue }
+                points.append(SeriesPoint(id: points.count, at: sample.at, series: peer.name, value: latency))
+            }
+        }
+        return points
+    }
+
+    /// Transfer rate in KB/s per peer and direction, from the change in the
+    /// cumulative counters between consecutive polls. A counter that went
+    /// backwards (runtime restart) contributes no point rather than a negative.
+    var trafficPoints: [SeriesPoint] {
+        var points: [SeriesPoint] = []
+        for (previous, sample) in zip(samples, samples.dropFirst()) {
+            let seconds = sample.at.timeIntervalSince(previous.at)
+            guard seconds > 0 else { continue }
+            for peer in sample.peers {
+                guard let before = previous.peers.first(where: { $0.id == peer.id }) else { continue }
+                if peer.receivedBytes >= before.receivedBytes {
+                    points.append(SeriesPoint(id: points.count, at: sample.at, series: "\(peer.name) · in",
+                        value: Double(peer.receivedBytes - before.receivedBytes) / 1_000 / seconds))
+                }
+                if peer.sentBytes >= before.sentBytes {
+                    points.append(SeriesPoint(id: points.count, at: sample.at, series: "\(peer.name) · out",
+                        value: Double(peer.sentBytes - before.sentBytes) / 1_000 / seconds))
+                }
+            }
         }
         return points
     }

@@ -68,6 +68,13 @@ struct NetworkPanel: View {
             if let reason = model.pairingUnavailableReason {
                 Label(reason, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else if let problem = model.pairingProblem, !problem.isEmpty {
+                // Directly under the button: a failed mint used to show only in the
+                // footer, so the click looked like it did nothing.
+                Label("Could not show a pairing code. \(problem)", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("pairing-problem")
             }
         }
     }

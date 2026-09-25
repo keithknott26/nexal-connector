@@ -19,6 +19,26 @@ enum NetworkService {
         Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/nexal-network")
     }
 
+    /// The launchd definition `service install` writes.
+    static let launchDaemonPlist = "/Library/LaunchDaemons/netbird.plist"
+
+    /// The executable the registered service launches, if one is registered.
+    static var registeredServiceBinary: String? {
+        guard let data = FileManager.default.contents(atPath: launchDaemonPlist),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        if let args = plist["ProgramArguments"] as? [String], let first = args.first { return first }
+        return plist["Program"] as? String
+    }
+
+    /// True when a service is registered but runs a binary other than this
+    /// app's own helper, e.g. a copy left in the Trash after an update.
+    static var serviceUsesOtherBinary: Bool {
+        guard let registered = registeredServiceBinary else { return false }
+        let mine = bundledHelper.resolvingSymlinksInPath().path
+        return URL(fileURLWithPath: registered).resolvingSymlinksInPath().path != mine
+    }
+
     enum Failure: LocalizedError {
         case helperMissing, helperUnsafe, cancelled, failed(String), didNotStart
         var errorDescription: String? {
@@ -69,7 +89,13 @@ enum NetworkService {
             // back to a relay (or fails). Allowing it is scoped to this binary.
             // "Block all incoming connections" overrides every per-app rule, and
             // stealth mode drops peer probes, so both are turned off here too.
-            "do shell script p & \" service install --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
+            // Stop and unregister first: after the app is moved, updated or
+            // reinstalled, a service registered from the OLD location keeps
+            // running that stale binary (often from the Trash), which the
+            // firewall then blocks. Re-registering pins it to this bundle.
+            "do shell script p & \" service stop >/dev/null 2>&1; \" "
+                + "& p & \" service uninstall >/dev/null 2>&1; \" "
+                + "& p & \" service install --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
                 + "& p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
                 + "& \"\(wakeForNetworkCommand)\" "
                 + "& firewallCommands "

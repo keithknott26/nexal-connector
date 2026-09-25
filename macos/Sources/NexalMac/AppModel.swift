@@ -226,7 +226,12 @@ final class AppModel: ObservableObject {
     func ensureNetworkServiceAtLaunch() async {
         guard (try? NetworkService.validatedHelper()) != nil else { return }
         // installNetworkService() rejoins on success; otherwise rejoin directly.
-        if NetworkService.isRunning {
+        if NetworkService.isRunning && NetworkService.serviceUsesOtherBinary {
+            // A service registered from an older copy of the app (often now in
+            // the Trash) keeps running that binary, and the firewall blocks it.
+            AgentLog.note("network service runs \(NetworkService.registeredServiceBinary ?? "?"); reinstalling from this app")
+            await installNetworkService()
+        } else if NetworkService.isRunning {
             // Already-installed Macs never re-run install(), so fix the firewall
             // here if "Block all incoming connections" or stealth mode is on.
             await repairFirewallIfNeeded()

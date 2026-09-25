@@ -120,7 +120,7 @@ struct NetworkPanel: View {
                 }
                 .accessibilityIdentifier("credential-rejected")
             } else {
-                Label("This Mac is connected", systemImage: "checkmark.circle.fill")
+                Label("Connected to the neXal@home network", systemImage: "checkmark.circle.fill")
                     .font(.title3.weight(.semibold)).foregroundStyle(.green)
             }
             if let mesh = model.status?.mesh {
@@ -246,6 +246,7 @@ struct NetworkPanel: View {
             VStack(alignment: .leading, spacing: 6) {
                 quickLinks(peer)
                 LabeledContent("Connection") { Text("\(lifecycleEmoji(peer.lifecycle)) \(peer.lifecycle.capitalized)") }
+                exitNodeCheckbox(peer)
                 LabeledContent("Post-quantum protection") { pqText(peer.pq) }
                 LabeledContent("Current path") { routeText(peer) }
                 if let step = peer.authenticationStep, !step.isEmpty { LabeledContent("Authentication", value: step) }
@@ -255,8 +256,16 @@ struct NetworkPanel: View {
                 if let handshake = peer.lastHandshakeAt { LabeledContent("Last handshake", value: friendlyTime(handshake)) }
                 if let verified = peer.pqVerifiedAt { LabeledContent("PQ last verified", value: friendlyTime(verified)) }
                 if let hostname = peer.hostname?.hostname { LabeledContent("neXal address", value: hostname) }
+                LabeledContent("Time Machine backup location") {
+                    if isStorageGateway(peer) { Text("🕰️ Yes").foregroundStyle(.green).fontWeight(.semibold) } else { Text("No") }
+                }
                 Divider().padding(.vertical, 2)
-                systemDetails(details)
+                if isStorageGateway(peer) {
+                    Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    systemDetails(details)
+                }
             }
             .font(.caption)
             .padding(.top, 6)
@@ -265,10 +274,25 @@ struct NetworkPanel: View {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
                     .frame(width: 7, height: 7).padding(.top, 5)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(peer.name.isEmpty ? peer.id : peer.name).font(.subheadline.weight(.semibold))
+                    HStack(spacing: 5) {
+                        Text(displayName(peer)).font(.subheadline.weight(.semibold))
+                        if isStorageGateway(peer) {
+                            Image(systemName: "externaldrive.badge.timemachine").help("Time Machine backup location")
+                        }
+                        if exitRouteID(for: peer) == model.exitRoute, model.exitRoute != nil {
+                            Image(systemName: "cloud.fill").foregroundStyle(.blue).help("Your internet traffic exits here")
+                        } else if model.availableExitRoutes.contains(exitRouteID(for: peer)) {
+                            Image(systemName: "cloud").help("Can be used as an exit node")
+                        }
+                    }
+                    .foregroundStyle(.primary)
                     Group {
-                        Text("Public IP: \(publicIP ?? "—")")
-                        Text("Direct IP: \(peer.directAddress ?? "—")")
+                        // neXal's own infrastructure: its addresses are not the
+                        // customer's to use, so they are not shown.
+                        if !isStorageGateway(peer) {
+                            Text("Public IP: \(publicIP ?? "—")")
+                            Text("Direct IP: \(peer.directAddress ?? "—")")
+                        }
                         Text("Location: \(location ?? "—")")
                         Text("Quantum Safe: ") + Text(peer.pq == "protected" ? "🔐 On" : "Off")
                             .foregroundColor(peer.pq == "protected" ? .green : .secondary)
@@ -281,6 +305,35 @@ struct NetworkPanel: View {
         .accessibilityIdentifier("host-\(peer.id)")
     }
 
+    /// The neXal storage gateway (the Time Machine destination) among the peers:
+    /// the peer whose device name is the first label of the Time Machine
+    /// destination host the coordinator gave this Mac, or, before Time Machine
+    /// is configured, a peer following the operator's gateway naming (gw-<region>).
+    private func isStorageGateway(_ peer: ConnectorStatus.MeshPeer) -> Bool {
+        let name = peer.name.lowercased()
+        if let host = model.timeMachine?.timeMachine.host?.lowercased(),
+           let label = host.split(separator: ".").first, !label.isEmpty {
+            return name == label
+        }
+        return name.range(of: #"^gw-[a-z0-9-]+$"#, options: .regularExpression) != nil
+    }
+
+    private func exitRouteID(for peer: ConnectorStatus.MeshPeer) -> String {
+        isStorageGateway(peer) ? NetworkService.storageExitRoute : NetworkService.exitRoute(forPeerNamed: peer.name)
+    }
+
+    /// The per-peer exit-node checkbox lives in ExitNodeCheckbox.swift: it is the
+    /// one deliberate customer switch, kept out of this file so the contract test
+    /// can keep forbidding every other Toggle here.
+    private func exitNodeCheckbox(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        ExitNodeCheckbox(route: exitRouteID(for: peer), peerConnected: peer.lifecycle == "connected")
+    }
+
+    private func displayName(_ peer: ConnectorStatus.MeshPeer) -> String {
+        if isStorageGateway(peer) { return "neXal Storage" }
+        return peer.name.isEmpty ? peer.id : peer.name
+    }
+
     /// The other computer's self-reported details, matched by tunnel address.
     private func hostDetails(for peer: ConnectorStatus.MeshPeer) -> ConnectorStatus.HostDetails? {
         guard let tunnel = peer.tunnelAddress else { return nil }
@@ -290,7 +343,7 @@ struct NetworkPanel: View {
     @ViewBuilder
     private func systemDetails(_ d: ConnectorStatus.HostDetails?) -> some View {
         if let d {
-            if let os = d.os { LabeledContent("Operating system", value: "🍎 \(os)") }
+            if let os = d.os { LabeledContent("Operating system", value: "\(os.hasPrefix("macOS") ? "🍎 " : "🐧 ")\(os)") }
             if let model = d.model { LabeledContent("Model", value: model) }
             if let chip = d.chip { LabeledContent("Processor", value: chip) }
             if let cores = d.cores {
@@ -353,15 +406,34 @@ struct NetworkPanel: View {
     /// ML-KEM (Kyber) and Classic McEliece, mixed into WireGuard's X25519 keys.
     @ViewBuilder
     private func pqText(_ value: String) -> some View {
-        if value == "protected" {
-            VStack(alignment: .trailing, spacing: 1) {
+        HStack(spacing: 4) {
+            if value == "protected" {
                 Text("🔐 Protected").foregroundStyle(.green).fontWeight(.semibold)
-                Text("ML-KEM (Kyber) + Classic McEliece via Rosenpass, with WireGuard X25519")
-                    .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                Text("· ML-KEM + McEliece").foregroundStyle(.secondary)
+            } else {
+                Text(pqLabel(value)).foregroundStyle(value == "failed" ? .red : .orange)
             }
-        } else {
-            Text(pqLabel(value)).foregroundStyle(value == "failed" ? .red : .orange)
+            pqInfoButton
         }
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    /// Opens a plain-language explanation of post-quantum cryptography. The
+    /// tooltip names the exact scheme: the secure network adds Rosenpass
+    /// (ML-KEM/Kyber + Classic McEliece) on top of WireGuard's X25519 keys.
+    private var pqInfoButton: some View {
+        Button {
+            if let url = URL(string: "https://en.wikipedia.org/wiki/Post-quantum_cryptography") {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            Image(systemName: "info.circle")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help("Post-quantum key exchange: ML-KEM (Kyber) + Classic McEliece via Rosenpass, combined with WireGuard X25519. Click to learn more.")
+        .accessibilityLabel("About post-quantum protection")
     }
 
     @ViewBuilder
@@ -428,6 +500,11 @@ struct NetworkPanel: View {
                 .help("Send a Wake-on-LAN packet through a neXal Mac on its network")
             }
         }
+        // neXal Storage is operator infrastructure: shown, but greyed out, since
+        // customers cannot sign in to it or wake it.
+        .disabled(isStorageGateway(peer))
+        .opacity(isStorageGateway(peer) ? 0.45 : 1)
+        .help(isStorageGateway(peer) ? "neXal Storage is managed by neXal and is not available for remote access." : "")
         if let note = model.wakeStatus[peer.id] {
             Text(note).font(.caption2).foregroundStyle(.secondary)
         }
@@ -526,7 +603,9 @@ struct NetworkPanel: View {
         case "protected": "Protected"
         case "negotiating": "Negotiating"
         case "rekeying": "Rotating keys"
-        case "degraded": "Degraded"
+        // Encrypted with WireGuard, but this link has no post-quantum layer: the
+        // other side has not enabled Rosenpass, or it has not handshaken yet.
+        case "degraded": "⚠️ Not quantum-safe (WireGuard only)"
         case "verification_stale": "Verification stale"
         case "failed": "Failed"
         default: "Unavailable"

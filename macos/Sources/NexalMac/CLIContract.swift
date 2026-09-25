@@ -156,6 +156,33 @@ struct TimeMachineReport: Decodable {
 		let state: String; let enabled: Bool; let entitled: Bool
 		let capacityBytes: UInt64?; let freeBytes: UInt64?; let shareName: String?
 		let advertised: Bool; let detailCode: String?
+		/// Gateway-backed networks answer with the client view instead:
+		/// {role:"client", state, serviceState, host, share, quotaBytes}. Its
+		/// `host` is the storage gateway's secure-network name, which is how the
+		/// panel recognises that gateway among the peers.
+		let role: String?; let host: String?; let share: String?; let serviceState: String?
+
+		private enum CodingKeys: String, CodingKey {
+			case state, enabled, entitled, capacityBytes, freeBytes, shareName, advertised, detailCode
+			case role, host, share, serviceState, quotaBytes
+		}
+		init(from decoder: Decoder) throws {
+			let c = try decoder.container(keyedBy: CodingKeys.self)
+			state = try c.decode(String.self, forKey: .state)
+			role = try c.decodeIfPresent(String.self, forKey: .role)
+			host = try c.decodeIfPresent(String.self, forKey: .host)
+			share = try c.decodeIfPresent(String.self, forKey: .share)
+			serviceState = try c.decodeIfPresent(String.self, forKey: .serviceState)
+			let client = role == "client"
+			enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? (client && state != "disabled")
+			entitled = try c.decodeIfPresent(Bool.self, forKey: .entitled) ?? client
+			capacityBytes = try c.decodeIfPresent(UInt64.self, forKey: .capacityBytes)
+				?? c.decodeIfPresent(UInt64.self, forKey: .quotaBytes)
+			freeBytes = try c.decodeIfPresent(UInt64.self, forKey: .freeBytes)
+			shareName = try c.decodeIfPresent(String.self, forKey: .shareName) ?? share
+			advertised = try c.decodeIfPresent(Bool.self, forKey: .advertised) ?? false
+			detailCode = try c.decodeIfPresent(String.self, forKey: .detailCode)
+		}
 	}
 	let timeMachine: State
 	let action: String?

@@ -35,4 +35,18 @@ final class ConnectorUIContractTests: XCTestCase {
             XCTAssertFalse(text.contains(forbidden), "Customer UI still exposes \(forbidden)")
         }
     }
+
+    /// The exit-node checkbox is the one intended customer switch. It lives in
+    /// its own file so the rule above stays absolute for NetworkPanel, and this
+    /// test pins that file to exactly that one control.
+    func testTheExitNodeCheckboxIsTheOnlyCustomerSwitch() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/NexalMac/ExitNodeCheckbox.swift")
+        let text = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "Toggle(").count - 1, 1, "exactly one switch")
+        XCTAssertTrue(text.contains("Route all of my internet traffic through this exit node"))
+        XCTAssertFalse(text.contains("Picker("))
+        XCTAssertTrue(try source.contains("ExitNodeCheckbox("), "the panel uses the dedicated checkbox")
+    }
 }

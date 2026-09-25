@@ -153,6 +153,60 @@ enum NetworkService {
     /// have no tunnel until traffic arrives, so the first request stalls. The
     /// account setting turns them on; NB_LAZY_CONN=off in the service
     /// environment overrides it on this Mac (the `up` flag is ignored since 0.75).
+    // MARK: - Exit node
+
+    /// Route id of the neXal Storage exit route; another peer's is
+    /// "nexal-exit-<peer name>". Both are created by the coordinator with
+    /// auto-apply off, so nothing is routed until this Mac selects one.
+    static let storageExitRoute = "nexal-exit"
+    static func exitRoute(forPeerNamed name: String) -> String { "nexal-exit-\(name.lowercased())" }
+
+    /// Runs the bundled runtime unprivileged (it talks to the service over its
+    /// socket, exactly like `status`). Returns (exit status, stdout+stderr).
+    static func runHelper(_ arguments: [String]) -> (Int32, String) {
+        guard isRunning, let helper = try? validatedHelper() else { return (-1, "secure networking service is not running") }
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = arguments
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = out
+        guard (try? process.run()) != nil else { return (-1, "could not start the secure networking runtime") }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+
+    /// Exit routes this Mac has been given (ids starting with "nexal-exit").
+    static func availableExitRoutes() -> Set<String> {
+        let (code, text) = runHelper(["networks", "ls"])
+        guard code == 0 else { return [] }
+        var ids = Set<String>()
+        let pattern = try? NSRegularExpression(pattern: #"\bnexal-exit(?:-[a-z0-9-]+)?\b"#)
+        let range = NSRange(text.startIndex..., in: text)
+        pattern?.enumerateMatches(in: text, range: range) { match, _, _ in
+            if let match, let r = Range(match.range, in: text) { ids.insert(String(text[r])) }
+        }
+        return ids
+    }
+
+    /// Selects one exit route (and deselects the previous), or deselects when nil.
+    static func selectExitRoute(_ id: String?, previous: String?) throws {
+        if let previous, previous != id {
+            let (code, text) = runHelper(["networks", "deselect", previous])
+            if code != 0 && id == nil { throw Failure.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        if let id {
+            // --append keeps any other selected routes; a runtime without the flag
+            // gets the plain form (which replaces the selection).
+            var (code, text) = runHelper(["networks", "select", "--append", id])
+            if code != 0, text.localizedCaseInsensitiveContains("unknown flag") {
+                (code, text) = runHelper(["networks", "select", id])
+            }
+            if code != 0 { throw Failure.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+    }
+
     static var lazyConnectionsOn: Bool {
         guard isRunning, let helper = try? validatedHelper() else { return false }
         let process = Process()

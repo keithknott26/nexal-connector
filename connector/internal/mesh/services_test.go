@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,5 +40,25 @@ func TestRuntimeReportsDirectEndpoint(t *testing.T) {
 	p = translateRuntime([]byte(js), time.Now()).Peers[0]
 	if p.DirectAddress != "73.12.34.56" || p.DirectIsPrivate {
 		t.Fatalf("direct = %q private=%v", p.DirectAddress, p.DirectIsPrivate)
+	}
+}
+
+func TestLocalServicesProbesLoopback(t *testing.T) {
+	old := dialService
+	defer func() { dialService = old }()
+	var dialed []string
+	var mu sync.Mutex
+	dialService = func(addr string) bool {
+		mu.Lock()
+		dialed = append(dialed, addr)
+		mu.Unlock()
+		return addr == "127.0.0.1:22" || addr == "127.0.0.1:445"
+	}
+	serviceMu.Lock()
+	delete(serviceCache, "127.0.0.1")
+	serviceMu.Unlock()
+	got := LocalServices()
+	if len(got) != 2 || got[0] != "ssh" || got[1] != "smb" {
+		t.Fatalf("services = %v (dialed %v)", got, dialed)
 	}
 }

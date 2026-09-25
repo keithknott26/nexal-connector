@@ -38,6 +38,15 @@ var (
 	}
 )
 
+// LocalServices is what THIS computer offers (Remote Login, Screen Sharing, File
+// Sharing), checked on its own loopback address and cached like peer probes. The
+// coordinator opens exactly these ports to the other computers in the network,
+// which is why this must not depend on a peer probing us: on a deny-by-default
+// network that probe is blocked until the port is opened.
+func LocalServices() []string {
+	return probeServices("127.0.0.1")
+}
+
 // probeServices returns the offered services on a peer's tunnel IP, cached for
 // a minute so status polls do not dial the peer every time.
 func probeServices(ip string) []string {

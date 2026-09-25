@@ -21,6 +21,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var wakeStatus: [String: String] = [:]
     /// Public IP and location per mesh peer id, filled in after each status poll.
     @Published private(set) var peerNetInfo: [String: PeerNetInfo] = [:]
+    /// The exit route this Mac sends all internet traffic through, or nil.
+    /// Remembered across launches and re-applied when the service restarts.
+    @Published private(set) var exitRoute: String? = UserDefaults.standard.string(forKey: AppModel.exitRouteKey)
+    /// Exit routes the coordinator has offered this Mac.
+    @Published private(set) var availableExitRoutes: Set<String> = []
+    @Published private(set) var exitRouteBusy = false
+    private var exitRouteCheckedAt: Date?
+    static let exitRouteKey = "exitRouteID"
     @Published private(set) var status: ConnectorStatus?
     @Published private(set) var busy = false
     /// What the connector is doing RIGHT NOW, in the owner's language.
@@ -458,6 +466,7 @@ final class AppModel: ObservableObject {
         await updatePeers()
         await updatePeerLocations()
 		await updateTimeMachine()
+        await updateExitRoutes()
     }
 
     /// First click on "Leave neXal network": ask inline. A dialog is not used
@@ -579,6 +588,35 @@ final class AppModel: ObservableObject {
             // ShellError.commandFailed carries the connector's own stderr message
             // (e.g. "too many wake requests; wait a minute"), so this is friendly text.
             wakeStatus[peer.id] = error.localizedDescription
+        }
+    }
+
+    /// Refreshes the offered exit routes (every 30 s at most) and re-applies the
+    /// owner's choice, since a restarted service may have forgotten it.
+    func updateExitRoutes() async {
+        if let at = exitRouteCheckedAt, Date().timeIntervalSince(at) < 30 { return }
+        exitRouteCheckedAt = Date()
+        let available = await Task.detached { NetworkService.availableExitRoutes() }.value
+        if available != availableExitRoutes { availableExitRoutes = available }
+        if let chosen = exitRoute, available.contains(chosen) {
+            _ = await Task.detached { try? NetworkService.selectExitRoute(chosen, previous: nil) }.value
+        }
+    }
+
+    /// Turns "Route all of my internet traffic through this exit node" on for
+    /// `route`, or off when `route` is nil. Only one exit node at a time.
+    func setExitRoute(_ route: String?) async {
+        guard !exitRouteBusy else { return }
+        exitRouteBusy = true
+        defer { exitRouteBusy = false }
+        let previous = exitRoute
+        do {
+            try await Task.detached { try NetworkService.selectExitRoute(route, previous: previous) }.value
+            exitRoute = route
+            UserDefaults.standard.set(route, forKey: Self.exitRouteKey)
+            AgentLog.note(route.map { "exit node on: \($0)" } ?? "exit node off")
+        } catch {
+            message = "Could not change the exit node: \(error.localizedDescription)"
         }
     }
 

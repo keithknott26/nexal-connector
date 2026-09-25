@@ -18,6 +18,9 @@ type TunnelStatusReport struct {
 	LastTrafficAt   string        `json:"lastTrafficAt,omitempty"`
 	PQVerifiedAt    string        `json:"pqVerifiedAt,omitempty"`
 	DetailCode      string        `json:"detailCode,omitempty"`
+	// Services this computer offers (ssh, vnc, smb). A pointer so that "none"
+	// is sent as [] (closing their ports) while an unset value is omitted.
+	Services *[]string `json:"services,omitempty"`
 }
 
 type TunnelPath struct {
@@ -118,6 +121,8 @@ func (c *Client) ReportTunnelStatus(ctx context.Context, hostID string, status m
 		return errors.New("invalid host id")
 	}
 	report := TunnelReportFromRuntime(status, time.Now())
+	services := append([]string{}, mesh.LocalServices()...)
+	report.Services = &services
 	var out struct {
 		OK bool `json:"ok"`
 	}

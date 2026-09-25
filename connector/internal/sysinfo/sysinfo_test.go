@@ -3,6 +3,8 @@ package sysinfo
 import (
 	"context"
 	"errors"
+	"net"
+	"net/netip"
 	"runtime"
 	"testing"
 )
@@ -75,5 +77,50 @@ func TestParseBattery(t *testing.T) {
 	p, s = parseBattery([]byte("Now drawing from 'AC Power'\n"))
 	if p != 0 || s != "" {
 		t.Fatalf("desktop got %d %q", p, s)
+	}
+}
+
+func TestPickLANAddressSkipsTunnelsAndPublicAddresses(t *testing.T) {
+	ifaces := []net.Interface{
+		{Name: "lo0", Flags: net.FlagUp | net.FlagLoopback},
+		{Name: "utun4", Flags: net.FlagUp},
+		{Name: "en1", Flags: 0},
+		{Name: "en0", Flags: net.FlagUp},
+	}
+	addrs := map[string][]net.Addr{
+		"lo0":   {&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)}},
+		"utun4": {&net.IPNet{IP: net.ParseIP("100.86.178.78"), Mask: net.CIDRMask(16, 32)}},
+		"en1":   {&net.IPNet{IP: net.ParseIP("10.0.0.9"), Mask: net.CIDRMask(8, 32)}},
+		"en0": {&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+			&net.IPNet{IP: net.ParseIP("192.168.68.56"), Mask: net.CIDRMask(22, 32)}},
+	}
+	got := pickLANAddress(ifaces, func(i net.Interface) ([]net.Addr, error) { return addrs[i.Name], nil })
+	if got != "192.168.68.56" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestLocalRangesCoverEveryLANFamilyButNotTheTunnelRange(t *testing.T) {
+	for _, local := range []string{"10.1.2.3", "172.16.0.1", "172.31.255.254", "192.168.68.56", "169.254.10.20", "fd12:3456::1"} {
+		if localRank(netip.MustParseAddr(local)) < 0 {
+			t.Errorf("%s should be local", local)
+		}
+	}
+	for _, other := range []string{"100.86.178.78", "73.1.2.3", "172.32.0.1", "8.8.8.8", "fe80::1", "2001:db8::1"} {
+		if localRank(netip.MustParseAddr(other)) >= 0 {
+			t.Errorf("%s must not be local", other)
+		}
+	}
+}
+
+func TestPickLANAddressPrefersIPv4PrivateOverLinkLocalAndULA(t *testing.T) {
+	ifaces := []net.Interface{{Name: "en0", Flags: net.FlagUp}, {Name: "en1", Flags: net.FlagUp}}
+	addrs := map[string][]net.Addr{
+		"en0": {&net.IPNet{IP: net.ParseIP("fd00::5"), Mask: net.CIDRMask(64, 128)},
+			&net.IPNet{IP: net.ParseIP("169.254.3.4"), Mask: net.CIDRMask(16, 32)}},
+		"en1": {&net.IPNet{IP: net.ParseIP("10.20.30.40"), Mask: net.CIDRMask(8, 32)}},
+	}
+	if got := pickLANAddress(ifaces, func(i net.Interface) ([]net.Addr, error) { return addrs[i.Name], nil }); got != "10.20.30.40" {
+		t.Fatalf("got %q", got)
 	}
 }

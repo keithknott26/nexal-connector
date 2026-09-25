@@ -106,6 +106,10 @@ type Peer struct {
 	// both Macs share a LAN.
 	DirectAddress   string `json:"directAddress,omitempty"`
 	DirectIsPrivate bool   `json:"directIsPrivate,omitempty"`
+	// DirectVia is how the P2P tunnel reaches the peer: "lan" (both ends used
+	// local-network addresses), "nat" (through a router's public address), or
+	// "" when unknown. From the runtime's selected ICE candidate pair.
+	DirectVia string `json:"directVia,omitempty"`
 	// Services lists what answered on the tunnel address: "ssh", "vnc", "smb".
 	Services []string `json:"services,omitempty"`
 }

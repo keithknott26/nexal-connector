@@ -127,6 +127,12 @@ func translateRuntime(out []byte, now time.Time) Status {
 				peer.DirectAddress = ap.Addr().Unmap().String()
 				peer.DirectIsPrivate = ap.Addr().IsPrivate() || ap.Addr().IsLinkLocalUnicast()
 			}
+			switch {
+			case rp.ICECandidateType.Local == "host" && rp.ICECandidateType.Remote == "host":
+				peer.DirectVia = "lan"
+			case rp.ICECandidateType.Remote != "":
+				peer.DirectVia = "nat"
+			}
 		case "relayed":
 			peer.Path, peer.PathLabel = PathRelay, "neXal Relay — metered"
 		}

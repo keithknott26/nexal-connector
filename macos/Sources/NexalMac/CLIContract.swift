@@ -230,11 +230,12 @@ struct ConnectorStatus: Decodable {
 	/// Another computer's details. Every field optional: absent means not reported.
 	/// publicIp and location are added by the coordinator, not the computer.
 	struct HostDetails: Decodable, Equatable {
-		let os: String?; let model: String?; let chip: String?
+		let name: String?; let os: String?; let model: String?; let chip: String?
 		let cores: Int?; let performanceCores: Int?; let efficiencyCores: Int?
 		let memoryBytes: UInt64?; let diskTotalBytes: UInt64?; let diskFreeBytes: UInt64?
 		let thermal: String?; let batteryPercent: Int?; let batteryState: String?
 		let tunnelAddress: String?; let publicIp: String?; let location: String?
+		let lanAddress: String?
 	}
 
 	struct MeshStatus: Decodable {
@@ -263,6 +264,8 @@ struct ConnectorStatus: Decodable {
 		let tunnelAddress: String?
 		let directAddress: String?
 		let directIsPrivate: Bool?
+		/// "lan" or "nat": how the P2P tunnel reaches this peer. Absent from older connectors.
+		let directVia: String?
 		let services: [String]?
 	}
 	struct MeshTraffic: Decodable { let receivedBytes: UInt64; let sentBytes: UInt64; let lastAt: String? }

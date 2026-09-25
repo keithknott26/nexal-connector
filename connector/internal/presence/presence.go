@@ -529,7 +529,7 @@ func (c *Client) reportInfo(ctx context.Context, conn Conn, snapshotSeen <-chan 
 
 // cleanInfo bounds every text field received from a peer.
 func cleanInfo(info sysinfo.Info) sysinfo.Info {
-	for _, field := range []*string{&info.OS, &info.Model, &info.Chip, &info.Thermal, &info.TunnelAddress,
+	for _, field := range []*string{&info.Name, &info.OS, &info.Model, &info.Chip, &info.Thermal, &info.TunnelAddress, &info.LANAddress,
 		&info.BatteryState, &info.PublicIP, &info.Location} {
 		text := strings.Map(func(r rune) rune {
 			if r < 0x20 || r == 0x7f {

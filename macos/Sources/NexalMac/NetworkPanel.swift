@@ -269,10 +269,13 @@ struct NetworkPanel: View {
             }
             .font(.caption)
             .padding(.top, 6)
+            // Line the details up with the header's text ("Quantum Safe: On"):
+            // the disclosure chevron plus the status dot and its spacing.
+            .padding(.leading, Self.hostDetailIndent)
         } label: {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: Self.hostDotSpacing) {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
-                    .frame(width: 7, height: 7).padding(.top, 5)
+                    .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Text(displayName(peer)).font(.subheadline.weight(.semibold))
@@ -291,7 +294,10 @@ struct NetworkPanel: View {
                         // customer's to use, so they are not shown.
                         if !isStorageGateway(peer) {
                             Text("Public IP: \(publicIP ?? "—")")
-                            Text("Direct IP: \(peer.directAddress ?? "—")")
+                            // The computer's own LAN address, as it reported it. Not the
+                            // tunnel endpoint, which is the public address when the
+                            // tunnel runs through the router (see Current path).
+                            Text("Private IP: \(details?.lanAddress ?? (peer.directIsPrivate == true ? peer.directAddress : nil) ?? "—")")
                         }
                         Text("Location: \(location ?? "—")")
                         Text("Quantum Safe: ") + Text(peer.pq == "protected" ? "🔐 On" : "Off")
@@ -329,10 +335,22 @@ struct NetworkPanel: View {
         ExitNodeCheckbox(route: exitRouteID(for: peer), peerConnected: peer.lifecycle == "connected")
     }
 
+    /// The computer's own name as it reported it (Computer Name in System
+    /// Settings), falling back to the secure network's peer name. The peer name is
+    /// fixed when the computer first registers, from its hostname at that moment,
+    /// so a Mac set up with Migration Assistant can carry the old Mac's name there.
     private func displayName(_ peer: ConnectorStatus.MeshPeer) -> String {
         if isStorageGateway(peer) { return "neXal Storage" }
+        if let name = hostDetails(for: peer)?.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty { return name }
         return peer.name.isEmpty ? peer.id : peer.name
     }
+
+    /// Host row geometry, shared by the header and the expanded details so they
+    /// line up. The indent is macOS's disclosure chevron column (about 12 pt)
+    /// plus the status dot and the gap after it.
+    private static let hostDotSize: CGFloat = 7
+    private static let hostDotSpacing: CGFloat = 8
+    private static let hostDetailIndent: CGFloat = 12 + hostDotSize + hostDotSpacing
 
     /// The other computer's self-reported details, matched by tunnel address.
     private func hostDetails(for peer: ConnectorStatus.MeshPeer) -> ConnectorStatus.HostDetails? {
@@ -439,7 +457,15 @@ struct NetworkPanel: View {
     @ViewBuilder
     private func routeText(_ peer: ConnectorStatus.MeshPeer) -> some View {
         if peer.path == "direct" {
-            Text("⚡️ P2P Direct").foregroundStyle(.green).fontWeight(.semibold)
+            HStack(spacing: 4) {
+                Text("⚡️ P2P Direct").foregroundStyle(.green).fontWeight(.semibold)
+                switch peer.directVia {
+                case "lan": Text("· local network").foregroundStyle(.secondary)
+                case "nat": Text("· via router's public address").foregroundStyle(.secondary)
+                default: EmptyView()
+                }
+            }
+            .help(peer.directAddress.map { "Tunnel endpoint: \($0)" } ?? "")
         } else {
             Text(routeLabel(peer)).foregroundStyle(peer.path == "relay" ? .orange : .secondary)
         }

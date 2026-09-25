@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
+	"net/netip"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -29,6 +31,11 @@ import (
 // Info is one host's details. Every field is optional: zero means unknown.
 // JSON names are the wire contract with the coordinator's host.info frame.
 type Info struct {
+	// Name is the computer's own name as its owner set it (System Settings →
+	// General → About, e.g. "Keith's Mac mini"). The panel shows this rather than
+	// the secure network's peer name, which is fixed at first registration from
+	// the system hostname and can be stale (e.g. carried over by Migration Assistant).
+	Name             string `json:"name,omitempty"`
 	OS               string `json:"os,omitempty"`    // "macOS 27.0 (27A5218g)"
 	Model            string `json:"model,omitempty"` // "Mac mini"
 	Chip             string `json:"chip,omitempty"`  // "Apple M4"
@@ -46,6 +53,9 @@ type Info struct {
 	// TunnelAddress is this host's secure-network address, so a receiving
 	// connector can match the entry to the peer it sees in its own tunnel list.
 	TunnelAddress string `json:"tunnelAddress,omitempty"`
+	// LANAddress is this computer's private IPv4 address on its local network
+	// (e.g. 192.168.68.20), from its active physical interface.
+	LANAddress string `json:"lanAddress,omitempty"`
 	// PublicIP and Location are added by the coordinator from where the host's
 	// connection came from (Cloudflare's view). A host never sends them; they
 	// appear only on details received about OTHER hosts.
@@ -124,6 +134,7 @@ func (c *Collector) Collect(ctx context.Context) Info {
 			info.DiskTotalBytes, info.DiskFreeBytes = total, free
 		}
 	}
+	info.LANAddress = lanAddress()
 	info.Thermal = c.thermal(ctx)
 	if runtime.GOOS == "darwin" {
 		if out, err := c.Run(ctx, "/usr/bin/pmset", "-g", "batt"); err == nil {
@@ -150,6 +161,9 @@ func (c *Collector) readStatic(ctx context.Context) Info {
 		info.PerformanceCores, _ = strconv.Atoi(values["hw.perflevel0.physicalcpu"])
 		info.EfficiencyCores, _ = strconv.Atoi(values["hw.perflevel1.physicalcpu"])
 		info.MemoryBytes, _ = strconv.ParseUint(values["hw.memsize"], 10, 64)
+	}
+	if out, err := c.Run(ctx, "/usr/sbin/scutil", "--get", "ComputerName"); err == nil {
+		info.Name = strings.TrimSpace(string(out))
 	}
 	if out, err := c.Run(ctx, "/usr/bin/sw_vers"); err == nil {
 		info.OS = parseSwVers(out)
@@ -276,4 +290,73 @@ func parseBattery(out []byte) (int, string) {
 		return percent, state
 	}
 	return 0, ""
+}
+
+// LocalRanges are the address ranges that count as a computer's local-network
+// (LAN) address, in order of preference, from the IANA special-purpose address
+// registries (RFC 6890). The coordinator validates against the same list.
+//
+//	10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16  private networks (RFC 1918)
+//	169.254.0.0/16                             IPv4 link-local, self-assigned (RFC 3927)
+//	fc00::/7                                   IPv6 unique local (RFC 4193)
+//
+// 100.64.0.0/10 (shared address space, RFC 6598) is deliberately NOT listed: the
+// secure network assigns tunnel addresses from it, so it is never a LAN address.
+var LocalRanges = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fc00::/7"),
+}
+
+// localRank is the preference of ip among LocalRanges, or -1 if it is not local.
+func localRank(ip netip.Addr) int {
+	ip = ip.Unmap()
+	for i, prefix := range LocalRanges {
+		if prefix.Contains(ip) {
+			return i
+		}
+	}
+	return -1
+}
+
+// lanAddress returns this computer's most preferred local-network address (see
+// LocalRanges) on an up, non-loopback, physical-looking interface (en*, eth*,
+// wl*). Tunnel, bridge, VPN and AirDrop interfaces are skipped so the secure
+// network's own address is never reported as the LAN address.
+func lanAddress() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	return pickLANAddress(ifaces, func(i net.Interface) ([]net.Addr, error) { return i.Addrs() })
+}
+
+func pickLANAddress(ifaces []net.Interface, addrs func(net.Interface) ([]net.Addr, error)) string {
+	best, bestRank := "", len(LocalRanges)
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		name := iface.Name
+		if !(strings.HasPrefix(name, "en") || strings.HasPrefix(name, "eth") || strings.HasPrefix(name, "wl")) {
+			continue
+		}
+		list, err := addrs(iface)
+		if err != nil {
+			continue
+		}
+		for _, a := range list {
+			prefix, err := netip.ParsePrefix(a.String())
+			if err != nil {
+				continue
+			}
+			ip := prefix.Addr().Unmap()
+			if rank := localRank(ip); rank >= 0 && rank < bestRank {
+				best, bestRank = ip.String(), rank
+			}
+		}
+	}
+	return best
 }

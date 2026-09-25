@@ -121,7 +121,9 @@ func (c *Client) ReportTunnelStatus(ctx context.Context, hostID string, status m
 	var out struct {
 		OK bool `json:"ok"`
 	}
-	if err := c.call(ctx, "POST", "/api/v2/devices/"+hostID+"/tunnel-status", report, &out); err != nil {
+	// Lenient: the coordinator once returned extra fields here, and strict decoding
+	// turned every accepted report into "invalid coordinator response schema".
+	if err := c.callLenient(ctx, "POST", "/api/v2/devices/"+hostID+"/tunnel-status", report, &out); err != nil {
 		return err
 	}
 	if !out.OK {

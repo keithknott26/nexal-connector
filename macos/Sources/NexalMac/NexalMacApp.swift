@@ -19,28 +19,39 @@ struct NexalMacApp: App {
 private struct MenuBarLabel: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        // A plain SF Symbol label is drawn as a template (monochrome) in the menu
-        // bar, so colour must come from a non-template image.
-        if let image = Self.tinted(model.menuBarSymbol, model.menuBarSeverity) {
-            Image(nsImage: image).accessibilityLabel("neXal")
-        } else {
-            Label("neXal", systemImage: model.menuBarSymbol)
+        TimelineView(.periodic(from: .now, by: 0.65)) { context in
+            let visible = model.menuBarSeverity != .bad || Int(context.date.timeIntervalSince1970 * 2) % 2 == 0
+            if let image = Self.badge(model.menuBarSeverity, visible: visible) {
+                Image(nsImage: image)
+                    .accessibilityLabel(model.menuBarSeverity == .bad ? "neXal needs attention" : "neXal network")
+            }
         }
     }
 
-    static func tinted(_ symbol: String, _ severity: IndicatorSeverity) -> NSImage? {
+    /// A brand-specific circled @ drawn locally, without an asset or generated
+    /// bitmap. Red attention state alternates with an exclamation mark.
+    static func badge(_ severity: IndicatorSeverity, visible: Bool) -> NSImage? {
         let color: NSColor
         switch severity {
         case .good: color = .systemGreen
         case .pending: color = .systemYellow
         case .warning: color = .systemOrange
         case .bad: color = .systemRed
-        case .inactive: return nil // grey = the normal template look
+        case .inactive: color = .secondaryLabelColor
         }
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
-        guard let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "neXal")?
-            .withSymbolConfiguration(config) else { return nil }
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            color.withAlphaComponent(visible ? 1 : 0.28).setStroke()
+            let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 1.5))
+            ring.lineWidth = 1.6
+            ring.stroke()
+            let text = severity == .bad && visible ? "!" : "@"
+            let style = NSMutableParagraphStyle(); style.alignment = .center
+            let attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: color.withAlphaComponent(visible ? 1 : 0.28),
+                .font: NSFont.systemFont(ofSize: 11, weight: .bold), .paragraphStyle: style]
+            text.draw(in: NSRect(x: 0, y: 2.2, width: 18, height: 13), withAttributes: attrs)
+            return true
+        }
         image.isTemplate = false
         return image
     }
@@ -55,9 +66,10 @@ private struct MenuBarLabel: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private var window: NSWindow?
+    private var splashWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if !model.hasPersistedHostIdentity { showWindow() }
+        showSplash()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -77,5 +89,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func showSplash() {
+        let root = ZStack {
+            LinearGradient(colors: [.black, Color(red: 0.04, green: 0.12, blue: 0.20)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            VStack(spacing: -2) {
+                Text("neXal").font(.system(size: 40, weight: .semibold, design: .rounded))
+                Text("systems").font(.system(size: 17, weight: .medium, design: .rounded)).tracking(5)
+            }.foregroundStyle(.white)
+        }.frame(width: 360, height: 230)
+        let splash = NSWindow(contentViewController: NSHostingController(rootView: root))
+        splash.styleMask = [.borderless]
+        splash.isOpaque = false
+        splash.backgroundColor = .clear
+        splash.level = .floating
+        splash.center()
+        splash.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        splashWindow = splash
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak splash] in
+            splash?.orderOut(nil)
+            self?.splashWindow = nil
+        }
     }
 }

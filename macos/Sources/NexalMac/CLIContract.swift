@@ -214,6 +214,9 @@ struct ConnectorStatus: Decodable {
     let credentialRejected: Bool?
     let resourcePolicy: ResourcePolicy?
 	let mesh: MeshStatus?
+	/// Commercial/product switches are coordinator-owned and fail closed when
+	/// absent. They control presentation, never authorization by themselves.
+	let features: ConnectorFeatures?
 	/// Live presence, including other computers' self-reported details.
 	/// Absent from connectors older than host details.
 	let presence: Presence?

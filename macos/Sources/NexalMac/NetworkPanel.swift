@@ -503,19 +503,20 @@ struct NetworkPanel: View {
     private func quickLinks(_ peer: ConnectorStatus.MeshPeer) -> some View {
         let services = Set(peer.services ?? [])
         let tunnel = peer.tunnelAddress
+        let features = model.status?.features ?? ConnectorFeatures()
         HStack(spacing: 6) {
-            if services.contains("ssh"), let host = tunnel {
+            if features.remoteSSH, services.contains("ssh"), let host = tunnel {
                 linkButton("SSH", "terminal", "ssh://\(host)")
             }
-            if let host = (peer.screenSharing?.available == true ? peer.screenSharing?.address : nil)
+            if features.remoteVNC, let host = (peer.screenSharing?.available == true ? peer.screenSharing?.address : nil)
                 ?? (services.contains("vnc") ? tunnel : nil) {
                 linkButton("VNC", "display", "vnc://\(host)")
             }
-            if let host = (peer.fileSharing?.available == true ? peer.fileSharing?.address : nil)
+            if features.networkFiles, let host = (peer.fileSharing?.available == true ? peer.fileSharing?.address : nil)
                 ?? (services.contains("smb") ? tunnel : nil) {
                 linkButton("Files", "folder", "smb://\(host)")
             }
-            if tunnel != nil {
+            if features.wakeOnLAN, tunnel != nil {
                 Button {
                     Task { await model.wake(peer) }
                 } label: {

@@ -181,6 +181,29 @@ provider supplies runtime evidence.
   The command takes NO configuration lock: it writes nothing, and blocking on the
   lock a running agent may hold would make pairing fail on exactly the machines
   that are working normally.
+- `nexal wake --host <hostId>` asks the coordinator to wake another Mac on the
+  network (`POST /api/v2/hosts/{hostId}/wake`, enrolled host credential, like
+  heartbeat). Wake-on-LAN is a LAN broadcast and cannot cross a router, so the
+  coordinator relays the request over the live presence stream to an AWAKE neXal
+  Mac whose reported `lanKey` matches the target's, and that Mac sends the magic
+  packet. Success prints `{"requested":true,"requestId":"<id>","relays":<n>}` —
+  the request was ROUTED, not that the target woke; watch `status.presence.online`
+  for the target to appear. When no awake Mac shares the target's LAN the
+  coordinator answers 409 `no_wake_relay` and the command exits 1 with
+  `{"error":{"code":"no_wake_relay","message":"No awake neXal Mac on that computer's network can wake it."}}`.
+  A coordinator that does not know the host, or predates remote wake (404/501/503),
+  yields code `wake_unavailable`. Every other failure keeps code `connector_error`.
+  Asking to wake this Mac's own host id is refused.
+  `nexal wake --mac aa:bb:cc:dd:ee:ff` sends the magic packet FROM THIS MAC,
+  immediately, without the coordinator or any credential (works unenrolled): UDP
+  port 9 to the directed broadcast of every up, non-loopback, non-virtual IPv4
+  interface plus `255.255.255.255`. It prints `{"sent":true,"interfaces":<n>}`,
+  where `n` counts interfaces a directed broadcast went out on (0 means only the
+  limited broadcast was sent). MACs must be six hex octets with `:` or `-`
+  throughout; group (multicast/broadcast) and all-zero addresses are refused.
+  Exactly one of `--host` / `--mac` is required. Neither form takes the
+  configuration lock, so both work while `nexal run` is up. The native app maps
+  `.wake(hostId:)` to `["wake","--host",id]`.
 - `nexal tunnel-check` verifies the configured binary digest/configuration and reports
   policy evidence, NOT live PQ attestation.
 - `nexal self-test --samples 1000000` runs the fixed CPU workload offline with a
@@ -271,6 +294,43 @@ per §26). Rules a consumer may rely on:
 - `synthetic` is true under `run --dev-assume-idle`, which substitutes a
   development fixture (AC power, ample disk, thermal still unknown) exactly as it
   already substitutes idle/memory telemetry.
+
+Status also includes two ADDITIVE objects for live presence and Wake-on-LAN.
+Both are always present and their arrays are never `null`:
+
+- `presence` `{connected,online[],updatedAt,detail}`. `online` is the sorted list
+  of host ids the coordinator's live stream (`GET /api/v2/hosts/events`,
+  WebSocket, host credential) last reported online. `connected` is true while the
+  stream is open and has delivered its first snapshot. The set is RETAINED while
+  disconnected, so a network blip does not make every Mac look offline — read
+  `connected` before trusting `online`, and `updatedAt` (RFC 3339 UTC, `""` when
+  nothing has arrived) says how old it is. `detail` is a short human reason when
+  not connected (`"cannot reach the coordinator"`, `"this coordinator does not
+  offer live presence yet"`, `"this Mac was removed from the network"`, `"live
+  presence is not running"`, …) and `""` while connected. The text is for display,
+  not a stable code. The online set is display and routing input only; it
+  authorizes nothing. Reconnects use jittered exponential backoff (1–60 s); an
+  older coordinator's 404 is retried every 10 minutes; after removal (event
+  `host.removed` for this host or close code 4001) the stream stays down until
+  `nexal run` restarts.
+- `wake` `{macs[],wakeForNetwork,reported}`. `macs` are this Mac's physical
+  Ethernet/Wi-Fi addresses (virtual interfaces and locally-administered — e.g.
+  private Wi-Fi — addresses excluded). `wakeForNetwork` is `enabled`, `disabled`
+  or `unknown`, read from the `womp` line of `pmset -g` (macOS System Settings >
+  Energy > "Wake for network access"); unknown off macOS or when pmset cannot be
+  read. `reported` is true only when the coordinator accepted the CURRENT facts
+  via `PUT /api/v2/hosts/wake-info` `{macs,lanKey,wakeForNetwork}`; it is false
+  before the first report, after a failure, when facts changed, and against a
+  coordinator that predates the route (404/503, which is not logged as a fault).
+  Facts are re-read at start and every 5 minutes and sent only when they change.
+  `lanKey` (not shown in status) is `hex(sha256(sorted IPv4 network prefixes of
+  those interfaces, comma-joined + "|" + coordinator-observed public IP))`, or
+  the prefixes alone when no public IP is known; the public IP is known only once
+  peer discovery has advertised. KNOWN LIMITATION: two Macs on one LAN where only
+  one knows its public IP compute different keys; see `internal/wol/facts.go`.
+  While relaying, a connected agent sends magic packets for `wake.request` events
+  that target another host (bounded to 8 MACs, de-duplicated, at most one per
+  second) and logs each result.
 
 Status additionally reports `manualAcceptanceSupported`, `ownerActivityOverride`,
 optional `acceptJobsUntil`, and optional `executionBlocker`. An absent blocker is

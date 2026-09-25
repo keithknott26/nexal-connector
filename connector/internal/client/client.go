@@ -127,7 +127,17 @@ func New(base, token string, dev bool) (*Client, error) {
 
 // StatusError is a non-2xx coordinator response. It deliberately carries the
 // status code and NOTHING else: no URL, no response body, no bearer token.
-type StatusError struct{ Status int }
+//
+// Code is the one exception, and it is narrow: the machine-readable
+// error.code from the contract's {error:{code,message}} shape, kept only when
+// it is 1–64 characters of [a-z0-9_]. It exists so a caller can tell one 409
+// from another (e.g. wake's no_wake_relay) without string-matching prose; the
+// message is never kept, and Error() does not print the code, so every
+// existing message is unchanged.
+type StatusError struct {
+	Status int
+	Code   string
+}
 
 func (e *StatusError) Error() string {
 	return fmt.Sprintf("coordinator rejected request (HTTP %d)", e.Status)
@@ -145,6 +155,21 @@ func ValidID(id string) bool {
 	return true
 }
 func (c *Client) call(ctx context.Context, method, path string, in, out any) error {
+	return c.do(ctx, method, path, in, out, true)
+}
+
+// callLenient is call without DisallowUnknownFields, for the v2 host endpoints
+// added alongside live presence and Wake-on-LAN. HARDENING-PLAN §43 records why
+// strict decoding of coordinator responses is a hazard: the Worker deploys
+// instantly while installed connectors lag, so one new server field would break
+// every installed client at once. These endpoints are new, so they start
+// lenient; every field they DO read is still validated by the caller. A nil
+// out accepts any bounded 2xx body and reads nothing from it.
+func (c *Client) callLenient(ctx context.Context, method, path string, in, out any) error {
+	return c.do(ctx, method, path, in, out, false)
+}
+
+func (c *Client) do(ctx context.Context, method, path string, in, out any, strict bool) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -178,7 +203,7 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 		// is what the pairing command needs in order to tell the owner WHICH of the
 		// several possible causes applies (HARDENING-PLAN §26). The message is
 		// unchanged, so existing callers and their tests see exactly what they did.
-		return &StatusError{Status: resp.StatusCode}
+		return &StatusError{Status: resp.StatusCode, Code: errorCode(resp.Body)}
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if err != nil {
@@ -187,11 +212,16 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 	if len(b) > 64<<10 {
 		return errors.New("coordinator response too large or unreadable")
 	}
+	if out == nil && !strict {
+		return nil
+	}
 	if err := config.CheckJSONObject(b); err != nil {
 		return errors.New("invalid coordinator response schema")
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
-	d.DisallowUnknownFields()
+	if strict {
+		d.DisallowUnknownFields()
+	}
 	if err = d.Decode(out); err != nil {
 		return errors.New("invalid coordinator response schema")
 	}
@@ -258,4 +288,32 @@ func (c *Client) Complete(ctx context.Context, id string, r Result, seconds floa
 			UsageSeconds float64 `json:"usageSeconds"`
 		}{r, seconds}, &out)
 	return out.Accepted, err
+}
+
+// errorCode extracts error.code from a non-2xx body and returns it only if it is
+// a short [a-z0-9_] token; anything else (including the message) is dropped so
+// no server-controlled prose can reach a terminal or a log.
+func errorCode(r io.Reader) string {
+	b, err := io.ReadAll(io.LimitReader(r, 8<<10))
+	if err != nil {
+		return ""
+	}
+	var shape struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(b, &shape) != nil {
+		return ""
+	}
+	code := shape.Error.Code
+	if len(code) < 1 || len(code) > 64 {
+		return ""
+	}
+	for _, r := range code {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+			return ""
+		}
+	}
+	return code
 }

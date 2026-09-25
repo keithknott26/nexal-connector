@@ -149,6 +149,11 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 			completed++
 			mu.Unlock()
 			respond(map[string]bool{"accepted": true})
+		case "/api/v2/hosts/events", "/api/v2/hosts/wake-info":
+			// `run` now opens the live presence stream and reports wake info.
+			// This fake coordinator predates both, which is exactly the older
+			// coordinator the agent must tolerate quietly: 404, and carry on.
+			w.WriteHeader(404)
 		default:
 			t.Errorf("unexpected path %s", r.URL.Path)
 			w.WriteHeader(404)

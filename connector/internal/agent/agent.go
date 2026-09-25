@@ -19,6 +19,7 @@ import (
 	"nexal/connector/internal/contribution"
 	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/throttle"
+	"nexal/connector/internal/wol"
 )
 
 type Record struct {
@@ -53,6 +54,10 @@ type Status struct {
 	// the second is automatic, transient and never written to disk.
 	Contribution ContributionStatus `json:"contribution"`
 	Mesh         mesh.Status        `json:"mesh"`
+	// Presence and Wake are additive (see presence.go). Presence is the
+	// coordinator's live online set; Wake is this Mac's own Wake-on-LAN facts.
+	Presence PresenceStatus `json:"presence"`
+	Wake     WakeStatus     `json:"wake"`
 }
 
 // UploadThrottle is the §26 "always see why" view of the upload dimension: the
@@ -122,6 +127,18 @@ type Agent struct {
 	// reduces transport failures to fixed messages for the same reason.
 	logger       *slog.Logger
 	meshProvider mesh.Provider
+	// presence is the live online-set stream; nil unless WithPresence. It has
+	// its own lock and never takes a.mu, so reading it under a.mu is safe.
+	presence PresenceSource
+	// wakeReporter publishes wake facts; nil unless WithWakeInfo. wakeFacts is
+	// the local collector (wol.CollectLocal), replaceable by tests. wake is the
+	// last collected view for status, guarded by mu.
+	wakeReporter WakeInfoReporter
+	wakeFacts    func(context.Context, string) wol.Facts
+	wake         WakeStatus
+	// wakeInfoEvery overrides both wake-info waits when nonzero. Tests only;
+	// production leaves it zero and gets wakeInfoInterval/RetryInterval.
+	wakeInfoEvery time.Duration
 }
 
 // Option configures optional Agent behaviour. Options exist so observability can
@@ -167,7 +184,8 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 		return nil, errors.New("telemetry probe required")
 	}
 	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1), meshProvider: mesh.UnavailableProvider{},
-		logger: slog.New(slog.DiscardHandler)}
+		logger: slog.New(slog.DiscardHandler), wakeFacts: wol.CollectLocal,
+		wake: WakeStatus{MACs: []string{}, WakeForNetwork: wol.WakeUnknown}}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -228,6 +246,7 @@ func (a *Agent) Snapshot() Status {
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
 		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
+		Presence: a.presenceStatusLocked(), Wake: a.wakeStatusLocked(),
 		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second}
 }
 
@@ -754,7 +773,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.Refresh(ctx)
 	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(6)
+	// Live presence and wake-info reporting are their own goroutines for the
+	// same reason discovery is: a stalled WebSocket, a slow pmset or a slow
+	// coordinator write must never delay a heartbeat or an attempt poll.
+	// runPresence returns at once when presence is not configured.
+	go func() {
+		defer wg.Done()
+		a.runPresence(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.runWakeInfo(ctx)
+	}()
 	// §36.4 power/thermal/disk sampling is its own goroutine on its own slower
 	// cadence: it spawns processes, so it must never sit in the 2 s telemetry path,
 	// and a slow pmset must not delay a heartbeat.

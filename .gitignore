@@ -32,3 +32,4 @@ __pycache__/
 .swiftpm/
 .build/
 Claude outputs/*.tgz
+connector/nexal

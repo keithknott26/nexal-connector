@@ -134,7 +134,7 @@ type Agent struct {
 	// the local collector (wol.CollectLocal), replaceable by tests. wake is the
 	// last collected view for status, guarded by mu.
 	wakeReporter WakeInfoReporter
-	wakeFacts    func(context.Context, string) wol.Facts
+	wakeFacts    func(context.Context) wol.Facts
 	wake         WakeStatus
 	// wakeInfoEvery overrides both wake-info waits when nonzero. Tests only;
 	// production leaves it zero and gets wakeInfoInterval/RetryInterval.

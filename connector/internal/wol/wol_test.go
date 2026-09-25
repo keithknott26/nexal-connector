@@ -3,6 +3,8 @@ package wol
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net"
 	"net/netip"
@@ -180,7 +182,7 @@ func TestCollectLocal(t *testing.T) {
 		{Name: "en0", Flags: up, Prefix: netip.MustParsePrefix("169.254.3.3/16")}, // link-local
 	}
 	withFakes(t, v4, raw, &fakeUDP{})
-	f := CollectLocal(context.Background(), "203.0.113.7")
+	f := CollectLocal(context.Background())
 	wantMACs := []string{"3c:22:fb:01:02:03", "3c:22:fb:01:02:04", "3c:22:fb:01:02:05"}
 	if len(f.MACs) != len(wantMACs) {
 		t.Fatalf("MACs = %v, want %v", f.MACs, wantMACs)
@@ -193,7 +195,7 @@ func TestCollectLocal(t *testing.T) {
 	if len(f.Prefixes) != 2 || f.Prefixes[0] != "10.0.4.0/22" || f.Prefixes[1] != "192.168.1.0/24" {
 		t.Fatalf("Prefixes = %v", f.Prefixes)
 	}
-	if f.LANKey != LANKey([]string{"192.168.1.0/24", "10.0.4.0/22"}, "203.0.113.7") || len(f.LANKey) != 64 {
+	if f.LANKey != LANKey([]string{"192.168.1.0/24", "10.0.4.0/22"}) || len(f.LANKey) != 64 {
 		t.Fatalf("LANKey = %q", f.LANKey)
 	}
 	if f.WakeForNetwork == "" {
@@ -202,23 +204,23 @@ func TestCollectLocal(t *testing.T) {
 }
 
 func TestLANKey(t *testing.T) {
-	a := LANKey([]string{"192.168.1.0/24", "10.0.0.0/8"}, "")
-	b := LANKey([]string{"10.0.0.0/8", "192.168.1.0/24"}, "")
-	if a != b || len(a) != 64 {
+	a := LANKey([]string{"192.168.1.0/24", "10.0.0.0/8"})
+	if a != LANKey([]string{"10.0.0.0/8", "192.168.1.0/24"}) || len(a) != 64 {
 		t.Fatal("LANKey depends on enumeration order")
 	}
-	if got := LANKey([]string{"192.168.1.0/24", "10.0.0.0/8"}, "203.0.113.7"); got == a {
-		t.Fatal("public IP did not change the key")
+	if a != LANKey([]string{"10.0.0.0/8", "192.168.1.0/24", "10.0.0.0/8"}) {
+		t.Fatal("LANKey depends on duplicates")
 	}
-	if LANKey([]string{"192.168.1.0/24"}, "198.51.100.1") == LANKey([]string{"192.168.1.0/24"}, "198.51.100.2") {
-		t.Fatal("two households on 192.168.1.0/24 got the same key")
+	// Exact definition: sha256 hex of the sorted prefixes joined by ",", with no
+	// public address mixed in (the coordinator salts it with the source IP).
+	sum := sha256.Sum256([]byte("10.0.0.0/8,192.168.1.0/24"))
+	if a != hex.EncodeToString(sum[:]) {
+		t.Fatalf("LANKey = %s, want sha256 of the joined prefixes", a)
 	}
-	// A private or malformed "public" address is ignored rather than trusted.
-	if LANKey([]string{"192.168.1.0/24"}, "10.1.1.1") != LANKey([]string{"192.168.1.0/24"}, "") ||
-		LANKey([]string{"192.168.1.0/24"}, "nonsense") != LANKey([]string{"192.168.1.0/24"}, "") {
-		t.Fatal("non-public address was mixed into the key")
+	if LANKey([]string{"192.168.1.0/24"}) == LANKey([]string{"192.168.2.0/24"}) {
+		t.Fatal("different LANs share a key")
 	}
-	if LANKey(nil, "203.0.113.7") != "" {
+	if LANKey(nil) != "" {
 		t.Fatal("no prefixes must yield no key")
 	}
 }

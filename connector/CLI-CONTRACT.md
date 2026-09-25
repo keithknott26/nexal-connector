@@ -186,13 +186,22 @@ provider supplies runtime evidence.
   heartbeat). Wake-on-LAN is a LAN broadcast and cannot cross a router, so the
   coordinator relays the request over the live presence stream to an AWAKE neXal
   Mac whose reported `lanKey` matches the target's, and that Mac sends the magic
-  packet. Success prints `{"requested":true,"requestId":"<id>","relays":<n>}` —
-  the request was ROUTED, not that the target woke; watch `status.presence.online`
-  for the target to appear. When no awake Mac shares the target's LAN the
-  coordinator answers 409 `no_wake_relay` and the command exits 1 with
-  `{"error":{"code":"no_wake_relay","message":"No awake neXal Mac on that computer's network can wake it."}}`.
-  A coordinator that does not know the host, or predates remote wake (404/501/503),
-  yields code `wake_unavailable`. Every other failure keeps code `connector_error`.
+  packet. The coordinator answers HTTP 202 `{requestId,relays,targetWakeForNetwork}`
+  (any 2xx with a valid `requestId` and `0 <= relays <= 1000` is success). Success
+  prints `{"requested":true,"requestId":"<uuid>","relays":<n>,"targetWakeForNetwork":<bool>}`
+  — `requested` is the CLI's statement that the request was ROUTED, not that the
+  target woke; watch `status.presence.online` for the target to appear.
+  `targetWakeForNetwork:false` means the target last reported "Wake for network
+  access" off, so the packet will probably not wake it.
+  Failures exit 1 with `{"error":{"code":…,"message":…}}`:
+  409 `no_wake_relay` -> code `no_wake_relay`, message
+  "No awake neXal Mac on that computer's network can wake it.";
+  429 `rate_limited` -> code `rate_limited`, message
+  "Too many wake requests for that computer; try again in a minute.";
+  404 `wake_target_not_found` -> code `wake_target_not_found`;
+  503 (`feature_unavailable`, `events_unavailable`, `wake_gate_unavailable`) or an
+  uncoded 404/501 from an older coordinator -> code `wake_unavailable`.
+  Every other failure keeps code `connector_error`.
   Asking to wake this Mac's own host id is refused.
   `nexal wake --mac aa:bb:cc:dd:ee:ff` sends the magic packet FROM THIS MAC,
   immediately, without the coordinator or any credential (works unenrolled): UDP
@@ -312,7 +321,8 @@ Both are always present and their arrays are never `null`:
   authorizes nothing. Reconnects use jittered exponential backoff (1–60 s); an
   older coordinator's 404 is retried every 10 minutes; after removal (event
   `host.removed` for this host or close code 4001) the stream stays down until
-  `nexal run` restarts.
+  `nexal run` restarts. Close code 4002 ("superseded by a newer connection from
+  this host") is NOT removal: the agent waits the normal backoff and reconnects.
 - `wake` `{macs[],wakeForNetwork,reported}`. `macs` are this Mac's physical
   Ethernet/Wi-Fi addresses (virtual interfaces and locally-administered — e.g.
   private Wi-Fi — addresses excluded). `wakeForNetwork` is `enabled`, `disabled`
@@ -323,11 +333,10 @@ Both are always present and their arrays are never `null`:
   before the first report, after a failure, when facts changed, and against a
   coordinator that predates the route (404/503, which is not logged as a fault).
   Facts are re-read at start and every 5 minutes and sent only when they change.
-  `lanKey` (not shown in status) is `hex(sha256(sorted IPv4 network prefixes of
-  those interfaces, comma-joined + "|" + coordinator-observed public IP))`, or
-  the prefixes alone when no public IP is known; the public IP is known only once
-  peer discovery has advertised. KNOWN LIMITATION: two Macs on one LAN where only
-  one knows its public IP compute different keys; see `internal/wol/facts.go`.
+  `lanKey` (not shown in status) is `hex(sha256(sorted, deduplicated IPv4 network
+  prefixes of those interfaces, comma-joined))` — prefixes ONLY. It is not unique
+  on its own (many homes are 192.168.1.0/24); the coordinator salts it with the
+  source IP it observes on the PUT. See `internal/wol/facts.go`.
   While relaying, a connected agent sends magic packets for `wake.request` events
   that target another host (bounded to 8 MACs, de-duplicated, at most one per
   second) and logs each result.

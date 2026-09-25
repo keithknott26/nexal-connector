@@ -11,7 +11,8 @@
 //	{"v":1,"type":"wake.request","requestId":"...","targetHostId":"...","macs":[...],"at":"..."}
 //
 // plus the text "pong" answering our "ping" every PingInterval, and close code
-// 4001 when this host has been removed.
+// 4001 when this host has been removed (4002, "superseded by a newer connection
+// from this host", is an ordinary disconnect: back off and reconnect).
 //
 // WHAT THIS VIEW IS AND IS NOT. The online set is the coordinator's opinion of
 // who holds a live connection. It is display and routing input only: it
@@ -60,8 +61,15 @@ const (
 	// every minute would be noise in the coordinator's logs for no benefit.
 	UnsupportedBackoff = 10 * time.Minute
 	// CloseRemoved is the coordinator's application close code for "this host
-	// was removed".
+	// was removed". It is the ONLY close code that stops reconnecting.
 	CloseRemoved = 4001
+	// CloseSuperseded is "superseded by a newer connection from this host". It
+	// is NOT removal: the loop waits the normal backoff and reconnects. From
+	// here the connector cannot tell a second live agent from its own stale
+	// connection racing a reconnect, and a second agent should not exist at all
+	// (`nexal run` holds the host-wide machine lock), so the safe reading is a
+	// stale duplicate and the correct response is to come back.
+	CloseSuperseded = 4002
 	// maxOnline bounds the retained set against a hostile or broken server.
 	// It is far above any real tenant; the peer directory pages at 200.
 	maxOnline = 4096
@@ -258,6 +266,8 @@ func describe(err error) string {
 		return "the coordinator did not accept this host's credential"
 	case errors.As(err, &se):
 		return "the coordinator refused the presence stream"
+	case errors.As(err, &ce) && ce.Code == CloseSuperseded:
+		return "another connection from this Mac replaced the presence stream"
 	case errors.As(err, &ce):
 		return "the coordinator closed the presence stream"
 	case errors.Is(err, wsclient.ErrProtocol), errors.Is(err, wsclient.ErrMessageTooBig):
@@ -325,6 +335,8 @@ func (c *Client) session(ctx context.Context) error {
 		typ, data, err := conn.ReadMessage()
 		if err != nil {
 			var ce *wsclient.CloseError
+			// Only 4001 means removal. 4002 (superseded) and every other
+			// code fall through to the ordinary backoff-and-reconnect path.
 			if errors.As(err, &ce) && ce.Code == CloseRemoved {
 				c.markRemoved()
 			}

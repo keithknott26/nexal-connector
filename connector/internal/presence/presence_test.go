@@ -182,6 +182,24 @@ func TestRemovedByCloseCode(t *testing.T) {
 	}
 }
 
+func TestSupersededIsNotRemoval(t *testing.T) {
+	first := newFake(&wsclient.CloseError{Code: CloseSuperseded}, `{"v":1,"type":"snapshot","online":["a"]}`)
+	second := newFake(nil, `{"v":1,"type":"snapshot","online":["a","b"]}`)
+	h := newHarness(t, func() (Conn, error) { return first, nil }, func() (Conn, error) { return second, nil })
+	run(t, h, func() bool {
+		s := h.c.Snapshot()
+		return s.Connected && reflect.DeepEqual(s.Online, []string{"a", "b"})
+	})
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.c.Snapshot().Removed || h.dials < 2 {
+		t.Fatalf("4002 treated as removal (dials=%d)", h.dials)
+	}
+	if len(h.sleeps) < 1 || h.sleeps[0] < MinBackoff/2 || h.sleeps[0] > MinBackoff {
+		t.Fatalf("4002 did not wait the normal backoff: %v", h.sleeps)
+	}
+}
+
 func TestBackoffAndUnsupported(t *testing.T) {
 	fail := func() (Conn, error) { return nil, errors.New("dial failed") }
 	unsupported := func() (Conn, error) { return nil, &client.StatusError{Status: 404} }

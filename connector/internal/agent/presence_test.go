@@ -78,16 +78,11 @@ func TestWakeInfoReportsOnlyOnChange(t *testing.T) {
 	key2 := "2222222222222222222222222222222222222222222222222222222222222222"
 	var mu sync.Mutex
 	facts := wol.Facts{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: key1, WakeForNetwork: wol.WakeEnabled}
-	var seenIP string
-	a.wakeFacts = func(_ context.Context, ip string) wol.Facts {
+	a.wakeFacts = func(context.Context) wol.Facts {
 		mu.Lock()
 		defer mu.Unlock()
-		seenIP = ip
 		return facts
 	}
-	a.mu.Lock()
-	a.peerView.ObservedWANAddress = "203.0.113.7"
-	a.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { a.runWakeInfo(ctx); close(done) }()
@@ -102,9 +97,6 @@ func TestWakeInfoReportsOnlyOnChange(t *testing.T) {
 		t.Fatalf("wake status = %+v", s)
 	}
 	mu.Lock()
-	if seenIP != "203.0.113.7" {
-		t.Fatalf("collector got public IP %q", seenIP)
-	}
 	facts.LANKey = key2
 	mu.Unlock()
 	waitFor(t, "changed wake report", func() bool { return rep.n() == 2 })
@@ -121,7 +113,7 @@ func TestWakeInfoUnsupportedAndFailure(t *testing.T) {
 	rep := &fakeWakeReporter{err: &client.StatusError{Status: 404}}
 	a.wakeReporter = rep
 	a.wakeInfoEvery = 5 * time.Millisecond
-	a.wakeFacts = func(context.Context, string) wol.Facts {
+	a.wakeFacts = func(context.Context) wol.Facts {
 		return wol.Facts{MACs: []string{"3c:22:fb:01:02:03"},
 			LANKey: "1111111111111111111111111111111111111111111111111111111111111111", WakeForNetwork: wol.WakeDisabled}
 	}
@@ -141,7 +133,7 @@ func TestWakeInfoUnsupportedAndFailure(t *testing.T) {
 	rep2 := &fakeWakeReporter{err: errors.New("unused")}
 	a2.wakeReporter = rep2
 	a2.wakeInfoEvery = 5 * time.Millisecond
-	a2.wakeFacts = func(context.Context, string) wol.Facts {
+	a2.wakeFacts = func(context.Context) wol.Facts {
 		return wol.Facts{MACs: []string{"3c:22:fb:01:02:03"}, WakeForNetwork: wol.WakeUnknown}
 	}
 	ctx2, cancel2 := context.WithCancel(context.Background())

@@ -100,11 +100,19 @@ func wakeCommand(ctx context.Context, args []string) error {
 	switch {
 	case errors.Is(err, client.ErrNoWakeRelay):
 		return &codedError{code: "no_wake_relay", err: err}
+	case errors.Is(err, client.ErrWakeRateLimited):
+		return &codedError{code: "rate_limited", err: err}
+	case errors.Is(err, client.ErrWakeTargetNotFound):
+		return &codedError{code: "wake_target_not_found", err: err}
 	case client.IsNotSupported(err):
 		return &codedError{code: "wake_unavailable",
-			err: errors.New("the coordinator does not know that host or does not support remote wake yet")}
+			err: errors.New("remote wake is unavailable on the coordinator right now, or it does not support remote wake yet")}
 	case err != nil:
 		return err
 	}
-	return emit(map[string]any{"requested": true, "requestId": ack.RequestID, "relays": ack.Relays})
+	// "requested" is the CLI's own statement that the coordinator accepted the
+	// request for routing (it answers 202 with no such field); it is not a
+	// claim that the target woke.
+	return emit(map[string]any{"requested": true, "requestId": ack.RequestID, "relays": ack.Relays,
+		"targetWakeForNetwork": ack.TargetWakeForNetwork})
 }

@@ -137,14 +137,12 @@ func (a *Agent) runWakeInfo(ctx context.Context) {
 	lastOK := false
 	for {
 		a.mu.Lock()
-		// The coordinator-observed public address, when peer discovery has
-		// completed an advertise; see wol.LANKey for why it is mixed in and the
-		// limitation that follows from it being optional.
-		publicIP := a.peerView.ObservedWANAddress
 		collect := a.wakeFacts
 		reporter := a.wakeReporter
 		a.mu.Unlock()
-		f := collect(ctx, publicIP)
+		// lanKey is prefixes-only; the coordinator salts it with the source IP it
+		// observes on the PUT. See wol.LANKey.
+		f := collect(ctx)
 		info := client.WakeInfo{MACs: f.MACs, LANKey: f.LANKey, WakeForNetwork: f.WakeForNetwork == wol.WakeEnabled}
 		changed := !lastOK || !slices.Equal(info.MACs, last.MACs) || info.LANKey != last.LANKey ||
 			info.WakeForNetwork != last.WakeForNetwork

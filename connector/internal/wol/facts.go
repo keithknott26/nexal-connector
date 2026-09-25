@@ -5,8 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net"
-	"net/netip"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -37,44 +37,40 @@ type Facts struct {
 	WakeForNetwork string
 }
 
-// LANKey is hex(sha256(<sorted prefixes joined by ","> "|" <public IP>)), or
-// hex(sha256(<sorted prefixes joined by ",">)) when no public IP is known.
+// LANKey is hex(sha256(<sorted, deduplicated IPv4 prefixes joined by ",">)).
 //
 // WHY THIS SHAPE. Two Macs can relay a wake to each other only if a broadcast
 // from one reaches the other, i.e. they share a layer-2 segment. The local
-// IPv4 network prefix is the best cheap proxy for that. It is not unique on its
-// own — half the homes on earth are 192.168.1.0/24 — so the public address the
-// coordinator saw is mixed in to separate one household's 192.168.1.0/24 from
-// the neighbour's. The prefixes are sorted so interface enumeration order
-// cannot change the key, and the value is hashed so the coordinator stores an
-// equality token rather than this Mac's internal addressing plan.
+// IPv4 network prefix is the best cheap proxy for that. The prefixes are sorted
+// so interface enumeration order cannot change the key, and hashed so the
+// coordinator stores an equality token rather than this Mac's internal
+// addressing plan.
 //
-// KNOWN LIMITATION, stated rather than hidden: the public IP is only known to
-// an agent whose peer discovery has completed an advertise (the coordinator's
-// observed WAN address rides that response). Two Macs on the same LAN where one
-// knows its public IP and the other does not will compute DIFFERENT keys, and
-// the coordinator will not pair them as relays. The same happens across a
-// multi-homed Mac whose interfaces straddle two LANs (all its prefixes are in
-// one key). The robust fix is coordinator-side — key on the request's own
-// observed source address — and is noted for the coordinator owner.
-func LANKey(prefixes []string, publicIP string) string {
+// The key alone is NOT unique — half the homes on earth are 192.168.1.0/24 —
+// and deliberately so: the coordinator salts it with the source IP it observes
+// on the PUT /api/v2/hosts/wake-info request, which is what separates one
+// household's 192.168.1.0/24 from the neighbour's. The connector does not mix
+// in a public address itself, because the only one it could know is the one
+// peer discovery learns after an advertise, and two Macs on one LAN that
+// differed in whether discovery had run would then disagree on the key.
+//
+// A multi-homed Mac whose interfaces straddle two LANs puts all its prefixes in
+// one key, so it matches neither LAN's single-homed Macs; that is a known,
+// accepted limitation.
+func LANKey(prefixes []string) string {
 	if len(prefixes) == 0 {
 		return ""
 	}
 	sorted := append([]string(nil), prefixes...)
 	sort.Strings(sorted)
-	material := strings.Join(sorted, ",")
-	if ip, err := netip.ParseAddr(publicIP); err == nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
-		material += "|" + ip.Unmap().String()
-	}
-	sum := sha256.Sum256([]byte(material))
+	sorted = slices.Compact(sorted)
+	sum := sha256.Sum256([]byte(strings.Join(sorted, ",")))
 	return hex.EncodeToString(sum[:])
 }
 
 // CollectLocal enumerates the physical interfaces and reads the wake setting.
-// publicIP is the coordinator-observed address when the caller has one, or "".
 // It never fails: every fact it cannot establish is reported empty or unknown.
-func CollectLocal(ctx context.Context, publicIP string) Facts {
+func CollectLocal(ctx context.Context) Facts {
 	f := Facts{MACs: []string{}, Prefixes: []string{}, WakeForNetwork: wakeForNetwork(ctx)}
 	v4, ifs, err := systemInterfaces()
 	if err != nil {
@@ -108,7 +104,7 @@ func CollectLocal(ctx context.Context, publicIP string) Facts {
 		f.Prefixes = append(f.Prefixes, p)
 	}
 	sort.Strings(f.Prefixes)
-	f.LANKey = LANKey(f.Prefixes, publicIP)
+	f.LANKey = LANKey(f.Prefixes)
 	return f
 }
 

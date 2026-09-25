@@ -60,7 +60,17 @@ func TestWakeCommandHost(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/api/v2/hosts/h2/wake":
-			_, _ = w.Write([]byte(`{"requested":true,"requestId":"wr_1","relays":1}`))
+			w.WriteHeader(202)
+			_, _ = w.Write([]byte(`{"requestId":"6f1c2a4e-9b1d-4c8e-8a57-3f0e2d1b9c77","relays":1,"targetWakeForNetwork":true}`))
+		case "/api/v2/hosts/h5/wake":
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"slow down"}}`))
+		case "/api/v2/hosts/h6/wake":
+			w.WriteHeader(404)
+			_, _ = w.Write([]byte(`{"error":{"code":"wake_target_not_found","message":"x"}}`))
+		case "/api/v2/hosts/h7/wake":
+			w.WriteHeader(503)
+			_, _ = w.Write([]byte(`{"error":{"code":"events_unavailable","message":"x"}}`))
 		case "/api/v2/hosts/h3/wake":
 			w.WriteHeader(409)
 			_, _ = w.Write([]byte(`{"error":{"code":"no_wake_relay","message":"no relay"}}`))
@@ -81,6 +91,16 @@ func TestWakeCommandHost(t *testing.T) {
 	err = wakeCommand(ctx, []string{"--config", p, "--host", "h4"})
 	if err == nil || errorCode(err) != "wake_unavailable" || strings.Contains(err.Error(), s.URL) {
 		t.Fatalf("404 = %v (code %s)", err, errorCode(err))
+	}
+	err = wakeCommand(ctx, []string{"--config", p, "--host", "h5"})
+	if errorCode(err) != "rate_limited" || err.Error() != "Too many wake requests for that computer; try again in a minute." {
+		t.Fatalf("429 = %v (code %s)", err, errorCode(err))
+	}
+	if err = wakeCommand(ctx, []string{"--config", p, "--host", "h6"}); errorCode(err) != "wake_target_not_found" {
+		t.Fatalf("404 wake_target_not_found = %v (code %s)", err, errorCode(err))
+	}
+	if err = wakeCommand(ctx, []string{"--config", p, "--host", "h7"}); errorCode(err) != "wake_unavailable" {
+		t.Fatalf("503 = %v (code %s)", err, errorCode(err))
 	}
 	if errorCode(os.ErrNotExist) != "connector_error" {
 		t.Fatal("uncoded errors must keep the historic connector_error code")

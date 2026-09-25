@@ -72,15 +72,26 @@ func TestRequestWake(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/v2/hosts/ok-host/wake":
-			reply(w, 200, `{"requested":true,"requestId":"req_1","relays":2,"extra":"ignored"}`)
+			// The coordinator's real answer: 202, no "requested" field.
+			reply(w, 202, `{"requestId":"6f1c2a4e-9b1d-4c8e-8a57-3f0e2d1b9c77","relays":2,"targetWakeForNetwork":true,"extra":"ignored"}`)
+		case "/api/v2/hosts/zero-relay/wake":
+			reply(w, 200, `{"requestId":"req_0","relays":0,"targetWakeForNetwork":false}`)
+		case "/api/v2/hosts/busy/wake":
+			reply(w, 429, `{"error":{"code":"rate_limited","message":"x"}}`)
+		case "/api/v2/hosts/gone/wake":
+			reply(w, 404, `{"error":{"code":"wake_target_not_found","message":"x"}}`)
+		case "/api/v2/hosts/gated/wake":
+			reply(w, 503, `{"error":{"code":"wake_gate_unavailable","message":"x"}}`)
+		case "/api/v2/hosts/too-many-relays/wake":
+			reply(w, 202, `{"requestId":"req_3","relays":1001}`)
+		case "/api/v2/hosts/no-id/wake":
+			reply(w, 202, `{"relays":1}`)
 		case "/api/v2/hosts/lonely/wake":
 			reply(w, 409, `{"error":{"code":"no_wake_relay","message":"<script>untrusted prose</script>"}}`)
 		case "/api/v2/hosts/other-conflict/wake":
 			reply(w, 409, `{"error":{"code":"host_awake","message":"x"}}`)
 		case "/api/v2/hosts/weird-code/wake":
 			reply(w, 409, `{"error":{"code":"No Wake Relay\u001b[31m","message":"x"}}`)
-		case "/api/v2/hosts/lying/wake":
-			reply(w, 200, `{"requested":false,"requestId":"req_2","relays":1}`)
 		default:
 			reply(w, 404, `{}`)
 		}
@@ -89,8 +100,25 @@ func TestRequestWake(t *testing.T) {
 	c, _ := New(srv.URL, "host-scoped-secret", true)
 	ctx := context.Background()
 	ack, err := c.RequestWake(ctx, "ok-host")
-	if err != nil || !ack.Requested || ack.RequestID != "req_1" || ack.Relays != 2 {
-		t.Fatalf("ack = %+v, %v", ack, err)
+	if err != nil || ack.RequestID != "6f1c2a4e-9b1d-4c8e-8a57-3f0e2d1b9c77" || ack.Relays != 2 || !ack.TargetWakeForNetwork {
+		t.Fatalf("202 ack = %+v, %v", ack, err)
+	}
+	if ack, err := c.RequestWake(ctx, "zero-relay"); err != nil || ack.Relays != 0 || ack.TargetWakeForNetwork {
+		t.Fatalf("200 zero-relay ack = %+v, %v", ack, err)
+	}
+	if _, err := c.RequestWake(ctx, "busy"); !errors.Is(err, ErrWakeRateLimited) {
+		t.Fatalf("429 = %v", err)
+	}
+	if _, err := c.RequestWake(ctx, "gone"); !errors.Is(err, ErrWakeTargetNotFound) || IsNotSupported(err) {
+		t.Fatalf("404 wake_target_not_found = %v", err)
+	}
+	if _, err := c.RequestWake(ctx, "gated"); !IsNotSupported(err) {
+		t.Fatalf("503 = %v", err)
+	}
+	for _, id := range []string{"too-many-relays", "no-id"} {
+		if _, err := c.RequestWake(ctx, id); err == nil {
+			t.Fatalf("%s accepted", id)
+		}
 	}
 	if _, err := c.RequestWake(ctx, "lonely"); !errors.Is(err, ErrNoWakeRelay) {
 		t.Fatalf("409 no_wake_relay = %v", err)
@@ -107,14 +135,35 @@ func TestRequestWake(t *testing.T) {
 	if _, err := c.RequestWake(ctx, "weird-code"); !errors.As(err, &s) || s.Code != "" {
 		t.Fatalf("unsanitary code kept: %+v", s)
 	}
-	if _, err := c.RequestWake(ctx, "lying"); err == nil {
-		t.Fatal("requested:false accepted")
-	}
 	if _, err := c.RequestWake(ctx, "missing"); !IsNotSupported(err) {
 		t.Fatalf("404 = %v", err)
 	}
 	if _, err := c.RequestWake(ctx, "../etc"); err == nil {
 		t.Fatal("invalid host id accepted")
+	}
+}
+
+// TestCallLenientAccepts2xx pins that the lenient path treats the whole 2xx
+// range as success, including 202 Accepted (wake) and 204 No Content.
+func TestCallLenientAccepts2xx(t *testing.T) {
+	for _, status := range []int{200, 201, 202, 204} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			if status != 204 {
+				_, _ = w.Write([]byte(`{"requestId":"r1","relays":1,"unknown":true}`))
+			}
+		}))
+		c, _ := New(srv.URL, "host-scoped-secret", true)
+		if err := c.callLenient(context.Background(), "PUT", "/x", struct{}{}, nil); err != nil {
+			t.Errorf("HTTP %d with nil out: %v", status, err)
+		}
+		if status != 204 {
+			var out WakeAck
+			if err := c.callLenient(context.Background(), "POST", "/x", struct{}{}, &out); err != nil || out.RequestID != "r1" {
+				t.Errorf("HTTP %d decode: %+v %v", status, out, err)
+			}
+		}
+		srv.Close()
 	}
 }
 

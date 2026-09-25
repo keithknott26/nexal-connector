@@ -23,9 +23,20 @@ import (
 // answers 404 (or 503 while a feature flag is off). IsNotSupported names that
 // case so callers can stay quiet about it instead of logging a fault.
 
-// ErrNoWakeRelay is returned by RequestWake for the coordinator's 409
-// no_wake_relay: no awake neXal Mac shares a LAN with the target.
-var ErrNoWakeRelay = errors.New("No awake neXal Mac on that computer's network can wake it.")
+// Wake request failures the coordinator names with an error code. Each has a
+// fixed message written for the owner; the coordinator's own message is never
+// shown (see StatusError).
+var (
+	// ErrNoWakeRelay is 409 no_wake_relay: no awake neXal Mac shares a LAN with
+	// the target.
+	ErrNoWakeRelay = errors.New("No awake neXal Mac on that computer's network can wake it.")
+	// ErrWakeRateLimited is 429 rate_limited: the coordinator bounds how often
+	// one target may be woken.
+	ErrWakeRateLimited = errors.New("Too many wake requests for that computer; try again in a minute.")
+	// ErrWakeTargetNotFound is 404 wake_target_not_found: no such host in this
+	// tenant (or it has been removed).
+	ErrWakeTargetNotFound = errors.New("The coordinator does not know that computer; it may have been removed from the network.")
+)
 
 // IsNotSupported reports whether err is an older coordinator's "no such
 // route" (404), "not implemented" (501) or "feature unavailable" (503).
@@ -96,15 +107,24 @@ func (c *Client) ReportWakeInfo(ctx context.Context, w WakeInfo) error {
 	return c.callLenient(ctx, "PUT", "/api/v2/hosts/wake-info", w, nil)
 }
 
-// WakeAck is the coordinator's answer to a wake request.
+// WakeAck is the coordinator's answer to a wake request: HTTP 202 with
+// {requestId, relays, targetWakeForNetwork}. There is no "requested" field;
+// any 2xx carrying a valid requestId and a sane relay count is success.
 type WakeAck struct {
-	Requested bool   `json:"requested"`
 	RequestID string `json:"requestId"`
 	Relays    int    `json:"relays"`
+	// TargetWakeForNetwork is the target's last reported "Wake for network
+	// access" setting. False means the packet was relayed but the target has
+	// said it will probably not wake from it.
+	TargetWakeForNetwork bool `json:"targetWakeForNetwork"`
 }
 
 // RequestWake asks the coordinator to have an awake Mac on the target's LAN
-// send a magic packet. It returns ErrNoWakeRelay for 409 no_wake_relay.
+// send a magic packet. Coded failures map to ErrNoWakeRelay (409
+// no_wake_relay), ErrWakeRateLimited (429) and ErrWakeTargetNotFound (404
+// wake_target_not_found); a 503 (feature_unavailable, events_unavailable,
+// wake_gate_unavailable) or an uncoded 404 from an older coordinator satisfies
+// IsNotSupported.
 func (c *Client) RequestWake(ctx context.Context, hostID string) (WakeAck, error) {
 	var out WakeAck
 	if !ValidID(hostID) {
@@ -112,12 +132,19 @@ func (c *Client) RequestWake(ctx context.Context, hostID string) (WakeAck, error
 	}
 	if err := c.callLenient(ctx, "POST", "/api/v2/hosts/"+url.PathEscape(hostID)+"/wake", struct{}{}, &out); err != nil {
 		var s *StatusError
-		if errors.As(err, &s) && s.Status == http.StatusConflict && s.Code == "no_wake_relay" {
-			return WakeAck{}, ErrNoWakeRelay
+		if errors.As(err, &s) {
+			switch {
+			case s.Status == http.StatusConflict && s.Code == "no_wake_relay":
+				return WakeAck{}, ErrNoWakeRelay
+			case s.Status == http.StatusTooManyRequests:
+				return WakeAck{}, ErrWakeRateLimited
+			case s.Status == http.StatusNotFound && s.Code == "wake_target_not_found":
+				return WakeAck{}, ErrWakeTargetNotFound
+			}
 		}
 		return WakeAck{}, err
 	}
-	if !out.Requested || !ValidID(out.RequestID) || out.Relays < 0 || out.Relays > 1000 {
+	if !ValidID(out.RequestID) || out.Relays < 0 || out.Relays > 1000 {
 		return WakeAck{}, errors.New("invalid coordinator wake response")
 	}
 	return out, nil

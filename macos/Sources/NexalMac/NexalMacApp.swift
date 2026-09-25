@@ -1,15 +1,56 @@
+import AppKit
 import SwiftUI
 
 @main
 struct NexalMacApp: App {
-    @StateObject private var model = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
         MenuBarExtra {
-            NetworkPanel().environmentObject(model)
+            NetworkPanel().environmentObject(appDelegate.model)
         } label: {
-            Label("neXal", systemImage: model.menuBarSymbol)
+            MenuBarLabel(model: appDelegate.model)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Observes the model so the menu-bar symbol follows connection state.
+private struct MenuBarLabel: View {
+    @ObservedObject var model: AppModel
+    var body: some View { Label("neXal", systemImage: model.menuBarSymbol) }
+}
+
+/// A menu-bar-only app is easy to lose: on a MacBook with a notch, or a crowded
+/// menu bar, its icon can be hidden, and launching the app then appears to do
+/// nothing. So the same panel is also shown in an ordinary window when this Mac
+/// is not paired yet (the owner needs the pairing code) and whenever the app is
+/// opened again from Finder, Launchpad or Spotlight while it is running.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let model = AppModel()
+    private var window: NSWindow?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if !model.hasPersistedHostIdentity { showWindow() }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow()
+        return true
+    }
+
+    func showWindow() {
+        if window == nil {
+            let hosting = NSHostingController(rootView: NetworkPanel().environmentObject(model))
+            let window = NSWindow(contentViewController: hosting)
+            window.title = "neXal Connector"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.isReleasedWhenClosed = false
+            window.center()
+            self.window = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 }

@@ -708,7 +708,7 @@ final class AppModel: ObservableObject {
             }
             pairing = presentation
             watchPairing()
-            message = "Pairing code ready. Scan it in neXal@home; it expires shortly and nothing is shared by scanning alone."
+            message = "Pairing code ready. In neXal@home, choose \u{201C}Pair a computer\u{201D} and scan it; it expires shortly and nothing is shared by scanning alone."
         } catch {
             pairing = nil
             // The connector's text is shown verbatim because it names the actual

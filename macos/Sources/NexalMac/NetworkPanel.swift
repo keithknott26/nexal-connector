@@ -54,9 +54,9 @@ struct NetworkPanel: View {
     private var readyToPair: some View {
         VStack(alignment: .leading, spacing: 14) {
             step(number: "1", title: "Sign in on your iPhone",
-                 detail: "Open neXal on your iPhone and sign in with Apple.", symbol: "apple.logo")
+                 detail: "Open neXal@home on your iPhone (available in the Apple App Store) and sign in with Apple.", symbol: "apple.logo")
             step(number: "2", title: "Pair this Mac",
-                 detail: "Show a one-time code here, then scan it with the neXal iPhone app.", symbol: "qrcode")
+                 detail: "Show a one-time code here, then choose \u{201C}Pair a computer\u{201D} in neXal@home and scan it.", symbol: "qrcode")
             CoordinatorChoice()
             Button { Task { await model.startPairing() } } label: {
                 Label("Show pairing code", systemImage: "qrcode").frame(maxWidth: .infinity)
@@ -82,7 +82,7 @@ struct NetworkPanel: View {
     private func pairing(_ linking: LinkingState) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Scan to connect this Mac").font(.title3.weight(.semibold))
-            Text("In the neXal iPhone app, choose Add Computer and scan this code.")
+            Text("In the neXal@home iOS application (available in the Apple App Store), choose \u{201C}Pair a computer\u{201D} and scan this QR code.")
                 .font(.caption).foregroundStyle(.secondary)
             if let symbol = model.pairing?.symbol {
                 HStack { Spacer(minLength: 0); PairingCodeView(symbol: symbol, isLive: !linking.isExpired); Spacer(minLength: 0) }

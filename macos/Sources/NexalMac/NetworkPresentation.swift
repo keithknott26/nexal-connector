@@ -223,7 +223,7 @@ enum LeavePhase: Equatable {
         case .leaving:
             return "Revoking this Mac with the coordinator and disconnecting its tunnel."
         case .left:
-            return "This Mac is no longer on the neXal network. To pair it again, scan the code below with the neXal iPhone app or enter the manual pairing code."
+            return "This Mac is no longer on the neXal network. To pair it again, choose \u{201C}Pair a computer\u{201D} in the neXal@home iPhone app and scan the code below, or enter the manual pairing code."
         case .failed(let reason):
             return reason
         }

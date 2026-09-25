@@ -106,9 +106,9 @@ enum ConnectorStage: Equatable {
             return "The connector is running but has not joined an account yet. "
                 + "Choose a connector and join with an invitation under Setup."
         case .needsPairing:
-            return "Show a code, then scan it in the neXal app on your iPhone."
+            return "Show a code, then choose \u{201C}Pair a computer\u{201D} in neXal@home on your iPhone and scan it."
         case .showingCode:
-            return "Open neXal on your iPhone and scan the code. This Mac joins the same "
+            return "In neXal@home on your iPhone, choose \u{201C}Pair a computer\u{201D} and scan the code. This Mac joins the same "
                 + "account your iPhone is signed in to."
         case .paired:
             return nil

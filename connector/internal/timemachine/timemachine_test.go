@@ -97,8 +97,12 @@ func TestDeployedCoordinatorShapeAcceptsDefaultShareAndRejectsTraversal(t *testi
 	w.Storage.Backend = "r2"
 	w.Storage.ObjectPrefix = "tenants/t/time-machine/n/"
 	w.Storage.CredentialEndpoint = "/api/v2/devices/h/time-machine/credentials"
-	if _, err := w.Local(); err != nil {
+	local, err := w.Local()
+	if err != nil {
 		t.Fatalf("deployed shape rejected: %v", err)
+	}
+	if local.Advertise {
+		t.Fatal("ordinary backup configuration silently enabled recovery advertisement")
 	}
 	w.NetworkID = "../../private"
 	if _, err := w.Local(); err == nil {

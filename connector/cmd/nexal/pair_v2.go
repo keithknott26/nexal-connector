@@ -98,6 +98,17 @@ func rejoinPairV2(ctx context.Context, path string) error {
 }
 
 func leavePairV2(ctx context.Context, path string) error {
+	// A recovery share owns the configuration lock for its whole lifetime. Ask
+	// it to stop before waiting for that lock, otherwise leave would deadlock
+	// behind the very session it must terminate. The sentinel cannot kill an
+	// unrelated process and the supervisor removes it during cleanup.
+	if _, err := config.ReadPrivate(sessionPath(path), 64<<10); err == nil {
+		if err := config.AtomicPrivate(stopPath(path), []byte("network-leave\n")); err != nil {
+			return errors.New("cannot stop the active recovery session before leaving the network")
+		}
+	} else if !os.IsNotExist(err) && !errors.Is(err, os.ErrNotExist) {
+		return errors.New("cannot inspect recovery state before leaving the network")
+	}
 	unlock, err := lockStoppingAgent(ctx, path)
 	if err != nil {
 		return err

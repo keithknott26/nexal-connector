@@ -65,7 +65,9 @@ func (w CoordinatorConfig) Local() (Config, error) {
 	if w.Protocol != "smb" || w.Port != 445 || w.Bonjour.ServiceType != "_adisk._tcp" || w.Storage.Driver != "juicefs" || w.Storage.Backend != "r2" || w.Storage.CredentialsIncluded || w.RefreshAfterSeconds < 15 || w.RefreshAfterSeconds > 3600 || !validID.MatchString(w.NetworkID) || !strings.HasPrefix(w.Storage.ObjectPrefix, "tenants/") || strings.Contains(w.Storage.ObjectPrefix, "..") || !strings.HasSuffix(w.Storage.CredentialEndpoint, "/time-machine/credentials") {
 		return Config{}, errors.New("invalid Time Machine coordinator configuration")
 	}
-	c := Config{Enabled: true, Entitled: true, Revision: w.RefreshAfterSeconds, ShareName: w.Bonjour.ShareName, Backend: BackendJuiceFS, QuotaBytes: w.QuotaBytes, Advertise: true,
+	// Ordinary backup configuration never selects this connector as a recovery
+	// helper. Advertisement requires its own authenticated, expiring grant.
+	c := Config{Enabled: true, Entitled: true, Revision: w.RefreshAfterSeconds, ShareName: w.Bonjour.ShareName, Backend: BackendJuiceFS, QuotaBytes: w.QuotaBytes, Advertise: false,
 		MountPath: filepath.Join("/var/lib/nexal/time-machine", w.NetworkID), MeshCIDRs: []string{"100.64.0.0/10"}}
 	return c, c.Validate()
 }

@@ -1,6 +1,8 @@
 package client
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +23,21 @@ func TestTunnelReportMapsOnlyFreshVerifiedRuntimeEvidence(t *testing.T) {
 	}
 	if report.Traffic.BytesSent != 12 || report.Traffic.BytesReceived != 34 {
 		t.Fatalf("traffic lost: %#v", report.Traffic)
+	}
+}
+
+func TestCoordinatorTrafficIsExplicitlyUnavailableNotZero(t *testing.T) {
+	report := TunnelReportFromRuntime(mesh.Status{}, time.Now())
+	if report.CoordinatorTraffic.Available || report.CoordinatorTraffic.BytesSent != nil || report.CoordinatorTraffic.BytesReceived != nil {
+		t.Fatalf("unknown coordinator counters became values: %+v", report.CoordinatorTraffic)
+	}
+	b, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"coordinatorTraffic":{"available":false`) ||
+		strings.Contains(string(b), `"coordinatorTraffic":{"available":false,"bytes`) {
+		t.Fatalf("wire representation hides unknown telemetry: %s", b)
 	}
 }
 

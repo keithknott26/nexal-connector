@@ -91,6 +91,31 @@ unentitled configuration fails closed. The status state is one of `disabled`,
 `blocked`, `unsupported`, `action_required`, `configuring`, `degraded`, or
 `ready`, with a stable `detailCode` suitable for the UI.
 
+## Disaster-recovery helper authorization
+
+Recovery advertisement is off by default. In production, `nexal share start`
+requires all of the following before starting or advertising SMB:
+
+- this connector is the exact helper host selected by the coordinator;
+- a live Ed25519-signed authorization bound to network, account, user ID,
+  username, share name, exact backup mount, issue time, expiry, and nonce;
+- the coordinator verification key is pinned in connector configuration; and
+- the signed privileged helper reports explicit administrator approval.
+
+The local session deadline is shortened to the authorization deadline and can
+never extend it. Cancel, expiry, process shutdown, or network departure cancel
+the supervised process, zero in-memory secrets, remove the private passdb and
+configuration, and restore the prior state. The current CLI supervisor already
+implements expiry/cancel cleanup; production packaging still requires the
+signed privileged helper to reconcile Apple's SMB and Bonjour state and restore
+the exact prior settings. Until that helper reports successful reconciliation,
+the connector must report `advertised: false`.
+
+The ordinary coordinator Time Machine configuration also maps to
+`advertise: false`. Merely enabling or paying for backup storage cannot select a
+computer as a recovery helper. Session status identifies the grant, selected
+user, and helper host but never contains the one-time password or image key.
+
 ## Release blockers
 
 Migration Assistant compatibility cannot be inferred from SMB reachability.

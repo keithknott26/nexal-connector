@@ -180,7 +180,14 @@ struct SeriesChart: View {
             .interpolationMethod(.stepEnd)
         }
         .chartYScale(domain: 0...upperBound)
-        .chartXAxis(.hidden)
+        .chartYAxisLabel(unit)
+        .chartXAxis {
+            // Clock times along the bottom, so a range is readable at a glance.
+            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                AxisGridLine()
+                AxisValueLabel(format: .dateTime.hour().minute())
+            }
+        }
     }
 }
 

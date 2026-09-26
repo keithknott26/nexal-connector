@@ -5,6 +5,8 @@ import SwiftUI
 /// Implementation defaults and account policy do not belong in this menu.
 struct NetworkPanel: View {
     @EnvironmentObject var model: AppModel
+    /// Time range shown by the activity graphs, in minutes (5 or 30).
+    @State private var chartWindowMinutes = 30
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -242,44 +244,63 @@ struct NetworkPanel: View {
         let info = model.peerNetInfo[peer.id]
         let publicIP = details?.publicIp ?? info?.publicAddress
         let location = details?.location ?? info?.location
+        let privateIP = details?.lanAddress ?? (peer.directIsPrivate == true ? peer.directAddress : nil)
+        let storage = isStorageGateway(peer)
         return DisclosureGroup {
-            VStack(alignment: .leading, spacing: 6) {
-                quickLinks(peer)
-                LabeledContent("Connection") { Text("\(lifecycleEmoji(peer.lifecycle)) \(peer.lifecycle.capitalized)") }
-                exitNodeCheckbox(peer)
-                LabeledContent("Post-quantum protection") { pqText(peer.pq) }
-                LabeledContent("Current path") { routeText(peer) }
-                if let step = peer.authenticationStep, !step.isEmpty { LabeledContent("Authentication", value: step) }
-                if let latency = peer.latencyMs { LabeledContent("Latency", value: latency.formatted(.number.precision(.fractionLength(0))) + " ms") }
-                if let loss = peer.packetLossPercent { LabeledContent("Packet loss", value: loss.formatted(.number.precision(.fractionLength(1))) + "%") }
-                LabeledContent("Traffic", value: "↑ \(bytes(peer.traffic.sentBytes)) sent · ↓ \(bytes(peer.traffic.receivedBytes)) received")
-                if let handshake = peer.lastHandshakeAt { LabeledContent("Last handshake", value: friendlyTime(handshake)) }
-                if let verified = peer.pqVerifiedAt { LabeledContent("PQ last verified", value: friendlyTime(verified)) }
-                if let hostname = peer.hostname?.hostname { LabeledContent("neXal address", value: hostname) }
-                LabeledContent("Time Machine backup location") {
-                    if isStorageGateway(peer) { Text("🕰️ Yes").foregroundStyle(.green).fontWeight(.semibold) } else { Text("No") }
+            VStack(alignment: .leading, spacing: 10) {
+                detailSection("Connection") {
+                    detailRow("Status") { Text("\(lifecycleEmoji(peer.lifecycle)) \(peer.lifecycle.capitalized)") }
+                    detailRow("Path") { routeText(peer) }
+                    if let step = peer.authenticationStep, !step.isEmpty { detailRow("Authentication") { Text(step) } }
+                    if let latency = peer.latencyMs {
+                        detailRow("Latency") { Text(latency.formatted(.number.precision(.fractionLength(0))) + " ms") }
+                    }
+                    if let loss = peer.packetLossPercent {
+                        detailRow("Packet loss") { Text(loss.formatted(.number.precision(.fractionLength(1))) + "%") }
+                    }
+                    detailRow("Traffic") { Text("↑ \(bytes(peer.traffic.sentBytes)) sent · ↓ \(bytes(peer.traffic.receivedBytes)) received") }
+                    if let hostname = peer.hostname?.hostname { detailRow("neXal address") { Text(hostname) } }
                 }
-                Divider().padding(.vertical, 2)
-                if isStorageGateway(peer) {
-                    Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
-                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                } else {
-                    systemDetails(details)
+                detailSection("Security") {
+                    detailRow("Post-quantum") { pqText(peer.pq) }
+                    if let verified = lastVerified(peer) {
+                        detailRow("Last verified") {
+                            Text(verified.relative).help(verified.exact)
+                        }
+                    }
+                    detailRow("Time Machine location") {
+                        if storage { Text("🕰️ Yes").foregroundStyle(.green).fontWeight(.semibold) } else { Text("No") }
+                    }
+                }
+                detailSection("Actions") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        quickLinks(peer)
+                        exitNodeCheckbox(peer)
+                    }
+                }
+                detailSection("System") {
+                    if storage {
+                        Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
+                            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        systemDetails(details)
+                    }
                 }
             }
             .font(.caption)
             .padding(.top, 6)
-            // Line the details up with the header's text ("Quantum Safe: On"):
-            // the disclosure chevron plus the status dot and its spacing.
+            // Line the details up with the header's text: the disclosure chevron
+            // plus the status dot and its spacing.
             .padding(.leading, Self.hostDetailIndent)
         } label: {
             HStack(alignment: .top, spacing: Self.hostDotSpacing) {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
                     .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
                 VStack(alignment: .leading, spacing: 2) {
+                    // Line 1: name, role icons, and the two things worth a glance.
                     HStack(spacing: 5) {
                         Text(displayName(peer)).font(.subheadline.weight(.semibold))
-                        if isStorageGateway(peer) {
+                        if storage {
                             Image(systemName: "externaldrive.badge.timemachine").help("Time Machine backup location")
                         }
                         if exitRouteID(for: peer) == model.exitRoute, model.exitRoute != nil {
@@ -287,28 +308,66 @@ struct NetworkPanel: View {
                         } else if model.availableExitRoutes.contains(exitRouteID(for: peer)) {
                             Image(systemName: "cloud").help("Can be used as an exit node")
                         }
+                        Text(peer.pq == "protected" ? "· 🔐" : "· Not quantum-safe")
+                            .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
+                            .help(peer.pq == "protected" ? "Quantum-safe" : "This link has no post-quantum layer")
+                        if peer.lifecycle == "connected", let latency = peer.latencyMs {
+                            Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     .foregroundStyle(.primary)
-                    Group {
-                        // neXal's own infrastructure: its addresses are not the
-                        // customer's to use, so they are not shown.
-                        if !isStorageGateway(peer) {
-                            Text("Public IP: \(publicIP ?? "—")")
-                            // The computer's own LAN address, as it reported it. Not the
-                            // tunnel endpoint, which is the public address when the
-                            // tunnel runs through the router (see Current path).
-                            Text("Private IP: \(details?.lanAddress ?? (peer.directIsPrivate == true ? peer.directAddress : nil) ?? "—")")
-                        }
-                        Text("Location: \(location ?? "—")")
-                        Text("Quantum Safe: ") + Text(peer.pq == "protected" ? "🔐 On" : "Off")
-                            .foregroundColor(peer.pq == "protected" ? .green : .secondary)
-                    }
-                    .font(.caption).foregroundStyle(.secondary)
+                    // Line 2: where it is. neXal's own infrastructure shows no
+                    // addresses: they are not the customer's to use.
+                    Text((storage ? [location] : [publicIP, privateIP, location]).compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help(storage ? "" : "Public IP · Private IP · Location")
                 }
                 .textSelection(.enabled)
             }
         }
         .accessibilityIdentifier("host-\(peer.id)")
+    }
+
+    /// Chart points inside the selected time range.
+    private func windowed(_ points: [ConnectorHistory.SeriesPoint]) -> [ConnectorHistory.SeriesPoint] {
+        let since = Date().addingTimeInterval(-Double(chartWindowMinutes) * 60)
+        return points.filter { $0.at >= since }
+    }
+
+    /// A titled group of aligned label/value rows inside a host's details.
+    private func detailSection<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+                content()
+            }
+        }
+    }
+
+    /// One row: label in a fixed-width column, value aligned after it, so every
+    /// value in a section starts at the same position.
+    private func detailRow<Value: View>(_ label: String, @ViewBuilder _ value: () -> Value) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary).frame(width: Self.detailLabelWidth, alignment: .leading)
+            value()
+        }
+    }
+
+    /// The most recent of the last handshake and the last post-quantum
+    /// verification, as one relative time; both exact times on hover.
+    private func lastVerified(_ peer: ConnectorStatus.MeshPeer) -> (relative: String, exact: String)? {
+        let stamps = [peer.lastHandshakeAt, peer.pqVerifiedAt].compactMap { $0 }
+        guard !stamps.isEmpty else { return nil }
+        let parse: (String) -> Date? = { ISO8601DateFormatter().date(from: $0.replacingOccurrences(of: #"\.\d+"#, with: "", options: .regularExpression)) }
+        guard let latest = stamps.compactMap(parse).max() else { return nil }
+        let relative = abs(latest.timeIntervalSinceNow) < 5 ? "just now"
+            : RelativeDateTimeFormatter().localizedString(for: latest, relativeTo: Date())
+        var exact: [String] = []
+        if let h = peer.lastHandshakeAt { exact.append("Last handshake: \(friendlyTime(h))") }
+        if let v = peer.pqVerifiedAt { exact.append("Post-quantum verified: \(friendlyTime(v))") }
+        return (relative, exact.joined(separator: "\n"))
     }
 
     /// The neXal storage gateway (the Time Machine destination) among the peers:
@@ -351,6 +410,8 @@ struct NetworkPanel: View {
     private static let hostDotSize: CGFloat = 7
     private static let hostDotSpacing: CGFloat = 8
     private static let hostDetailIndent: CGFloat = 12 + hostDotSize + hostDotSpacing
+    /// Width of the label column in a host's details: fits "Time Machine location".
+    private static let detailLabelWidth: CGFloat = 130
 
     /// The other computer's self-reported details, matched by tunnel address.
     private func hostDetails(for peer: ConnectorStatus.MeshPeer) -> ConnectorStatus.HostDetails? {
@@ -361,21 +422,21 @@ struct NetworkPanel: View {
     @ViewBuilder
     private func systemDetails(_ d: ConnectorStatus.HostDetails?) -> some View {
         if let d {
-            if let os = d.os { LabeledContent("Operating system", value: "\(os.hasPrefix("macOS") ? "🍎 " : "🐧 ")\(os)") }
-            if let model = d.model { LabeledContent("Model", value: model) }
-            if let chip = d.chip { LabeledContent("Processor", value: chip) }
+            if let os = d.os { detailRow("Operating system") { Text("\(os.hasPrefix("macOS") ? "🍎 " : "🐧 ")\(os)") } }
+            if let model = d.model { detailRow("Model") { Text(model) } }
+            if let chip = d.chip { detailRow("Processor") { Text(chip) } }
             if let cores = d.cores {
                 let split = (d.performanceCores ?? 0) > 0 && (d.efficiencyCores ?? 0) > 0
                     ? " (\(d.performanceCores!) performance + \(d.efficiencyCores!) efficiency)" : ""
-                LabeledContent("Cores", value: "\(cores)\(split)")
+                detailRow("Cores") { Text("\(cores)\(split)") }
             }
-            if let memory = d.memoryBytes { LabeledContent("Memory", value: memoryText(memory)) }
+            if let memory = d.memoryBytes { detailRow("Memory") { Text(memoryText(memory)) } }
             if let total = d.diskTotalBytes {
                 let free = d.diskFreeBytes.map { "\(diskText($0)) free of " } ?? ""
-                LabeledContent("Disk", value: "💾 \(free)\(diskText(total))")
+                detailRow("Disk") { Text("💾 \(free)\(diskText(total))") }
             }
             if let thermal = d.thermal {
-                LabeledContent("Thermal") {
+                detailRow("Thermal") {
                     switch thermal {
                     case "nominal": Text("🌡️ Normal").foregroundStyle(.green)
                     case "throttled": Text("🔥 Throttling (hot)").foregroundStyle(.orange)
@@ -384,7 +445,7 @@ struct NetworkPanel: View {
                 }
             }
             if let percent = d.batteryPercent, let state = d.batteryState {
-                LabeledContent("Battery") {
+                detailRow("Battery") {
                     Text("\(state == "discharging" ? (percent <= 20 ? "🪫" : "🔋") : "🔌") \(percent)% · \(batteryStateText(state))")
                         .foregroundStyle(percent <= 20 && state == "discharging" ? .red : .primary)
                 }
@@ -550,21 +611,33 @@ struct NetworkPanel: View {
 
     private var activityGraphs: some View {
         DisclosureGroup("Activity graphs") {
+            let latency = windowed(model.history.networkLatencyPoints)
+            let peers = windowed(model.history.peerLatencyPoints)
+            let traffic = windowed(model.history.trafficPoints)
             VStack(alignment: .leading, spacing: 14) {
-                ChartCard(title: "neXal network latency", caption: ConnectorHistory.networkLatencyCaption,
-                          isEmpty: model.history.networkLatencyPoints.isEmpty,
+                HStack(spacing: 4) {
+                    Text("Show last").font(.caption).foregroundStyle(.secondary)
+                    ForEach([5, 30], id: \.self) { minutes in
+                        Button("\(minutes) min") { chartWindowMinutes = minutes }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .tint(chartWindowMinutes == minutes ? .accentColor : .secondary)
+                            .accessibilityAddTraits(chartWindowMinutes == minutes ? .isSelected : [])
+                    }
+                }
+                ChartCard(title: "neXal network latency (ms)", caption: ConnectorHistory.networkLatencyCaption,
+                          isEmpty: latency.isEmpty,
                           emptyMessage: "No latency yet: no other computer is connected.") {
-                    SeriesChart(points: model.history.networkLatencyPoints, unit: "ms")
+                    SeriesChart(points: latency, unit: "ms")
                 }
-                ChartCard(title: "Peer latency", caption: ConnectorHistory.peerLatencyCaption,
-                          isEmpty: model.history.peerLatencyPoints.isEmpty,
+                ChartCard(title: "Peer latency (ms)", caption: ConnectorHistory.peerLatencyCaption,
+                          isEmpty: peers.isEmpty,
                           emptyMessage: "No peer latency samples yet.") {
-                    SeriesChart(points: model.history.peerLatencyPoints, unit: "ms")
+                    SeriesChart(points: peers, unit: "ms")
                 }
-                ChartCard(title: "Traffic in / out", caption: ConnectorHistory.trafficCaption,
-                          isEmpty: model.history.trafficPoints.isEmpty,
+                ChartCard(title: "Traffic in / out (KB/s)", caption: ConnectorHistory.trafficCaption,
+                          isEmpty: traffic.isEmpty,
                           emptyMessage: "No traffic samples yet (needs two polls with a connected peer).") {
-                    SeriesChart(points: model.history.trafficPoints, unit: "KB/s")
+                    SeriesChart(points: traffic, unit: "KB/s")
                 }
             }
             .padding(.top, 8)
@@ -722,4 +795,9 @@ struct NetworkPanel: View {
         case .inactive: .secondary.opacity(0.5)
         }
     }
+}
+
+private extension String {
+    /// The string, or `fallback` when it is empty.
+    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
 }

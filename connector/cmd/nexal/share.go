@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -61,17 +62,22 @@ func shareCommand(ctx context.Context, args []string) error {
 // start` and exists nowhere else; smbshare.Credential and smbshare.Mode both
 // marshal to redactions so an accidental embed cannot change that.
 type sessionRecord struct {
-	SessionID  string          `json:"sessionId"`
-	ShareName  string          `json:"shareName"`
-	Username   string          `json:"username"`
-	Port       uint16          `json:"port"`
-	StartedAt  time.Time       `json:"startedAt"`
-	ExpiresAt  time.Time       `json:"expiresAt"`
-	TimeBox    string          `json:"timeBox"`
-	Serves     []string        `json:"serves"`
-	Refuses    []string        `json:"refuses"`
-	Transport  string          `json:"transport"`
-	Supervisor smbshare.Status `json:"supervisor"`
+	SessionID       string          `json:"sessionId"`
+	ShareName       string          `json:"shareName"`
+	Username        string          `json:"username"`
+	Port            uint16          `json:"port"`
+	StartedAt       time.Time       `json:"startedAt"`
+	ExpiresAt       time.Time       `json:"expiresAt"`
+	TimeBox         string          `json:"timeBox"`
+	Serves          []string        `json:"serves"`
+	Refuses         []string        `json:"refuses"`
+	Transport       string          `json:"transport"`
+	Supervisor      smbshare.Status `json:"supervisor"`
+	GrantID         string          `json:"grantId,omitempty"`
+	SelectedUserID  string          `json:"selectedUserId,omitempty"`
+	HelperHostID    string          `json:"helperHostId,omitempty"`
+	AdminAuthorized bool            `json:"adminAuthorized"`
+	Advertised      bool            `json:"advertised"`
 }
 
 func sessionPath(configPath string) string {
@@ -188,6 +194,8 @@ func shareStart(ctx context.Context, args []string) error {
 	scratchGiB := f.Uint64("scratch-gib", smbshare.MinScratchBytes>>30, "streamed-restore cache required free on the served volume, in GiB")
 	timeBox := f.Duration("time-box", smbshare.DefaultTimeBox, "hard limit on the session, 1m–12h; there is no extension")
 	keyStdin := f.Bool("image-key-stdin", false, "read the 32-byte image key as hex from stdin; required")
+	authorizationFile := f.String("authorization-file", "", "absolute coordinator-signed recovery authorization JSON; required in production")
+	adminApproved := f.Bool("administrator-approved", false, "confirm the signed privileged helper obtained explicit administrator approval")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -238,6 +246,41 @@ func shareStart(ctx context.Context, args []string) error {
 	// invisible to the machine it exists for.
 	if *port != 445 && !c.Development {
 		return errors.New("recoveryOS only reaches port 445; a different port is allowed only for a development configuration")
+	}
+	var authorization smbshare.RecoveryAuthorization
+	if !c.Development {
+		if c.Enrollment == nil || c.HostID == "" || c.Enrollment.NetworkID == "" || c.Enrollment.AccountID == "" {
+			return errors.New("this Mac must be paired before it can act as the selected recovery helper")
+		}
+		if !filepath.IsAbs(*authorizationFile) {
+			return errors.New("an absolute --authorization-file from the coordinator is required; recovery sharing is off by default")
+		}
+		rawGrant, err := config.ReadPrivate(*authorizationFile, 32<<10)
+		if err != nil {
+			return errors.New("cannot read recovery authorization")
+		}
+		var grant smbshare.RecoveryAuthorization
+		dec := json.NewDecoder(strings.NewReader(string(rawGrant)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&grant); err != nil {
+			return errors.New("invalid recovery authorization document")
+		}
+		publicKey, err := smbshare.DecodeRecoveryPublicKey(c.RecoveryAuthorityPublicKey)
+		if err != nil {
+			return err
+		}
+		selection := smbshare.RecoverySelection{HelperHostID: c.HostID, NetworkID: c.Enrollment.NetworkID,
+			AccountID: c.Enrollment.AccountID, Username: *username, ShareName: *name, MountPath: filepath.Clean(*shareDir)}
+		if err := smbshare.VerifyRecoveryAuthorization(grant, ed25519.PublicKey(publicKey), selection, time.Now(), *adminApproved); err != nil {
+			return err
+		}
+		// The command cannot outlive the coordinator grant even when a longer
+		// local --time-box was supplied.
+		remaining := time.Until(grant.ExpiresAt)
+		if remaining < *timeBox {
+			*timeBox = remaining
+		}
+		authorization = grant
 	}
 	privateDir := filepath.Dir(*path)
 
@@ -296,7 +339,9 @@ func shareStart(ctx context.Context, args []string) error {
 	}
 	record := sessionRecord{SessionID: sessionID, ShareName: *name, Username: *username, Port: uint16(*port),
 		StartedAt: now, ExpiresAt: mode.Expires(), TimeBox: timeBox.String(),
-		Serves: []string{string(smbshare.CapabilitySMBShare)}, Refuses: refuses, Transport: smbshare.TransportNote}
+		Serves: []string{string(smbshare.CapabilitySMBShare)}, Refuses: refuses, Transport: smbshare.TransportNote,
+		GrantID: authorization.GrantID, SelectedUserID: authorization.UserID, HelperHostID: authorization.HelperHostID,
+		AdminAuthorized: *adminApproved, Advertised: false}
 	// Write under the same lock the config was read under.
 	if err := writeSession(*path, record); err != nil {
 		return err
@@ -380,14 +425,17 @@ func shareStart(ctx context.Context, args []string) error {
 		return removeErr
 	}
 	return emit(map[string]any{
-		"recovery":   false,
-		"serving":    false,
-		"sessionId":  sessionID,
-		"endedAt":    time.Now(),
-		"imageKey":   "zeroed",
-		"credential": "burned",
-		"cleanup":    "generated smb.conf, private passdb and session record removed from this Mac",
-		"note":       "recovery mode has ended; this Mac's other capabilities are available again after the next `nexal run`",
+		"recovery":           false,
+		"serving":            false,
+		"sessionId":          sessionID,
+		"endedAt":            time.Now(),
+		"imageKey":           "zeroed",
+		"credential":         "burned",
+		"cleanup":            "generated smb.conf, private passdb and session record removed from this Mac",
+		"advertised":         false,
+		"priorStateRestored": false,
+		"restoreStatus":      "connector private state removed; privileged helper must confirm restoration of macOS SMB and Bonjour settings",
+		"note":               "recovery mode has ended; this Mac's other capabilities are available again after the next `nexal run`",
 	})
 }
 

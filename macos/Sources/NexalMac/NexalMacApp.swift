@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if window == nil {
             let hosting = NSHostingController(rootView: NetworkPanel().environmentObject(model))
             let window = NSWindow(contentViewController: hosting)
-            window.title = "neXal Connector"
+            window.title = "neXal-Connector"
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.isReleasedWhenClosed = false
             window.center()

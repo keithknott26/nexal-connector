@@ -1,4 +1,4 @@
-# Producing the neXal Connector .dmg
+# Producing the neXal-Connector .dmg
 
 `.github/workflows/release-dmg.yml` builds a signed, notarized, stapled DMG.
 It runs on `workflow_dispatch` or a `v*` tag only — never on an ordinary push,

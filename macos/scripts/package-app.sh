@@ -7,7 +7,7 @@
 # performance and sensor behaviour than native ones.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/build/Nexal Connector.app"
+APP="$ROOT/build/neXal-Connector.app"
 test "$(uname -s)" = Darwin || { echo "Packaging requires macOS."; exit 1; }
 # Build host must be Apple silicon: an arm64 host can cross-compile x86_64, but
 # an Intel host cannot produce arm64, so a universal bundle is impossible there.
@@ -44,7 +44,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 STAGE="$(mktemp -d "$ROOT/build/.nexal-stage.XXXXXX")"
-CANDIDATE="$STAGE/Nexal Connector.app"
+CANDIDATE="$STAGE/neXal-Connector.app"
 # Tests run on the host architecture only. A universal test bundle cannot be
 # executed for the foreign slice, so testing x86_64 here would require Rosetta
 # and would still not prove anything about a real Intel machine.

@@ -1,4 +1,4 @@
-name: neXal Connector verification
+name: neXal-Connector verification
 on:
   push:
   pull_request:

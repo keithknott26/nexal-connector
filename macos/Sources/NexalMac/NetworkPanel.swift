@@ -45,7 +45,7 @@ struct NetworkPanel: View {
         HStack(spacing: 10) {
             Image(systemName: model.menuBarSymbol).font(.title2).foregroundStyle(.tint).frame(width: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text("neXal Connector").font(.headline)
+                Text("neXal-Connector").font(.headline)
                 Text(model.hostNameDisplay).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -451,7 +451,7 @@ struct NetworkPanel: View {
                 }
             }
         } else {
-            Text("System details have not been reported yet. They appear once that computer runs the latest neXal Connector.")
+            Text("System details have not been reported yet. They appear once that computer runs the latest neXal-Connector.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }

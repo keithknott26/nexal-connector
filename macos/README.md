@@ -1,4 +1,4 @@
-# neXal Connector for macOS
+# neXal-Connector for macOS
 
 The platform repository now includes double-click `Setup neXal.command` and
 `Start neXal.command` launchers. See its `docs/MAC-SETUP.md` for the recommended
@@ -150,7 +150,7 @@ are **instructions to run on macOS**, not a claim they were run here.
 
 ```bash
 # Run from macos after packaging.
-APP="$PWD/build/neXal Connector.app"
+APP="$PWD/build/neXal-Connector.app"
 IDENTITY='Developer ID Application: YOUR ORGANIZATION (YOURTEAMID)'
 security find-identity -v -p codesigning
 

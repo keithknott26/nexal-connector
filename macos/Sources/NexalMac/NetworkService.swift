@@ -44,9 +44,9 @@ enum NetworkService {
         var errorDescription: String? {
             switch self {
             case .helperMissing:
-                return "The secure networking runtime is missing from this app. Reinstall neXal Connector."
+                return "The secure networking runtime is missing from this app. Reinstall neXal-Connector."
             case .helperUnsafe:
-                return "The secure networking runtime in this app is a link or writable by other users, so it was not run as administrator. Reinstall neXal Connector."
+                return "The secure networking runtime in this app is a link or writable by other users, so it was not run as administrator. Reinstall neXal-Connector."
             case .cancelled:
                 return "The secure networking service was not installed because the administrator prompt was cancelled. This Mac cannot join until it is."
             case .failed(let detail):

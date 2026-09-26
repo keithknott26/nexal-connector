@@ -387,7 +387,7 @@ func lockStoppingAgent(ctx context.Context, path string) (func(), error) {
 			return unlock, nil
 		}
 	}
-	return nil, errors.New("the running connector did not stop within 10 seconds; quit neXal Connector and try again")
+	return nil, errors.New("the running connector did not stop within 10 seconds; quit neXal-Connector and try again")
 }
 
 func sameConfigFile(a, b string) bool {

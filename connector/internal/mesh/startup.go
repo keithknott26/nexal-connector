@@ -151,7 +151,7 @@ func (c Controller) reconcile(ctx context.Context) error {
 			return errors.New("secure networking service did not finish authentication; restart the neXal networking service and retry")
 		}
 		if errors.Is(err, os.ErrNotExist) || err.Error() == "secure networking runtime is not installed" {
-			return errors.New("secure networking runtime is not installed; reinstall neXal Connector 0.2.8 or later")
+			return errors.New("secure networking runtime is not installed; reinstall neXal-Connector 0.2.8 or later")
 		}
 		msg := "secure networking service rejected startup; verify its macOS system service is installed and running"
 		if detail := runtimeDetail(err, credentialPath); detail != "" {

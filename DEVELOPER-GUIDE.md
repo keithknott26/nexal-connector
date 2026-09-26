@@ -1,4 +1,4 @@
-# neXal Connector developer guide
+# neXal-Connector developer guide
 
 For a resumable engineering checkpoint and the full platform document archive,
 read [CURRENT-HANDOFF.md](CURRENT-HANDOFF.md).
@@ -38,7 +38,7 @@ application; a Linux container is not a substitute for macOS Keychain or Metal.
 The installer asks before package-manager changes and keeps global tool links
 untouched. Use `--native` instead for a host-run local coordinator.
 
-The resulting app is `macos/build/neXal Connector.app`. It is not signed or
+The resulting app is `macos/build/neXal-Connector.app`. It is not signed or
 notarized for distribution. Leave Gatekeeper and SIP enabled.
 
 ## Local preview enrollment

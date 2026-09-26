@@ -13,14 +13,18 @@ MOUNT="$(mktemp -d /tmp/nexal-dmg.XXXXXX)"
 cleanup() { /usr/bin/hdiutil detach "$MOUNT" >/dev/null 2>&1 || true; rmdir "$MOUNT" 2>/dev/null || true; }
 trap cleanup EXIT
 /usr/bin/hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT"
-SOURCE="$MOUNT/neXal Connector.app"
-TARGET="/Applications/neXal Connector.app"
-test -d "$SOURCE" || { echo "DMG does not contain neXal Connector.app" >&2; exit 1; }
-if [ -e "$TARGET" ]; then
-  BACKUP="$HOME/.Trash/neXal Connector-$(date +%Y%m%d-%H%M%S).app"
-  mv "$TARGET" "$BACKUP"
-  echo "Previous installation moved to $BACKUP"
-fi
+SOURCE="$MOUNT/neXal-Connector.app"
+TARGET="/Applications/neXal-Connector.app"
+test -d "$SOURCE" || { echo "DMG does not contain neXal-Connector.app" >&2; exit 1; }
+# Earlier builds were named with a space ("neXal Connector.app"); retire those too
+# so two copies never compete for the same background service.
+for OLD in "$TARGET" "/Applications/neXal Connector.app" "/Applications/Nexal Connector.app"; do
+  if [ -e "$OLD" ]; then
+    BACKUP="$HOME/.Trash/$(basename "$OLD" .app)-$(date +%Y%m%d-%H%M%S).app"
+    mv "$OLD" "$BACKUP"
+    echo "Previous installation moved to $BACKUP"
+  fi
+done
 /usr/bin/ditto "$SOURCE" "$TARGET"
 /usr/bin/codesign --verify --deep --strict "$TARGET" 2>/dev/null || echo "Installed local unsigned build; distribution signature is absent."
 echo "Installed $TARGET"

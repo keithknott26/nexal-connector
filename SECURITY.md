@@ -1,4 +1,4 @@
-# neXal Connector security
+# neXal-Connector security
 
 Keep this repository private. Never commit real tokens, Keychain exports,
 private keys, feed credentials, model customer data or device configuration.

@@ -581,7 +581,7 @@ final class AppModel: ObservableObject {
             }
             var text = "Wake packet sent by \(senders) Mac\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
             if !reply.targetWakeForNetwork {
-                text += " Wake for network access is off on that Mac, so it may not wake \u{2014} open neXal Connector on it once while it\u{2019}s awake to fix that."
+                text += " Wake for network access is off on that Mac, so it may not wake \u{2014} open neXal-Connector on it once while it\u{2019}s awake to fix that."
             }
             wakeStatus[peer.id] = text
         } catch {

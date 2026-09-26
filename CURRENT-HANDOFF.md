@@ -130,7 +130,7 @@ Validation: 19 Linux mock setup/enrollment tests; native owner acceptance pendin
 
 ## Product and owner decisions
 
-- Product: neXal Platform and neXal Connector; entity: KWK, LLC.
+- Product: neXal Platform and neXal-Connector; entity: KWK, LLC.
 - Domain: owner purchased `nexal.systems`; registration provider is not confirmed.
 - Source owner: GitHub account `keithknott26`; all neXal repositories must stay private.
 - Prefer Go where practical, native Cloudflare services for the coordinator,
@@ -385,7 +385,7 @@ folder collection and a dashboard transfer button are not implemented.
 Found on 2026-09-23 while bringing up M2 ↔ M4 over the secure network. Direct
 (P2P) connections only worked after these were changed by hand:
 
-- Allow incoming for `neXal Connector.app/Contents/Helpers/nexal-network`
+- Allow incoming for `neXal-Connector.app/Contents/Helpers/nexal-network`
   (done automatically now: `NetworkService.install()` runs
   `socketfilterfw --add` and `--unblockapp` under the admin prompt).
 - **Block all incoming connections** had to be turned OFF on the M4. It

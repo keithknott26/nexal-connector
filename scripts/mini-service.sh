@@ -43,8 +43,8 @@ find_nexal() {
   repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
 
   # GLOBBED, not spelled out. The repo disagrees with itself about the bundle name:
-  # macos/scripts/package-app.sh builds "Nexal Connector.app" while
-  # .github/workflows/release-dmg.yml builds and ships "neXal Connector.app" -- so the
+  # macos/scripts/package-app.sh builds "neXal-Connector.app" while
+  # .github/workflows/release-dmg.yml builds and ships "neXal-Connector.app" -- so the
   # app installed from a release does not match the name a local package build
   # produces. Matching any *Connector.app avoids encoding either spelling, and keeps
   # working when the two are reconciled.
@@ -247,7 +247,7 @@ runners_section() {
 # Why this is not `pgrep -f nexal.*run`: that pattern matched its own shell, pgrep
 # itself and the ps pipeline, reporting five connectors when two were running. It also
 # split the config path on whitespace, and the real paths contain spaces -- both
-# "Application Support" and "neXal Connector.app". Verified against real processes.
+# "Application Support" and "neXal-Connector.app". Verified against real processes.
 scan_instances() {
   python3 - <<'SCAN' 2>/dev/null || true
 import os, re, subprocess
@@ -328,7 +328,7 @@ cmd_install() {
     plain "  find /Applications -maxdepth 4 -name nexal -type f 2>/dev/null"
     plain ""
     plain "Point at it explicitly:"
-    plain "  NEXAL=\"/Applications/Nexal Connector.app/Contents/Helpers/nexal\" $0 install"
+    plain "  NEXAL=\"/Applications/neXal-Connector.app/Contents/Helpers/nexal\" $0 install"
     plain ""
     plain "Or build one from this checkout:"
     plain "  (cd connector && go build -o ./nexal ./cmd/nexal)"

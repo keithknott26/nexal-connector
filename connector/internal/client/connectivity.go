@@ -51,7 +51,7 @@ func transportError(err error) error {
 		// such as Little Snitch or LuLu, a VPN/content filter, or an MDM policy)
 		// refuses this process. It was previously reported as a generic failure,
 		// which sent owners looking at their router instead of their firewall app.
-		kind, hint = "blocked", "the connection was blocked on this Mac by a firewall app, content filter or network policy; allow neXal Connector's nexal helper to reach the coordinator"
+		kind, hint = "blocked", "the connection was blocked on this Mac by a firewall app, content filter or network policy; allow neXal-Connector's nexal helper to reach the coordinator"
 	}
 	// For an unclassified failure, name the OS error (a fixed errno string such
 	// as "no route to host", never attacker-controlled text) so it can be diagnosed.

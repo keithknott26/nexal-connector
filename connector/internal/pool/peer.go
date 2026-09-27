@@ -175,16 +175,11 @@ func peerTLS(identity Identity, policy *peerPolicy, server bool) (*tls.Config, e
 	}
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS13,
-		// CurvePreferences stays nil, and must stay nil: Go offers the hybrid ML-KEM
-		// key exchanges only when this field is unset, so "pinning" X25519MLKEM768
-		// here would disable every other group while removing nothing classical from
-		// the handshake we already get. Both ends are ours and both run this code, so
-		// a nil default already negotiates a post-quantum group; the GODEBUG switches
-		// that gate it (tlsmlkem, tlssecpmlkem) follow go.mod's go directive rather
-		// than the toolchain, and TestPeerHandshakeUsesPostQuantumKeyExchange asserts
-		// the negotiated group so a silent downgrade fails the suite. Device
-		// authentication is still classical Ed25519; ML-DSA is deferred.
-		//
+		// Require P-384 + standardized ML-KEM-1024 on both ends. Nil preferences
+		// would permit ML-KEM-768 and classical groups; no weaker fallback is
+		// allowed here. This is the peer transport, not the Rosenpass VPN.
+		// Device authentication remains classical Ed25519.
+		CurvePreferences: []tls.CurveID{tls.SecP384r1MLKEM1024},
 		// Certificates is left empty on purpose. Go consults GetCertificate only
 		// when Certificates is empty or the handshake carried SNI, and peers dial
 		// literal private IPs, which send no SNI: a populated Certificates slice
@@ -199,7 +194,7 @@ func peerTLS(identity Identity, policy *peerPolicy, server bool) (*tls.Config, e
 		// verifies a pinned, enrolled Ed25519 device, cert validity and signature.
 		InsecureSkipVerify: true,
 		VerifyConnection: func(cs tls.ConnectionState) error {
-			if cs.Version != tls.VersionTLS13 {
+			if cs.Version != tls.VersionTLS13 || cs.CurveID != tls.SecP384r1MLKEM1024 {
 				return ErrUnauthorized
 			}
 			return policy.verifyCertificates(cs.PeerCertificates)

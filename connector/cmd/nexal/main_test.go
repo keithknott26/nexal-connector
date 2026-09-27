@@ -202,8 +202,9 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
+	testMachineConfig := filepath.Join(t.TempDir(), "config.json")
 	go func() {
-		done <- run(runCtx, []string{"run", "--config", path, "--dev-private-pull", "--dev-assume-idle"})
+		done <- runCommandWithMachineLock(runCtx, []string{"--config", path, "--dev-private-pull", "--dev-assume-idle"}, func(string) (func(), error) { return config.Lock(testMachineConfig) })
 	}()
 	defer func() {
 		cancel()

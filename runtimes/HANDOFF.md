@@ -1,3 +1,5 @@
+> Update: runtime 0.2.0 adds Qwen3/Phi-4-mini profiles and sequential champion–challenger execution. See [QWEN-PHI.md](QWEN-PHI.md) and validation/qwen-phi-native-smoke.json. Older implementation details below describe the original llama-only baseline.
+
 # Native shell + MLX runtime handoff
 
 ## Completed scope

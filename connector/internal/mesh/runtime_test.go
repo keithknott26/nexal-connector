@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -25,7 +26,17 @@ func TestRuntimeConnectedToNetworkWithIdlePeer(t *testing.T) {
 
 func TestRuntimeProtectedPeer(t *testing.T) {
 	js := `{"peers":{"details":[{"fqdn":"m2.x","netbirdIp":"100.113.174.101/16","publicKey":"k","status":"Connected","connectionType":"P2P","quantumResistance":true,"latency":12000000,"transferReceived":5,"transferSent":7}]},"management":{"connected":true},"quantumResistance":true}`
-	s := translateRuntime([]byte(js), time.Now())
+	now := time.Now()
+	var input map[string]any
+	if err := json.Unmarshal([]byte(js), &input); err != nil {
+		t.Fatal(err)
+	}
+	detail := input["peers"].(map[string]any)["details"].([]any)[0].(map[string]any)
+	detail["quantumProfile"] = experimentalQuantumProfile
+	detail["quantumKeyInstalledAt"] = now.Add(-time.Minute).Format(time.RFC3339Nano)
+	detail["quantumKeyExpiresAt"] = now.Add(2 * time.Minute).Format(time.RFC3339Nano)
+	data, _ := json.Marshal(input)
+	s := translateRuntime(data, now)
 	if s.PQ != PQProtected || s.Peers[0].Path != PathDirect || s.Peers[0].LatencyMS != 12 || s.Peers[0].TunnelAddress != "100.113.174.101" || !s.StrictPQReady() {
 		t.Fatalf("%+v", s)
 	}
@@ -41,5 +52,31 @@ func TestRuntimeFailureIsUnavailable(t *testing.T) {
 	}
 	if s := translateRuntime([]byte(`{"management":{"connected":false}}`), time.Now()); s.Lifecycle != LifecycleAuthenticating {
 		t.Fatal("disconnected management should be authenticating")
+	}
+}
+
+func TestQuantumEvidenceRejectsUnverifiedAndExpiredPeers(t *testing.T) {
+	now := time.Now().UTC()
+	stamp := func(d time.Duration) string { return now.Add(d).Format(time.RFC3339Nano) }
+	for _, tc := range []struct{ name, profile, installed, expires string }{
+		{"legacy flags only", "", "", ""},
+		{"previous install-only profile", "nexal-mlkem1024-experimental-v1", stamp(-time.Minute), stamp(time.Minute)},
+		{"unknown profile", "ML-KEM-1024", stamp(-time.Minute), stamp(time.Minute)},
+		{"expired", experimentalQuantumProfile, stamp(-time.Minute), stamp(0)},
+		{"future", experimentalQuantumProfile, stamp(time.Second), stamp(time.Minute)},
+		{"unbounded", experimentalQuantumProfile, stamp(-time.Minute), stamp(10 * time.Minute)},
+		{"stale", experimentalQuantumProfile, stamp(-3 * time.Minute), stamp(time.Second)},
+		{"malformed", experimentalQuantumProfile, "invalid", stamp(time.Minute)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := runtimeStatus{QuantumResistance: true}
+			input.Peers.Details = []runtimePeer{{PublicKey: "peer", Status: "Connected", QuantumResistance: true,
+				QuantumProfile: tc.profile, QuantumKeyInstalledAt: tc.installed, QuantumKeyExpiresAt: tc.expires}}
+			data, _ := json.Marshal(input)
+			s := translateRuntime(data, now)
+			if s.PQ == PQProtected || s.Peers[0].PQ == PQProtected || s.Peers[0].PQVerifiedAt != "" || s.StrictPQReady() {
+				t.Fatal("unverified peer was reported protected")
+			}
+		})
 	}
 }

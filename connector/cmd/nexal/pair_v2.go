@@ -83,6 +83,15 @@ func rejoinPairV2(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	if cfg.GuestAccess != nil {
+		if cfg.GuestAccess.IsExpired(time.Now()) {
+			_ = expireGuest(ctx, path, &cfg)
+			return guestExpiredError(cfg.GuestAccess)
+		}
+		if !guestGuardReady(ctx, path, *cfg.GuestAccess) {
+			return errors.New("temporary access requires its installed expiry guard")
+		}
+	}
 	if cfg.Enrollment == nil || cfg.Enrollment.ManagementURL == "" ||
 		(cfg.Enrollment.Status != "joining" && cfg.Enrollment.Status != "paired") {
 		return emit(map[string]any{"rejoined": false, "reason": "not_enrolled"})
@@ -91,7 +100,19 @@ func rejoinPairV2(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	if err := startPersistedMesh(ctx, secrets, cfg.Enrollment.ManagementURL); err != nil {
+	hostname := ""
+	if cfg.GuestAccess != nil {
+		hostname = cfg.GuestAccess.MeshHostname
+		if !client.ValidGuestHostname(cfg.GuestAccess.GrantID, hostname) {
+			return errors.New("temporary mesh identity unavailable")
+		}
+	}
+	if cfg.GuestAccess != nil {
+		err = startGuestMesh(ctx, secrets, cfg.Enrollment.ManagementURL, *cfg.GuestAccess)
+	} else {
+		err = startPersistedMesh(ctx, secrets, cfg.Enrollment.ManagementURL, hostname)
+	}
+	if err != nil {
 		return err
 	}
 	return emit(map[string]any{"rejoined": true})
@@ -145,6 +166,7 @@ func leavePairV2(ctx context.Context, path string) error {
 		}
 	}
 	cfg.HostID, cfg.Enrollment, cfg.Tunnel = "", nil, nil
+	cfg.GuestAccess = nil
 	if err := config.Save(path, cfg); err != nil {
 		return err
 	}
@@ -263,6 +285,9 @@ func statusPairV2(ctx context.Context, path, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	if state.GrantID != "" {
+		return errors.New("temporary access must be activated through the invitation expiry guard")
+	}
 	hasCredentials := state.Credential != "" || state.HostCredential != ""
 	if (state.Status == "joining" || state.Status == "paired") && hasCredentials {
 		if err := secrets.Put(ctx, "mesh-credential", state.Credential); err != nil {
@@ -274,6 +299,7 @@ func statusPairV2(ctx context.Context, path, sessionID string) error {
 		state.Credential = ""
 		state.HostCredential = ""
 		cfg.HostID = state.HostID
+		cfg.GuestAccess = nil
 		cfg.Enrollment = &config.EnrollmentState{SchemaVersion: 2, SessionID: sessionID, Status: state.Status, AccountID: state.AccountID, NetworkID: state.NetworkID, DeviceID: state.DeviceID, ManagementURL: state.ManagementURL, PairedAt: time.Now().UTC().Format(time.RFC3339Nano), ExpiresAt: state.ExpiresAt}
 		if err := config.Save(path, cfg); err != nil {
 			return err
@@ -300,14 +326,18 @@ func statusPairV2(ctx context.Context, path, sessionID string) error {
 	return emit(map[string]any{"enrollmentStatus": state})
 }
 
-func startPersistedMesh(ctx context.Context, secrets config.Secrets, managementURL string) error {
+func startPersistedMesh(ctx context.Context, secrets config.Secrets, managementURL string, hostnames ...string) error {
 	setupKey, err := secrets.Get(ctx, "mesh-credential")
 	if err != nil {
 		return errors.New("secure networking credential unavailable")
 	}
+	hostname := mesh.LocalPeerName(ctx)
+	if len(hostnames) > 0 && hostnames[0] != "" {
+		hostname = hostnames[0]
+	}
 	controller := mesh.Controller{
 		Plans: mesh.StaticPlanStore{Plan: mesh.StartupPlan{SetupKey: setupKey, ManagementURL: managementURL,
-			Hostname: mesh.LocalPeerName(ctx)}},
+			Hostname: hostname}},
 		Runner: mesh.ExecRunner{},
 	}
 	return controller.Start(ctx)

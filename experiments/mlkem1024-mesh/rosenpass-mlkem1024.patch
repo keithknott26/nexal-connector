@@ -1,0 +1,870 @@
+--- a/server.go
++++ b/server.go
+@@ -13,9 +13,13 @@
+ )
+ 
+ type Server struct {
+-	spkm     spk
+-	sskm     ssk
+-	handlers []Handler
++	done      chan struct{}
++	closeOnce sync.Once
++	stateMu   sync.Mutex
++	closed    bool
++	spkm      spk
++	sskm      ssk
++	handlers  []Handler
+ 
+ 	biscuitKeys   [2]key
+ 	biscuitCtr    biscuitNo
+@@ -33,6 +37,9 @@
+ }
+ 
+ func NewUDPServer(cfg Config) (_ *Server, err error) {
++	if err := validateKeys(cfg.PublicKey, cfg.SecretKey); err != nil {
++		return nil, err
++	}
+ 	if len(cfg.ListenAddrs) == 0 {
+ 		// Listen on random port on all interfaces by default
+ 		cfg.ListenAddrs = append(cfg.ListenAddrs, &net.UDPAddr{})
+@@ -54,12 +61,16 @@
+ }
+ 
+ func NewServer(cfg Config) (*Server, error) {
++	if err := validateKeys(cfg.PublicKey, cfg.SecretKey); err != nil {
++		return nil, err
++	}
+ 	biscuitKey, err := generateKey(keySize)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("failed to generate biscuit key: %w", err)
+ 	}
+ 
+ 	s := &Server{
++		done:     make(chan struct{}),
+ 		spkm:     cfg.PublicKey,
+ 		sskm:     cfg.SecretKey,
+ 		handlers: cfg.Handlers,
+@@ -114,6 +125,7 @@
+ }
+ 
+ func (s *Server) Close() error {
++	s.closeOnce.Do(func() { close(s.done) })
+ 	s.biscuitTicker.Stop()
+ 
+ 	if s.closeConn {
+@@ -122,7 +134,14 @@
+ 		}
+ 	}
+ 
+-	for pid := range s.peers {
++	s.stateMu.Lock()
++	s.closed = true
++	ids := make([]pid, 0, len(s.peers))
++	for id := range s.peers {
++		ids = append(ids, id)
++	}
++	s.stateMu.Unlock()
++	for _, pid := range ids {
+ 		if err := s.RemovePeer(pid); err != nil {
+ 			return err
+ 		}
+@@ -132,6 +151,11 @@
+ }
+ 
+ func (s *Server) Run() error {
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
++	if s.closed {
++		return net.ErrClosed
++	}
+ 	for _, p := range s.peers {
+ 		s.initiateHandshake(p)
+ 	}
+@@ -140,6 +164,14 @@
+ }
+ 
+ func (s *Server) AddPeer(pCfg PeerConfig) (PeerID, error) { //nolint:revive
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
++	if s.closed {
++		return PeerID{}, net.ErrClosed
++	}
++	if _, ok := s.peers[pCfg.PID()]; ok {
++		return PeerID{}, errors.New("peer already registered")
++	}
+ 	p, err := s.newPeer(pCfg)
+ 	if err != nil {
+ 		return PeerID{}, err
+@@ -156,11 +188,16 @@
+ }
+ 
+ func (s *Server) RemovePeer(pid pid) error {
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
+ 	peer, ok := s.peers[pid]
+ 	if !ok {
+ 		return errors.New("peer does not exist")
+ 	}
+ 
++	if peer.rekeyTimer != nil {
++		peer.rekeyTimer.Stop()
++	}
+ 	s.handshakesLock.Lock()
+ 	defer s.handshakesLock.Unlock()
+ 
+@@ -201,7 +238,12 @@
+ }
+ 
+ func (s *Server) biscuitLoop() {
+-	for range s.biscuitTicker.C {
++	for {
++		select {
++		case <-s.done:
++			return
++		case <-s.biscuitTicker.C:
++		}
+ 		if err := s.rotateBiscuitKey(); err != nil {
+ 			s.logger.Error("Failed to generate biscuit key", slog.Any("error", err))
+ 		}
+@@ -228,6 +270,11 @@
+ }
+ 
+ func (s *Server) handle(pl payload, from Endpoint) (err error) {
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
++	if s.closed {
++		return net.ErrClosed
++	}
+ 	defer func() {
+ 		if r := recover(); r != nil {
+ 			err = fmt.Errorf("recovered from panic: %v", r)
+@@ -269,7 +316,7 @@
+ 			return err
+ 		}
+ 
+-		hs.txTimer.Stop()
++		hs.stopRetransmission()
+ 
+ 		if err = hs.sendInitConf(); err != nil {
+ 			return err
+@@ -309,7 +356,7 @@
+ 		}
+ 
+ 		hs.nextMsg = msgTypeData
+-		hs.txTimer.Stop()
++		hs.stopRetransmission()
+ 		hs.expiryTimer.Stop()
+ 
+ 		s.removeHandshake(hs)
+@@ -343,22 +390,18 @@
+ }
+ 
+ func (s *Server) initiateHandshake(p *peer) {
+-	if hs, err := p.initiateHandshake(); err != nil {
++	if _, err := p.initiateHandshake(); err != nil {
+ 		if errors.Is(err, errMissingEndpoint) {
+ 			p.logger.Debug("Skipping handshake due to missing endpoint")
+ 		} else {
+ 			p.logger.Error("Failed to initiate handshake for peer", slog.Any("error", err))
+ 		}
+-	} else {
+-		hs.expiryTimer = time.AfterFunc(RejectAfterTime, func() {
+-			s.expireHandshake(hs)
+-		})
+-
+-		s.addHandshake(hs)
++
+ 	}
+ }
+ 
+ func (s *Server) completeHandshake(hs *handshake, ep Endpoint, rekeyAfter time.Duration) {
++	hs.peer.generation++
+ 	hs.peer.logger.Debug("Exchanged key with peer")
+ 
+ 	if hs.peer.endpoint == nil || !hs.peer.endpoint.Equal(ep) {
+@@ -368,31 +411,48 @@
+ 
+ 	for _, h := range s.handlers {
+ 		if h, ok := h.(HandshakeCompletedHandler); ok {
+-			go h.HandshakeCompleted(hs.peer.PID(), hs.osk)
++			h.HandshakeCompleted(hs.peer.PID(), hs.osk)
+ 		}
+ 	}
+ 
+ 	hs.peer.logger.Debug("Rekey", slog.Duration("after", rekeyAfter))
+ 
+-	p := hs.peer
+-
++	s.schedulePeerHandshake(hs.peer, rekeyAfter)
++}
++
++// Called with stateMu held. Recovery remains bounded after a failed renewal.
++func (s *Server) schedulePeerHandshake(p *peer, after time.Duration) {
+ 	if p.rekeyTimer != nil {
+ 		p.rekeyTimer.Stop()
+ 	}
+ 
+-	p.rekeyTimer = time.AfterFunc(rekeyAfter, func() {
+-		s.initiateHandshake(p)
++	p.rekeyTimer = time.AfterFunc(after, func() {
++		s.stateMu.Lock()
++		defer s.stateMu.Unlock()
++		if !s.closed && s.peers[p.PID()] == p {
++			s.initiateHandshake(p)
++		}
+ 	})
+ }
+ 
+ func (s *Server) expireHandshake(hs *initiatorHandshake) {
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
++	if s.closed || s.peers[hs.peer.PID()] != hs.peer {
++		return
++	}
++	hs.stopRetransmission()
+ 	hs.peer.logger.Debug("Erasing outdated key from peer")
+ 
+ 	s.removeHandshake(hs)
++	if hs.startedGeneration != hs.peer.generation {
++		return
++	}
+ 
+ 	for _, h := range s.handlers {
+ 		if h, ok := h.(HandshakeExpiredHandler); ok {
+-			go h.HandshakeExpired(hs.peer.PID())
+-		}
+-	}
+-}
++			h.HandshakeExpired(hs.peer.PID())
++		}
++	}
++	s.schedulePeerHandshake(hs.peer, RetransmitDelayEnd)
++}
+--- a/handshake.go
++++ b/handshake.go
+@@ -6,7 +6,6 @@
+ import (
+ 	"errors"
+ 
+-	"github.com/cloudflare/circl/kem"
+ )
+ 
+ var (
+@@ -89,7 +88,7 @@
+ 	return pt, nil
+ }
+ 
+-func (hs *handshake) encapAndMix(typ kem.Scheme, pk []byte) ([]byte, error) {
++func (hs *handshake) encapAndMix(typ kemProfile, pk []byte) ([]byte, error) {
+ 	kem, err := newKEM(typ, pk)
+ 	if err != nil {
+ 		return nil, err
+@@ -105,7 +104,7 @@
+ 	return ct, nil
+ }
+ 
+-func (hs *handshake) decapAndMix(typ kem.Scheme, sk, pk, ct []byte) error {
++func (hs *handshake) decapAndMix(typ kemProfile, sk, pk, ct []byte) error {
+ 	kem, err := newKEM(typ, sk)
+ 	if err != nil {
+ 		return err
+--- a/types.go
++++ b/types.go
+@@ -14,7 +14,7 @@
+ type msgType uint8
+ 
+ const (
+-	msgTypeInitHello msgType = iota + 0x81
++	msgTypeInitHello msgType = iota + 0x91
+ 	msgTypeRespHello
+ 	msgTypeInitConf
+ 	msgTypeEmptyData
+@@ -68,16 +68,13 @@
+ 	oskSize = hashSize // Output-shared key size
+ 	ckSize  = hashSize // Chaining key size
+ 
+-	// Classic McEliece 460896 sizes.
+-	sctSize       = 188    // Static Cipher-text size
+-	spkSize       = 524160 // Static public key size
+-	sskSizeRound2 = 13568  // Static secret key size (Round 2 implementation)
+-	sskSize       = 13608  // Static secret key size
+-
+-	// Kyber-512 sizes.
+-	ectSize = 768  // Ephemeral cipher text size
+-	epkSize = 800  // Ephemeral public key size
+-	eskSize = 1632 // Ephemeral secret key size
++ // Standardized ML-KEM-1024: 1568-byte public key/ciphertext, 64-byte seed.
++ sctSize = 1568
++ spkSize = 1568
++ sskSize = 64
++ ectSize = 1568
++ epkSize = 1568
++ eskSize = 64
+ 
+ 	// Envelope sizes.
+ 	macSize      = 16
+--- a/handshake_initiator.go
++++ b/handshake_initiator.go
+@@ -10,17 +10,21 @@
+ 	"log/slog"
+ 	"math"
+ 	"math/big"
++	"sync"
+ 	"time"
+ )
+ 
+ type initiatorHandshake struct {
+ 	handshake
+ 
+-	nextMsg msgType // The type of the next expected message
++	startedGeneration uint64
++	nextMsg           msgType // The type of the next expected message
+ 
+ 	eski esk // The initiator’s ephemeral secret key
+ 
+ 	expiryTimer  *time.Timer
++	txMu         sync.Mutex
++	txGeneration uint64
+ 	txTimer      *time.Timer
+ 	txRetryCount uint
+ 
+@@ -28,7 +32,10 @@
+ }
+ 
+ func (hs *initiatorHandshake) Close() error {
+-	hs.expiryTimer.Stop()
++	hs.stopRetransmission()
++	if hs.expiryTimer != nil {
++		hs.expiryTimer.Stop()
++	}
+ 	return nil
+ }
+ 
+@@ -80,6 +87,9 @@
+ 
+ 	hs.nextMsg = msgTypeRespHello
+ 
++	hs.startedGeneration = hs.peer.generation
++	hs.expiryTimer = time.AfterFunc(RejectAfterTime, func() { hs.server.expireHandshake(hs) })
++	hs.server.addHandshake(hs)
+ 	return hs.send(&initHello{
+ 		sidi:  hs.sidi,
+ 		epki:  hs.epki,
+@@ -186,26 +196,45 @@
+ 	return time.Duration(after*1e6) * time.Microsecond
+ }
+ 
+-func (hs *initiatorHandshake) scheduleRetransmission(pl payload) {
++// stopRetransmission invalidates callbacks already queued by time.AfterFunc.
++func (hs *initiatorHandshake) stopRetransmission() {
++	hs.txMu.Lock()
++	defer hs.txMu.Unlock()
++	hs.txGeneration++
++	if hs.txTimer != nil {
++		hs.txTimer.Stop()
++	}
++}
++
++// Caller holds txMu. Payload and destination are captured for this flight.
++func (hs *initiatorHandshake) scheduleRetransmission(pl payload, ep Endpoint, generation uint64) {
+ 	hs.txTimer = time.AfterFunc(hs.retransmitDelay(), func() {
++		hs.txMu.Lock()
++		defer hs.txMu.Unlock()
++		if generation != hs.txGeneration {
++			return
++		}
+ 		hs.txRetryCount++
+-
+ 		switch pl.(type) {
+-		case *initHello, *initConf: // Only InitHello and InitConf messages are retransmitted
+-			hs.scheduleRetransmission(pl)
++		case *initHello, *initConf:
++			hs.scheduleRetransmission(pl, ep, generation)
+ 		}
+-
+-		if err := hs.server.conn.Send(pl, hs.peer.spkt, hs.peer.endpoint); err != nil {
++		if err := hs.server.conn.Send(pl, hs.peer.spkt, ep); err != nil {
+ 			hs.peer.logger.Error("Failed to send", slog.Any("error", err))
+ 		}
+ 	})
+ }
+-
+ func (hs *initiatorHandshake) send(pl payload) error {
++	hs.txMu.Lock()
++	hs.txGeneration++
++	if hs.txTimer != nil {
++		hs.txTimer.Stop()
++	}
+ 	hs.txRetryCount = 0
+-	hs.scheduleRetransmission(pl)
+-
+-	return hs.handshake.send(pl, hs.peer.endpoint)
++	ep := hs.peer.endpoint
++	hs.scheduleRetransmission(pl, ep, hs.txGeneration)
++	hs.txMu.Unlock()
++	return hs.handshake.send(pl, ep)
+ }
+ 
+ // Helpers
+--- a/conn_udp.go
++++ b/conn_udp.go
+@@ -137,8 +137,9 @@
+ 
+ func receiveFromConn(conn net.PacketConn) ReceiveFunc {
+ 	return func(spkm spk) (payload, Endpoint, error) {
+-		// TODO: Check for appropriate MTU
+-		buf := make([]byte, 1500)
++		// Larger KEMs require reassembled datagrams; fragmentation must be tested
++        // across each deployed path before this experimental profile is enabled.
++        buf := make([]byte, 65535)
+ 
+ 		n, rAddr, err := conn.ReadFrom(buf)
+ 		if err != nil {
+--- a/protocol.go
++++ b/protocol.go
+@@ -6,7 +6,7 @@
+ import "time"
+ 
+ var (
+-	lblProtocol                     = []byte("Rosenpass v1 mceliece460896 Kyber512 ChaChaPoly1305 BLAKE2s")
++	lblProtocol                     = []byte("neXal EXPERIMENTAL mesh v1 ML-KEM-1024-static ML-KEM-1024-ephemeral ChaChaPoly1305 BLAKE2s")
+ 	lblMAC                          = []byte("mac")
+ 	lblCookie                       = []byte("cookie") //nolint:unused
+ 	lblPeerID                       = []byte("peer id")
+--- /dev/null
++++ b/conn_tcp.go
+@@ -0,0 +1,246 @@
++// SPDX-License-Identifier: Apache-2.0
++package rosenpass
++
++import (
++	"context"
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"sync"
++	"time"
++)
++
++// TCPConn carries the existing authenticated envelopes over bounded TCP frames.
++// Endpoints must be explicitly authorized from the management peer inventory.
++// TCP segmentation avoids reliance on IP fragmentation for large ML-KEM keys.
++// The transport itself is NOT authentication: envelope verification is mandatory.
++type TCPConn struct {
++	Listen      func(string, string) (net.Listener, error)
++	DialContext func(context.Context, string, string) (net.Conn, error)
++	listen      string
++	mu          sync.Mutex
++	listener    net.Listener
++	allowed     map[string]bool
++	active      map[net.Conn]bool
++	incoming    chan tcpFrame
++	done        chan struct{}
++	once        sync.Once
++	slots       chan struct{}
++}
++type tcpFrame struct {
++	data     []byte
++	endpoint *UDPEndpoint
++}
++
++const tcpFrameLimit = 4096
++
++func NewTCPConn(listen string) *TCPConn {
++	return &TCPConn{listen: listen, allowed: map[string]bool{}, active: map[net.Conn]bool{}, incoming: make(chan tcpFrame, 64), done: make(chan struct{}), slots: make(chan struct{}, 32)}
++}
++func (c *TCPConn) AuthorizeEndpoint(addr *net.UDPAddr, allowed bool) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if allowed {
++		c.allowed[addr.String()] = true
++	} else {
++		delete(c.allowed, addr.String())
++	}
++}
++func (c *TCPConn) authorized(addr *net.UDPAddr) bool {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.allowed[addr.String()]
++}
++func (c *TCPConn) Open() ([]ReceiveFunc, error) {
++	listen := c.Listen
++	if listen == nil {
++		listen = net.Listen
++	}
++	l, err := listen("tcp", c.listen)
++	if err != nil {
++		return nil, err
++	}
++	c.mu.Lock()
++	c.listener = l
++	c.mu.Unlock()
++	go c.accept(l)
++	return []ReceiveFunc{func(key spk) (payload, Endpoint, error) {
++		select {
++		case <-c.done:
++			return nil, nil, net.ErrClosed
++		case f := <-c.incoming:
++			if !c.authorized((*net.UDPAddr)(f.endpoint)) {
++				return nil, nil, errors.New("revoked control endpoint")
++			}
++			e := &envelope{}
++			n, err := e.CheckAndUnmarshalBinary(f.data, key)
++			if err != nil {
++				return nil, nil, err
++			}
++			if n != len(f.data) {
++				return nil, nil, errors.New("partial envelope")
++			}
++			return e.payload, f.endpoint, nil
++		}
++	}}, nil
++}
++func (c *TCPConn) accept(l net.Listener) {
++	for {
++		conn, err := l.Accept()
++		if err != nil {
++			return
++		}
++		select {
++		case c.slots <- struct{}{}:
++		default:
++			conn.Close()
++			continue
++		}
++		c.mu.Lock()
++		select {
++		case <-c.done:
++			c.mu.Unlock()
++			conn.Close()
++			<-c.slots
++			return
++		default:
++		}
++		c.active[conn] = true
++		c.mu.Unlock()
++		go func() {
++			defer func() { conn.Close(); c.mu.Lock(); delete(c.active, conn); c.mu.Unlock(); <-c.slots }()
++			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
++			var header [8]byte
++			if _, err := io.ReadFull(conn, header[:]); err != nil {
++				return
++			}
++			if string(header[:4]) != "NXQ2" {
++				return
++			}
++			n := int(binary.BigEndian.Uint16(header[4:6]))
++			port := int(binary.BigEndian.Uint16(header[6:8]))
++			if n < 1 || n > tcpFrameLimit || port == 0 {
++				return
++			}
++			remote := conn.RemoteAddr().(*net.TCPAddr)
++			addr := &net.UDPAddr{IP: remote.IP, Port: port, Zone: remote.Zone}
++			if !c.authorized(addr) {
++				return
++			}
++			data := make([]byte, n)
++			if _, err := io.ReadFull(conn, data); err != nil {
++				return
++			}
++			select {
++			case c.incoming <- tcpFrame{data, (*UDPEndpoint)(addr)}:
++			case <-c.done:
++			default:
++			}
++		}()
++	}
++}
++func (c *TCPConn) Send(pl payload, key spk, ep Endpoint) error {
++	addr, ok := ep.(*UDPEndpoint)
++	if !ok || addr == nil {
++		return errInvalidEndpoint
++	}
++	if !c.authorized((*net.UDPAddr)(addr)) {
++		return errors.New("unauthorized control endpoint")
++	}
++	e := envelope{payload: pl}
++	switch pl.(type) {
++	case *initHello:
++		e.typ = msgTypeInitHello
++	case *respHello:
++		e.typ = msgTypeRespHello
++	case *initConf:
++		e.typ = msgTypeInitConf
++	case *emptyData:
++		e.typ = msgTypeEmptyData
++	default:
++		return errors.New("unsupported envelope")
++	}
++	data := e.MarshalBinaryAndSeal(key)
++	if len(data) > tcpFrameLimit {
++		return errors.New("control envelope too large")
++	}
++	c.mu.Lock()
++	l := c.listener
++	c.mu.Unlock()
++	if l == nil {
++		return net.ErrClosed
++	}
++	select {
++	case <-c.done:
++		return net.ErrClosed
++	default:
++	}
++	dial := c.DialContext
++	if dial == nil {
++		dial = (&net.Dialer{}).DialContext
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	defer cancel()
++	conn, err := dial(ctx, "tcp", addr.String())
++	if err != nil {
++		return err
++	}
++	defer conn.Close()
++	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
++	frame := make([]byte, 8+len(data))
++	copy(frame, "NXQ2")
++	binary.BigEndian.PutUint16(frame[4:6], uint16(len(data)))
++	binary.BigEndian.PutUint16(frame[6:8], uint16(l.Addr().(*net.TCPAddr).Port))
++	copy(frame[8:], data)
++	for len(frame) > 0 {
++		n, err := conn.Write(frame)
++		if err != nil {
++			return err
++		}
++		if n == 0 {
++			return io.ErrShortWrite
++		}
++		frame = frame[n:]
++	}
++	return nil
++}
++func (c *TCPConn) LocalEndpoints() ([]Endpoint, error) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.listener == nil {
++		return nil, net.ErrClosed
++	}
++	a := c.listener.Addr().(*net.TCPAddr)
++	return []Endpoint{(*UDPEndpoint)(&net.UDPAddr{IP: a.IP, Port: a.Port, Zone: a.Zone})}, nil
++}
++func (c *TCPConn) Close() error {
++	var err error
++	c.once.Do(func() {
++		close(c.done)
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		if c.listener != nil {
++			err = c.listener.Close()
++		}
++		for conn := range c.active {
++			conn.Close()
++		}
++	})
++	return err
++}
++
++// NewTCPServer takes ownership of a supplied bounded TCP control transport.
++func NewTCPServer(cfg Config, conn *TCPConn) (*Server, error) {
++	if conn == nil {
++		return nil, fmt.Errorf("missing TCP control transport")
++	}
++	cfg.Conn = conn
++	cfg.closeConn = true
++	s, err := NewServer(cfg)
++	if err != nil {
++		conn.Close()
++	}
++	return s, err
++}
+--- a/crypto.go
++++ b/crypto.go
+@@ -5,48 +5,22 @@
+ 
+ import (
+ 	"crypto/cipher"
++ "bytes"
++ "crypto/mlkem"
+ 	"crypto/rand"
+ 	"fmt"
+ 
+-	"github.com/cloudflare/circl/kem"
+-	"github.com/cloudflare/circl/kem/kyber/kyber512"
+-	"github.com/cloudflare/circl/kem/mceliece/mceliece460896"
+ 	"golang.org/x/crypto/blake2b"
+ 	"golang.org/x/crypto/chacha20poly1305"
+ )
+ 
+-var (
+-	kemStatic    kem.Scheme = mceliece460896.Scheme()
+-	kemEphemeral kem.Scheme = kyber512.Scheme()
+-)
+-
+-// GenerateKeyPair generates a new Classic McEliece key pair.
+-func GenerateKeyPair() (PublicKey, SecretKey, error) { //nolint:revive
+-	return generateStaticKeyPair()
+-}
+-
+-// GenerateKeyPair generates a new Classic McEliece key pair in its old (round 2) format.
+-func GenerateRound2KeyPair() (PublicKey, SecretKey, error) { //nolint:revive
+-	spk, ssk, err := generateStaticKeyPair()
+-	if err != nil {
+-		return nil, nil, err
+-	}
+-
+-	// Convert a secret key from its round 3 to round 2 format
+-	if len(ssk) == sskSize {
+-		g := ssk[40:232]
+-		a := ssk[232:13032]
+-		s := ssk[13032:13608]
+-
+-		sskNew := []byte{}
+-		sskNew = append(sskNew, s...)
+-		sskNew = append(sskNew, g...)
+-		sskNew = append(sskNew, a...)
+-
+-		return spk, sskNew, nil
+-	}
+-
+-	return spk, ssk, nil
++// neXal experimental protocol: both independently generated KEM roles use
++// Go's standardized ML-KEM-1024. This is not upstream Rosenpass v1.
++type kemProfile uint8
++const (kemStatic kemProfile = iota; kemEphemeral)
++func GenerateKeyPair() (PublicKey, SecretKey, error) { return generateStaticKeyPair() }
++func GenerateRound2KeyPair() (PublicKey, SecretKey, error) {
++ return nil, nil, fmt.Errorf("legacy McEliece keys are unsupported by neXal ML-KEM-1024")
+ }
+ 
+ // Generates a new pre-shared key.
+@@ -157,44 +131,30 @@
+ 	return epk(pk), esk(sk), nil
+ }
+ 
+-func generateKeyPair(typ kem.Scheme) ([]byte, []byte, error) {
+-	pk, sk, err := typ.GenerateKeyPair()
+-	if err != nil {
+-		return nil, nil, err
+-	}
+-
+-	pk2, _ := pk.MarshalBinary()
+-	sk2, _ := sk.MarshalBinary()
+-
+-	return pk2, sk2, nil
++func generateKeyPair(_ kemProfile) ([]byte, []byte, error) {
++ sk, err := mlkem.GenerateKey1024()
++ if err != nil { return nil, nil, err }
++ return sk.EncapsulationKey().Bytes(), sk.Bytes(), nil
++}
++func newKEM(_ kemProfile, key []byte) (*keyEncapsulation, error) { return &keyEncapsulation{key:key}, nil }
++type keyEncapsulation struct { key []byte }
++func (ke *keyEncapsulation) EncapSecret(pk []byte) ([]byte, []byte, error) {
++ public, err := mlkem.NewEncapsulationKey1024(pk)
++ if err != nil { return nil, nil, err }
++ shared, ciphertext := public.Encapsulate()
++ return ciphertext, shared, nil
++}
++func (ke *keyEncapsulation) DecapSecret(ct []byte) ([]byte, error) {
++ private, err := mlkem.NewDecapsulationKey1024(ke.key)
++ if err != nil { return nil, err }
++ return private.Decapsulate(ct)
+ }
+ 
+-func newKEM(typ kem.Scheme, key []byte) (*keyEncapsulation, error) {
+-	return &keyEncapsulation{
+-		key:    key,
+-		scheme: typ,
+-	}, nil
++// ValidatePublicKey rejects old Rosenpass keys and non-canonical ML-KEM inputs.
++func ValidatePublicKey(pk []byte) error { _, err := mlkem.NewEncapsulationKey1024(pk); return err }
++func validateKeys(pk, seed []byte) error {
++ private, err := mlkem.NewDecapsulationKey1024(seed)
++ if err != nil { return err }
++ if !bytes.Equal(private.EncapsulationKey().Bytes(),pk) { return fmt.Errorf("ML-KEM-1024 public key does not match private seed") }
++ return nil
+ }
+-
+-type keyEncapsulation struct {
+-	scheme kem.Scheme
+-	key    []byte
+-}
+-
+-func (ke *keyEncapsulation) EncapSecret(pk []byte) (ct []byte, ss []byte, err error) {
+-	cpk, err := ke.scheme.UnmarshalBinaryPublicKey(pk)
+-	if err != nil {
+-		return nil, nil, err
+-	}
+-
+-	return ke.scheme.Encapsulate(cpk)
+-}
+-
+-func (ke *keyEncapsulation) DecapSecret(ct []byte) (ss []byte, err error) {
+-	csk, err := ke.scheme.UnmarshalBinaryPrivateKey(ke.key)
+-	if err != nil {
+-		return nil, err
+-	}
+-
+-	return ke.scheme.Decapsulate(csk, ct)
+-}
+--- a/peer.go
++++ b/peer.go
+@@ -28,7 +28,8 @@
+ }
+ 
+ type peer struct {
+-	server *Server
++	server     *Server
++	generation uint64
+ 
+ 	rekeyTimer *time.Timer
+ 
+@@ -44,6 +45,9 @@
+ }
+ 
+ func (s *Server) newPeer(cfg PeerConfig) (*peer, error) {
++	if err := ValidatePublicKey(cfg.PublicKey); err != nil {
++		return nil, err
++	}
+ 	if cfg.PublicKey == nil {
+ 		return nil, errMissingPublicKey
+ 	}
+@@ -86,7 +90,7 @@
+ 	}
+ 
+ 	if err := hs.sendInitHello(); err != nil {
+-		return nil, fmt.Errorf("failed to send: %w", err)
++		return hs, fmt.Errorf("failed to send: %w", err)
+ 	}
+ 
+ 	p.logger.Debug("Started new handshake", "sidi", hs.sidi)
+--- a/server_test.go
++++ b/server_test.go
+@@ -4,7 +4,6 @@
+ package rosenpass_test
+ 
+ import (
+-	"encoding/base64"
+ 	"log/slog"
+ 	"math"
+ 	"math/rand"
+@@ -190,7 +189,7 @@
+ 
+ 		require.Equal(oskAlice, oskBob, "Keys differ in exchange %d", i)
+ 
+-		t.Logf("OSK: %s\n", base64.StdEncoding.EncodeToString(oskAlice[:]))
++		t.Logf("Matching output keys for exchange %d", i)
+ 	}
+ 
+ 	// HandshakeExpiredHandlers are only supported for non-standalone servers
+--- a/main_test.go
++++ b/main_test.go
+@@ -24,5 +24,5 @@
+ 	rp.RejectAfterTime = 2 * time.Second
+ 	rp.BiscuitEpoch = 3 * time.Second
+ 
+-	m.Run()
++	os.Exit(m.Run())
+ }

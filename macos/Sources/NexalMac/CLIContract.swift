@@ -27,10 +27,14 @@ enum CLICommand {
     /// an https origin and a loopback http origin can never satisfy it.
     case initializeDevelopment(name: String, memoryMiB: Int, reserveMiB: Int)
     case enroll, run, status, pause, resume, acceptJobs
+    case redeemGuestInvitation, activateGuestInvitation, guestAccessStatus
     /// The live peer view. Named peers-view in the CLI because `peers` is invitation
     /// and enrollment management, which reports no addresses.
     case peersView
 	case timeMachine
+	/// Adds the storage gateway as a Time Machine destination behind the macOS
+	/// administrator dialog. Waits on a person, so it has a longer time limit.
+	case timeMachineConnect
     /// Mint a phone pairing and render it. `--no-poll` is deliberate: this app
     /// polls with `pairingStatus` through the SAME bounded `ConnectorProcess`
     /// execution as every other command, rather than holding a long-lived child
@@ -46,12 +50,19 @@ enum CLICommand {
     case rejoinNetwork
     /// Ask the coordinator to wake a sleeping peer, named by its tunnel address.
     case wake(tunnelAddress: String)
-
+    case exitRoute(tunnelAddress: String, enabled: Bool, targetDeviceID: String? = nil)
     case canary(action: String)
     case securityStatus, securityScan, securityBaseline, securityFindings
     case securityConfigure(roots: [String], engine: String?, enabled: Bool)
 
+    /// How long one invocation may run. Everything answers within 20 seconds
+    /// except adding the Time Machine destination, which waits for a person to
+    /// approve the macOS administrator dialog (the CLI itself gives up at 3 min).
     var timeLimit: TimeInterval {
+        if case .timeMachineConnect = self { return 200 }
+        if case .redeemGuestInvitation = self { return 60 }
+        if case .activateGuestInvitation = self { return 40 }
+        if case .exitRoute = self { return 35 }
         if case .securityScan = self { return 130 }
         if case .securityBaseline = self { return 130 }
         return 20
@@ -76,10 +87,14 @@ enum CLICommand {
                        "--reserve-memory-mib", String(reserveMiB),
                        "--dev-loopback", "--dev-secrets"]
         case .enroll: command = ["enroll", "--code-stdin"]
+        case .redeemGuestInvitation: command = ["guest", "redeem", "--code-stdin"]
+        case .activateGuestInvitation: command = ["guest", "activate"]
+        case .guestAccessStatus: command = ["guest", "status"]
         case .run: command = ["run"]
         case .status: command = ["status"]
         case .peersView: command = ["peers-view"]
 		case .timeMachine: command = ["time-machine"]
+		case .timeMachineConnect: command = ["time-machine", "-connect"]
         case .pause: command = ["pause"]
         case .resume: command = ["resume"]
         case .acceptJobs: command = ["accept-jobs"]
@@ -104,6 +119,8 @@ enum CLICommand {
             command = ["security", "configure", "--enabled=\(enabled)"] + roots.flatMap { ["--root", $0] } + (engine.map { ["--engine", $0] } ?? [])
         case let .canary(action):
             command = ["canary", "--action", action]
+        case let .exitRoute(tunnelAddress, enabled, targetDeviceID):
+            command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):
             command = ["wake", "--tunnel", tunnelAddress]
         }
@@ -174,6 +191,8 @@ struct TimeMachineReport: Decodable {
 		let state: String; let enabled: Bool; let entitled: Bool
 		let capacityBytes: UInt64?; let freeBytes: UInt64?; let shareName: String?
 		let advertised: Bool; let detailCode: String?
+		/// Plain-language reason from the client view (e.g. why it is blocked).
+		let detail: String?
 		/// Gateway-backed networks answer with the client view instead:
 		/// {role:"client", state, serviceState, host, share, quotaBytes}. Its
 		/// `host` is the storage gateway's secure-network name, which is how the
@@ -182,7 +201,7 @@ struct TimeMachineReport: Decodable {
 
 		private enum CodingKeys: String, CodingKey {
 			case state, enabled, entitled, capacityBytes, freeBytes, shareName, advertised, detailCode
-			case role, host, share, serviceState, quotaBytes
+			case role, host, share, serviceState, quotaBytes, detail
 		}
 		init(from decoder: Decoder) throws {
 			let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -200,6 +219,7 @@ struct TimeMachineReport: Decodable {
 			shareName = try c.decodeIfPresent(String.self, forKey: .shareName) ?? share
 			advertised = try c.decodeIfPresent(Bool.self, forKey: .advertised) ?? false
 			detailCode = try c.decodeIfPresent(String.self, forKey: .detailCode)
+			detail = try c.decodeIfPresent(String.self, forKey: .detail)
 		}
 	}
 	let timeMachine: State
@@ -254,7 +274,15 @@ struct ConnectorStatus: Decodable {
 		let name: String?; let os: String?; let model: String?; let chip: String?
 		let cores: Int?; let performanceCores: Int?; let efficiencyCores: Int?
 		let memoryBytes: UInt64?; let diskTotalBytes: UInt64?; let diskFreeBytes: UInt64?
-		let thermal: String?; let batteryPercent: Int?; let batteryState: String?
+		var loadAverage1m: Double? = nil; var loadAverage5m: Double? = nil; var loadAverage15m: Double? = nil
+        var cpuUsagePercent: Double? = nil; var memoryUsedBytes: UInt64? = nil; var idleSeconds: UInt64? = nil
+        var lastTimeMachineBackupAt: String? = nil; var reportedAt: String? = nil
+        var exitNodeStatus: String? = nil
+        var threatScannerStatus: String? = nil; var lastThreatScanAt: String? = nil
+        var threatRulesVersion: String? = nil; var threatScanLastError: String? = nil; var threatScanCoverage: String? = nil
+        var threatScanFilesScanned: Int? = nil; var threatScanFilesSkipped: Int? = nil; var threatScanFindings: Int? = nil
+        var canaryStatus: String? = nil; var canaryLastCheckedAt: String? = nil
+        let thermal: String?; let batteryPercent: Int?; let batteryState: String?
 		let tunnelAddress: String?; let publicIp: String?; let location: String?
 		let lanAddress: String?
 	}
@@ -277,6 +305,7 @@ struct ConnectorStatus: Decodable {
 		let authenticationStep: String?; let path: String; let pathLabel: String
 		let relayRegion: String?; let latencyMs: Double?; let packetLossPercent: Double?
 		let lastHandshakeAt: String?; let pq: String; let pqVerifiedAt: String?
+ let quantumProfile: String?; let pqExpiresAt: String?
 		let traffic: MeshTraffic
 		let fileSharing: MeshFileSharing?
 		let screenSharing: MeshScreenSharing?

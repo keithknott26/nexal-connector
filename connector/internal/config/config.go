@@ -73,6 +73,7 @@ type Config struct {
 	// AllowedPeers.
 	StaticPeers []StaticPeer     `json:"staticPeers,omitempty"`
 	Enrollment  *EnrollmentState `json:"enrollment,omitempty"`
+	GuestAccess *GuestAccess     `json:"guestAccess,omitempty"`
 }
 
 // EnrollmentState contains durable, non-secret identifiers only. The credential
@@ -256,6 +257,11 @@ func (c Config) Validate() error {
 		}
 		if (c.Enrollment.Status == "joining" || c.Enrollment.Status == "paired") && (c.Enrollment.AccountID == "" || c.Enrollment.NetworkID == "" || !validDeviceFingerprint(c.Enrollment.DeviceID) || c.Enrollment.PairedAt == "" || ValidateURL(c.Enrollment.ManagementURL, false) != nil) {
 			return errors.New("paired enrollment state is incomplete")
+		}
+	}
+	if c.GuestAccess != nil {
+		if err := c.GuestAccess.Validate(); err != nil {
+			return err
 		}
 	}
 	return c.ResourcePolicy().Validate()

@@ -12,13 +12,15 @@ import re
 import sys
 import time
 
+from .profiles import TOKENIZERS, encode_prompt, format_prompt
+
 from .security import (
     Rejected, absolute_local, digest, exact_keys, integer, read_regular,
     strict_json, verify_model,
 )
 
-RUNTIME_VERSION = "0.1.0"
-CANDIDATE_PINS = {"mlx": "0.29.3", "mlx-lm": "0.28.4"}
+RUNTIME_VERSION = "0.2.0"
+CANDIDATE_PINS = {"mlx": "0.29.3", "mlx-lm": "0.28.4", "transformers": "4.57.6"}
 
 
 def probe(*, load_backend: bool = False) -> dict:
@@ -30,6 +32,7 @@ def probe(*, load_backend: bool = False) -> dict:
         "metal_available": None, "backend_imported": False,
         "inference_release_gate": "requires-reviewed-macos-lock-and-model",
         "distributed_execution": "disabled",
+        "model_type_allowlist": sorted(TOKENIZERS),
     }
     for package in CANDIDATE_PINS:
         try:
@@ -142,6 +145,7 @@ def infer(config_path: str, admission_path: str, prompt_path: str, max_tokens: i
     prompt = read_regular(absolute_local(prompt_path), 16 * 1024).decode("utf-8")
     if not prompt.strip():
         raise Rejected("a nonempty UTF-8 prompt is required")
+    format_prompt(manifest["model_type"], prompt)  # Reject role injection before loading.
     # Admit worst-case supported context before loading the model. The owner
     # owns this directory; immutable read-only snapshots are a deployment gate.
     required = memory_required(manifest, 4096, max_tokens)
@@ -161,10 +165,10 @@ def infer(config_path: str, admission_path: str, prompt_path: str, max_tokens: i
         sampler = importlib.import_module("mlx_lm.sample_utils").make_sampler(temp=0.0)
         model, tokenizer = lm.load(
             config["model_directory"],
-            tokenizer_config={"trust_remote_code": False, "local_files_only": True},
+            tokenizer_config={"trust_remote_code": False, "local_files_only": True, "use_fast": True},
             lazy=False,
         )
-        tokens = tokenizer.encode(prompt)
+        tokens = encode_prompt(manifest["model_type"], tokenizer, prompt)
         if not 1 <= len(tokens) <= 4096:
             raise Rejected("prompt exceeds the approved 4096-token context")
         # Import/load time cannot silently consume the lease. The Go supervisor

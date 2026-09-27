@@ -1,0 +1,20 @@
+{
+  "Qwen/Qwen3-4B": {
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+    "sha256": {
+      "config.json": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
+      "tokenizer.json": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+      "tokenizer_config.json": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+      "generation_config.json": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+    }
+  },
+  "microsoft/Phi-4-mini-instruct": {
+    "revision": "cfbefacb99257ffa30c83adab238a50856ac3083",
+    "sha256": {
+      "config.json": "ac65d86061d3d0d704ee2511fd0eb8713ef19eb6eedba17c3080a4165d5b933b",
+      "tokenizer.json": "382cc235b56c725945e149cc25f191da667c836655efd0857b004320e90e91ea",
+      "tokenizer_config.json": "9c9b6bc0c94d95f69f826c41069a3e8b387ac3ced89601d201886e99240ac9db",
+      "generation_config.json": "3e3f48753753f92d2b958679151861d4fd7bf26e4dfc41fd47056116c4914dcd"
+    }
+  }
+}

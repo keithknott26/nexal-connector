@@ -172,38 +172,89 @@ enum NetworkService {
         process.standardOutput = out
         process.standardError = out
         guard (try? process.run()) != nil else { return (-1, "could not start the secure networking runtime") }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 8, execute: timeout)
+        defer { timeout.cancel() }
+        var data = Data(), oversized = false
+        while true {
+            let chunk = out.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            if data.count + chunk.count <= 65_536 { data.append(chunk) }
+            else { oversized = true; if process.isRunning { process.terminate() } }
+        }
         process.waitUntilExit()
+        if oversized { return (-1, "The network service returned too much routing data.") }
         return (process.terminationStatus, String(decoding: data, as: UTF8.self))
     }
 
-    /// Exit routes this Mac has been given (ids starting with "nexal-exit").
-    static func availableExitRoutes() -> Set<String> {
-        let (code, text) = runHelper(["networks", "ls"])
-        guard code == 0 else { return [] }
-        var ids = Set<String>()
-        let pattern = try? NSRegularExpression(pattern: #"\bnexal-exit(?:-[a-z0-9-]+)?\b"#)
-        let range = NSRange(text.startIndex..., in: text)
-        pattern?.enumerateMatches(in: text, range: range) { match, _, _ in
-            if let match, let r = Range(match.range, in: text) { ids.insert(String(text[r])) }
-        }
-        return ids
+    enum RoutingFailure: LocalizedError {
+        case failed(String)
+        var errorDescription: String? { if case let .failed(message) = self { return message }; return nil }
     }
 
-    /// Selects one exit route (and deselects the previous), or deselects when nil.
-    static func selectExitRoute(_ id: String?, previous: String?) throws {
-        if let previous, previous != id {
-            let (code, text) = runHelper(["networks", "deselect", previous])
-            if code != 0 && id == nil { throw Failure.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    struct ExitRoutes: Equatable {
+        var available = Set<String>()
+        var selected = Set<String>()
+    }
+
+    static func validExitRouteID(_ value: String) -> Bool {
+        value.range(of: #"^(?:nexal-exit(?:-[a-z0-9-]+)?|nx-exit-[a-f0-9]{32})$"#, options: .regularExpression) != nil
+    }
+
+    /// Read IDs and selection from complete default-route records, never from
+    /// arbitrary descriptions or a saved preference. Subnet routes are excluded.
+    static func parseExitRoutes(_ text: String) -> ExitRoutes {
+        var result = ExitRoutes(), id: String?, isDefault = false, selected = false
+        func finish() {
+            guard let id, validExitRouteID(id), isDefault else { return }
+            result.available.insert(id)
+            if selected { result.selected.insert(id) }
         }
-        if let id {
-            // --append keeps any other selected routes; a runtime without the flag
-            // gets the plain form (which replaces the selection).
-            var (code, text) = runHelper(["networks", "select", "--append", id])
-            if code != 0, text.localizedCaseInsensitiveContains("unknown flag") {
-                (code, text) = runHelper(["networks", "select", id])
+        for raw in text.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("- ID: ") {
+                finish(); id = String(line.dropFirst(6)); isDefault = false; selected = false
+            } else if line.hasPrefix("Network: ") {
+                let networks = line.dropFirst(9).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                isDefault = networks.contains("0.0.0.0/0") || networks.contains("::/0")
+            } else if line == "Status: Selected" { selected = true }
+        }
+        finish()
+        return result
+    }
+
+    static func exitRoutes() -> ExitRoutes? {
+        let (code, text) = runHelper(["networks", "ls"])
+        return code == 0 ? parseExitRoutes(text) : nil
+    }
+
+    static func availableExitRoutes() -> Set<String> { exitRoutes()?.available ?? [] }
+
+    /// Change only the requested exit route, preserving unrelated subnet routes.
+    /// Verify the runtime receipt and restore the previous selection on failure.
+    static func selectExitRoute(_ id: String?, previous: String?,
+                                execute: ([String]) -> (Int32, String) = runHelper) throws {
+        guard [id, previous].compactMap({ $0 }).allSatisfy(validExitRouteID) else {
+            throw RoutingFailure.failed("Invalid exit route identifier.")
+        }
+        if let previous, previous != id {
+            let (code, text) = execute(["networks", "deselect", previous])
+            if code != 0 { throw RoutingFailure.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        do {
+            if let id {
+                let (code, text) = execute(["networks", "select", "--append", id])
+                if code != 0 { throw RoutingFailure.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
             }
-            if code != 0 { throw Failure.failed(text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            let (code, text) = execute(["networks", "ls"])
+            let state = parseExitRoutes(text)
+            guard code == 0, id.map({ state.selected.contains($0) }) ?? (previous.map({ !state.selected.contains($0) }) ?? true) else {
+                throw RoutingFailure.failed("The network service has not confirmed the requested exit route.")
+            }
+        } catch {
+            if let id { _ = execute(["networks", "deselect", id]) }
+            if let previous { _ = execute(["networks", "select", "--append", previous]) }
+            throw error
         }
     }
 
@@ -282,10 +333,39 @@ enum NetworkService {
         }
     }
 
-    private static func runAdminScript(_ script: [String], argument: String) throws {
+    /// Install a root launchd deadline guard before a guest tunnel can start.
+    /// It survives quitting this app and needs no coordinator polling.
+    static func installGuestExpiryGuard(config: URL) throws {
+        let helper = try validatedHelper(Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/nexal"))
+        let script = [
+            "on run argv",
+            "set p to quoted form of (item 1 of argv)",
+            "set c to quoted form of (item 2 of argv)",
+            "do shell script p & \" guest install-guard --config \" & c with prompt \"neXal needs an automatic expiry guard to disconnect temporary network access after one hour, even when this app is closed or the internet is unavailable.\" with administrator privileges",
+            "end run",
+        ]
+        try runAdminScript(script, argument: helper.path, additionalArguments: [config.path])
+    }
+
+    static var guestExpiryGuardInstalled: Bool {
+        FileManager.default.fileExists(atPath: "/Library/LaunchDaemons/systems.nexal.guest-expiry.plist")
+    }
+
+    static func removeGuestExpiryGuard() throws {
+        let helper = try validatedHelper(Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/nexal"))
+        let script = [
+            "on run argv",
+            "set p to quoted form of (item 1 of argv)",
+            "do shell script p & \" guest remove-guard\" with prompt \"neXal needs to disconnect the previous temporary access before pairing this Mac as your own computer.\" with administrator privileges",
+            "end run",
+        ]
+        try runAdminScript(script, argument: helper.path)
+    }
+
+    private static func runAdminScript(_ script: [String], argument: String, additionalArguments: [String] = []) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = script.flatMap { ["-e", $0] } + [argument]
+        process.arguments = script.flatMap { ["-e", $0] } + [argument] + additionalArguments
         let errors = Pipe()
         process.standardError = errors
         process.standardOutput = FileHandle.nullDevice

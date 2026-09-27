@@ -14,6 +14,10 @@ struct NetworkPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
+                    if let guest = model.guestAccess, !guest.isExpired(), let deadline = guest.deadline {
+                        Label("Temporary access until \(deadline.formatted(date: .omitted, time: .shortened))", systemImage: "clock")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     leaveBanner.id("leave-banner")
                     switch model.networkScreen {
                     case .needsConnector(let reason): blocked(reason)
@@ -70,6 +74,7 @@ struct NetworkPanel: View {
                  detail: "Open neXal@home on your iPhone (available in the Apple App Store) and sign in with Apple.", symbol: "apple.logo")
             step(number: "2", title: "Pair this Mac",
                  detail: "Show a one-time code here, then choose \u{201C}Pair a computer\u{201D} in neXal@home and scan it.", symbol: "qrcode")
+            GuestInvitationEntry()
             CoordinatorChoice()
             Button { Task { await model.startPairing() } } label: {
                 Label("Show pairing code", systemImage: "qrcode").frame(maxWidth: .infinity)
@@ -140,6 +145,7 @@ struct NetworkPanel: View {
                 meshSummary(mesh)
             } else {
                 status(network.tunnel)
+                LabeledContent("Post-quantum type", value: "Not reported")
                 Text("The networking service has not reported peer routes yet.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -236,6 +242,8 @@ struct NetworkPanel: View {
         VStack(alignment: .leading, spacing: 7) {
             LabeledContent("Tunnel") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(mesh.lifecycle.capitalized)") }
             LabeledContent("Post-quantum protection") { pqText(mesh.pq) }
+            LabeledContent("Post-quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
+                .help(quantumProfileExplanation)
             LabeledContent("Network path", value: pathSummary(mesh.peers))
             if let step = mesh.authenticationStep, !step.isEmpty {
                 LabeledContent("Connection step", value: step)
@@ -274,6 +282,7 @@ struct NetworkPanel: View {
                 }
                 detailSection("Security") {
                     detailRow("Post-quantum") { pqText(peer.pq) }
+                    detailRow("Post-quantum type") { Text(MeshQuantumPresentation.label(peers: [peer])).help(quantumProfileExplanation) }
                     if let verified = lastVerified(peer) {
                         detailRow("Last verified") {
                             Text(verified.relative).help(verified.exact)
@@ -395,14 +404,14 @@ struct NetworkPanel: View {
     }
 
     private func exitRouteID(for peer: ConnectorStatus.MeshPeer) -> String {
-        isStorageGateway(peer) ? NetworkService.storageExitRoute : NetworkService.exitRoute(forPeerNamed: peer.name)
+        isStorageGateway(peer) ? NetworkService.storageExitRoute : (model.peerExitRoutes[peer.id] ?? "")
     }
 
     /// The per-peer exit-node checkbox lives in ExitNodeCheckbox.swift: it is the
     /// one deliberate customer switch, kept out of this file so the contract test
     /// can keep forbidding every other Toggle here.
     private func exitNodeCheckbox(_ peer: ConnectorStatus.MeshPeer) -> some View {
-        ExitNodeCheckbox(route: exitRouteID(for: peer), peerConnected: peer.lifecycle == "connected")
+        ExitNodeCheckbox(peer: peer, storageGateway: isStorageGateway(peer))
     }
 
     /// The computer's own name as it reported it (Computer Name in System
@@ -433,7 +442,18 @@ struct NetworkPanel: View {
     @ViewBuilder
     private func systemDetails(_ d: ConnectorStatus.HostDetails?) -> some View {
         if let d {
-            if let os = d.os { detailRow("Operating system") { Text("\(os.hasPrefix("macOS") ? "🍎 " : "🐧 ")\(os)") } }
+            if let os = d.os {
+                detailRow("Operating system") {
+                    if os.hasPrefix("macOS") {
+                        HStack(spacing: 4) {
+                            Image(systemName: "apple.logo").accessibilityHidden(true)
+                            Text(os)
+                        }
+                    } else {
+                        Text("🐧 \(os)")
+                    }
+                }
+            }
             if let model = d.model { detailRow("Model") { Text(model) } }
             if let chip = d.chip { detailRow("Processor") { Text(chip) } }
             if let cores = d.cores {
@@ -441,10 +461,46 @@ struct NetworkPanel: View {
                     ? " (\(d.performanceCores!) performance + \(d.efficiencyCores!) efficiency)" : ""
                 detailRow("Cores") { Text("\(cores)\(split)") }
             }
+            if let cpu = d.cpuUsagePercent { detailRow("CPU use") { Text("\(cpu, specifier: "%.0f")%") } }
+            if let one = d.loadAverage1m, let five = d.loadAverage5m, let fifteen = d.loadAverage15m {
+                detailRow("Load avg · 1/5/15 min") {
+                    Text("\(one, specifier: "%.2f") / \(five, specifier: "%.2f") / \(fifteen, specifier: "%.2f")")
+                        .help("Average runnable system workload over 1, 5 and 15 minutes. Compare with the computer’s core count; this is not CPU percent.")
+                }
+            }
             if let memory = d.memoryBytes { detailRow("Memory") { Text(memoryText(memory)) } }
+            if let used = d.memoryUsedBytes { detailRow("Memory in use") { Text(memoryText(used)) } }
+            if let idle = d.idleSeconds { detailRow("Activity") { Text(idle < 60 ? "In use" : "Idle for \(idle / 60) min") } }
+            if let backup = d.lastTimeMachineBackupAt,
+               let date = ISO8601DateFormatter().date(from: backup) {
+                detailRow("Last backup") { Text(date.formatted(date: .abbreviated, time: .shortened)) }
+            }
             if let total = d.diskTotalBytes {
                 let free = d.diskFreeBytes.map { "\(diskText($0)) free of " } ?? ""
                 detailRow("Disk") { Text("💾 \(free)\(diskText(total))") }
+            }
+            if let exit = d.exitNodeStatus {
+                detailRow("Internet routing") {
+                    Text(exit == "selected" ? "Exit route selected" : exit == "not_selected" ? "Exit route not selected" : exit == "unavailable" ? "No exit route offered" : "Not reported")
+                        .help("Reports the computer’s route selection. It does not independently verify where traffic exits.")
+                }
+            }
+            if let canary = d.canaryStatus {
+                detailRow("Integrity canary") {
+                    Text(canary == "watching" ? "Watching its decoy" : canary == "alert" ? "Change detected" : canary == "disabled" ? "Off" : "Unavailable")
+                }
+            }
+            if d.threatScannerStatus != nil {
+                DisclosureGroup("File scan coverage") {
+                    Text("Last reported: \(ScannerPresentation.status(d.threatScannerStatus))").font(.caption)
+                    Text("Report: \(ScannerPresentation.date(d.reportedAt))").font(.caption2).foregroundStyle(.secondary)
+                    Text("Completed pass: \(ScannerPresentation.date(d.lastThreatScanAt))").font(.caption2)
+                    Text(d.threatScanCoverage == "configured_roots" ? "Configured folders only" : "Scope not reported").font(.caption2)
+                    Text("Rules: \(d.threatRulesVersion ?? "Not reported")").font(.caption2)
+                    Text("Scanned: \(d.threatScanFilesScanned.map(String.init) ?? "Unknown") · Skipped: \(d.threatScanFilesSkipped.map(String.init) ?? "Unknown") · Findings: \(d.threatScanFindings.map(String.init) ?? "Unknown")").font(.caption2)
+                    if let error = d.threatScanLastError, error != "none" { Text(ScannerPresentation.error(error)).font(.caption2).foregroundStyle(.orange) }
+                    Text("Historical reports do not confirm the scanner is running now. Style signals do not prove malware or AI authorship.").font(.caption2).foregroundStyle(.secondary)
+                }
             }
             if let thermal = d.thermal {
                 detailRow("Thermal") {
@@ -491,15 +547,13 @@ struct NetworkPanel: View {
         }
     }
 
-    /// "Protected" in green with the negotiated scheme in words. The secure
-    /// network adds Rosenpass to WireGuard: a post-quantum key exchange built on
-    /// ML-KEM (Kyber) and Classic McEliece, mixed into WireGuard's X25519 keys.
+    /// Render protection separately from the evidence-validated algorithm label.
+    /// Never infer a parameter set from an enabled flag.
     @ViewBuilder
     private func pqText(_ value: String) -> some View {
         HStack(spacing: 4) {
             if value == "protected" {
                 Text("🔐 Protected").foregroundStyle(.green).fontWeight(.semibold)
-                Text("· ML-KEM + McEliece").foregroundStyle(.secondary)
             } else {
                 Text(pqLabel(value)).foregroundStyle(value == "failed" ? .red : .orange)
             }
@@ -509,12 +563,15 @@ struct NetworkPanel: View {
         .fixedSize()
     }
 
-    /// Opens a plain-language explanation of post-quantum cryptography. The
-    /// tooltip names the exact scheme: the secure network adds Rosenpass
-    /// (ML-KEM/Kyber + Classic McEliece) on top of WireGuard's X25519 keys.
+    private var quantumProfileExplanation: String {
+        "The algorithm is shown only for a fresh, active ML-KEM-bound tunnel session. Category 5 describes the ML-KEM-1024 parameter set, not certification of the complete app. The current integration is experimental."
+    }
+
+    /// The documentation explains the pinned build profile separately from
+    /// the peer's protection status and unavailable negotiated-suite evidence.
     private var pqInfoButton: some View {
         Button {
-            if let url = URL(string: "https://en.wikipedia.org/wiki/Post-quantum_cryptography") {
+            if let url = URL(string: "https://csrc.nist.gov/pubs/fips/203/final") {
                 NSWorkspace.shared.open(url)
             }
         } label: {
@@ -522,7 +579,7 @@ struct NetworkPanel: View {
         }
         .buttonStyle(.borderless)
         .foregroundStyle(.secondary)
-        .help("Post-quantum key exchange: ML-KEM (Kyber) + Classic McEliece via Rosenpass, combined with WireGuard X25519. Click to learn more.")
+        .help(quantumProfileExplanation)
         .accessibilityLabel("About post-quantum protection")
     }
 
@@ -661,19 +718,58 @@ struct NetworkPanel: View {
 		VStack(alignment: .leading, spacing: 7) {
 			Label("Time Machine", systemImage: "externaldrive.badge.timemachine")
 				.font(.subheadline.weight(.semibold))
-			LabeledContent("Status", value: report.timeMachine.state.replacingOccurrences(of: "_", with: " ").capitalized)
+			LabeledContent("Status", value: timeMachineStatus(report.timeMachine.state))
 			if let name = report.timeMachine.shareName { LabeledContent("Backup destination", value: name) }
 			if let cap = report.timeMachine.capacityBytes { LabeledContent("Storage limit", value: bytes(cap)) }
 			if let code = report.timeMachine.detailCode {
 				Text(timeMachineDetail(code)).font(.caption).foregroundStyle(.secondary)
+			} else if let detail = report.timeMachine.detail {
+				Text(detail).font(.caption).foregroundStyle(.secondary)
 			}
-			if let action = report.action { Text(action).font(.caption2).foregroundStyle(.secondary) }
-			Button("Check again") { Task { await model.updateTimeMachine(force: true) } }.disabled(model.busy)
+			switch report.timeMachine.state {
+			case "ready_to_connect":
+				Text("Your backup disk is ready. Add it to Time Machine on this Mac with one click.")
+					.font(.caption).foregroundStyle(.secondary)
+				HStack {
+					Button {
+						Task { await model.setUpTimeMachine() }
+					} label: {
+						Label("Set up Time Machine", systemImage: "externaldrive.badge.plus")
+					}
+					.buttonStyle(.borderedProminent)
+					.disabled(model.busy)
+					.accessibilityIdentifier("time-machine-setup")
+					Button("Check again") { Task { await model.updateTimeMachine(force: true) } }.disabled(model.busy)
+				}
+			case "connected":
+				Label("Backing up to neXal", systemImage: "checkmark.circle.fill")
+					.foregroundStyle(.green)
+				HStack {
+					Button("Open Time Machine Settings") {
+						if let url = URL(string: "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") {
+							NSWorkspace.shared.open(url)
+						}
+					}
+					Button("Check again") { Task { await model.updateTimeMachine(force: true) } }.disabled(model.busy)
+				}
+			default:
+				Button("Check again") { Task { await model.updateTimeMachine(force: true) } }.disabled(model.busy)
+			}
 		}
 		.font(.caption)
 		.padding(12)
 		.background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
 		.accessibilityIdentifier("time-machine-status")
+	}
+
+	private func timeMachineStatus(_ state: String) -> String {
+		switch state {
+		case "ready_to_connect": return "Ready to set up"
+		case "connected": return "Connected"
+		case "blocked": return "Not reachable yet"
+		case "disabled": return "Off"
+		default: return state.replacingOccurrences(of: "_", with: " ").capitalized
+		}
 	}
 
 	private func timeMachineDetail(_ code: String) -> String {

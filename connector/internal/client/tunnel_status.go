@@ -9,15 +9,24 @@ import (
 	"nexal/connector/internal/mesh"
 )
 
+type NegotiatedSecurity struct {
+	Algorithm  string `json:"algorithm"`
+	Category   int    `json:"category"`
+	Profile    string `json:"profile"`
+	VerifiedAt string `json:"verifiedAt"`
+	ExpiresAt  string `json:"expiresAt"`
+}
+
 type TunnelStatusReport struct {
-	AuthStage       string        `json:"authStage"`
-	SecurityState   string        `json:"securityState"`
-	Path            TunnelPath    `json:"path"`
-	Traffic         TunnelTraffic `json:"traffic"`
-	LastHandshakeAt string        `json:"lastHandshakeAt,omitempty"`
-	LastTrafficAt   string        `json:"lastTrafficAt,omitempty"`
-	PQVerifiedAt    string        `json:"pqVerifiedAt,omitempty"`
-	DetailCode      string        `json:"detailCode,omitempty"`
+	NegotiatedSecurity *NegotiatedSecurity `json:"negotiatedSecurity,omitempty"`
+	AuthStage          string              `json:"authStage"`
+	SecurityState      string              `json:"securityState"`
+	Path               TunnelPath          `json:"path"`
+	Traffic            TunnelTraffic       `json:"traffic"`
+	LastHandshakeAt    string              `json:"lastHandshakeAt,omitempty"`
+	LastTrafficAt      string              `json:"lastTrafficAt,omitempty"`
+	PQVerifiedAt       string              `json:"pqVerifiedAt,omitempty"`
+	DetailCode         string              `json:"detailCode,omitempty"`
 	// Services this computer offers (ssh, vnc, smb). A pointer so that "none"
 	// is sent as [] (closing their ports) while an unset value is omitted.
 	Services *[]string `json:"services,omitempty"`
@@ -75,6 +84,7 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 	report.LastTrafficAt = wireTimestamp(peer.Traffic.LastAt)
 	if report.SecurityState == "quantum_protected" {
 		report.PQVerifiedAt = wireTimestamp(peer.PQVerifiedAt)
+		report.NegotiatedSecurity = &NegotiatedSecurity{Algorithm: "ML-KEM-1024", Category: 5, Profile: peer.QuantumProfile, VerifiedAt: report.PQVerifiedAt, ExpiresAt: wireTimestamp(peer.PQExpiresAt)}
 	}
 	if report.SecurityState != "quantum_protected" {
 		report.DetailCode = "strict_pq_evidence_unavailable"

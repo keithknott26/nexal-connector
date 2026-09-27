@@ -45,18 +45,32 @@ type runtimeStatus struct {
 	} `json:"peers"`
 }
 
+const experimentalQuantumProfile = "nexal-mlkem1024-tcp-v2"
+
+// Only the runtime's active, generation-bound WireGuard session supplies this evidence.
+// Configuration flags and ordinary WireGuard handshakes are insufficient.
+func validQuantumEvidence(profile, installed, expires string, now time.Time) (time.Time, bool) {
+	i, ie := time.Parse(time.RFC3339Nano, installed)
+	e, ee := time.Parse(time.RFC3339Nano, expires)
+	return i, profile == experimentalQuantumProfile && ie == nil && ee == nil &&
+		!i.After(now) && e.After(now) && e.After(i) && e.Sub(i) <= 3*time.Minute && now.Sub(i) <= 2*time.Minute
+}
+
 type runtimePeer struct {
-	FQDN              string          `json:"fqdn"`
-	NetbirdIP         string          `json:"netbirdIp"`
-	PublicKey         string          `json:"publicKey"`
-	Status            string          `json:"status"`
-	ConnectionType    string          `json:"connectionType"`
-	LastHandshake     string          `json:"lastWireguardHandshake"`
-	TransferReceived  int64           `json:"transferReceived"`
-	TransferSent      int64           `json:"transferSent"`
-	QuantumResistance bool            `json:"quantumResistance"`
-	Latency           json.RawMessage `json:"latency"`
-	ICECandidateType  struct {
+	QuantumProfile        string          `json:"quantumProfile"`
+	QuantumKeyInstalledAt string          `json:"quantumKeyInstalledAt"`
+	QuantumKeyExpiresAt   string          `json:"quantumKeyExpiresAt"`
+	FQDN                  string          `json:"fqdn"`
+	NetbirdIP             string          `json:"netbirdIp"`
+	PublicKey             string          `json:"publicKey"`
+	Status                string          `json:"status"`
+	ConnectionType        string          `json:"connectionType"`
+	LastHandshake         string          `json:"lastWireguardHandshake"`
+	TransferReceived      int64           `json:"transferReceived"`
+	TransferSent          int64           `json:"transferSent"`
+	QuantumResistance     bool            `json:"quantumResistance"`
+	Latency               json.RawMessage `json:"latency"`
+	ICECandidateType      struct {
 		Local  string `json:"local"`
 		Remote string `json:"remote"`
 	} `json:"iceCandidateType"`
@@ -143,8 +157,10 @@ func translateRuntime(out []byte, now time.Time) Status {
 		if json.Unmarshal(rp.Latency, &ns) == nil && ns > 0 {
 			peer.LatencyMS = ns / 1e6
 		}
-		if peer.Lifecycle == LifecycleConnected && rs.QuantumResistance && rp.QuantumResistance {
-			peer.PQ, peer.PQVerifiedAt = PQProtected, FreshRFC3339(now)
+		installed, verified := validQuantumEvidence(rp.QuantumProfile, rp.QuantumKeyInstalledAt, rp.QuantumKeyExpiresAt, now)
+		if peer.Lifecycle == LifecycleConnected && rs.QuantumResistance && rp.QuantumResistance && verified {
+			peer.PQ, peer.PQVerifiedAt = PQProtected, installed.Format(time.RFC3339Nano)
+			peer.QuantumProfile, peer.PQExpiresAt = rp.QuantumProfile, rp.QuantumKeyExpiresAt
 		} else {
 			allProtected = false
 		}

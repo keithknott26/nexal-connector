@@ -372,3 +372,73 @@ changes enrollment, pauses the running agent or requires its exclusive config lo
 Keychain authorization may prompt on macOS. No bearer tokens or private keys
 are accepted in command arguments. Full platform protocol, prerequisites and
 limits: `experiments/tcp-pager/PLATFORM-DELIVERY.md` in the repository.
+
+### Security evidence import
+
+`nexal security-import --config /absolute/config.json --input /absolute/capture.jsonl --source-id CAPTURE_UUID --rules-version RULESET_VERSION`
+
+Uploads normalized Suricata EVE alerts with the enrolled host credential. The
+input must be a regular file, at most 16 MiB / 10,000 lines / 1,000 alerts; a line
+is limited to 256 KiB. The complete capture is validated before upload. The
+source ID must be an opaque capture identifier, never a filename. Keep both the
+immutable capture and its source ID until all acknowledgements arrive; retrying
+uses deterministic event IDs and is safe after a partial failure. Captures older
+than seven days are rejected by the evidence contract. Packet payloads, paths,
+IP addresses and signature prose are never uploaded. This command does not start
+a scanner or perform mitigation.
+
+### Peer telemetry
+
+`presence.hosts[].info` additionally carries optional `cpuUsagePercent`,
+`memoryAvailableBytes`, `memoryUsedBytes`, `idleSeconds`,
+`lastTimeMachineBackupAt`, and `reportedAt`. Unknown metrics are omitted; a
+measured zero is retained. Memory available means free plus speculative pages;
+used is the conservative complement, including cached/inactive memory. CPU is a
+one-second measured interval. Time Machine requires local permission to read its
+latest backup. GPU utilization and exact temperature require a supported sensor
+and are not invented from CPU or thermal pressure. Existing `thermal` reports
+macOS thermal pressure, not a temperature. Collection is bounded, unprivileged,
+and uses only fixed system executables without a shell.
+
+### Opt-in integrity canary
+
+`nexal canary --action status|enable|disable --config /absolute/config.json`
+
+`enable` creates a harmless decoy only under the connector's own private
+`security-canary` state directory. The running connector checks its integrity
+once a minute and submits a `behavior_alert` if it changes, disappears, or is
+replaced by an unsafe file type. It never inspects personal files, detects reads,
+opens a honeypot network service, or automatically mitigates anything. Disabling
+preserves the decoy and evidence. Re-enabling preserves its original baseline.
+A persistent single-event outbox retries exactly the same event until accepted;
+while a report is pending, later changes are checked after delivery rather than
+queued without bound. Alerts older than the coordinator's seven-day acceptance
+window remain locally pending and require operator review. `canaryStatus` and
+`canaryLastCheckedAt` are separate from malware scanning status. The macOS panel
+provides the same explicit enable/disable control. Updating source alone does not
+enable the feature or replace/restart an installed connector.
+
+### Peer exit-route setup and teardown
+
+`nexal exit-route --tunnel 100.x.y.z [--disable] --config /absolute/config.json`
+
+This authenticates with this computer's host credential and configures/removes a
+route scoped to the source and chosen peer. A successful enable reports
+`configured:true`, `selectionRequired:true`, `autoApply:false`, and the exact
+`routeId` to select with the local runtime. It does not select a route, turn off
+firewalls, or claim internet egress already works. Requests and provider response
+waits are bounded by 30 seconds. An `exit_route_pending` error means the durable
+choice is saved but configuration is not confirmed; keep the local route off.
+
+For teardown after a peer was removed, use `--disable --target-device UUID`.
+The stable device ID takes priority and the request omits `targetTunnelAddress`,
+even if a stale `--tunnel` was supplied. It cannot be used for enabling routes.
+The acknowledgement's action, route identifier and device identifiers are
+validated before the CLI returns success.
+
+Peer details also report `loadAverage1m`, `loadAverage5m`, `loadAverage15m` from
+macOS `sysctl -n vm.loadavg` on each regular check. These are system load averages,
+not CPU percentages; compare them with core count. Unknown values are omitted
+and measured zero is retained. `exitNodeStatus` reads the runtime's default-route
+selection as `selected`, `not_selected`, `unavailable`, or `unknown`. Selection
+does not independently prove successful internet forwarding.

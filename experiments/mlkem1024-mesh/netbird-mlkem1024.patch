@@ -1,0 +1,602 @@
+--- a/client/internal/rosenpass/manager.go
++++ b/client/internal/rosenpass/manager.go
+@@ -38,18 +38,20 @@
+ }
+ 
+ type Manager struct {
+-	ifaceName    string
+-	localWgKey   wgtypes.Key
+-	spk          []byte
+-	ssk          []byte
+-	rpKeyHash    string
+-	preSharedKey *[32]byte
+-	rpPeerIDs    map[string]*rp.PeerID
+-	rpWgHandler  *NetbirdHandler
+-	server       rpServer
+-	lock         sync.Mutex
+-	port         int
+-	wgIface      PresharedKeySetter
++	ifaceName        string
++	localWgKey       wgtypes.Key
++	spk              []byte
++	ssk              []byte
++	rpKeyHash        string
++	preSharedKey     *[32]byte
++	rpPeerIDs        map[string]*rp.PeerID
++	rpWgHandler      *NetbirdHandler
++	server           rpServer
++	lock             sync.Mutex
++	port             int
++	wgIface          PresharedKeySetter
++	tcpConn          *rp.TCPConn
++	controlEndpoints map[string]*net.UDPAddr
+ }
+ 
+ // NewManager creates a new Rosenpass manager. localWgKey is the local
+@@ -63,13 +65,14 @@
+ 	rpKeyHash := hashRosenpassKey(public)
+ 	log.Tracef("generated new rosenpass key pair with public key %s", rpKeyHash)
+ 	return &Manager{
+-		ifaceName:    wgIfaceName,
+-		localWgKey:   localWgKey,
+-		rpKeyHash:    rpKeyHash,
+-		spk:          public,
+-		ssk:          secret,
+-		preSharedKey: (*[32]byte)(preSharedKey),
+-		rpPeerIDs:    make(map[string]*rp.PeerID),
++		ifaceName:        wgIfaceName,
++		localWgKey:       localWgKey,
++		rpKeyHash:        rpKeyHash,
++		spk:              public,
++		ssk:              secret,
++		preSharedKey:     (*[32]byte)(preSharedKey),
++		rpPeerIDs:        make(map[string]*rp.PeerID),
++		controlEndpoints: make(map[string]*net.UDPAddr),
+ 		// rpWgHandler is created here (instead of only in generateConfig) so it
+ 		// is never nil between NewManager and Run(). Otherwise an early
+ 		// OnConnected call (race observed on Android, issue #4341) panics on
+@@ -92,6 +95,9 @@
+ 
+ // addPeer adds a new peer to the Rosenpass server
+ func (m *Manager) addPeer(rosenpassPubKey []byte, rosenpassAddr string, wireGuardIP string, wireGuardPubKey string) error {
++	if err := rp.ValidatePublicKey(rosenpassPubKey); err != nil {
++		return fmt.Errorf("neXal ML-KEM-1024 profile: incompatible peer public key: %w", err)
++	}
+ 	// Defense in depth against issue #4341 (Android crash): if Run() has not
+ 	// completed yet, m.server / m.rpWgHandler may be nil. Return an explicit
+ 	// error instead of panicking on nil-receiver dereference.
+@@ -102,6 +108,12 @@
+ 		return fmt.Errorf("rosenpass wg handler not initialized")
+ 	}
+ 
++	if _, exists := m.rpPeerIDs[wireGuardPubKey]; exists {
++		if err := m.removePeer(wireGuardPubKey); err != nil {
++			return err
++		}
++		delete(m.rpPeerIDs, wireGuardPubKey)
++	}
+ 	var err error
+ 	pcfg := rp.PeerConfig{PublicKey: rosenpassPubKey}
+ 	if m.preSharedKey != nil {
+@@ -127,22 +139,51 @@
+ 			pcfg.Endpoint.IP = v4.To16()
+ 		}
+ 	}
+-	peerID, err := m.server.AddPeer(pcfg)
+-	if err != nil {
+-		return err
+-	}
+-
+ 	key, err := wgtypes.ParseKey(wireGuardPubKey)
+ 	if err != nil {
+ 		return err
+ 	}
++	_, portString, err := net.SplitHostPort(rosenpassAddr)
++	if err != nil {
++		return err
++	}
++	port, err := strconv.ParseUint(portString, 10, 16)
++	if err != nil || port == 0 {
++		return fmt.Errorf("invalid ML-KEM control port")
++	}
++	endpoint, err := net.ResolveUDPAddr("udp", net.JoinHostPort(wireGuardIP, portString))
++	if err != nil {
++		return err
++	}
++	control, ok := m.wgIface.(interface {
++		ConfigureQuantumControl(string, string, uint16, uint16) error
++	})
++	if !ok || m.tcpConn == nil {
++		return fmt.Errorf("quantum session gate unavailable")
++	}
++	if err := control.ConfigureQuantumControl(wireGuardPubKey, wireGuardIP, uint16(m.port), uint16(port)); err != nil {
++		return err
++	}
++	m.tcpConn.AuthorizeEndpoint(endpoint, true)
++	m.controlEndpoints[wireGuardPubKey] = endpoint
++	peerID := rp.PeerIDFromPublicKey(rosenpassPubKey)
+ 	m.rpWgHandler.AddPeer(peerID, m.ifaceName, rp.Key(key))
++	if _, err := m.server.AddPeer(pcfg); err != nil {
++		m.rpWgHandler.RemovePeer(peerID)
++		m.tcpConn.AuthorizeEndpoint(endpoint, false)
++		delete(m.controlEndpoints, wireGuardPubKey)
++		return err
++	}
+ 	m.rpPeerIDs[wireGuardPubKey] = &peerID
+ 	return nil
+ }
+ 
+ // removePeer removes a peer from the Rosenpass server
+ func (m *Manager) removePeer(wireGuardPubKey string) error {
++	if ep := m.controlEndpoints[wireGuardPubKey]; ep != nil && m.tcpConn != nil {
++		m.tcpConn.AuthorizeEndpoint(ep, false)
++		delete(m.controlEndpoints, wireGuardPubKey)
++	}
+ 	err := m.server.RemovePeer(*m.rpPeerIDs[wireGuardPubKey])
+ 	if err != nil {
+ 		return err
+@@ -171,16 +212,6 @@
+ 	m.lock.Unlock()
+ 
+ 	cfg.Handlers = []rp.Handler{m.rpWgHandler}
+-
+-	port, err := findRandomAvailableUDPPort()
+-	if err != nil {
+-		log.Errorf("could not determine a random port for rosenpass server. Error: %s", err)
+-		return rp.Config{}, err
+-	}
+-
+-	m.port = port
+-
+-	cfg.ListenAddrs = []*net.UDPAddr{m.GetAddress()}
+ 
+ 	return cfg, nil
+ }
+@@ -229,13 +260,23 @@
+ 		return err
+ 	}
+ 
+-	server, err := rp.NewUDPServer(conf)
++	tcpConn := rp.NewTCPConn("[::]:0")
++	server, err := rp.NewTCPServer(conf, tcpConn)
+ 	if err != nil {
+ 		return err
+ 	}
+ 
+ 	m.lock.Lock()
+ 	m.server = server
++	m.tcpConn = tcpConn
++	endpoints, err := tcpConn.LocalEndpoints()
++	if err != nil {
++		m.lock.Unlock()
++		server.Close()
++		return err
++	}
++	_, portString, _ := net.SplitHostPort(endpoints[0].String())
++	m.port, _ = strconv.Atoi(portString)
+ 	m.lock.Unlock()
+ 
+ 	log.Infof("starting rosenpass server on port %d", m.port)
+@@ -247,6 +288,7 @@
+ func (m *Manager) Close() error {
+ 	m.lock.Lock()
+ 	server := m.server
++	m.rpWgHandler.SetInterface(nil)
+ 	m.server = nil
+ 	m.lock.Unlock()
+ 	if server == nil {
+@@ -319,3 +361,17 @@
+ 	}
+ 	return strconv.Atoi(portStr)
+ }
++
++// QuantumEvidence resolves evidence using the WireGuard peer identity.
++func (m *Manager) QuantumEvidence(key string) (string, string, string) {
++	m.lock.Lock()
++	defer m.lock.Unlock()
++	if m.server == nil || m.rpWgHandler == nil {
++		return "", "", ""
++	}
++	id, ok := m.rpPeerIDs[key]
++	if !ok || id == nil {
++		return "", "", ""
++	}
++	return m.rpWgHandler.QuantumEvidence(*id)
++}
+--- a/client/internal/rosenpass/netbird_handler.go
++++ b/client/internal/rosenpass/netbird_handler.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"sync"
++	"time"
+ 
+ 	rp "cunicu.li/go-rosenpass"
+ 	log "github.com/sirupsen/logrus"
+@@ -13,6 +14,12 @@
+ // This minimal interface allows rosenpass to update PSKs without depending on the full WGIface.
+ type PresharedKeySetter interface {
+ 	SetPresharedKey(peerKey string, psk wgtypes.Key, updateOnly bool) error
++}
++
++type quantumKeyInstaller interface {
++	InstallQuantumKey(string, wgtypes.Key, time.Time) error
++	RevokeQuantum(string)
++	QuantumSessionReady(string) bool
+ }
+ 
+ type wireGuardPeer struct {
+@@ -21,6 +28,8 @@
+ 	// initialized is true once a completed exchange has set a
+ 	// Rosenpass-managed PSK for this peer.
+ 	initialized bool
++	installedAt time.Time
++	expiresAt   time.Time
+ 	// chainKey is the key output by the last completed exchange, advanced by
+ 	// one ratchet step on expiry. Nil until the first exchange completes and
+ 	// after the peer has fallen back to the rendezvous key.
+@@ -54,7 +63,14 @@
+ func (h *NetbirdHandler) SetInterface(iface PresharedKeySetter) {
+ 	h.mu.Lock()
+ 	defer h.mu.Unlock()
++	for _, p := range h.peers {
++		h.revokeQuantumLocked(p)
++	}
+ 	h.iface = iface
++	for _, peer := range h.peers {
++		peer.installedAt = time.Time{}
++		peer.expiresAt = time.Time{}
++	}
+ }
+ 
+ // AddPeer registers a peer with the handler. Re-adding a known peer (every
+@@ -63,7 +79,10 @@
+ 	h.mu.Lock()
+ 	defer h.mu.Unlock()
+ 	if existing, ok := h.peers[pid]; ok && existing.PublicKey == pk {
++		h.revokeQuantumLocked(existing)
+ 		existing.Interface = intf
++		existing.installedAt = time.Time{}
++		existing.expiresAt = time.Time{}
+ 		return
+ 	}
+ 	h.peers[pid] = &wireGuardPeer{
+@@ -75,6 +94,9 @@
+ func (h *NetbirdHandler) RemovePeer(pid rp.PeerID) {
+ 	h.mu.Lock()
+ 	defer h.mu.Unlock()
++	if p := h.peers[pid]; p != nil {
++		h.revokeQuantumLocked(p)
++	}
+ 	delete(h.peers, pid)
+ }
+ 
+@@ -105,11 +127,23 @@
+ 	// chainKey tracks the shared exchange output regardless of the local write
+ 	// outcome, so both ends still converge on the next expiry.
+ 	peer.chainKey = &psk
++	h.revokeQuantumLocked(peer)
++	peer.installedAt = time.Time{}
++	peer.expiresAt = time.Time{}
+ 	peer.expiries = 0
+-	if !h.applyKeyLocked(pid, psk, peer.initialized) {
++	installed := time.Now().UTC()
++	expires := installed.Add(rp.RejectAfterTime)
++	installer, ok := h.iface.(quantumKeyInstaller)
++	if !ok {
++		return
++	}
++	if err := installer.InstallQuantumKey(wgtypes.Key(peer.PublicKey).String(), psk, expires); err != nil {
++		log.Errorf("quantum key installation failed: %v", err)
+ 		return
+ 	}
+ 	peer.initialized = true
++	peer.installedAt = installed
++	peer.expiresAt = expires
+ }
+ 
+ // HandshakeExpired replaces the expired key. The renewal exchange runs over
+@@ -127,6 +161,9 @@
+ 		return
+ 	}
+ 
++	h.revokeQuantumLocked(peer)
++	peer.installedAt = time.Time{}
++	peer.expiresAt = time.Time{}
+ 	peer.expiries++
+ 
+ 	var psk wgtypes.Key
+@@ -200,3 +237,25 @@
+ 	}
+ 	h.applyKeyLocked(pid, wgtypes.Key(key), true)
+ }
++
++// QuantumEvidence is local key-installation evidence, not remote attestation or
++// a claim that the entire protocol provides NIST category 5 security.
++func (h *NetbirdHandler) QuantumEvidence(pid rp.PeerID) (string, string, string) {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	p, ok := h.peers[pid]
++	if !ok || p.installedAt.IsZero() || !time.Now().Before(p.expiresAt) {
++		return "", "", ""
++	}
++	installer, ok := h.iface.(quantumKeyInstaller)
++	if !ok || !installer.QuantumSessionReady(wgtypes.Key(p.PublicKey).String()) {
++		return "", "", ""
++	}
++	return "nexal-mlkem1024-tcp-v2", p.installedAt.Format(time.RFC3339Nano), p.expiresAt.Format(time.RFC3339Nano)
++}
++
++func (h *NetbirdHandler) revokeQuantumLocked(p *wireGuardPeer) {
++	if installer, ok := h.iface.(quantumKeyInstaller); ok {
++		installer.RevokeQuantum(wgtypes.Key(p.PublicKey).String())
++	}
++}
+--- a/client/internal/engine.go
++++ b/client/internal/engine.go
+@@ -587,6 +587,7 @@
+ 	publicKey := e.config.WgPrivateKey.PublicKey()
+ 	e.flowManager = netflow.NewManager(e.wgInterface, publicKey[:], e.statusRecorder)
+ 
++	e.statusRecorder.SetQuantumEvidenceProvider(nil)
+ 	if e.config.RosenpassEnabled {
+ 		log.Infof("rosenpass is enabled")
+ 		if e.config.RosenpassPermissive {
+@@ -598,6 +599,7 @@
+ 		if err != nil {
+ 			return fmt.Errorf("create rosenpass manager: %w", err)
+ 		}
++		e.statusRecorder.SetQuantumEvidenceProvider(e.rpManager.QuantumEvidence)
+ 		if err := e.rpManager.Run(); err != nil {
+ 			return fmt.Errorf("run rosenpass manager: %w", err)
+ 		}
+@@ -641,6 +643,14 @@
+ 		return fmt.Errorf("create wg interface: %w", err)
+ 	}
+ 
++	if !e.config.RosenpassEnabled || e.config.RosenpassPermissive {
++		return fmt.Errorf("neXal experimental quantum runtime requires strict ML-KEM mode")
++	}
++	if d := e.wgInterface.GetWGDevice(); d != nil {
++		d.RequireQuantum()
++	} else {
++		return fmt.Errorf("neXal quantum gate requires userspace WireGuard; kernel backend is unsupported")
++	}
+ 	if filteredDevice := e.wgInterface.GetDevice(); filteredDevice != nil {
+ 		filteredDevice.SetPanicHandler(e.triggerClientRestart)
+ 	}
+@@ -788,13 +798,12 @@
+ 		nil,
+ 		[]netip.Prefix{netip.PrefixFrom(netip.IPv4Unspecified(), 0)},
+ 		firewallManager.Network{},
+-		firewallManager.ProtocolUDP,
++		firewallManager.ProtocolTCP,
+ 		nil,
+ 		&port,
+ 		firewallManager.ActionAccept,
+ 	); err != nil {
+-		log.Errorf("failed to allow rosenpass interface traffic: %v", err)
+-		return nil
++		return fmt.Errorf("allow ML-KEM TCP control traffic: %w", err)
+ 	}
+ 
+ 	log.Infof("rosenpass interface traffic allowed on port %d", rosenpassPort)
+--- a/client/internal/peer/status.go
++++ b/client/internal/peer/status.go
+@@ -70,6 +70,9 @@
+ 	BytesRx                    int64
+ 	Latency                    time.Duration
+ 	RosenpassEnabled           bool
++	QuantumProfile             string
++	QuantumKeyInstalledAt      string
++	QuantumKeyExpiresAt        string
+ 	SSHHostKey                 []byte
+ 	routes                     map[string]struct{}
+ }
+@@ -192,6 +195,7 @@
+ // every private-service request) don't contend against each other.
+ // Pure read methods take RLock; anything that mutates state takes Lock.
+ type Status struct {
++	quantumEvidence     func(string) (string, string, string)
+ 	mux                 sync.RWMutex
+ 	muxRelays           sync.RWMutex
+ 	peers               map[string]State
+@@ -1197,6 +1201,9 @@
+ 	fullStatus.LocalPeerState = d.localPeer
+ 
+ 	for _, status := range d.peers {
++		if d.quantumEvidence != nil && status.ConnStatus == StatusConnected {
++			status.QuantumProfile, status.QuantumKeyInstalledAt, status.QuantumKeyExpiresAt = d.quantumEvidence(status.PubKey)
++		}
+ 		fullStatus.Peers = append(fullStatus.Peers, status)
+ 	}
+ 
+@@ -1584,6 +1591,9 @@
+ 			BytesRx:                    peerState.BytesRx,
+ 			BytesTx:                    peerState.BytesTx,
+ 			RosenpassEnabled:           peerState.RosenpassEnabled,
++			QuantumProfile:             peerState.QuantumProfile,
++			QuantumKeyInstalledAt:      peerState.QuantumKeyInstalledAt,
++			QuantumKeyExpiresAt:        peerState.QuantumKeyExpiresAt,
+ 			Networks:                   networks,
+ 			Latency:                    durationpb.New(peerState.Latency),
+ 			SshHostKey:                 peerState.SSHHostKey,
+@@ -1627,3 +1637,11 @@
+ 
+ 	return &pbFullStatus
+ }
++
++// SetQuantumEvidenceProvider installs a read-only provider; configuration flags
++// cannot populate exchange evidence. A new engine replaces the old provider.
++func (d *Status) SetQuantumEvidenceProvider(provider func(string) (string, string, string)) {
++	d.mux.Lock()
++	defer d.mux.Unlock()
++	d.quantumEvidence = provider
++}
+--- a/client/status/status.go
++++ b/client/status/status.go
+@@ -65,6 +65,9 @@
+ }
+ 
+ type PeerStateDetailOutput struct {
++	QuantumProfile         string           `json:"quantumProfile,omitempty" yaml:"quantumProfile,omitempty"`
++	QuantumKeyInstalledAt  string           `json:"quantumKeyInstalledAt,omitempty" yaml:"quantumKeyInstalledAt,omitempty"`
++	QuantumKeyExpiresAt    string           `json:"quantumKeyExpiresAt,omitempty" yaml:"quantumKeyExpiresAt,omitempty"`
+ 	FQDN                   string           `json:"fqdn" yaml:"fqdn"`
+ 	IP                     string           `json:"netbirdIp" yaml:"netbirdIp"`
+ 	IPv6                   string           `json:"netbirdIpv6,omitempty" yaml:"netbirdIpv6,omitempty"`
+@@ -367,6 +370,9 @@
+ 			TransferSent:           transferSent,
+ 			Latency:                pbPeerState.GetLatency().AsDuration(),
+ 			RosenpassEnabled:       pbPeerState.GetRosenpassEnabled(),
++			QuantumProfile:         pbPeerState.GetQuantumProfile(),
++			QuantumKeyInstalledAt:  pbPeerState.GetQuantumKeyInstalledAt(),
++			QuantumKeyExpiresAt:    pbPeerState.GetQuantumKeyExpiresAt(),
+ 			Networks:               pbPeerState.GetNetworks(),
+ 		}
+ 
+@@ -712,6 +718,9 @@
+ 			BytesRx:                    peerState.BytesRx,
+ 			BytesTx:                    peerState.BytesTx,
+ 			RosenpassEnabled:           peerState.RosenpassEnabled,
++			QuantumProfile:             peerState.QuantumProfile,
++			QuantumKeyInstalledAt:      peerState.QuantumKeyInstalledAt,
++			QuantumKeyExpiresAt:        peerState.QuantumKeyExpiresAt,
+ 			Networks:                   maps.Keys(peerState.GetRoutes()),
+ 			Latency:                    durationpb.New(peerState.Latency),
+ 			SshHostKey:                 peerState.SSHHostKey,
+--- a/client/proto/daemon.proto
++++ b/client/proto/daemon.proto
+@@ -399,6 +399,9 @@
+   string relayAddress = 18;
+   bytes sshHostKey = 19;
+   string ipv6 = 20;
++ string quantumProfile = 21;
++ string quantumKeyInstalledAt = 22;
++ string quantumKeyExpiresAt = 23;
+ }
+ 
+ // LocalPeerState contains the latest state of the local peer
+--- a/client/proto/daemon.pb.go
++++ b/client/proto/daemon.pb.go
+@@ -1,7 +1,7 @@
+ // Code generated by protoc-gen-go. DO NOT EDIT.
+ // versions:
+-// 	protoc-gen-go v1.36.6
+-// 	protoc        v6.33.1
++// 	protoc-gen-go v1.36.11
++// 	protoc        v6.33.0
+ // source: daemon.proto
+ 
+ package proto
+@@ -1507,6 +1507,9 @@
+ 	RelayAddress               string                 `protobuf:"bytes,18,opt,name=relayAddress,proto3" json:"relayAddress,omitempty"`
+ 	SshHostKey                 []byte                 `protobuf:"bytes,19,opt,name=sshHostKey,proto3" json:"sshHostKey,omitempty"`
+ 	Ipv6                       string                 `protobuf:"bytes,20,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
++	QuantumProfile             string                 `protobuf:"bytes,21,opt,name=quantumProfile,proto3" json:"quantumProfile,omitempty"`
++	QuantumKeyInstalledAt      string                 `protobuf:"bytes,22,opt,name=quantumKeyInstalledAt,proto3" json:"quantumKeyInstalledAt,omitempty"`
++	QuantumKeyExpiresAt        string                 `protobuf:"bytes,23,opt,name=quantumKeyExpiresAt,proto3" json:"quantumKeyExpiresAt,omitempty"`
+ 	unknownFields              protoimpl.UnknownFields
+ 	sizeCache                  protoimpl.SizeCache
+ }
+@@ -1670,6 +1673,27 @@
+ func (x *PeerState) GetIpv6() string {
+ 	if x != nil {
+ 		return x.Ipv6
++	}
++	return ""
++}
++
++func (x *PeerState) GetQuantumProfile() string {
++	if x != nil {
++		return x.QuantumProfile
++	}
++	return ""
++}
++
++func (x *PeerState) GetQuantumKeyInstalledAt() string {
++	if x != nil {
++		return x.QuantumKeyInstalledAt
++	}
++	return ""
++}
++
++func (x *PeerState) GetQuantumKeyExpiresAt() string {
++	if x != nil {
++		return x.QuantumKeyExpiresAt
+ 	}
+ 	return ""
+ }
+@@ -7240,7 +7264,7 @@
+ 	"\x0esshJWTCacheTTL\x18\x1a \x01(\x05R\x0esshJWTCacheTTL\x12!\n" +
+ 	"\fdisable_ipv6\x18\x1b \x01(\bR\vdisableIpv6\x12,\n" +
+ 	"\x11remoteJobsAllowed\x18\x1d \x01(\bR\x11remoteJobsAllowed\x12*\n" +
+-	"\x10mDMManagedFields\x18\x1c \x03(\tR\x10mDMManagedFields\"\x92\x06\n" +
++	"\x10mDMManagedFields\x18\x1c \x03(\tR\x10mDMManagedFields\"\xa2\a\n" +
+ 	"\tPeerState\x12\x0e\n" +
+ 	"\x02IP\x18\x01 \x01(\tR\x02IP\x12\x16\n" +
+ 	"\x06pubKey\x18\x02 \x01(\tR\x06pubKey\x12\x1e\n" +
+@@ -7265,7 +7289,10 @@
+ 	"\n" +
+ 	"sshHostKey\x18\x13 \x01(\fR\n" +
+ 	"sshHostKey\x12\x12\n" +
+-	"\x04ipv6\x18\x14 \x01(\tR\x04ipv6\"\x9c\x02\n" +
++	"\x04ipv6\x18\x14 \x01(\tR\x04ipv6\x12&\n" +
++	"\x0equantumProfile\x18\x15 \x01(\tR\x0equantumProfile\x124\n" +
++	"\x15quantumKeyInstalledAt\x18\x16 \x01(\tR\x15quantumKeyInstalledAt\x120\n" +
++	"\x13quantumKeyExpiresAt\x18\x17 \x01(\tR\x13quantumKeyExpiresAt\"\x9c\x02\n" +
+ 	"\x0eLocalPeerState\x12\x0e\n" +
+ 	"\x02IP\x18\x01 \x01(\tR\x02IP\x12\x16\n" +
+ 	"\x06pubKey\x18\x02 \x01(\tR\x06pubKey\x12(\n" +
+--- a/client/iface/iface.go
++++ b/client/iface/iface.go
+@@ -357,3 +357,49 @@
+ 
+ 	return w.tun.GetNet()
+ }
++
++// ConfigureQuantumControl and InstallQuantumKey require the userspace session
++// gate; kernel WireGuard cannot silently bypass it in this experimental profile.
++func (w *WGIface) ConfigureQuantumControl(peerKey, remoteIP string, localPort, remotePort uint16) error {
++	key, err := wgtypes.ParseKey(peerKey)
++	if err != nil {
++		return err
++	}
++	remote, err := netip.ParseAddr(remoteIP)
++	if err != nil {
++		return err
++	}
++	d := w.GetWGDevice()
++	if d == nil {
++		return fmt.Errorf("quantum session gate requires userspace WireGuard")
++	}
++	return d.ConfigureQuantumControl([32]byte(key), w.Address().IP, remote, localPort, remotePort)
++}
++func (w *WGIface) InstallQuantumKey(peerKey string, psk wgtypes.Key, expires time.Time) error {
++	key, err := wgtypes.ParseKey(peerKey)
++	if err != nil {
++		return err
++	}
++	d := w.GetWGDevice()
++	if d == nil {
++		return fmt.Errorf("quantum session gate requires userspace WireGuard")
++	}
++	return d.InstallQuantumKey([32]byte(key), [32]byte(psk), expires)
++}
++func (w *WGIface) RevokeQuantum(peerKey string) {
++	key, err := wgtypes.ParseKey(peerKey)
++	if err != nil {
++		return
++	}
++	if d := w.GetWGDevice(); d != nil {
++		d.RevokeQuantum([32]byte(key))
++	}
++}
++func (w *WGIface) QuantumSessionReady(peerKey string) bool {
++	key, err := wgtypes.ParseKey(peerKey)
++	if err != nil {
++		return false
++	}
++	d := w.GetWGDevice()
++	return d != nil && d.QuantumSessionReady([32]byte(key))
++}

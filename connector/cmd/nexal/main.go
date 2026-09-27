@@ -23,11 +23,13 @@ import (
 	"nexal/connector/internal/agent"
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/cybersecurity"
 	"nexal/connector/internal/diagnostics"
 	"nexal/connector/internal/discovery"
 	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/observability"
 	"nexal/connector/internal/presence"
+	"nexal/connector/internal/privateruntime"
 	"nexal/connector/internal/sysinfo"
 	"nexal/connector/internal/tunnel"
 	"nexal/connector/internal/wol"
@@ -76,9 +78,19 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|security-import|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
+	case "exit-route":
+		return exitRouteCommand(ctx, args[1:])
+	case "guest":
+		return guestCommand(ctx, args[1:])
+	case "security":
+		return securityCommand(ctx, args[1:])
+	case "canary":
+		return canaryCommand(ctx, args[1:])
+	case "security-import":
+		return securityImportCommand(ctx, args[1:])
 	case "coordinator-check":
 		return coordinatorCheckCommand(ctx, args[1:])
 	case "bundle-send", "bundle-receive":
@@ -364,6 +376,12 @@ func enrollCommand(ctx context.Context, args []string) error {
 	return emit(map[string]any{"enrolled": true, "hostId": c.HostID, "marketplaceEnabled": false})
 }
 func runCommand(ctx context.Context, args []string) error {
+	return runCommandWithMachineLock(ctx, args, config.LockMachine)
+}
+
+// The test seam keeps integration tests away from a real running connector's lock.
+// Production always supplies the host-wide lock above; no environment bypass exists.
+func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine func(string) (func(), error)) error {
 	f, path, err := flags("run")
 	if err != nil {
 		return err
@@ -398,11 +416,21 @@ func runCommand(ctx context.Context, args []string) error {
 	// Taken by `run` alone, and deliberately not by enroll/peers/share/self-test. Those
 	// are short-lived and frequently used WHILE the agent runs; a host-wide lock in
 	// config.Lock itself would make `nexal peers` fail whenever the agent is up.
-	unlockHost, err := config.LockMachine(*path)
+	unlockHost, err := lockMachine(*path)
 	if err != nil {
 		return err
 	}
 	defer unlockHost()
+	if c.GuestAccess != nil {
+		if c.GuestAccess.IsExpired(time.Now()) {
+			_ = expireGuest(ctx, *path, &c)
+			return guestExpiredError(c.GuestAccess)
+		}
+		if !guestGuardReady(ctx, *path, *c.GuestAccess) {
+			_ = (mesh.ExecRunner{}).Run(ctx, "nexal-network", "down")
+			return errors.New("temporary access requires its installed expiry guard")
+		}
+	}
 	secrets, err := config.NewSecrets(*path, c)
 	if err != nil {
 		return err
@@ -494,6 +522,8 @@ func runCommand(ctx context.Context, args []string) error {
 	// This Mac's details for the other computers' panels, sent over the
 	// presence stream below (one frame, only on material change).
 	hostInfo := sysinfo.NewCollector()
+	canary := cybersecurity.CanaryForConfig(*path)
+	scanner := cybersecurity.ScannerForConfig(*path)
 	// Live presence (GET /api/v2/hosts/events) and Wake-on-LAN. The stream uses
 	// the same client, so the same origin/TLS/no-proxy policy and host token as
 	// every REST call. A coordinator without these routes answers 404 and both
@@ -503,6 +533,30 @@ func runCommand(ctx context.Context, args []string) error {
 		Logger: logger.With("component", "presence"),
 		Info: func(ctx context.Context) sysinfo.Info {
 			info := hostInfo.Collect(ctx)
+			info.ExitNodeStatus = mesh.ReadExitNodeStatus(ctx)
+			if state, err := scanner.Status(); err == nil {
+				info.ThreatScannerStatus = state.Status
+				info.LastThreatScanAt = state.LastScanAt
+				info.ThreatRulesVersion = state.RulesVersion
+				info.ThreatScanLastError = state.LastError
+				info.ThreatScanCoverage = state.Coverage
+				if state.LastScanAt != "" {
+					scanned, skipped, findings := state.FilesScanned, state.FilesSkipped, state.Findings
+					info.ThreatScanFilesScanned = &scanned
+					info.ThreatScanFilesSkipped = &skipped
+					info.ThreatScanFindings = &findings
+				}
+			} else {
+				info.ThreatScannerStatus = "error"
+				info.ThreatScanLastError = "state_error"
+			}
+
+			if state, err := canary.Status(); err == nil {
+				info.CanaryStatus = state.Status
+				info.CanaryLastCheckedAt = state.LastCheckedAt
+			} else {
+				info.CanaryStatus = "error"
+			}
 			if ip := meshProvider.Snapshot().SelfTunnelAddress; client.ValidTunnelAddress(ip) {
 				info.TunnelAddress = ip
 			}
@@ -527,7 +581,32 @@ func runCommand(ctx context.Context, args []string) error {
 	defer cancel()
 	results := make(chan error, 3)
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(5)
+	go func() {
+		defer wg.Done()
+		manager := privateruntime.Manager{API: api, HostID: c.HostID, Root: filepath.Join(filepath.Dir(*path), "runtime-sessions"), Connected: func() bool {
+			status := a.Snapshot()
+			observed, err := time.Parse(time.RFC3339Nano, status.Mesh.UpdatedAt)
+			return err == nil && time.Since(observed) >= 0 && time.Since(observed) < 30*time.Second && meshProvider.Enrolled() &&
+				status.Mesh.ProviderAvailable && status.Mesh.Lifecycle == mesh.LifecycleConnected && !status.Paused &&
+				!status.Contribution.Withholding && status.ActiveAttempt == "" && !status.CredentialRejected
+		}}
+		if err := manager.RunLoop(ctx); err != nil {
+			logger.Warn("private runtime bootstrap stopped", "reason", "bootstrap_unavailable")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		runScanner(ctx, scanner, func(ctx context.Context, event cybersecurity.Event) error {
+			return api.ReportSecurityEvent(ctx, c.HostID, event)
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		runCanary(ctx, canary, func(ctx context.Context, event cybersecurity.Event) error {
+			return api.ReportSecurityEvent(ctx, c.HostID, event)
+		})
+	}()
 	go func() { defer wg.Done(); results <- a.Serve(ctx, admin) }()
 	go func() { defer wg.Done(); results <- a.Run(ctx) }()
 	// Version-2 enrollment uses the embedded peer-to-peer mesh runtime. Older
@@ -549,12 +628,29 @@ func runCommand(ctx context.Context, args []string) error {
 			})
 		}()
 	}
+	var guestDeadline <-chan time.Time
+	var guestTimer *time.Timer
+	if c.GuestAccess != nil {
+		deadline, _ := time.Parse(time.RFC3339Nano, c.GuestAccess.AccessExpiresAt)
+		guestTimer = time.NewTimer(time.Until(deadline))
+		defer guestTimer.Stop()
+		guestDeadline = guestTimer.C
+	}
+	guestExpired := false
 	select {
 	case err = <-results:
 	case <-ctx.Done():
+	case <-guestDeadline:
+		guestExpired = true
 	}
 	cancel()
 	wg.Wait()
+	if guestExpired {
+		request, stop := context.WithTimeout(context.Background(), 12*time.Second)
+		defer stop()
+		_ = expireGuest(request, *path, &c)
+		return guestExpiredError(c.GuestAccess)
+	}
 	return err
 }
 
@@ -740,7 +836,7 @@ type enrollmentGatedMesh struct {
 
 func (p enrollmentGatedMesh) Enrolled() bool {
 	c, err := config.Load(p.path)
-	return err == nil && c.Enrollment != nil
+	return err == nil && c.Enrollment != nil && (c.GuestAccess == nil || !c.GuestAccess.IsExpired(time.Now()))
 }
 
 func (p enrollmentGatedMesh) Snapshot() mesh.Status {

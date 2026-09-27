@@ -94,9 +94,9 @@ const (
 	// recentWakeIDs bounds the requestId de-duplication memory.
 	recentWakeIDs = 64
 	// InfoCheckInterval is how often this Mac re-reads its own details. A frame
-	// is sent only when they changed materially, so this costs nothing on the
-	// wire while nothing changes.
-	InfoCheckInterval = 5 * time.Minute
+	// is sent when metrics change, with a five-minute freshness refresh.
+	InfoCheckInterval   = time.Minute
+	InfoRefreshInterval = 5 * time.Minute
 	// maxInfoText bounds each text field accepted from a peer.
 	maxInfoText = 120
 )
@@ -497,7 +497,7 @@ func (c *Client) handle(data []byte) bool {
 }
 
 // reportInfo sends this Mac's details after the first snapshot, then re-checks
-// every InfoCheckInterval and sends only on a material change.
+// every InfoCheckInterval and sends changes or a five-minute freshness refresh.
 func (c *Client) reportInfo(ctx context.Context, conn Conn, snapshotSeen <-chan struct{}) {
 	select {
 	case <-ctx.Done():
@@ -509,16 +509,17 @@ func (c *Client) reportInfo(ctx context.Context, conn Conn, snapshotSeen <-chan 
 		every = InfoCheckInterval
 	}
 	var last sysinfo.Info
+	var lastSent time.Time
 	sent := false
 	for {
 		info := c.opts.Info(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		if !sent || sysinfo.Material(last, info) {
+		if shouldReportInfo(last, info, sent, time.Since(lastSent)) {
 			frame, err := json.Marshal(map[string]any{"v": 1, "type": "host.info", "info": info})
 			if err == nil && conn.WriteText(frame) == nil {
-				last, sent = info, true
+				last, sent, lastSent = info, true, time.Now()
 			}
 		}
 		if c.opts.Sleep(ctx, every) != nil {
@@ -530,7 +531,7 @@ func (c *Client) reportInfo(ctx context.Context, conn Conn, snapshotSeen <-chan 
 // cleanInfo bounds every text field received from a peer.
 func cleanInfo(info sysinfo.Info) sysinfo.Info {
 	for _, field := range []*string{&info.Name, &info.OS, &info.Model, &info.Chip, &info.Thermal, &info.TunnelAddress, &info.LANAddress,
-		&info.BatteryState, &info.PublicIP, &info.Location} {
+		&info.BatteryState, &info.PublicIP, &info.Location, &info.ReportedAt, &info.LastTimeMachineBackupAt, &info.CanaryStatus, &info.CanaryLastCheckedAt, &info.ExitNodeStatus, &info.ThreatScannerStatus, &info.LastThreatScanAt, &info.ThreatRulesVersion, &info.ThreatScanLastError, &info.ThreatScanCoverage} {
 		text := strings.Map(func(r rune) rune {
 			if r < 0x20 || r == 0x7f {
 				return -1
@@ -595,4 +596,9 @@ func (c *Client) relayWake(e event) {
 		return
 	}
 	log.Info("wake relayed", "request", e.RequestID, "target", e.TargetHostID, "macs", len(macs), "interfaces", n)
+}
+
+// shouldReportInfo keeps local sampling independent from network reporting.
+func shouldReportInfo(last, next sysinfo.Info, sent bool, elapsed time.Duration) bool {
+	return !sent || elapsed >= InfoRefreshInterval || sysinfo.Material(last, next)
 }

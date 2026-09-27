@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,10 +31,15 @@ import (
 // sudo authenticates on the user's own /dev/tty (we never pass -S), so it
 // cannot consume the piped password; the password is only written after
 // tmutil has printed its prompt, i.e. after echo is off.
+//
+// From the neXal-Connector app there is no terminal for sudo to ask on, so the
+// same script(1)+tmutil command runs as root through macOS's own administrator
+// dialog instead (see runElevated). The password rules are unchanged.
 const (
-	sudoPath   = "/usr/bin/sudo"
-	scriptPath = "/usr/bin/script"
-	tmutilPath = "/usr/bin/tmutil"
+	sudoPath      = "/usr/bin/sudo"
+	scriptPath    = "/usr/bin/script"
+	tmutilPath    = "/usr/bin/tmutil"
+	osascriptPath = "/usr/bin/osascript"
 
 	setDestinationTimeout = 3 * time.Minute
 	tmutilOutputLimit     = 64 << 10
@@ -67,6 +75,129 @@ var hasTerminal = func() bool {
 	return true
 }
 
+// elevatedPromptAvailable reports whether the macOS administrator dialog can be
+// used when there is no terminal (tests turn it off).
+var elevatedPromptAvailable = func() bool { return runtime.GOOS == "darwin" }
+
+// elevatedPrompt is the text of the macOS administrator dialog.
+const elevatedPrompt = "neXal-Connector wants to add your neXal Time Machine backup disk."
+
+// shellQuote single-quotes s for /bin/sh.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// appleScriptString renders s as an AppleScript string literal.
+func appleScriptString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
+// elevatedScript is the AppleScript run by osascript. It holds the
+// password-free destination URL and the two FIFO paths, nothing secret.
+func elevatedScript(destinationURL, inFIFO, outFIFO string) string {
+	shell := fmt.Sprintf("%s -q /dev/null %s setdestination -a -p %s < %s > %s 2>&1",
+		scriptPath, tmutilPath, shellQuote(destinationURL), shellQuote(inFIFO), shellQuote(outFIFO))
+	return fmt.Sprintf("do shell script %s with administrator privileges with prompt %s",
+		appleScriptString(shell), appleScriptString(elevatedPrompt))
+}
+
+// errAdminCancelled is returned when the owner dismisses the macOS dialog.
+var errAdminCancelled = errors.New("administrator approval was cancelled; the backup disk was not added")
+
+// runElevated runs script(1)+tmutil as root behind the macOS administrator
+// dialog. The password never enters argv or the disk: script's stdin and its
+// output are FIFOs in a private 0700 directory, tmutil's prompt is read back
+// through the output FIFO, and only then is the password written to the input
+// FIFO. Replaceable in tests.
+var runElevated = func(ctx context.Context, destinationURL string, stdin io.Reader, stdout io.Writer) error {
+	dir, err := os.MkdirTemp("", "nexal-tm-") // 0700
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	inFIFO, outFIFO := filepath.Join(dir, "in"), filepath.Join(dir, "out")
+	for _, p := range []string{inFIFO, outFIFO} {
+		if err := syscall.Mkfifo(p, 0o600); err != nil {
+			return err
+		}
+	}
+	cmd := exec.CommandContext(ctx, osascriptPath, "-e", elevatedScript(destinationURL, inFIFO, outFIFO))
+	var diag bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &diag, &diag
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 5 * time.Second
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	output := make(chan struct{})
+	go func() { // root's shell opens the output FIFO for writing
+		defer close(output)
+		if f, err := os.OpenFile(outFIFO, os.O_RDONLY, 0); err == nil {
+			_, _ = io.Copy(stdout, f)
+			_ = f.Close()
+		}
+	}()
+	// ...and the input FIFO for reading. Not waited for, like runTmutil's
+	// stdin copy: it ends when the caller closes the password feeder.
+	go func() {
+		if f, err := os.OpenFile(inFIFO, os.O_WRONLY, 0); err == nil {
+			_, _ = io.Copy(f, stdin)
+			_ = f.Close()
+		}
+	}()
+	waitErr := cmd.Wait()
+	// If the dialog was cancelled the shell never opened the FIFOs and the opens
+	// above are still blocked. Opening the other end releases a blocked open;
+	// retried briefly because a goroutine may not have reached its open yet.
+	for deadline := time.Now().Add(3 * time.Second); ; {
+		if f, err := os.OpenFile(outFIFO, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = f.Close()
+		}
+		if f, err := os.OpenFile(inFIFO, os.O_RDONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = f.Close()
+		}
+		select {
+		case <-output:
+		case <-time.After(50 * time.Millisecond):
+			if time.Now().Before(deadline) {
+				continue
+			}
+		}
+		break
+	}
+	if waitErr != nil && strings.Contains(diag.String(), "-128") {
+		return errAdminCancelled
+	}
+	return waitErr
+}
+
+// destinationConfigured reports whether Time Machine already has this gateway
+// share as a destination. `tmutil destinationinfo` needs no privileges and
+// prints one "URL : smb://user@host/share" line per destination.
+var destinationConfigured = func(host, share string) bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	out, err := exec.Command(tmutilPath, "destinationinfo").Output()
+	if err != nil {
+		return false
+	}
+	return destinationListed(string(out), host, share)
+}
+
+func destinationListed(info, host, share string) bool {
+	host, share = strings.ToLower(host), strings.ToLower(share)
+	for _, line := range strings.Split(strings.ToLower(info), "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(key) != "url" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if strings.Contains(value, "@"+host+"/") && strings.HasSuffix(strings.TrimRight(value, "/"), "/"+share) {
+			return true
+		}
+	}
+	return false
+}
+
 func tmutilArgv(destinationURL string, interactive bool) []string {
 	argv := []string{sudoPath}
 	if !interactive {
@@ -84,15 +215,28 @@ var setDestination = func(ctx context.Context, destinationURL string, password [
 	out := &promptWatcher{prompted: make(chan struct{})}
 	feed := &passwordFeeder{prompted: out.prompted, closed: make(chan struct{}), secret: append(append(make([]byte, 0, len(password)+1), password...), '\n')}
 	defer feed.Close()
-	err := runTmutil(ctx, tmutilArgv(destinationURL, interactive), feed, out, os.Stderr)
+	elevated := !interactive && elevatedPromptAvailable()
+	var err error
+	if elevated {
+		err = runElevated(ctx, destinationURL, feed, out)
+	} else {
+		err = runTmutil(ctx, tmutilArgv(destinationURL, interactive), feed, out, os.Stderr)
+	}
 	feed.Close()
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, errAdminCancelled) {
+		return err
 	}
 	if detail := out.redacted(password); len(detail) > 0 {
 		_, _ = os.Stderr.Write(append(detail, '\n'))
 	}
 	switch {
+	case elevated && ctx.Err() != nil && !out.sawPrompt():
+		return errors.New("timed out waiting for administrator approval; the backup disk was not added")
+	case elevated && ctx.Err() == nil:
+		return errors.New("macOS did not add the backup disk; check that the secure network is connected and that neXal-Connector has Full Disk Access (System Settings › Privacy & Security)")
 	case ctx.Err() != nil && !out.sawPrompt():
 		return errors.New("tmutil setdestination timed out before tmutil asked for the share password; approve the administrator prompt in Terminal")
 	case ctx.Err() != nil:
@@ -270,9 +414,13 @@ func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c
 		view["detail"] = err.Error()
 		return emit(map[string]any{"timeMachine": view})
 	}
+	if !connect && destinationConfigured(d.Host, d.Share) {
+		view["state"] = "connected"
+		return emit(map[string]any{"timeMachine": view})
+	}
 	if !connect {
 		view["state"] = "ready_to_connect"
-		view["action"] = "Run: nexal time-machine -connect"
+		view["action"] = "Set up Time Machine in neXal-Connector, or run: nexal time-machine -connect"
 		return emit(map[string]any{"timeMachine": view})
 	}
 	if runtime.GOOS != "darwin" && !dryRun {

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "template": "mlx-ring-smoke-v1",
-  "template_version": "1.0.0",
-  "runtime_version": "0.1.0",
+  "template_version": "1.1.0",
+  "runtime_version": "0.2.0",
   "entrypoint": "nexal_mlx_entry.py",
   "entrypoint_sha256": "a7de43620d79d2b0401062db7ed58c490fea2373d6ed8ba486b603870a57dfc2",
   "implementation": "nexal_mlx/ring.py",

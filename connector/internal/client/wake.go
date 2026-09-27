@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"nexal/connector/internal/observability"
 	"time"
 
 	"nexal/connector/internal/wol"
@@ -77,7 +78,7 @@ func (c *Client) DialHostEvents(ctx context.Context) (*wsclient.Conn, error) {
 // tlsConfig returns the REST transport's TLS settings so the WebSocket trusts
 // exactly the roots the REST calls trust (tests install a private root there).
 func (c *Client) tlsConfig() *tls.Config {
-	if tr, ok := c.http.Transport.(*http.Transport); ok && tr.TLSClientConfig != nil {
+	if tr, ok := observability.Underlying(c.http.Transport).(*http.Transport); ok && tr.TLSClientConfig != nil {
 		return tr.TLSClientConfig.Clone()
 	}
 	return nil

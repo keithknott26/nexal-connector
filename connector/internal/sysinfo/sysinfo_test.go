@@ -60,8 +60,8 @@ func TestCollectorCachesStaticAndNeverFails(t *testing.T) {
 	if a.DiskTotalBytes != 500<<30 || b.DiskFreeBytes != 200<<30 || a.Cores == 0 {
 		t.Fatalf("unexpected info: %+v", a)
 	}
-	if runtime.GOOS == "darwin" && calls-first != 1 {
-		t.Fatalf("static part re-read: %d extra calls", calls-first-1)
+	if runtime.GOOS == "darwin" && calls-first != 7 {
+		t.Fatalf("static part re-read: %d extra calls", calls-first-7)
 	}
 }
 
@@ -122,5 +122,17 @@ func TestPickLANAddressPrefersIPv4PrivateOverLinkLocalAndULA(t *testing.T) {
 	}
 	if got := pickLANAddress(ifaces, func(i net.Interface) ([]net.Addr, error) { return addrs[i.Name], nil }); got != "10.20.30.40" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSerialFromProfiler(t *testing.T) {
+	hw := []byte("Hardware Overview:\n      Model Name: Mac mini\n      Serial Number (system): C07ABC123XYZ\n")
+	if got := profilerField(hw, "Serial Number (system)"); !validSerial(got) || got != "C07ABC123XYZ" {
+		t.Fatalf("serial = %q", got)
+	}
+	for _, bad := range []string{"", "short", "c07abc123xyz", "C07ABC 123XYZ", "C07ABC123XYZ0123456789"} {
+		if validSerial(bad) {
+			t.Fatalf("validSerial(%q) = true", bad)
+		}
 	}
 }

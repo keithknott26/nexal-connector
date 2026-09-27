@@ -120,12 +120,14 @@ enum ConnectorProcess {
     /// pre-pairing state (where no local agent should be listening yet) from an
     /// enrolled connector that has stopped and should be restarted.
     static func hasPersistedHostIdentity(at url: URL) -> Bool {
-        struct Identity: Decodable { let hostId: String? }
+        struct Identity: Decodable { let hostId: String?; let guestAccess: GuestAccessRecord?; let enrollment: GuestEnrollment? }
+        struct GuestEnrollment: Decodable { let status: String }
         guard let data = try? Data(contentsOf: url),
               let value = try? JSONDecoder().decode(Identity.self, from: data),
               let hostId = value.hostId?.trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
         }
+        if let guest = value.guestAccess { return !guest.isExpired() && value.enrollment?.status == "paired" && !hostId.isEmpty }
         return !hostId.isEmpty
     }
 

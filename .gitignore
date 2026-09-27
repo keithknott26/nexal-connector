@@ -33,3 +33,12 @@ __pycache__/
 .build/
 Claude outputs/*.tgz
 connector/nexal
+
+# Private signing material and downloaded session payloads must never ship.
+macos/scripts/cert.b64
+*.p12
+*.pfx
+runtime-sessions/
+
+# Temporary task handoff archives are not release source.
+/.tmp-*.tgz

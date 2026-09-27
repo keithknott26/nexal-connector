@@ -260,7 +260,7 @@ func (a *Agent) Snapshot() Status {
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
 		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
 		Presence: a.presenceStatusLocked(), Wake: a.wakeStatusLocked(),
-		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < 30*time.Second,
+		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < a.hostHeartbeatIntervalLocked()+15*time.Second,
 		CredentialRejected: !a.credentialRejectedAt.IsZero()}
 }
 
@@ -713,10 +713,24 @@ func errorText(err error) string {
 // not to fill the coordinator's logs with 401s from a Mac nobody re-paired.
 const credentialRetryInterval = 10 * time.Minute
 
+// hostHeartbeatIntervalLocked reduces background coordinator traffic only when
+// job admission is explicitly disabled. Potentially runnable work keeps its
+// existing lease cadence; consent/manual transitions bypass this interval.
+func (a *Agent) hostHeartbeatIntervalLocked() time.Duration {
+	if a.active == "" && (a.cfg.Paused || !a.devPull || !a.cfg.Development) {
+		return 5 * time.Minute
+	}
+	return 15 * time.Second
+}
+
 func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 	a.mu.Lock()
 	rejected := a.credentialRejectedAt
+	deferInterval := trigger == "interval" && a.hostHeartbeatIntervalLocked() > 15*time.Second && !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < a.hostHeartbeatIntervalLocked()
 	a.mu.Unlock()
+	if deferInterval {
+		return
+	}
 	if !rejected.IsZero() && trigger == "interval" && time.Since(rejected) < credentialRetryInterval {
 		return
 	}

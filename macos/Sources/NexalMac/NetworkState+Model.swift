@@ -95,7 +95,7 @@ extension AppModel {
     /// underlying status.
     var networkScreen: NetworkScreen {
         NetworkScreen.derive(connectorProblem: connectorProblem,
-                             isLinked: isLinked,
+                             isLinked: guestAccess?.isExpired() == true ? false : isLinked,
                              pairing: linkingState,
                              network: networkState)
     }

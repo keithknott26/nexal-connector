@@ -11,6 +11,8 @@ struct MeshStatusView: View {
             if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
             Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum protection: \(mesh.pq.replacingOccurrences(of: "_", with: " "))")
                 .font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
+            LabeledContent("Post-quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
+                .font(.caption)
             Divider()
             Label("Local threat detection not reporting", systemImage: "shield.lefthalf.filled.badge.checkmark")
                 .font(.caption.weight(.semibold))
@@ -36,6 +38,7 @@ struct MeshStatusView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(peer.name.isEmpty ? peer.id : peer.name).font(.caption.weight(.semibold))
             Text(peer.pathLabel).font(.caption)
+            LabeledContent("Post-quantum type", value: MeshQuantumPresentation.label(peers: [peer])).font(.caption)
             if let region = peer.relayRegion, peer.path == "relay" { Text("neXal Relay — \(region)").font(.caption).foregroundStyle(.secondary) }
             Text("↑ \(peer.traffic.sentBytes) B  ↓ \(peer.traffic.receivedBytes) B").font(.caption2).foregroundStyle(.secondary)
             fileSharingView(peer.fileSharing)

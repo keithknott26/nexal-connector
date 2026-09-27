@@ -1,36 +1,36 @@
 import SwiftUI
 
-/// "Route all of my internet traffic through this exit node", for one peer.
-///
-/// The only switch in the customer panel, and deliberately so: it is an owner
-/// choice (where this Mac's internet traffic leaves), not an implementation
-/// default. ConnectorUIContractTests forbids any other Toggle in NetworkPanel
-/// and checks that this file holds exactly this one.
-///
-/// One exit node at a time: ticking one peer moves the route off any other.
-/// Disabled until the coordinator has offered this peer as an exit node to this
-/// Mac, and while the peer is not connected.
+/// The owner's explicit, reversible choice to use this computer as an exit node.
 struct ExitNodeCheckbox: View {
     @EnvironmentObject private var model: AppModel
-    let route: String
-    let peerConnected: Bool
+    let peer: ConnectorStatus.MeshPeer
+    let storageGateway: Bool
+
+    private var route: String? {
+        storageGateway ? NetworkService.storageExitRoute : model.peerExitRoutes[peer.id]
+    }
 
     var body: some View {
-        let offered = model.availableExitRoutes.contains(route)
+        let selected = route != nil && model.exitRoute == route
         VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: Binding(
-                get: { model.exitRoute == route },
-                set: { on in Task { await model.setExitRoute(on ? route : nil) } }
+                get: { selected },
+                set: { on in Task { await model.setPeerExitRoute(peer, storageGateway: storageGateway, enabled: on) } }
             )) {
                 Text(Self.label)
             }
             .toggleStyle(.checkbox)
-            .disabled(!offered || model.exitRouteBusy || !peerConnected)
-            if !offered {
-                Text("Not available as an exit node on your network yet.")
+            // A selected offline peer can always be deselected. Ordinary peers
+            // no longer require a nonexistent pre-created route to enable setup.
+            .disabled(model.exitRouteBusy || (!selected && peer.lifecycle != "connected") ||
+                      (!selected && storageGateway && !model.availableExitRoutes.contains(NetworkService.storageExitRoute)))
+            if let status = model.exitRouteStatus[peer.id] {
+                Text(status).font(.caption2).foregroundStyle(.secondary)
+            } else if selected {
+                Text("This exit route is selected in the network service.")
                     .font(.caption2).foregroundStyle(.secondary)
-            } else if model.exitRoute == route {
-                Text("☁️ Websites now see this exit node's address and location instead of yours.")
+            } else {
+                Text("Routes internet access through this computer while selected. Uncheck to restore normal routing.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }

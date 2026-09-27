@@ -101,6 +101,8 @@ def check_metadata(value: Any) -> None:
 
 
 def verify_model(directory: str, expected_manifest_sha256: str) -> dict:
+    from .profiles import TOKENIZERS, validate_config
+
     root = absolute_local(directory)
     if not root.is_dir() or root.stat().st_mode & 0o022:
         raise Rejected("model directory must be owner-controlled")
@@ -112,8 +114,8 @@ def verify_model(directory: str, expected_manifest_sha256: str) -> dict:
     manifest = strict_json(manifest_data)
     exact_keys(manifest, {"schema_version", "model_id", "revision", "license",
                           "model_type", "files", "memory"})
-    if manifest["schema_version"] != 1 or manifest["model_type"] != "llama":
-        raise Rejected("only schema 1 and the built-in llama architecture are approved")
+    if manifest["schema_version"] != 1 or manifest["model_type"] not in TOKENIZERS:
+        raise Rejected("only schema 1 and reviewed built-in architectures are approved")
     if not isinstance(manifest["revision"], str) or not re.fullmatch(
         r"[0-9a-f]{40,64}", manifest["revision"]
     ):
@@ -133,6 +135,8 @@ def verify_model(directory: str, expected_manifest_sha256: str) -> dict:
         raise Rejected("approved safetensors weights required")
     if not ({"tokenizer.json", "tokenizer.model"} & set(files)):
         raise Rejected("local tokenizer required")
+    if manifest["model_type"] != "llama" and "tokenizer.json" not in files:
+        raise Rejected("Qwen/Phi require a pinned local fast tokenizer")
     for name, expected in files.items():
         if name not in MODEL_FILES and not WEIGHT.fullmatch(name):
             raise Rejected("model file type is not allowlisted")
@@ -155,11 +159,9 @@ def verify_model(directory: str, expected_manifest_sha256: str) -> dict:
         if name.endswith(".json") and name != "tokenizer.json":
             metadata = strict_json(read_regular(path, MAX_JSON))
             check_metadata(metadata)
-            if name == "config.json" and metadata.get("model_type") != "llama":
-                raise Rejected("configuration architecture differs from approved manifest")
-            if name == "tokenizer_config.json" and metadata.get("tokenizer_class") not in {
-                "PreTrainedTokenizerFast", "LlamaTokenizer", "LlamaTokenizerFast"
-            }:
+            if name == "config.json":
+                validate_config(manifest["model_type"], metadata)
+            if name == "tokenizer_config.json" and metadata.get("tokenizer_class") not in TOKENIZERS[manifest["model_type"]]:
                 raise Rejected("tokenizer implementation is not approved")
             if name == "model.safetensors.index.json":
                 weight_map = metadata.get("weight_map", {})

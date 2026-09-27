@@ -272,9 +272,9 @@ class DependencyGateTests(LocalFixture):
         value = {
             "schema_version": 1, "macos_hardware_smoke_passed": True,
             "python_version": "3.11.9",
-            "packages": {"mlx": "0.29.3", "mlx-lm": "0.28.4", "example-dependency": "1.2.3"},
+            "packages": {"mlx": "0.29.3", "mlx-lm": "0.28.4", "transformers": "4.57.6", "example-dependency": "1.2.3"},
             "requirements_lock_sha256": "a" * 64,
-            "wheel_sha256": {"mlx": "b" * 64, "mlx-lm": "c" * 64, "example-dependency": "d" * 64},
+            "wheel_sha256": {"mlx": "b" * 64, "mlx-lm": "c" * 64, "transformers": "e" * 64, "example-dependency": "d" * 64},
         }
         value.update(overrides)
         path = self.jsonfile("receipt.json", value)
@@ -284,7 +284,7 @@ class DependencyGateTests(LocalFixture):
         installed = [
             SimpleNamespace(metadata={"Name": name}, version=version)
             for name, version in (("mlx", "0.29.3"), ("mlx-lm", "0.28.4"),
-                                  ("example-dependency", "1.2.3"), *extra)
+                                  ("transformers", "4.57.6"), ("example-dependency", "1.2.3"), *extra)
         ]
         with patch.object(runtime.platform, "system", return_value="Darwin"), \
              patch.object(runtime.platform, "machine", return_value="arm64"), \
@@ -320,6 +320,10 @@ class WorkloadIntegrityTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         manifest = json.loads((root / "manifests" / "mlx-local-text-v1.json").read_text())
         self.assertEqual(manifest["schema_version"], 1)
+        import nexal_mlx
+        self.assertEqual(manifest["runtime_version"], runtime.RUNTIME_VERSION)
+        self.assertEqual(nexal_mlx.__version__, runtime.RUNTIME_VERSION)
+        self.assertEqual(set(manifest["model_type_allowlist"]), {"llama", "qwen3", "phi3"})
         self.assertFalse(manifest["coordinator_dispatch_enabled"])
         actual = {str(path.relative_to(root)) for path in (root / "nexal_mlx").glob("*.py")}
         actual.add("nexal_mlx_entry.py")

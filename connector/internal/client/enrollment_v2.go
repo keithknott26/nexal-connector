@@ -33,6 +33,12 @@ type EnrollmentSession struct {
 }
 
 type EnrollmentSessionStatus struct {
+	MeshHostname    string `json:"meshHostname,omitempty"`
+	GrantID         string `json:"grantId,omitempty"`
+	AccessExpiresAt string `json:"accessExpiresAt,omitempty"`
+	InviterEmail    string `json:"inviterEmail,omitempty"`
+	ServerNow       string `json:"serverNow,omitempty"`
+
 	SchemaVersion  int    `json:"schemaVersion"`
 	SessionID      string `json:"sessionId"`
 	Status         string `json:"status"`

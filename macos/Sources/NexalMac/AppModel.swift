@@ -23,7 +23,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var peerNetInfo: [String: PeerNetInfo] = [:]
     /// The exit route this Mac sends all internet traffic through, or nil.
     /// Remembered across launches and re-applied when the service restarts.
-    @Published private(set) var exitRoute: String? = UserDefaults.standard.string(forKey: AppModel.exitRouteKey)
+    @Published private(set) var exitRoute: String?
+    private var desiredExitRoute = UserDefaults.standard.string(forKey: AppModel.exitRouteKey)
+    @Published private(set) var peerExitRoutes: [String: String] = UserDefaults.standard.dictionary(forKey: "peerExitRouteIDs") as? [String: String] ?? [:]
+    private var peerExitDeviceIDs: [String: String] = UserDefaults.standard.dictionary(forKey: "peerExitDeviceIDs") as? [String: String] ?? [:]
+    @Published private(set) var exitRouteStatus: [String: String] = [:]
+    private var pendingExitTeardown: [String: String] = UserDefaults.standard.dictionary(forKey: "pendingExitTeardown") as? [String: String] ?? [:]
     /// Exit routes the coordinator has offered this Mac.
     @Published private(set) var availableExitRoutes: Set<String> = []
     @Published private(set) var exitRouteBusy = false
@@ -171,19 +176,6 @@ final class AppModel: ObservableObject {
         enrollmentPresentation.beginReplacement(for: selectedConfig)
     }
 
-    func scannerFindings() async throws -> LocalScannerFindingsReply {
-        let reply = try JSONDecoder().decode(LocalScannerFindingsReply.self, from: try await invoke(.securityFindings))
-        return reply
-    }
-
-    func scanner(_ command: CLICommand) async throws -> ScannerReply {
-        try JSONDecoder().decode(ScannerReply.self, from: try await invoke(command))
-    }
-
-    func canary(action: String) async throws -> CanaryReply {
-        try JSONDecoder().decode(CanaryReply.self, from: try await invoke(.canary(action: action)))
-    }
-
     init(capabilitySource: TransportCapabilityProviding = ConnectorStatusCapabilitySource()) {
         self.capabilitySource = capabilitySource
         capability = capabilitySource.capability(from: nil)
@@ -312,6 +304,66 @@ final class AppModel: ObservableObject {
         } catch { message = error.localizedDescription }
     }
 
+
+    func scannerFindings() async throws -> LocalScannerFindingsReply {
+        let reply = try JSONDecoder().decode(LocalScannerFindingsReply.self, from: try await invoke(.securityFindings))
+        return reply
+    }
+
+    func scanner(_ command: CLICommand) async throws -> ScannerReply {
+        try JSONDecoder().decode(ScannerReply.self, from: try await invoke(command))
+    }
+
+    func canary(action: String) async throws -> CanaryReply {
+        try JSONDecoder().decode(CanaryReply.self, from: try await invoke(.canary(action: action)))
+    }
+
+    @Published var guestInvitationCode = ""
+    @Published private(set) var guestInvitationProblem: String?
+    var guestAccess: GuestAccessRecord? { GuestAccessRecord.read(at: selectedConfig) }
+
+    func redeemGuestInvitation() async {
+        guard !busy else { return }
+        busy = true; activity = "Checking your invitation…"; guestInvitationProblem = nil
+        defer { busy = false; activity = nil }
+        let code = guestInvitationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard code.utf8.count <= 32, !code.contains("\n"), !code.contains("\r") else {
+            guestInvitationProblem = "Enter the eight-character invitation code."; return
+        }
+        do {
+            if !configurationExists {
+                if developmentEnvironment {
+                    _ = try await invoke(.initializeDevelopment(name: hostName, memoryMiB: memoryMiB, reserveMiB: reserveMiB))
+                } else {
+                    _ = try await invoke(.initialize(coordinator: coordinator, name: hostName, memoryMiB: memoryMiB, reserveMiB: reserveMiB))
+                }
+            }
+            if !NetworkService.isRunning {
+                activity = "Installing secure networking…"
+                try await Task.detached(priority: .userInitiated) { try NetworkService.install() }.value
+            }
+            activity = "Redeeming your invitation…"
+            let reply = try JSONDecoder().decode(GuestAccessResponse.self,
+                from: try await invoke(.redeemGuestInvitation, input: Data((code + "\n").utf8)))
+            guard reply.status != "provisioning" else {
+                guestInvitationProblem = reply.message ?? "Invitation accepted. Retry the same code shortly to finish joining."; return
+            }
+            guard let grant = reply.guestAccess, !grant.isExpired() else {
+                guestInvitationProblem = "This invitation has expired. Ask the inviter for a new code."; return
+            }
+            let configuration = selectedConfig
+            activity = "Installing the automatic access-expiry guard…"
+            try await Task.detached(priority: .userInitiated) {
+                try NetworkService.installGuestExpiryGuard(config: configuration)
+            }.value
+            activity = "Joining the temporary network…"
+            _ = try await invoke(.activateGuestInvitation)
+            guestInvitationCode = ""
+            message = "Temporary access is active until \(grant.deadline?.formatted(date: .abbreviated, time: .shortened) ?? grant.accessExpiresAt). Ask \(grant.inviterEmail) for a new code when it expires."
+            busy = false
+            await start()
+        } catch { guestInvitationProblem = error.localizedDescription }
+    }
 
     private func invoke(_ command: CLICommand, input: Data? = nil) async throws -> Data {
         guard let selection else { throw ShellError.noExecutable }
@@ -604,32 +656,119 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Refreshes the offered exit routes (every 30 s at most) and re-applies the
-    /// owner's choice, since a restarted service may have forgotten it.
+    /// Refresh reported selection, and retry unfinished server teardown. A saved
+    /// choice is intent only; it never makes the checkbox appear selected by itself.
     func updateExitRoutes() async {
+        guard !exitRouteBusy else { return }
         if let at = exitRouteCheckedAt, Date().timeIntervalSince(at) < 30 { return }
         exitRouteCheckedAt = Date()
-        let available = await Task.detached { NetworkService.availableExitRoutes() }.value
-        if available != availableExitRoutes { availableExitRoutes = available }
-        if let chosen = exitRoute, available.contains(chosen) {
-            _ = await Task.detached { try? NetworkService.selectExitRoute(chosen, previous: nil) }.value
+        exitRouteBusy = true
+        defer { exitRouteBusy = false }
+        for (peerID, tunnel) in pendingExitTeardown {
+            do {
+                let reply = try JSONDecoder().decode(ExitRouteReply.self, from: try await invoke(.exitRoute(tunnelAddress: tunnel, enabled: false, targetDeviceID: peerExitDeviceIDs[peerID])))
+                guard !reply.configured else { throw NetworkService.RoutingFailure.failed("Exit access removal is still pending.") }
+                pendingExitTeardown.removeValue(forKey: peerID)
+                exitRouteStatus[peerID] = "Exit routing is off. Temporary forwarding access was removed."
+            } catch { exitRouteStatus[peerID] = "Exit routing is off locally. Retrying removal of temporary forwarding access."
+            }
+        }
+        UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+        guard let state = await Task.detached(operation: { NetworkService.exitRoutes() }).value else {
+            availableExitRoutes = []; exitRoute = nil; return
+        }
+        availableExitRoutes = state.available
+        exitRoute = state.selected.sorted().first
+        if let chosen = desiredExitRoute, state.available.contains(chosen), !state.selected.contains(chosen) {
+            do {
+                let previous = exitRoute
+                try await Task.detached { try NetworkService.selectExitRoute(chosen, previous: previous) }.value
+                exitRoute = chosen
+            } catch { message = "Could not restore the exit route: \(error.localizedDescription)" }
         }
     }
 
-    /// Turns "Route all of my internet traffic through this exit node" on for
-    /// `route`, or off when `route` is nil. Only one exit node at a time.
-    func setExitRoute(_ route: String?) async {
+    private struct ExitRouteReply: Decodable { let routeId: String; let configured: Bool; let targetDeviceId: String? }
+
+    func setPeerExitRoute(_ peer: ConnectorStatus.MeshPeer, storageGateway: Bool, enabled: Bool) async {
         guard !exitRouteBusy else { return }
         exitRouteBusy = true
         defer { exitRouteBusy = false }
-        let previous = exitRoute
+        exitRouteStatus[peer.id] = enabled ? "Preparing this computer as your exit node…" : "Turning off exit routing…"
         do {
-            try await Task.detached { try NetworkService.selectExitRoute(route, previous: previous) }.value
-            exitRoute = route
-            UserDefaults.standard.set(route, forKey: Self.exitRouteKey)
-            AgentLog.note(route.map { "exit node on: \($0)" } ?? "exit node off")
+            let previous = exitRoute
+            var route = storageGateway ? NetworkService.storageExitRoute : peerExitRoutes[peer.id]
+            if enabled, !storageGateway {
+                guard let tunnel = peer.tunnelAddress else { throw NetworkService.RoutingFailure.failed("This peer has no secure network address.") }
+                let reply = try JSONDecoder().decode(ExitRouteReply.self, from: try await invoke(.exitRoute(tunnelAddress: tunnel, enabled: true)))
+                guard reply.configured, NetworkService.validExitRouteID(reply.routeId) else { throw NetworkService.RoutingFailure.failed("The coordinator did not configure this exit route.") }
+                route = reply.routeId
+                peerExitRoutes[peer.id] = reply.routeId
+                if let targetID = reply.targetDeviceId { peerExitDeviceIDs[peer.id] = targetID }
+                UserDefaults.standard.set(peerExitDeviceIDs, forKey: "peerExitDeviceIDs")
+                UserDefaults.standard.set(peerExitRoutes, forKey: "peerExitRouteIDs")
+                pendingExitTeardown.removeValue(forKey: peer.id)
+                UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+            }
+            guard let route else { throw NetworkService.RoutingFailure.failed("This peer has no configured exit route.") }
+            if enabled {
+                exitRouteStatus[peer.id] = "Waiting for the network service to receive this route…"
+                var offered = false
+                for _ in 0..<20 {
+                    if let state = await Task.detached(operation: { NetworkService.exitRoutes() }).value {
+                        availableExitRoutes = state.available
+                        if state.available.contains(route) { offered = true; break }
+                    }
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                guard offered else { throw NetworkService.RoutingFailure.failed("The route was configured, but has not reached this Mac. Try again shortly.") }
+            }
+            try await Task.detached { try NetworkService.selectExitRoute(enabled ? route : nil, previous: enabled ? previous : route) }.value
+            desiredExitRoute = enabled ? route : nil
+            exitRoute = enabled ? route : nil
+            UserDefaults.standard.set(desiredExitRoute, forKey: Self.exitRouteKey)
+            if enabled, let previous, previous != route,
+               let previousPeerID = peerExitRoutes.first(where: { $0.value == previous })?.key,
+               let previousPeer = status?.mesh?.peers.first(where: { $0.id == previousPeerID }),
+               let tunnel = previousPeer.tunnelAddress {
+                // Selecting another peer also unchecks the former peer; its
+                // temporary forwarding permission must be removed as well.
+                pendingExitTeardown[previousPeerID] = tunnel
+                UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+                do {
+                    let oldReply = try JSONDecoder().decode(ExitRouteReply.self, from: try await invoke(.exitRoute(tunnelAddress: tunnel, enabled: false, targetDeviceID: peerExitDeviceIDs[previousPeerID])))
+                    if !oldReply.configured { pendingExitTeardown.removeValue(forKey: previousPeerID) }
+                } catch { exitRouteStatus[previousPeerID] = "Previous exit is off locally. Temporary access cleanup will retry." }
+                UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+            }
+            if !enabled, !storageGateway, let tunnel = peer.tunnelAddress {
+                // Persist before network I/O so a temporary outage or app restart
+                // cannot silently lose the request to restore default blocking.
+                pendingExitTeardown[peer.id] = tunnel
+                UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+                let reply = try JSONDecoder().decode(ExitRouteReply.self, from: try await invoke(.exitRoute(tunnelAddress: tunnel, enabled: false, targetDeviceID: peerExitDeviceIDs[peer.id])))
+                guard !reply.configured else { throw NetworkService.RoutingFailure.failed("Exit access removal has not been confirmed.") }
+                pendingExitTeardown.removeValue(forKey: peer.id)
+                UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+                availableExitRoutes.remove(route)
+            }
+            exitRouteStatus[peer.id] = enabled
+                ? "The network service selected this exit node. Internet access still depends on that computer being online."
+                : "Exit routing is off. Normal routing and access rules are restored."
         } catch {
-            message = "Could not change the exit node: \(error.localizedDescription)"
+            if let state = await Task.detached(operation: { NetworkService.exitRoutes() }).value {
+                availableExitRoutes = state.available; exitRoute = state.selected.sorted().first
+            } else { exitRoute = nil }
+            if enabled, !storageGateway, exitRoute != peerExitRoutes[peer.id], let tunnel = peer.tunnelAddress {
+                // A server route may have been created before delivery/selection
+                // failed. An unchecked box must not leave temporary access behind.
+                pendingExitTeardown[peer.id] = tunnel
+                UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
+            }
+            exitRouteStatus[peer.id] = pendingExitTeardown[peer.id] != nil
+                ? "Exit routing is off locally. Temporary access cleanup is pending and will retry."
+                : "Could not change exit routing: \(error.localizedDescription)"
+            message = exitRouteStatus[peer.id]
         }
     }
 
@@ -663,6 +802,22 @@ final class AppModel: ObservableObject {
 			return
 		}
 		timeMachine = decoded
+	}
+
+	/// One-click Time Machine: adds this network's storage gateway as a backup
+	/// disk. macOS shows its own administrator dialog; the backup password goes
+	/// from the coordinator to tmutil without ever being shown or stored here.
+	func setUpTimeMachine() async {
+		guard !busy else { return }
+		busy = true; activity = "Adding the backup disk\u{2026} Approve the macOS prompt."
+		defer { busy = false; activity = nil }
+		do {
+			_ = try await invoke(.timeMachineConnect)
+			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, and backups start automatically."
+		} catch {
+			message = error.localizedDescription
+		}
+		await updateTimeMachine(force: true)
 	}
 
     func acceptJobsNow() async {
@@ -729,6 +884,10 @@ final class AppModel: ObservableObject {
         busy = true
         defer { busy = false; activity = nil }
         pairingProblem = nil
+        if guestAccess != nil || NetworkService.guestExpiryGuardInstalled {
+            do { try await Task.detached(priority: .userInitiated) { try NetworkService.removeGuestExpiryGuard() }.value }
+            catch { pairingProblem = error.localizedDescription; return }
+        }
         if !configurationExists {
             activity = "Creating this Mac\u{2019}s configuration\u{2026}"
             do {

@@ -25,6 +25,8 @@ final class ConnectorUIContractTests: XCTestCase {
         XCTAssertTrue(text.contains("metered"))
     }
 
+    // Quantum evidence behavior is covered by MeshQuantumPresentationTests.
+
     func testImplementationDefaultsAreNotCustomerControls() throws {
         let text = try source
         for forbidden in [

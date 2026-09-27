@@ -2,3 +2,4 @@
 # Deployment is blocked until RELEASE-GATES.md is satisfied on target hardware.
 mlx==0.29.3
 mlx-lm==0.28.4
+transformers==4.57.6

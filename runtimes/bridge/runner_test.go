@@ -90,7 +90,7 @@ func newFixture(t *testing.T) fixture {
 	grant := admission{1, job.AttemptID, model, 4096, 8192, 1024, time.Now().Unix(), time.Now().Add(120 * time.Second).Unix()}
 	putJSON(t, job.AdmissionPath, grant)
 	put(t, job.PromptPath, []byte("private prompt fixture"), 0600)
-	result := InferenceResult{1, "mlx-local-text-v1", "0.1.0", job.AttemptID, model, "hello", 2048}
+	result := InferenceResult{1, "mlx-local-text-v1", "0.2.0", job.AttemptID, model, "hello", 2048}
 	putJSON(t, filepath.Join(dir, "result.json"), result)
 	return fixture{owner, job, dir, result, grant}
 }
@@ -450,7 +450,7 @@ func TestInvalidResults(t *testing.T) {
 		"template": func(b []byte) []byte {
 			return bytes.ReplaceAll(b, []byte("mlx-local-text-v1"), []byte("remote-execution"))
 		},
-		"runtime":  func(b []byte) []byte { return bytes.ReplaceAll(b, []byte("0.1.0"), []byte("0.2.0")) },
+		"runtime":  func(b []byte) []byte { return bytes.ReplaceAll(b, []byte("0.2.0"), []byte("99.0.0")) },
 		"memory":   func(b []byte) []byte { return bytes.ReplaceAll(b, []byte("2048"), []byte("999999")) },
 		"negative": func(b []byte) []byte { return bytes.ReplaceAll(b, []byte("2048"), []byte("-1")) },
 		"fraction": func(b []byte) []byte { return bytes.ReplaceAll(b, []byte("2048"), []byte("1.5")) },

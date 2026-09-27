@@ -1,0 +1,321 @@
+--- a/device/device.go
++++ b/device/device.go
+@@ -21,7 +21,8 @@
+ )
+ 
+ type Device struct {
+-	state struct {
++	quantumRequired atomic.Bool
++	state           struct {
+ 		// state holds the device's state. It is accessed atomically.
+ 		// Use the device.deviceState method to read it.
+ 		// device.deviceState does not acquire the mutex, so it captures only a snapshot.
+--- a/device/peer.go
++++ b/device/peer.go
+@@ -16,6 +16,7 @@
+ )
+ 
+ type Peer struct {
++	quantum           atomic.Pointer[quantumLease]
+ 	isRunning         atomic.Bool
+ 	keypairs          Keypairs
+ 	handshake         Handshake
+--- a/device/keypair.go
++++ b/device/keypair.go
+@@ -22,14 +22,15 @@
+  */
+ 
+ type Keypair struct {
+-	sendNonce    atomic.Uint64
+-	send         cipher.AEAD
+-	receive      cipher.AEAD
+-	replayFilter replay.Filter
+-	isInitiator  bool
+-	created      time.Time
+-	localIndex   uint32
+-	remoteIndex  uint32
++	quantumGeneration uint64
++	sendNonce         atomic.Uint64
++	send              cipher.AEAD
++	receive           cipher.AEAD
++	replayFilter      replay.Filter
++	isInitiator       bool
++	created           time.Time
++	localIndex        uint32
++	remoteIndex       uint32
+ }
+ 
+ type Keypairs struct {
+--- a/device/noise-protocol.go
++++ b/device/noise-protocol.go
+@@ -209,6 +209,7 @@
+ }
+ 
+ type Handshake struct {
++	quantumGeneration         uint64
+ 	state                     handshakeState
+ 	mutex                     sync.RWMutex
+ 	hash                      [blake2s.Size]byte       // hash value
+@@ -486,6 +487,9 @@
+ 	handshake.mixKey(ss[:])
+ 
+ 	// add preshared key
++	if q := peer.quantum.Load(); q != nil {
++		handshake.quantumGeneration = q.generation
++	}
+ 
+ 	var tau [blake2s.Size]byte
+ 	var key [chacha20poly1305.KeySize]byte
+@@ -510,6 +514,7 @@
+ }
+ 
+ func (device *Device) ConsumeMessageResponse(msg *MessageResponse) *Peer {
++	var quantumGeneration uint64
+ 	if msg.Type != MessageResponseType {
+ 		return nil
+ 	}
+@@ -562,6 +567,9 @@
+ 		setZero(ss[:])
+ 
+ 		// add preshared key (psk)
++		if q := lookup.peer.quantum.Load(); q != nil {
++			quantumGeneration = q.generation
++		}
+ 
+ 		var tau [blake2s.Size]byte
+ 		var key [chacha20poly1305.KeySize]byte
+@@ -597,6 +605,7 @@
+ 	handshake.chainKey = chainKey
+ 	handshake.remoteIndex = msg.Sender
+ 	handshake.state = handshakeResponseConsumed
++	handshake.quantumGeneration = quantumGeneration
+ 
+ 	handshake.mutex.Unlock()
+ 
+@@ -651,6 +660,7 @@
+ 	// create AEAD instances
+ 
+ 	keypair := new(Keypair)
++	keypair.quantumGeneration = handshake.quantumGeneration
+ 	keypair.send, _ = chacha20poly1305.New(sendKey[:])
+ 	keypair.receive, _ = chacha20poly1305.New(recvKey[:])
+ 
+--- a/device/uapi.go
++++ b/device/uapi.go
+@@ -335,6 +335,7 @@
+ 
+ 		peer.handshake.mutex.Lock()
+ 		err := peer.handshake.presharedKey.FromHex(value)
++		peer.invalidateQuantumLocked()
+ 		peer.handshake.mutex.Unlock()
+ 
+ 		if err != nil {
+--- a/device/send.go
++++ b/device/send.go
+@@ -46,11 +46,12 @@
+  */
+ 
+ type QueueOutboundElement struct {
+-	buffer  *[MaxMessageSize]byte // slice holding the packet data
+-	packet  []byte                // slice of "buffer" (always!)
+-	nonce   uint64                // nonce for encryption
+-	keypair *Keypair              // keypair for encryption
+-	peer    *Peer                 // related peer
++	buffer         *[MaxMessageSize]byte // slice holding the packet data
++	packet         []byte                // slice of "buffer" (always!)
++	nonce          uint64                // nonce for encryption
++	keypair        *Keypair              // keypair for encryption
++	quantumControl bool                  // cached plaintext classification for post-encryption gate
++	peer           *Peer                 // related peer
+ }
+ 
+ type QueueOutboundElementsContainer struct {
+@@ -594,6 +595,15 @@
+ 
+ 	for elemsContainer := range device.queue.encryption.c {
+ 		for _, elem := range elemsContainer.elems {
++			// Check at the encryption boundary, including packets injected by forwarders.
++			elem.quantumControl = len(elem.packet) == 0
++			if s := elem.peer.quantum.Load(); s != nil {
++				elem.quantumControl = elem.quantumControl || s.controlPacket(elem.packet, true)
++			}
++			if !elem.peer.quantumAllows(elem.packet, elem.keypair, true) {
++				elem.packet = nil
++				continue
++			}
+ 			// populate header fields
+ 			header := elem.buffer[:MessageTransportHeaderSize]
+ 
+@@ -662,6 +672,12 @@
+ 		}
+ 		dataSent := false
+ 		for _, elem := range elemsContainer.elems {
++			if elem.packet == nil {
++				continue
++			}
++			if device.quantumRequired.Load() && !elem.quantumControl && !peer.quantumKeyReady(elem.keypair, time.Now()) {
++				continue
++			}
+ 			if len(elem.packet) != MessageKeepaliveSize {
+ 				dataSent = true
+ 			}
+--- a/device/receive.go
++++ b/device/receive.go
+@@ -507,6 +507,9 @@
+ 				continue
+ 			}
+ 
++			if !peer.quantumAllows(elem.packet, elem.keypair, false) {
++				continue
++			}
+ 			bufs = append(bufs, elem.buffer[:MessageTransportOffsetContent+len(elem.packet)])
+ 		}
+ 
+--- /dev/null
++++ b/device/nexal_quantum.go
+@@ -0,0 +1,145 @@
++// SPDX-License-Identifier: MIT
++package device
++
++import (
++	"encoding/binary"
++	"errors"
++	"net/netip"
++	"time"
++)
++
++// This gate is opt-in on a userspace Device and applies to every peer and packet
++// path, including CreateOutboundPacket used by forwarding. It does not alter
++// WireGuard's wire protocol or advertise product-level NIST certification.
++type quantumLease struct {
++	generation            uint64
++	expires               time.Time
++	local, remote         netip.Addr
++	localPort, remotePort uint16
++}
++
++func (d *Device) RequireQuantum() { d.quantumRequired.Store(true) }
++func (d *Device) ConfigureQuantumControl(key [32]byte, local, remote netip.Addr, localPort, remotePort uint16) error {
++	p := d.LookupPeer(NoisePublicKey(key))
++	if p == nil {
++		return errors.New("quantum peer does not exist")
++	}
++	p.handshake.mutex.Lock()
++	defer p.handshake.mutex.Unlock()
++	old := p.quantum.Load()
++	next := quantumLease{}
++	if old != nil {
++		next.generation = old.generation + 1
++	}
++	next.local = local.Unmap()
++	next.remote = remote.Unmap()
++	next.localPort = localPort
++	next.remotePort = remotePort
++	p.quantum.Store(&next)
++	return nil
++}
++
++// InstallQuantumKey creates a new generation under the same lock as the PSK.
++// Only a WireGuard session derived using that generation may carry app data.
++func (d *Device) InstallQuantumKey(key, psk [32]byte, expires time.Time) error {
++	if !d.quantumRequired.Load() {
++		return errors.New("quantum gate is not enabled")
++	}
++	if !expires.After(time.Now()) || time.Until(expires) > 3*time.Minute {
++		return errors.New("invalid quantum key lifetime")
++	}
++	p := d.LookupPeer(NoisePublicKey(key))
++	if p == nil {
++		return errors.New("quantum peer does not exist")
++	}
++	p.handshake.mutex.Lock()
++	old := p.quantum.Load()
++	if old == nil || !old.local.IsValid() || !old.remote.IsValid() || old.localPort == 0 || old.remotePort == 0 {
++		p.handshake.mutex.Unlock()
++		return errors.New("control endpoint not configured")
++	}
++	next := *old
++	next.generation++
++	next.expires = time.Now().Add(time.Until(expires))
++	p.handshake.presharedKey = NoisePresharedKey(psk)
++	p.quantum.Store(&next)
++	p.handshake.mutex.Unlock()
++	p.ExpireCurrentKeypairs()
++	return nil
++}
++func (p *Peer) invalidateQuantumLocked() {
++	old := p.quantum.Load()
++	if old == nil {
++		return
++	}
++	next := *old
++	next.generation++
++	next.expires = time.Time{}
++	p.quantum.Store(&next)
++}
++func (d *Device) RevokeQuantum(key [32]byte) {
++	if p := d.LookupPeer(NoisePublicKey(key)); p != nil {
++		p.handshake.mutex.Lock()
++		p.invalidateQuantumLocked()
++		p.handshake.mutex.Unlock()
++	}
++}
++func (d *Device) QuantumSessionReady(key [32]byte) bool {
++	p := d.LookupPeer(NoisePublicKey(key))
++	if p == nil || !d.quantumRequired.Load() {
++		return false
++	}
++	return p.quantumKeyReady(p.keypairs.Current(), time.Now())
++}
++func (p *Peer) quantumKeyReady(key *Keypair, now time.Time) bool {
++	s := p.quantum.Load()
++	return s != nil && key != nil && s.generation != 0 && key.quantumGeneration == s.generation && now.Before(s.expires)
++}
++
++// quantumAllows runs on plaintext before encryption and after authenticated
++// decryption. Old sessions remain usable solely for the bounded control channel.
++func (p *Peer) quantumAllows(packet []byte, key *Keypair, outbound bool) bool {
++	if !p.device.quantumRequired.Load() || len(packet) == 0 {
++		return true
++	}
++	if p.quantumKeyReady(key, time.Now()) {
++		return true
++	}
++	s := p.quantum.Load()
++	if s == nil {
++		return false
++	}
++	return s.controlPacket(packet, outbound)
++}
++func (s *quantumLease) controlPacket(packet []byte, outbound bool) bool {
++	// No fragments, IPv6 extension headers, IP options or non-TCP bootstrap data.
++	var src, dst netip.Addr
++	var tcp []byte
++	if len(packet) >= 40 && packet[0]>>4 == 6 {
++		n := int(binary.BigEndian.Uint16(packet[4:6])) + 40
++		if packet[6] != 6 || n > len(packet) || n < 60 {
++			return false
++		}
++		src = netip.AddrFrom16([16]byte(packet[8:24]))
++		dst = netip.AddrFrom16([16]byte(packet[24:40]))
++		tcp = packet[40:n]
++	} else if len(packet) >= 20 && packet[0] == 0x45 {
++		n := int(binary.BigEndian.Uint16(packet[2:4]))
++		if packet[9] != 6 || binary.BigEndian.Uint16(packet[6:8])&0x3fff != 0 || n > len(packet) || n < 40 {
++			return false
++		}
++		src = netip.AddrFrom4([4]byte(packet[12:16]))
++		dst = netip.AddrFrom4([4]byte(packet[16:20]))
++		tcp = packet[20:n]
++	} else {
++		return false
++	}
++	if len(tcp) < 20 || int(tcp[12]>>4)*4 < 20 || int(tcp[12]>>4)*4 > len(tcp) {
++		return false
++	}
++	sp, dp := binary.BigEndian.Uint16(tcp[:2]), binary.BigEndian.Uint16(tcp[2:4])
++	if outbound {
++		return src.Unmap() == s.local && dst.Unmap() == s.remote && ((s.remotePort != 0 && dp == s.remotePort) || (s.localPort != 0 && sp == s.localPort))
++	}
++	return src.Unmap() == s.remote && dst.Unmap() == s.local && ((s.localPort != 0 && dp == s.localPort) || (s.remotePort != 0 && sp == s.remotePort))
++}

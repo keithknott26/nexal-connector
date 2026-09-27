@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -345,23 +346,7 @@ func TestPeerCertificatesRotateBeforeExpiry(t *testing.T) {
 	}
 }
 
-// postQuantumKeyExchange reports whether a negotiated group is one of Go's hybrid
-// ML-KEM key exchanges. This observes our own handshake; it is a self-report about
-// this process, not attestation of the peer's configuration.
-func postQuantumKeyExchange(id tls.CurveID) bool {
-	switch id { // gitleaks:allow -- public algorithm names, not key material
-	case tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024:
-		return true
-	}
-	return false
-}
-
-// Peer mTLS must negotiate a post-quantum group. Go offers the hybrid ML-KEM
-// groups only while CurvePreferences is nil, and the GODEBUG that gates them comes
-// from go.mod's go directive, so both "pinning" a curve and lowering that directive
-// would downgrade this handshake to classical X25519 with no other visible effect.
-// Both ends run this code, so the assertion covers the real server and client
-// configurations rather than a synthetic pair.
+// Exercise the production client/server configuration and exact ML-KEM-1024 group.
 func TestPeerHandshakeUsesPostQuantumKeyExchange(t *testing.T) {
 	registry := NewRegistry(nil)
 	a := enrolledIdentity(t, registry)
@@ -375,8 +360,8 @@ func TestPeerHandshakeUsesPostQuantumKeyExchange(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.CurvePreferences != nil {
-			t.Fatalf("server=%v: CurvePreferences is set, so Go offers only the listed groups and post-quantum key agreement is silently dropped", server)
+		if len(cfg.CurvePreferences) != 1 || cfg.CurvePreferences[0] != tls.SecP384r1MLKEM1024 {
+			t.Fatalf("server=%v: ML-KEM-1024 must be the only supported group", server)
 		}
 		if cfg.MinVersion != tls.VersionTLS13 {
 			t.Fatalf("server=%v: TLS floor is %#x, and the ML-KEM groups exist only in TLS 1.3", server, cfg.MinVersion)
@@ -399,8 +384,58 @@ func TestPeerHandshakeUsesPostQuantumKeyExchange(t *testing.T) {
 	if resp.TLS.Version != tls.VersionTLS13 {
 		t.Fatalf("negotiated TLS version %#x", resp.TLS.Version)
 	}
-	if !postQuantumKeyExchange(resp.TLS.CurveID) {
-		t.Fatalf("classical key exchange negotiated between peers: %v (%d)", resp.TLS.CurveID, resp.TLS.CurveID)
+	if resp.TLS.CurveID != tls.SecP384r1MLKEM1024 {
+		t.Fatalf("unexpected key exchange negotiated between peers: %v (%d)", resp.TLS.CurveID, resp.TLS.CurveID)
 	}
 	t.Logf("negotiated %v (%d) at TLS %#x", resp.TLS.CurveID, resp.TLS.CurveID, resp.TLS.Version)
+}
+
+func TestPeerMLKEM1024RejectsWeakerPeers(t *testing.T) {
+	for _, group := range []tls.CurveID{tls.X25519, tls.X25519MLKEM768, tls.SecP256r1MLKEM768} {
+		for _, weakServer := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/server=%v", group, weakServer), func(t *testing.T) {
+				registry := NewRegistry(nil)
+				a, b := enrolledIdentity(t, registry), enrolledIdentity(t, registry)
+				sp, err := newPeerPolicy(registry, []string{DeviceID(a.PublicKey)}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cp, err := newPeerPolicy(registry, []string{DeviceID(b.PublicKey)}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sc, err := peerTLS(b, sp, true)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cc, err := peerTLS(a, cp, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if weakServer {
+					sc.CurvePreferences = []tls.CurveID{group}
+				} else {
+					cc.CurvePreferences = []tls.CurveID{group}
+				}
+				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("weaker handshake reached HTTP") }))
+				server.TLS = sc
+				server.StartTLS()
+				defer server.Close()
+				transport := &http.Transport{TLSClientConfig: cc}
+				defer transport.CloseIdleConnections()
+				client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
+				response, err := client.Get(server.URL)
+				if response != nil {
+					response.Body.Close()
+				}
+				if err == nil {
+					t.Fatal("weaker peer connected")
+				}
+			})
+		}
+	}
+}
+func TestPeerMLKEM1024SurvivesDefaultGroupDisabling(t *testing.T) {
+	t.Setenv("GODEBUG", "tlsmlkem=0,tlssecpmlkem=0")
+	TestPeerHandshakeUsesPostQuantumKeyExchange(t)
 }

@@ -1,0 +1,62 @@
+{
+  "fixture_only": true,
+  "production_checkpoint_validated": false,
+  "python": "3.11.15",
+  "macos": "27.0",
+  "packages": {
+    "mlx": "0.29.3",
+    "mlx-lm": "0.28.4",
+    "transformers": "4.57.6",
+    "tokenizers": "0.22.2"
+  },
+  "cases": [
+    {
+      "model_type": "qwen3",
+      "bits": null,
+      "tokens": 20,
+      "reload_max_error": 0.0,
+      "cache_max_error": 2.1457672119140625e-06,
+      "greedy_repeatable": true,
+      "official_template_matches": true,
+      "official_token_ids_match": true,
+      "generated_tokens": 4,
+      "peak_memory_bytes": 115161316
+    },
+    {
+      "model_type": "qwen3",
+      "bits": 4,
+      "tokens": 20,
+      "reload_max_error": 0.0,
+      "cache_max_error": 1.9073486328125e-06,
+      "greedy_repeatable": true,
+      "official_template_matches": true,
+      "official_token_ids_match": true,
+      "generated_tokens": 4,
+      "peak_memory_bytes": 115161316
+    },
+    {
+      "model_type": "phi3",
+      "bits": null,
+      "tokens": 11,
+      "reload_max_error": 0.0,
+      "cache_max_error": 1.9073486328125e-06,
+      "greedy_repeatable": true,
+      "official_template_matches": true,
+      "official_token_ids_match": true,
+      "generated_tokens": 4,
+      "peak_memory_bytes": 129693864
+    },
+    {
+      "model_type": "phi3",
+      "bits": 4,
+      "tokens": 11,
+      "reload_max_error": 0.0,
+      "cache_max_error": 2.1383166313171387e-06,
+      "greedy_repeatable": true,
+      "official_template_matches": true,
+      "official_token_ids_match": true,
+      "generated_tokens": 4,
+      "peak_memory_bytes": 129693864
+    }
+  ]
+}

@@ -238,3 +238,13 @@ reported active macOS service and a stable private
 `<short-id>.mesh.nexal.systems` hostname. Discovery status distinguishes
 Wide-Area Bonjour, the optional site gateway, and the authenticated bridge; it
 does not claim that multicast or a shared Ethernet segment spans sites.
+
+### Local file scanning and code-style review
+
+The **Security** tab in Settings includes **File scanning & code-style review** alongside the integrity canary. Opening it reads local status only. Use the native folder picker, then Save/Enable to opt in; Pause preserves saved settings. Scan now invokes a bounded pass. The complete app uses its bundled `yr` engine; an optional trusted executable override is available in Advanced.
+
+Approving a style baseline requires an explicit confirmation and operates on the saved folders. Review those scripts first. The baseline requires at least three supported scripts of the same type with 20 nonblank lines each; it measures style differences, not threat probability or AI authorship. Status shows actual scope, last completed pass, rules version, counts, errors, and pending delivery. Peer coverage is labeled as historical reporting, with timestamps. No path or source content is added to peer telemetry by this UI.
+
+`security scan` and `security baseline --approve` have a 130-second process limit around the connector's 120-second pass budget. Configuration arguments are passed as separate argv entries, including folder names containing spaces or shell metacharacters. Native tests cover these contracts and partial status decoding; complete signed-package engine discovery and physical-device UI remain separate acceptance checks.
+
+**Recent local findings** shows up to 100 scanner observations with the local filename/path, timestamp, known-rule explanation, content hash, and optional style score. Refresh is manual and also runs after a user-initiated scan. The view does not open or execute a flagged file. Paths remain in the private local ledger; status/peer telemetry and outbound events exclude that ledger.

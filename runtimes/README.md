@@ -1,11 +1,15 @@
 # Approved local MLX runtime
 
+Qwen3/Phi-4-mini support and the sequential champion–challenger API are
+documented in [QWEN-PHI.md](QWEN-PHI.md). Runtime version: 0.2.0.
+
+
 Go remains the primary implementation: [`bridge`](bridge) constructs fixed local
 argument arrays; the connector's `internal/pool` owns memory admission,
 reservations, placement, peer authorization and fencing. Python is only the
 small MLX library adapter that Go cannot replace without changing the MLX API.
 
-**Not hardware-tested.** No model, full transitive Mac lock, signed runtime,
+**Native tiny-fixture validation only.** No full checkpoint, production Mac lock, signed runtime,
 performance claim, distributed model shard, or production MLX dispatch is shipped.
 The coordinator's only enabled template remains `monte-carlo-pi-v1`.
 The source manifest is a local runtime registry candidate, not authorization
@@ -45,7 +49,7 @@ Fixture bytes are deliberately **not an executable MLX model**.
 
 1. Complete [`RELEASE-GATES.md`](RELEASE-GATES.md). Keep the reviewed runtime
    directory and environment owner-controlled, not writable by other users.
-2. Obtain a licensed, reviewed **built-in `llama` architecture** model separately.
+2. Obtain a licensed, reviewed **built-in `llama`, `qwen3`, or supported `phi3` architecture** model separately.
    The runtime never downloads a model, repository or Python script. The model
    must be entirely local with regular safetensors weights and local tokenizer.
 3. Create `nexal-model-manifest.json` in the model directory from

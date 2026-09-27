@@ -273,3 +273,15 @@ func TestRunPollsAndStopsWithTheContext(t *testing.T) {
 		t.Fatal("Run did not stop with its context")
 	}
 }
+
+func TestDefaultDirectoryPollHasOneMinuteFloor(t *testing.T) {
+	now := time.Now()
+	r := newTestRendezvous(t, &fakeSource{}, &now, 0)
+	r.interval = defaultPollInterval
+	for range 100 {
+		wait := r.wait()
+		if wait < time.Minute || wait > 90*time.Second {
+			t.Fatalf("default poll wait = %v", wait)
+		}
+	}
+}

@@ -138,9 +138,10 @@ const tmTestURL = "smb://tm33333333333343338333@tm-gw-1.netbird.cloud/tm33333333
 
 func stubTmutil(t *testing.T, terminal bool, run func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) error) {
 	t.Helper()
-	oldRun, oldTTY := runTmutil, hasTerminal
+	oldRun, oldTTY, oldElevated := runTmutil, hasTerminal, elevatedPromptAvailable
 	runTmutil, hasTerminal = run, func() bool { return terminal }
-	t.Cleanup(func() { runTmutil, hasTerminal = oldRun, oldTTY })
+	elevatedPromptAvailable = func() bool { return false }
+	t.Cleanup(func() { runTmutil, hasTerminal, elevatedPromptAvailable = oldRun, oldTTY, oldElevated })
 }
 
 func TestSetDestinationKeepsPasswordOutOfArgv(t *testing.T) {
@@ -225,5 +226,62 @@ func TestSetDestinationFailureRedactsOutput(t *testing.T) {
 	}
 	if strings.Contains(string(printed), tmTestPassword) || !strings.Contains(string(printed), "[redacted]") {
 		t.Fatalf("stderr=%q", printed)
+	}
+}
+
+func TestElevatedScriptCarriesNoSecretAndQuotes(t *testing.T) {
+	script := elevatedScript(tmTestURL, "/tmp/d'x/in", "/tmp/d'x/out")
+	for _, want := range []string{
+		`do shell script "/usr/bin/script -q /dev/null /usr/bin/tmutil setdestination -a -p '` + tmTestURL + `'`,
+		`< '/tmp/d'\\''x/in' > '/tmp/d'\\''x/out' 2>&1"`,
+		"with administrator privileges with prompt ",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script %q lacks %q", script, want)
+		}
+	}
+	if strings.Contains(script, tmTestPassword) {
+		t.Fatal("password in script")
+	}
+}
+
+func TestSetDestinationUsesAdminDialogWithoutTerminal(t *testing.T) {
+	stubTmutil(t, false, func(context.Context, []string, io.Reader, io.Writer, io.Writer) error {
+		t.Fatal("sudo path used although the administrator dialog is available")
+		return nil
+	})
+	elevatedPromptAvailable = func() bool { return true }
+	oldElevated := runElevated
+	t.Cleanup(func() { runElevated = oldElevated })
+	var typed []byte
+	runElevated = func(_ context.Context, url string, stdin io.Reader, stdout io.Writer) error {
+		if url != tmTestURL {
+			t.Fatalf("url=%q", url)
+		}
+		_, _ = io.WriteString(stdout, "Destination password: ")
+		typed, _ = io.ReadAll(stdin)
+		return nil
+	}
+	if err := setDestination(context.Background(), tmTestURL, []byte(tmTestPassword)); err != nil {
+		t.Fatal(err)
+	}
+	if string(typed) != tmTestPassword+"\n" {
+		t.Fatalf("stdin=%q", typed)
+	}
+	runElevated = func(context.Context, string, io.Reader, io.Writer) error { return errAdminCancelled }
+	if err := setDestination(context.Background(), tmTestURL, []byte(tmTestPassword)); !errors.Is(err, errAdminCancelled) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestDestinationListedMatchesGatewayShareOnly(t *testing.T) {
+	info := "====\nName          : neXal Time Machine\nKind          : Network\nURL           : smb://tmabc@gw-us-east-1.netbird.selfhosted/tmabc\nID            : 1\n"
+	if !destinationListed(info, "gw-us-east-1.netbird.selfhosted", "tmabc") {
+		t.Fatal("configured destination not recognised")
+	}
+	for _, c := range [][2]string{{"gw-us-east-1.netbird.selfhosted", "tmother"}, {"other-gw", "tmabc"}} {
+		if destinationListed(info, c[0], c[1]) {
+			t.Fatalf("false match for %v", c)
+		}
 	}
 }

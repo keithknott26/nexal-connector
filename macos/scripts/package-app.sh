@@ -80,6 +80,7 @@ done
 /usr/bin/lipo -create "$STAGE/mesh-arm64" "$STAGE/mesh-amd64" \
     -output "$CANDIDATE/Contents/Helpers/nexal-network"
 chmod 755 "$CANDIDATE/Contents/Helpers/nexal-network"
+/bin/bash "$ROOT/scripts/bundle-yara-x.sh" "$STAGE" "$CANDIDATE"
 install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
 /usr/bin/plutil -lint "$CANDIDATE/Contents/Info.plist"
@@ -89,7 +90,7 @@ test -x "$CANDIDATE/Contents/Helpers/nexal-network"
 # Fail loudly if either slice is missing. Without this a silent fallback to a
 # single-architecture build would ship an Intel-broken DMG that looks fine on
 # the arm64 machine that built it -- exactly the bug this replaces.
-for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network"; do
+for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/Helpers/yr"; do
   ARCHS="$(/usr/bin/lipo -archs "$BINARY")"
   case " $ARCHS " in
     *" arm64 "*) ;;
@@ -100,7 +101,15 @@ for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/
     *) printf 'Missing x86_64 slice in %s (got: %s)\n' "$BINARY" "$ARCHS" >&2; exit 1 ;;
   esac
 done
+# The public installer carries bootstrap/networking components only. Private
+# inference code, model weights and credentials are fetched per connected session.
+PRIVATE_PAYLOAD="$(find "$CANDIDATE" -type f \( -name '*.safetensors' -o -name '*.gguf' -o -name '*.py' -o -name '*.key' -o -name '*.pem' -o -name '*.p12' -o -name '*.pfx' -o -name 'cert.b64' -o -name 'runtime-config.json' -o -name 'session.json' -o -name '.env*' \) -print -quit)"
+if [ -n "$PRIVATE_PAYLOAD" ]; then
+  printf 'Refusing to package private runtime payloads or credential files.\n' >&2
+  exit 1
+fi
 if [ -n "${NEXAL_CODE_SIGN_IDENTITY:-}" ]; then
+  /usr/bin/codesign --force --options runtime --timestamp=none --entitlements "$ROOT/Resources/YARA-X.entitlements" --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE/Contents/Helpers/yr"
   for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/MacOS/NexalMac"; do
     /usr/bin/codesign --force --options runtime --timestamp=none --sign "$NEXAL_CODE_SIGN_IDENTITY" "$BINARY"
   done

@@ -21,10 +21,9 @@ import (
 // successful poll the set is empty, which means no peer is authorized at all.
 
 const (
-	// defaultPollInterval is well inside the coordinator's lease window so a peer
-	// appearing or being revoked is noticed within a lease, without turning the
-	// peer list into a heartbeat.
-	defaultPollInterval = 30 * time.Second
+	// defaultPollInterval yields 60–90 second jittered directory reads.
+	// This bounds background traffic while preserving regular authorization updates.
+	defaultPollInterval = 75 * time.Second
 	// defaultStaleAfter is when a retained set starts being reported as stale.
 	defaultStaleAfter = 90 * time.Second
 	// jitterFraction spreads polls so a fleet restarting together does not

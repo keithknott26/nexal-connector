@@ -4,7 +4,8 @@
 // Everything is read locally with fixed system tools at absolute paths and the
 // standard library; nothing here needs administrator rights or cgo. The static
 // part (OS, model, chip, cores, memory, disk size) is read once per process and
-// cached; only disk free space and thermal state are re-read on each Collect.
+// cached; utilization, idle time, backup status, disk space and thermal state
+// are re-read on each Collect.
 //
 // TEMPERATURE. macOS exposes exact sensor temperatures only to root
 // (powermetrics) or through private IOKit interfaces that need cgo. What an
@@ -18,9 +19,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -28,17 +31,42 @@ import (
 	"time"
 )
 
-// Info is one host's details. Every field is optional: zero means unknown.
+// Info is one host's details. Optional live metrics use pointers so a measured
+// zero remains distinguishable from an unavailable measurement.
 // JSON names are the wire contract with the coordinator's host.info frame.
 type Info struct {
+	ThreatScannerStatus    string `json:"threatScannerStatus,omitempty"`
+	LastThreatScanAt       string `json:"lastThreatScanAt,omitempty"`
+	ThreatRulesVersion     string `json:"threatRulesVersion,omitempty"`
+	ThreatScanLastError    string `json:"threatScanLastError,omitempty"`
+	ThreatScanCoverage     string `json:"threatScanCoverage,omitempty"`
+	ThreatScanFilesScanned *int   `json:"threatScanFilesScanned,omitempty"`
+	ThreatScanFilesSkipped *int   `json:"threatScanFilesSkipped,omitempty"`
+	ThreatScanFindings     *int   `json:"threatScanFindings,omitempty"`
+
+	LoadAverage1m           *float64 `json:"loadAverage1m,omitempty"`
+	LoadAverage5m           *float64 `json:"loadAverage5m,omitempty"`
+	LoadAverage15m          *float64 `json:"loadAverage15m,omitempty"`
+	ExitNodeStatus          string   `json:"exitNodeStatus,omitempty"`
+	CanaryStatus            string   `json:"canaryStatus,omitempty"`
+	CanaryLastCheckedAt     string   `json:"canaryLastCheckedAt,omitempty"`
+	CPUUsagePercent         *float64 `json:"cpuUsagePercent,omitempty"`
+	MemoryAvailableBytes    *uint64  `json:"memoryAvailableBytes,omitempty"`
+	MemoryUsedBytes         *uint64  `json:"memoryUsedBytes,omitempty"`
+	IdleSeconds             *uint64  `json:"idleSeconds,omitempty"`
+	LastTimeMachineBackupAt string   `json:"lastTimeMachineBackupAt,omitempty"`
+	ReportedAt              string   `json:"reportedAt,omitempty"`
+
 	// Name is the computer's own name as its owner set it (System Settings →
 	// General → About, e.g. "Keith's Mac mini"). The panel shows this rather than
 	// the secure network's peer name, which is fixed at first registration from
 	// the system hostname and can be stale (e.g. carried over by Migration Assistant).
-	Name             string `json:"name,omitempty"`
-	OS               string `json:"os,omitempty"`    // "macOS 27.0 (27A5218g)"
-	Model            string `json:"model,omitempty"` // "Mac mini"
-	Chip             string `json:"chip,omitempty"`  // "Apple M4"
+	Name  string `json:"name,omitempty"`
+	OS    string `json:"os,omitempty"`    // "macOS 27.0 (27A5218g)"
+	Model string `json:"model,omitempty"` // "Mac mini"
+	// Serial is the hardware serial number, shown only to the owner's own devices.
+	Serial           string `json:"serial,omitempty"`
+	Chip             string `json:"chip,omitempty"` // "Apple M4"
 	Cores            int    `json:"cores,omitempty"`
 	PerformanceCores int    `json:"performanceCores,omitempty"`
 	EfficiencyCores  int    `json:"efficiencyCores,omitempty"`
@@ -80,7 +108,25 @@ func Material(prev, next Info) bool {
 	a, b := prev, next
 	a.DiskFreeBytes, b.DiskFreeBytes = 0, 0
 	a.BatteryPercent, b.BatteryPercent = 0, 0
-	if a != b {
+	a.ReportedAt, b.ReportedAt = "", ""
+	a.CanaryLastCheckedAt, b.CanaryLastCheckedAt = "", ""
+	// Compare against the last transmitted values, so small changes accumulate.
+	if floatChanged(a.CPUUsagePercent, b.CPUUsagePercent, 10) ||
+		floatChanged(a.LoadAverage1m, b.LoadAverage1m, 0.5) ||
+		floatChanged(a.LoadAverage5m, b.LoadAverage5m, 0.5) ||
+		floatChanged(a.LoadAverage15m, b.LoadAverage15m, 0.5) ||
+		bytesChanged(a.MemoryAvailableBytes, b.MemoryAvailableBytes, 256<<20) ||
+		bytesChanged(a.MemoryUsedBytes, b.MemoryUsedBytes, 256<<20) || idleChanged(a.IdleSeconds, b.IdleSeconds) {
+		return true
+	}
+	a.CPUUsagePercent, b.CPUUsagePercent = nil, nil
+	a.LoadAverage1m, b.LoadAverage1m = nil, nil
+	a.LoadAverage5m, b.LoadAverage5m = nil, nil
+	a.LoadAverage15m, b.LoadAverage15m = nil, nil
+	a.MemoryAvailableBytes, b.MemoryAvailableBytes = nil, nil
+	a.MemoryUsedBytes, b.MemoryUsedBytes = nil, nil
+	a.IdleSeconds, b.IdleSeconds = nil, nil
+	if !reflect.DeepEqual(a, b) {
 		return true
 	}
 	if abs(next.BatteryPercent-prev.BatteryPercent) >= BatteryChangeThreshold {
@@ -108,7 +154,15 @@ func abs(n int) int {
 type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
 func execRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).Output()
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = time.Second
+	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C"}
+	out := &limitedOutput{}
+	cmd.Stdout = out
+	err := cmd.Run()
+	return out.Bytes(), err
 }
 
 // Collector caches the static part of Info.
@@ -129,6 +183,7 @@ func (c *Collector) Collect(ctx context.Context) Info {
 	defer cancel()
 	c.once.Do(func() { c.static = c.readStatic(ctx) })
 	info := c.static
+	info.ReportedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if c.Statfs != nil {
 		if total, free, err := c.Statfs(dataVolume()); err == nil {
 			info.DiskTotalBytes, info.DiskFreeBytes = total, free
@@ -141,6 +196,7 @@ func (c *Collector) Collect(ctx context.Context) Info {
 			info.BatteryPercent, info.BatteryState = parseBattery(out)
 		}
 	}
+	c.collectLive(ctx, &info)
 	return info
 }
 
@@ -170,6 +226,9 @@ func (c *Collector) readStatic(ctx context.Context) Info {
 	}
 	if out, err := c.Run(ctx, "/usr/sbin/system_profiler", "SPHardwareDataType"); err == nil {
 		info.Model = profilerField(out, "Model Name")
+		if serial := profilerField(out, "Serial Number (system)"); validSerial(serial) {
+			info.Serial = serial
+		}
 		if info.Chip == "" {
 			info.Chip = profilerField(out, "Chip")
 		}
@@ -250,7 +309,10 @@ func parseTherm(out []byte) string {
 	if level, err := strconv.Atoi(values["Thermal_Level"]); err == nil && level > 0 {
 		return ThermalThrottled
 	}
-	return ThermalNominal
+	if strings.Contains(string(out), "No thermal warning level has been recorded") || values["CPU_Speed_Limit"] == "100" || values["Thermal_Level"] == "0" {
+		return ThermalNominal
+	}
+	return ThermalUnknown
 }
 
 // parseBattery reads `pmset -g batt`, e.g.
@@ -359,4 +421,39 @@ func pickLANAddress(ifaces []net.Interface, addrs func(net.Interface) ([]net.Add
 		}
 	}
 	return best
+}
+
+// validSerial accepts Apple-style serial numbers only, matching the coordinator's check.
+func validSerial(s string) bool {
+	if len(s) < 8 || len(s) > 20 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func floatChanged(a, b *float64, threshold float64) bool {
+	if a == nil || b == nil {
+		return (a == nil) != (b == nil)
+	}
+	return math.Abs(*a-*b) >= threshold
+}
+func bytesChanged(a, b *uint64, threshold uint64) bool {
+	if a == nil || b == nil {
+		return (a == nil) != (b == nil)
+	}
+	if *a > *b {
+		return *a-*b >= threshold
+	}
+	return *b-*a >= threshold
+}
+func idleChanged(a, b *uint64) bool {
+	if a == nil || b == nil {
+		return (a == nil) != (b == nil)
+	}
+	return (*a < 60) != (*b < 60)
 }

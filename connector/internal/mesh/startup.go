@@ -178,8 +178,11 @@ func (p StartupPlan) Arguments(credentialPath string) ([]string, error) {
 // RuntimePeerEvidence is the only evidence that may lift strict-PQ gates.
 // Process exit success or saved configuration is never sufficient.
 type RuntimePeerEvidence struct {
-	Connected         bool
-	QuantumResistance bool
+	Connected             bool
+	QuantumResistance     bool
+	QuantumProfile        string
+	QuantumKeyInstalledAt string
+	QuantumKeyExpiresAt   string
 }
 
 func StrictPQReady(peers []RuntimePeerEvidence) bool {
@@ -187,7 +190,8 @@ func StrictPQReady(peers []RuntimePeerEvidence) bool {
 		return false
 	}
 	for _, peer := range peers {
-		if !peer.Connected || !peer.QuantumResistance {
+		_, verified := validQuantumEvidence(peer.QuantumProfile, peer.QuantumKeyInstalledAt, peer.QuantumKeyExpiresAt, time.Now())
+		if !peer.Connected || !peer.QuantumResistance || !verified {
 			return false
 		}
 	}

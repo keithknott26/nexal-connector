@@ -87,7 +87,7 @@ func TestStrictPQNeedsEveryConnectedPeerToReportRuntimeEvidence(t *testing.T) {
 	if StrictPQReady([]RuntimePeerEvidence{{Connected: true, QuantumResistance: true}, {Connected: false, QuantumResistance: true}}) {
 		t.Fatal("disconnected peer accepted")
 	}
-	if !StrictPQReady([]RuntimePeerEvidence{{Connected: true, QuantumResistance: true}}) {
-		t.Fatal("valid runtime evidence rejected")
+	if StrictPQReady([]RuntimePeerEvidence{{Connected: true, QuantumResistance: true}}) {
+		t.Fatal("configuration flags accepted without key-installation evidence")
 	}
 }

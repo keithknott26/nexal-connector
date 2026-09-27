@@ -1,9 +1,15 @@
 # Reproducible MLX environment gate
 
-## Current state: blocked pending Mac validation
+## Current state: full checkpoint release validation still required
+
+Runtime 0.2.0 supports Qwen3 and Phi-4-mini explicitly. See
+[QWEN-PHI.md](QWEN-PHI.md) for the model preparation and native fixture checks.
+Tiny synthetic weights do not satisfy real-checkpoint accuracy, memory or
+performance release gates. Keep production approval false until those pass.
+
 
 `requirements.in` pins **candidate top-level versions only**:
-`mlx==0.29.3` and `mlx-lm==0.28.4`. These releases exist; that does not prove their
+`mlx==0.29.3`, `mlx-lm==0.28.4`, and `transformers==4.57.6`. These releases exist; that does not prove their
 combination works on every macOS/Python target
 ([MLX 0.29.3](https://pypi.org/project/mlx/0.29.3/),
 [MLX-LM 0.28.4](https://pypi.org/project/mlx-lm/0.28.4/)).
@@ -67,7 +73,7 @@ Never accept a lock produced by a remote workload as authorization.
 This is an owner-managed gate, not remote attestation or a cryptographic signature.
 Write mode 0600, then hash the receipt bytes into `runtime-config.json`.
 All package names use lowercase normalized hyphens. Include every distribution
-visible to the isolated interpreter, not merely the two MLX packages.
+visible to the isolated interpreter, not merely the top-level packages.
 
 ```json
 {
@@ -77,12 +83,14 @@ visible to the isolated interpreter, not merely the two MLX packages.
   "packages": {
     "mlx": "0.29.3",
     "mlx-lm": "0.28.4",
+    "transformers": "4.57.6",
     "EVERY_OTHER_INSTALLED_DISTRIBUTION": "EXACT_VERSION"
   },
   "requirements_lock_sha256": "SHA256_OF_COMPLETE_REVIEWED_LOCK",
   "wheel_sha256": {
     "mlx": "SHA256_OF_EXACT_TARGET_WHEEL",
     "mlx-lm": "SHA256_OF_EXACT_TARGET_WHEEL",
+    "transformers": "SHA256_OF_EXACT_TARGET_WHEEL",
     "EVERY_OTHER_INSTALLED_DISTRIBUTION": "SHA256_OF_EXACT_TARGET_WHEEL"
   }
 }
@@ -100,7 +108,7 @@ Runtime checks require:
 
 - Apple-silicon Darwin interpreter.
 - Exact CPython patch version, exact complete installed package inventory, and
-  the two candidate versions.
+  the three candidate versions.
 - Reviewed receipt digest, a full lock digest, and one wheel hash per package.
 - An explicit recorded Mac hardware approval.
 

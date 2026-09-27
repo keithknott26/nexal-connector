@@ -69,3 +69,23 @@ func TestHostInfoSentAfterSnapshotAndPeersRecorded(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestInfoReportingCadence(t *testing.T) {
+	a := sysinfo.Info{ReportedAt: "before", CanaryLastCheckedAt: "before"}
+	b := sysinfo.Info{ReportedAt: "after", CanaryLastCheckedAt: "after"}
+	if !shouldReportInfo(a, b, false, 0) {
+		t.Fatal("initial report suppressed")
+	}
+	for _, elapsed := range []time.Duration{time.Minute, 4 * time.Minute, 5*time.Minute - time.Nanosecond} {
+		if shouldReportInfo(a, b, true, elapsed) {
+			t.Fatalf("unchanged telemetry sent at %v", elapsed)
+		}
+	}
+	if !shouldReportInfo(a, b, true, 5*time.Minute) {
+		t.Fatal("freshness refresh suppressed")
+	}
+	b.CanaryStatus = "alert"
+	if !shouldReportInfo(a, b, true, time.Minute) {
+		t.Fatal("security status change suppressed")
+	}
+}

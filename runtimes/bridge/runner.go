@@ -354,7 +354,7 @@ func runLocalInference(ctx context.Context, owner OwnerPolicy, job LocalJob, fac
 	if strictObject(data, &result, "schema_version", "template", "runtime_version", "attempt_id",
 		"model_manifest_sha256", "text", "estimated_required_bytes") != nil ||
 		result.SchemaVersion != 1 || result.Template != "mlx-local-text-v1" ||
-		result.RuntimeVersion != "0.1.0" || result.AttemptID != job.AttemptID ||
+		result.RuntimeVersion != "0.2.0" || result.AttemptID != job.AttemptID ||
 		result.ModelManifestSHA256 != job.ModelManifestSHA256 ||
 		result.EstimatedRequiredBytes == 0 || result.EstimatedRequiredBytes > grant.ReservedBytes ||
 		result.EstimatedRequiredBytes > grant.AvailableBytes-grant.OwnerReserveBytes {

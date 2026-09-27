@@ -25,7 +25,7 @@ func TestSanitizeSnapshotRejectsUpstreamAndUnauthorizedSharing(t *testing.T) {
 	}
 
 	host := "studio.network.mesh.nexal.systems"
-	s.Peers[0] = Peer{Hostname: HostnameStatus{State: "ready", Hostname: host}, PQ: PQProtected, PQVerifiedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	s.Peers[0] = Peer{Hostname: HostnameStatus{State: "ready", Hostname: host}, PQ: PQProtected, QuantumProfile: experimentalQuantumProfile, PQExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano), PQVerifiedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		FileSharing:   FileSharing{Authorized: true, Available: true, Address: host},
 		ScreenSharing: ScreenSharing{Authorized: true, Available: true, Address: host}}
 	got = SanitizeSnapshot(s).Peers[0]
@@ -36,7 +36,7 @@ func TestSanitizeSnapshotRejectsUpstreamAndUnauthorizedSharing(t *testing.T) {
 
 func TestStrictPQReadyRequiresRuntimePeerEvidence(t *testing.T) {
 	now := time.Now().UTC()
-	s := Status{PQ: PQProtected, Peers: []Peer{{Lifecycle: LifecycleConnected, PQ: PQProtected, PQVerifiedAt: now.Format(time.RFC3339Nano)}}}
+	s := Status{PQ: PQProtected, Peers: []Peer{{Lifecycle: LifecycleConnected, PQ: PQProtected, QuantumProfile: experimentalQuantumProfile, PQExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano), PQVerifiedAt: now.Format(time.RFC3339Nano)}}}
 	if !s.StrictPQReadyAt(now, 2*time.Minute) {
 		t.Fatal("valid peer evidence rejected")
 	}

@@ -93,6 +93,8 @@ type Peer struct {
 	LastHandshakeAt    string         `json:"lastHandshakeAt,omitempty"`
 	PQ                 PQState        `json:"pq"`
 	PQVerifiedAt       string         `json:"pqVerifiedAt,omitempty"`
+	QuantumProfile     string         `json:"quantumProfile,omitempty"`
+	PQExpiresAt        string         `json:"pqExpiresAt,omitempty"`
 	Traffic            Traffic        `json:"traffic"`
 	FileSharing        FileSharing    `json:"fileSharing"`
 	ScreenSharing      ScreenSharing  `json:"screenSharing"`
@@ -148,8 +150,12 @@ func SanitizeSnapshot(s Status) Status {
 		if peer.Hostname.State != "ready" || !peer.ScreenSharing.Authorized || !peer.ScreenSharing.Available || peer.ScreenSharing.Address != peer.Hostname.Hostname {
 			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
 		}
-		verified, err := time.Parse(time.RFC3339Nano, peer.PQVerifiedAt)
-		if peer.PQ != PQProtected || err != nil || verified.After(now.Add(5*time.Second)) || now.Sub(verified) > 2*time.Minute {
+		_, valid := validQuantumEvidence(peer.QuantumProfile, peer.PQVerifiedAt, peer.PQExpiresAt, now)
+		if peer.PQ != PQProtected || !valid {
+			peer.PQ = PQDegraded
+			if s.PQ == PQProtected {
+				s.PQ = PQDegraded
+			}
 			peer.FileSharing.Available, peer.FileSharing.Address = false, ""
 			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
 			if peer.Lifecycle == LifecycleConnected {
@@ -169,8 +175,8 @@ func (s Status) StrictPQReadyAt(now time.Time, maxAge time.Duration) bool {
 		return false
 	}
 	for _, peer := range s.Peers {
-		verified, err := time.Parse(time.RFC3339Nano, peer.PQVerifiedAt)
-		if peer.Lifecycle != LifecycleConnected || peer.PQ != PQProtected || err != nil || verified.After(now.Add(5*time.Second)) || now.Sub(verified) > maxAge {
+		verified, valid := validQuantumEvidence(peer.QuantumProfile, peer.PQVerifiedAt, peer.PQExpiresAt, now)
+		if peer.Lifecycle != LifecycleConnected || peer.PQ != PQProtected || !valid || now.Sub(verified) > maxAge {
 			return false
 		}
 	}

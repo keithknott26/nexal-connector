@@ -57,6 +57,7 @@ type ScannerState struct {
 	RulesVersion    string                 `json:"rulesVersion"`
 	LastScanAt      string                 `json:"lastScanAt,omitempty"`
 	LastAttemptAt   string                 `json:"lastAttemptAt,omitempty"`
+	LimitReason     string                 `json:"limitReason,omitempty"`
 	LastError       string                 `json:"lastError,omitempty"`
 	FilesScanned    int                    `json:"filesScanned"`
 	FilesSkipped    int                    `json:"filesSkipped"`
@@ -206,6 +207,7 @@ func (s Scanner) Status() (ScannerState, error) {
 		if at.IsZero() || time.Since(at) > 2*time.Minute+15*time.Second {
 			out.Status = "error"
 			out.LastError = "scan_limit"
+			out.LimitReason = "interrupted"
 		}
 	}
 	out.PendingEvents = len(out.Pending)
@@ -300,6 +302,7 @@ func (s Scanner) Configure(enabled bool, roots []string, engine string) error {
 		state.Enabled = enabled
 		state.Status = "disabled"
 		state.LastError = ""
+		state.LimitReason = ""
 		state.LastAttemptAt = ""
 		if enabled {
 			state.Status = "idle"
@@ -309,6 +312,24 @@ func (s Scanner) Configure(enabled bool, roots []string, engine string) error {
 }
 
 var errScanLimit = errors.New("scan limit reached")
+
+type scanLimitError string
+
+func (e scanLimitError) Error() string { return string(e) }
+func (e scanLimitError) Unwrap() error { return errScanLimit }
+func scanLimitReason(err error) string {
+	var limit scanLimitError
+	if errors.As(err, &limit) {
+		return string(limit)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "time"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "interrupted"
+	}
+	return "unknown"
+}
 
 // walkInputs never follows symlinks and reads through os.Root confinement. The
 // scanned engine input is this bounded immutable byte snapshot, not a user path.
@@ -381,7 +402,7 @@ func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) 
 					}
 					entries++
 					if entries > MaxScanEntries {
-						return errScanLimit
+						return scanLimitError("entries")
 					}
 					name := filepath.Join(directory, d.Name())
 					if d.Type()&os.ModeSymlink != 0 {
@@ -404,10 +425,6 @@ func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) 
 					if !d.Type().IsRegular() {
 						skipped++
 						continue
-					}
-					files++
-					if files > MaxScanFiles {
-						return errScanLimit
 					}
 					unsafe := false
 					prefix := ""
@@ -440,9 +457,13 @@ func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) 
 						skipped++
 						continue
 					}
+					files++
+					if files > MaxScanFiles {
+						return scanLimitError("files")
+					}
 					total += len(data)
 					if total > MaxScanBytes {
-						return errScanLimit
+						return scanLimitError("bytes")
 					}
 					if e = visit(filepath.Join(path, name), data); e != nil {
 						return e
@@ -527,7 +548,11 @@ func (s Scanner) Scan(ctx context.Context, now time.Time, report func(context.Co
 		}
 		state.LastAttemptAt = now.UTC().Format(time.RFC3339)
 		state.Status = "running"
+		state.FilesScanned = 0
+		state.FilesSkipped = 0
+		state.Findings = 0
 		state.LastError = ""
+		state.LimitReason = ""
 		if err := saveScanner(root, state); err != nil {
 			return err
 		}
@@ -640,7 +665,7 @@ func (s Scanner) Scan(ctx context.Context, now time.Time, report func(context.Co
 				return nil
 			}
 			if len(state.Pending) >= MaxPendingEvents {
-				return errScanLimit
+				return scanLimitError("pending_findings")
 			}
 			if err := os.WriteFile(target, data, 0600); err != nil {
 				return errors.New("state_error")
@@ -687,7 +712,7 @@ func (s Scanner) Scan(ctx context.Context, now time.Time, report func(context.Co
 					continue
 				}
 				if len(state.Pending) >= MaxPendingEvents {
-					return errScanLimit
+					return scanLimitError("pending_findings")
 				}
 				state.Pending = append(state.Pending, event)
 				state.LocalFindings = append(state.LocalFindings, LocalFinding{EventID: event.EventID, Path: name, RuleID: event.Evidence.RuleID, Engine: event.Evidence.Engine, ContentSHA256: content, ObservedAt: event.ObservedAt, Severity: event.Severity, TestOnly: event.Evidence.TestOnly, Score: event.Evidence.Score, BaselineID: event.Evidence.BaselineID})
@@ -700,8 +725,17 @@ func (s Scanner) Scan(ctx context.Context, now time.Time, report func(context.Co
 			oldContent[key] = true
 			return saveScanner(root, state)
 		}, s.Directory)
+		// Preserve actual progress even when the bounded pass stops early.
+		state.FilesScanned = scanFiles
+		state.FilesSkipped = skipped
+		state.Findings = scanFindings
 		if err != nil {
 			if errors.Is(err, errScanLimit) || ctx.Err() != nil {
+				if ctx.Err() != nil {
+					state.LimitReason = scanLimitReason(ctx.Err())
+				} else {
+					state.LimitReason = scanLimitReason(err)
+				}
 				return fail("scan_limit")
 			}
 			return fail("engine_failed")
@@ -719,6 +753,7 @@ func (s Scanner) Scan(ctx context.Context, now time.Time, report func(context.Co
 		if skipped > 0 {
 			state.Status = "limited"
 			state.LastError = "scan_limit"
+			state.LimitReason = "files_skipped"
 		}
 		if err := saveScanner(root, state); err != nil {
 			return err

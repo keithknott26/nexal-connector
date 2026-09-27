@@ -9,6 +9,7 @@ struct ScannerReply: Decodable {
     let engineVersion: String?
     let rulesVersion: String?
     let lastScanAt: String?
+    let limitReason: String?
     let lastError: String?
     let filesScanned: Int?
     let filesSkipped: Int?
@@ -61,6 +62,18 @@ enum ScannerPresentation {
         default: return "The scanner reported an unknown error. Refresh its status before continuing."
         }
     }
+    static func limit(_ reason: String?) -> String {
+        switch reason {
+        case "bytes": return "Paused after reading 64 MiB of file contents. Results cover only part of the selected folders. Choose a smaller subfolder to check the remaining files."
+        case "files": return "Paused at the 2,000-file limit. Results are partial; choose a smaller subfolder for the remaining files."
+        case "entries": return "Paused at the 10,000-entry limit. Results are partial; choose a smaller subfolder."
+        case "time": return "Paused at the two-minute limit. Findings were saved. Choose a smaller subfolder or scan again; unchanged inspected contents are cached."
+        case "pending_findings": return "Paused because 100 findings are waiting for delivery. Reconnect to the coordinator before scanning again."
+        case "interrupted": return "The scan was interrupted before finishing. Results are partial; try again."
+        case "files_skipped": return "Finished checking eligible files. Files over 4 MiB, links, unreadable items, and folders beyond the depth limit are excluded; they have not been checked."
+        default: return "This scan reported limited coverage without a specific reason. Scan again with this version to see the cause."
+        }
+    }
     static func date(_ value: String?) -> String {
         guard let value else { return "Not reported" }
         let formatter = ISO8601DateFormatter()
@@ -111,13 +124,13 @@ struct ScannerSettingsView: View {
                     LabeledContent("Last completed pass", value: ScannerPresentation.date(state.lastScanAt))
                     LabeledContent("Scope", value: state.coverage == "configured_roots" ? "Configured folders only" : "Not reported")
                     LabeledContent("Rules", value: state.rulesVersion ?? "Not reported")
-                    Text("Last pass · \(state.filesScanned.map(String.init) ?? "Unknown") scanned · \(state.filesSkipped.map(String.init) ?? "Unknown") skipped · \(state.findings.map(String.init) ?? "Unknown") findings")
+                    Text("Most recent attempt · \(state.filesScanned.map(String.init) ?? "Unknown") scanned · \(state.filesSkipped.map(String.init) ?? "Unknown") skipped · \(state.findings.map(String.init) ?? "Unknown") findings")
                         .font(.caption)
                     if let pending = state.pendingEvents, pending > 0 { Text("\(pending) findings waiting to be delivered").font(.caption).foregroundStyle(.orange) }
                     if let expired = state.expiredEvents, expired > 0 {
                         Text("\(expired) older findings retained locally; no longer uploadable").font(.caption).foregroundStyle(.secondary)
                     }
-                    if let lastError = state.lastError, lastError != "none" { Text(ScannerPresentation.error(lastError)).font(.caption).foregroundStyle(.orange) }
+                    if let lastError = state.lastError, lastError != "none" { Text(lastError == "scan_limit" ? ScannerPresentation.limit(state.limitReason) : ScannerPresentation.error(lastError)).font(.caption).foregroundStyle(.orange) }
                     HStack {
                         Button("Scan now") { Task { await perform(.securityScan) } }.disabled(busy || !state.enabled)
                         if state.enabled { Button("Pause scanning") { Task { await perform(.securityConfigure(roots: [], engine: nil, enabled: false)) } }.disabled(busy) }

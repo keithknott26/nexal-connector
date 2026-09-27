@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -396,5 +397,52 @@ func TestParentScanExcludesPrivateState(t *testing.T) {
 	}
 	if err := s.ApproveBaseline(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestScanReportsByteLimitAndPreservesPartialProgress(t *testing.T) {
+	engine := testEngine(t)
+	s, files := testScanner(t)
+	data := []byte(strings.Repeat("a", MaxScanFileBytes))
+	for i := 0; i < 17; i++ {
+		if err := os.WriteFile(filepath.Join(files, string(rune('a'+i))+".bin"), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Configure(true, []string{files}, engine); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Scan(context.Background(), time.Now(), nil, true); err != nil {
+		t.Fatal(err)
+	}
+	state, err := s.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.LimitReason != "bytes" || state.Status != "limited" || state.FilesScanned != 1 || state.LastScanAt != "" {
+		t.Fatalf("incorrect partial scan status: status=%s reason=%s scanned=%d completed=%s", state.Status, state.LimitReason, state.FilesScanned, state.LastScanAt)
+	}
+}
+
+func TestOversizedInputsDoNotConsumeEligibleFileBudget(t *testing.T) {
+	_, files := testScanner(t)
+	for i := 0; i <= MaxScanFiles; i++ {
+		f, err := os.Create(filepath.Join(files, strconv.Itoa(i)+".bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = f.Truncate(MaxScanFileBytes + 1)
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(files, "small.txt"), []byte("safe"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	visited := 0
+	skipped, err := walkInputs(context.Background(), []string{files}, func(string, []byte) error { visited++; return nil })
+	if err != nil || visited != 1 || skipped != MaxScanFiles+1 {
+		t.Fatalf("visited=%d skipped=%d err=%v", visited, skipped, err)
 	}
 }

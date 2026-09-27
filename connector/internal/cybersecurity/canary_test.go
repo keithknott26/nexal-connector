@@ -85,3 +85,64 @@ func TestCanaryRejectsDirectorySymlinkAndDetectsDecoySymlink(t *testing.T) {
 		t.Fatal("symlink not detected", err)
 	}
 }
+
+func TestCanaryTypedSignalsAndReenablePreservesAlert(t *testing.T) {
+	c := Canary{Directory: t.TempDir()}
+	ctx := context.Background()
+	if err := c.Configure(true); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(c.Directory, "security-canary", canaryName)
+	check := func(want string) {
+		t.Helper()
+		var got string
+		if err := c.Tick(ctx, time.Now(), func(_ context.Context, e Event) error { got = e.Detector; return e.Validate(time.Now()) }); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("got %q want %q", got, want)
+		}
+	}
+	if err := os.WriteFile(path, []byte("changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("nexal_canary_modified")
+	if err := c.Configure(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Configure(true); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := c.Status()
+	if s.Status != "alert" {
+		t.Fatal("re-enabling concealed changed decoy")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	check("nexal_canary_deleted")
+	if err := os.Symlink("/not-a-real-target", path); err != nil {
+		t.Fatal(err)
+	}
+	check("nexal_canary_unsafe")
+}
+
+func TestCanaryRecoversAfterLongOfflineGap(t *testing.T) {
+	c := Canary{Directory: t.TempDir()}
+	if err := c.Configure(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(c.Directory, "security-canary", canaryName)); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	_ = c.Tick(context.Background(), old, func(context.Context, Event) error { return errors.New("offline") })
+	if err := c.Tick(context.Background(), time.Now(), func(_ context.Context, e Event) error {
+		if e.Detector != "nexal_canary_deleted" {
+			t.Error("lost current missing decoy")
+		}
+		return e.Validate(time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

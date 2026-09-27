@@ -41,3 +41,40 @@ func TestSecurityReportingAcknowledgement(t *testing.T) {
 		t.Fatal("wrong acknowledgement accepted")
 	}
 }
+
+func TestWatermarkStateDoesNotDiscloseDecoyAndChecksAcknowledgement(t *testing.T) {
+	wrong := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/hosts/host_1/watermark-state" || r.Header.Get("Authorization") != "Bearer host-credential" {
+			t.Error("wrong scope")
+		}
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Error("invalid request")
+		}
+		for _, key := range []string{"baseline", "observed", "pending", "directory"} {
+			if _, ok := body[key]; ok {
+				t.Errorf("leaked %s", key)
+			}
+		}
+		at := body["reportedAt"]
+		if wrong {
+			at = "wrong"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"schemaVersion": 1, "accepted": true, "reportedAt": at})
+	}))
+	defer server.Close()
+	c, err := New(server.URL, "host-credential", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := cybersecurity.CanaryState{Enabled: true, Status: "watching", Baseline: "private-marker", Observed: "private-fingerprint", LastCheckedAt: time.Now().UTC().Format(time.RFC3339)}
+	if err := c.ReportWatermarkState(context.Background(), "host_1", state); err != nil {
+		t.Fatal(err)
+	}
+	wrong = true
+	if c.ReportWatermarkState(context.Background(), "host_1", state) == nil {
+		t.Fatal("wrong acknowledgement accepted")
+	}
+}

@@ -6,7 +6,9 @@ p.add_argument('--artifacts',type=pathlib.Path,required=True)
 p.add_argument('--base-app',type=pathlib.Path,required=True)
 p.add_argument('--output',type=pathlib.Path,required=True)
 p.add_argument('--identity',required=True)
+p.add_argument('--build-number',default='20260927.1')
 a=p.parse_args()
+a.artifacts=a.artifacts.resolve(); a.base_app=a.base_app.resolve(); a.output=a.output.resolve()
 root=pathlib.Path(__file__).resolve().parents[2]
 if a.output.exists(): raise SystemExit('Output must be new; existing builds are preserved.')
 manifest=json.loads((a.artifacts/'manifest.json').read_text())
@@ -34,7 +36,7 @@ shutil.copy2(a.base_app/'Contents/Helpers/yr',helpers/'yr')
 for item in (root/'macos/Resources').iterdir():
  if item.is_file() and item.suffix in ['.txt','.icns']: shutil.copy2(item,resources/item.name)
 info=plistlib.loads((root/'macos/Resources/Info.plist').read_bytes())
-info['CFBundleVersion']='20260927.1'
+info['CFBundleVersion']=a.build_number
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(info))
 for file in [helpers/'yr',helpers/'nexal',helpers/'nexal-network',macos/'NexalMac']:
  file.chmod(0o755)

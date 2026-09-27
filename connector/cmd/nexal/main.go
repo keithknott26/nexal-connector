@@ -605,6 +605,8 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		defer wg.Done()
 		runCanary(ctx, canary, func(ctx context.Context, event cybersecurity.Event) error {
 			return api.ReportSecurityEvent(ctx, c.HostID, event)
+		}, func(ctx context.Context, state cybersecurity.CanaryState) error {
+			return api.ReportWatermarkState(ctx, c.HostID, state)
 		})
 	}()
 	go func() { defer wg.Done(); results <- a.Serve(ctx, admin) }()

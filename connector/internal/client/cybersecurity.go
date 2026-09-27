@@ -30,3 +30,30 @@ func (c *Client) ReportSecurityEvent(ctx context.Context, hostID string, event c
 	}
 	return nil
 }
+
+// ReportWatermarkState sends metadata only. Marker values and paths stay local.
+func (c *Client) ReportWatermarkState(ctx context.Context, hostID string, state cybersecurity.CanaryState) error {
+	if !ValidID(hostID) {
+		return errors.New("invalid host id")
+	}
+	reportedAt := time.Now().UTC().Format(cybersecurity.TimeLayout)
+	body := struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		ReportedAt    string `json:"reportedAt"`
+		Enabled       bool   `json:"enabled"`
+		Status        string `json:"status"`
+		LastCheckedAt string `json:"lastCheckedAt,omitempty"`
+	}{1, reportedAt, state.Enabled, state.Status, state.LastCheckedAt}
+	var ack struct {
+		SchemaVersion int    `json:"schemaVersion"`
+		Accepted      bool   `json:"accepted"`
+		ReportedAt    string `json:"reportedAt"`
+	}
+	if err := c.call(ctx, "POST", "/api/hosts/"+hostID+"/watermark-state", body, &ack); err != nil {
+		return err
+	}
+	if ack.SchemaVersion != 1 || !ack.Accepted || ack.ReportedAt != reportedAt {
+		return errors.New("invalid watermark acknowledgement")
+	}
+	return nil
+}

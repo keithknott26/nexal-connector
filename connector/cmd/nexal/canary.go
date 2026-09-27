@@ -36,10 +36,29 @@ func canaryCommand(ctx context.Context, args []string) error {
 	}
 	return emit(map[string]any{"enabled": state.Enabled, "status": state.Status, "lastCheckedAt": state.LastCheckedAt, "description": "Watches only neXal's own decoy for changes or removal. Does not scan documents, detect reads, or automatically mitigate threats."})
 }
-func runCanary(ctx context.Context, monitor cybersecurity.Canary, report func(context.Context, cybersecurity.Event) error) {
+func runCanary(ctx context.Context, monitor cybersecurity.Canary, report func(context.Context, cybersecurity.Event) error, reportState ...func(context.Context, cybersecurity.CanaryState) error) {
+	var lastStatus string
+	var lastReported time.Time
 	for {
 		request, stop := context.WithTimeout(ctx, 15*time.Second)
-		_ = monitor.Tick(request, time.Now(), report)
+		tickErr := monitor.Tick(request, time.Now(), report)
+		if len(reportState) > 0 {
+			state, err := monitor.Status()
+			if err != nil {
+				state = cybersecurity.CanaryState{Enabled: true, Status: "error"}
+			}
+			if tickErr != nil && state.Enabled {
+				state.Status = "error"
+			}
+			// Five-minute heartbeat, or the next one-minute local check on change.
+			// Never transmit a baseline, marker or filesystem path.
+			if state.Status != lastStatus || time.Since(lastReported) >= 5*time.Minute {
+				if reportState[0](request, state) == nil {
+					lastStatus = state.Status
+					lastReported = time.Now()
+				}
+			}
+		}
 		stop()
 		timer := time.NewTimer(time.Minute)
 		select {

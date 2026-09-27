@@ -165,6 +165,9 @@ func (c Canary) Configure(enabled bool) error {
 		s.Status = "disabled"
 		if enabled {
 			s.Status = "watching"
+			if s.Observed != s.Baseline {
+				s.Status = "alert"
+			}
 		}
 		return saveCanary(root, s)
 	})
@@ -182,6 +185,15 @@ func (c Canary) Tick(ctx context.Context, now time.Time, report func(context.Con
 		if !s.Enabled {
 			return nil
 		}
+		// After the seven-day server retention window, observe the decoy
+		// anew rather than wedging forever on an expired offline event.
+		if s.Pending != nil {
+			at, err := time.Parse(TimeLayout, s.Pending.ObservedAt)
+			if err == nil && now.Sub(at) >= 7*24*time.Hour {
+				s.Pending = nil
+				s.Observed = ""
+			}
+		}
 		if s.Pending == nil {
 			fingerprint := canaryFingerprint(root)
 			s.LastCheckedAt = now.UTC().Format(time.RFC3339)
@@ -195,7 +207,14 @@ func (c Canary) Tick(ctx context.Context, now time.Time, report func(context.Con
 					return err
 				}
 				key := hex.EncodeToString(id)
-				event := Event{SchemaVersion: 1, EventID: "canary_" + key, ObservedAt: now.UTC().Format(TimeLayout), Kind: "behavior_alert", Severity: "medium", Detector: "nexal_canary_integrity", DetectorVersion: "1", OriginAssessment: "unknown", EvidenceRef: "canary_" + key}
+				kind := "modified"
+				if fingerprint == "missing" {
+					kind = "deleted"
+				}
+				if fingerprint == "unsafe" {
+					kind = "unsafe"
+				}
+				event := Event{SchemaVersion: 1, EventID: "canary_" + key, ObservedAt: now.UTC().Format(TimeLayout), Kind: "behavior_alert", Severity: "medium", Detector: "nexal_canary_" + kind, DetectorVersion: "2", OriginAssessment: "unknown", EvidenceRef: "canary_" + key}
 				s.Pending = &event
 			}
 			s.Observed = fingerprint

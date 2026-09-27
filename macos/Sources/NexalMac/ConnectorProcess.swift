@@ -205,7 +205,7 @@ enum ConnectorProcess {
                 }
             }
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 20, execute: deadline)
+        DispatchQueue.global().asyncAfter(deadline: .now() + command.timeLimit, execute: deadline)
         let started = Date()
         do {
             if let stdin { try input.fileHandleForWriting.write(contentsOf: stdin) }
@@ -218,7 +218,7 @@ enum ConnectorProcess {
         process.waitUntilExit()
         deadline.cancel()
         guard group.wait(timeout: .now() + 3) == .success else { throw ShellError.timeout }
-        if Date().timeIntervalSince(started) >= 20 { throw ShellError.timeout }
+        if Date().timeIntervalSince(started) >= command.timeLimit { throw ShellError.timeout }
         guard process.terminationStatus == 0 else {
             // Raw stderr is still never displayed or persisted. What IS surfaced is
             // the `message` field of the connector's structured error envelope,

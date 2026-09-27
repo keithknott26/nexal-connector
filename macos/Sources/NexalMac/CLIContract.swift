@@ -47,6 +47,16 @@ enum CLICommand {
     /// Ask the coordinator to wake a sleeping peer, named by its tunnel address.
     case wake(tunnelAddress: String)
 
+    case canary(action: String)
+    case securityStatus, securityScan, securityBaseline, securityFindings
+    case securityConfigure(roots: [String], engine: String?, enabled: Bool)
+
+    var timeLimit: TimeInterval {
+        if case .securityScan = self { return 130 }
+        if case .securityBaseline = self { return 130 }
+        return 20
+    }
+
     func arguments(config: URL) -> [String] {
         let command: [String]
         switch self {
@@ -86,6 +96,14 @@ enum CLICommand {
             command = ["pair-v2", "--leave"]
         case .rejoinNetwork:
             command = ["pair-v2", "--rejoin"]
+        case .securityFindings: command = ["security", "findings"]
+        case .securityStatus: command = ["security", "status"]
+        case .securityScan: command = ["security", "scan"]
+        case .securityBaseline: command = ["security", "baseline", "--approve"]
+        case let .securityConfigure(roots, engine, enabled):
+            command = ["security", "configure", "--enabled=\(enabled)"] + roots.flatMap { ["--root", $0] } + (engine.map { ["--engine", $0] } ?? [])
+        case let .canary(action):
+            command = ["canary", "--action", action]
         case let .wake(tunnelAddress):
             command = ["wake", "--tunnel", tunnelAddress]
         }

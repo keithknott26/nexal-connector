@@ -171,6 +171,19 @@ final class AppModel: ObservableObject {
         enrollmentPresentation.beginReplacement(for: selectedConfig)
     }
 
+    func scannerFindings() async throws -> LocalScannerFindingsReply {
+        let reply = try JSONDecoder().decode(LocalScannerFindingsReply.self, from: try await invoke(.securityFindings))
+        return reply
+    }
+
+    func scanner(_ command: CLICommand) async throws -> ScannerReply {
+        try JSONDecoder().decode(ScannerReply.self, from: try await invoke(command))
+    }
+
+    func canary(action: String) async throws -> CanaryReply {
+        try JSONDecoder().decode(CanaryReply.self, from: try await invoke(.canary(action: action)))
+    }
+
     init(capabilitySource: TransportCapabilityProviding = ConnectorStatusCapabilitySource()) {
         self.capabilitySource = capabilitySource
         capability = capabilitySource.capability(from: nil)

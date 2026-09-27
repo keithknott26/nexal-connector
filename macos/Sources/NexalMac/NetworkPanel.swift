@@ -5,8 +5,9 @@ import SwiftUI
 /// Implementation defaults and account policy do not belong in this menu.
 struct NetworkPanel: View {
     @EnvironmentObject var model: AppModel
-    /// Time range shown by the activity graphs, in minutes (5 or 30).
-    @State private var chartWindowMinutes = 30
+    var showSettings: () -> Void = {}
+    var showAbout: () -> Void = {}
+    @EnvironmentObject private var preferences: ConnectorPreferences
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -50,6 +51,15 @@ struct NetworkPanel: View {
             }
             Spacer()
             if model.busy { ProgressView().controlSize(.small) }
+            Menu {
+                Button("Settings…", action: showSettings)
+                Button("About neXal Systems Connector", action: showAbout)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("Connector menu")
         }
     }
 
@@ -331,7 +341,7 @@ struct NetworkPanel: View {
 
     /// Chart points inside the selected time range.
     private func windowed(_ points: [ConnectorHistory.SeriesPoint]) -> [ConnectorHistory.SeriesPoint] {
-        let since = Date().addingTimeInterval(-Double(chartWindowMinutes) * 60)
+        let since = Date().addingTimeInterval(-Double(preferences.chartWindowMinutes) * 60)
         return points.filter { $0.at >= since }
     }
 
@@ -618,10 +628,10 @@ struct NetworkPanel: View {
                 HStack(spacing: 4) {
                     Text("Show last").font(.caption).foregroundStyle(.secondary)
                     ForEach([5, 30], id: \.self) { minutes in
-                        Button("\(minutes) min") { chartWindowMinutes = minutes }
+                        Button("\(minutes) min") { preferences.chartWindowMinutes = minutes }
                             .buttonStyle(.bordered).controlSize(.small)
-                            .tint(chartWindowMinutes == minutes ? .accentColor : .secondary)
-                            .accessibilityAddTraits(chartWindowMinutes == minutes ? .isSelected : [])
+                            .tint(preferences.chartWindowMinutes == minutes ? .accentColor : .secondary)
+                            .accessibilityAddTraits(preferences.chartWindowMinutes == minutes ? .isSelected : [])
                     }
                 }
                 ChartCard(title: "neXal network latency (ms)", caption: ConnectorHistory.networkLatencyCaption,

@@ -213,8 +213,23 @@ Then choose that executable in the app. No code is installed by the app itself.
 
 Quitting sends SIGTERM only to the child launched by this app; independently
 started services remain running. The core's cancellation and descendant cleanup
-must be validated on macOS. This version does not install launch-at-login,
-automatic signed updates, or a privileged helper.
+must be validated on macOS. Launch at login is enabled by default on first launch through macOS Login Items.
+Use the connector’s gear menu or right-click its menu-bar icon for **Settings…**
+and **About neXal Systems Connector**. Settings includes a **Start neXal Systems
+Connector at login** checkbox; disabling it is preserved across relaunches.
+If macOS requires approval, Settings provides a link to Login Items. When enabled, the two-second
+splash closes directly to the menu bar without opening a main window. Reopening
+the app from Finder or choosing **Open Connector** opens the main window.
+Settings has **General** and **Security** tabs. General also includes persistent
+preferences for showing the splash, playing the pairing sound, flashing the
+menu-bar alert icon, and the activity graph range (5 or 30 minutes). The first
+three default to on, preserving existing behavior; the graph defaults to 30
+minutes. Changing the range in either Settings or the network panel updates
+both. Turning off flashing retains the static red alert icon.
+
+Security contains the existing integrity canary and file-scanning/code-style
+controls for linked Macs. Opening Settings does not enable either feature.
+Automatic signed updates are not installed.
 
 File Sharing and Screen Sharing are consent-preserving: the UI can open System
 Settings for the owner, but never enables either service or changes firewall

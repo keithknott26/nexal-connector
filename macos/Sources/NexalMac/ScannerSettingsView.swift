@@ -104,7 +104,7 @@ struct ScannerSettingsView: View {
                         Task { await perform(.securityConfigure(roots: roots, engine: engine, enabled: true)) }
                     }.disabled(busy || state == nil || roots.isEmpty)
                 }
-                Text("Folder changes apply when you save. At least one folder is required; pausing preserves the saved folders. File paths stay on this Mac.")
+                Text("Folder changes apply when you save. At least one folder is required; pausing preserves the saved folders. neXal’s private state is automatically excluded, even when you choose your home folder. File paths stay on this Mac.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let state {
                     LabeledContent("Last reported state", value: ScannerPresentation.status(state.status))

@@ -359,3 +359,42 @@ func TestScanRootIdentityRejectsReplacementAndSymlinks(t *testing.T) {
 		t.Fatal("symlink ancestor opened")
 	}
 }
+
+func TestParentScanExcludesPrivateState(t *testing.T) {
+	s, files := testScanner(t)
+	parent := filepath.Dir(files)
+	if err := s.Configure(true, []string{parent}, "/missing-engine"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Directory, "secret.txt"), []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	neighbor := s.Directory + "-public"
+	if err := os.Mkdir(neighbor, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{files, neighbor} {
+		if err := os.WriteFile(filepath.Join(dir, "public.txt"), []byte("public"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	visited := 0
+	skipped, err := walkInputs(context.Background(), []string{parent, s.Directory}, func(name string, data []byte) error {
+		visited++
+		if string(data) != "public" {
+			t.Fatalf("private input reached scanner: %s", name)
+		}
+		return nil
+	}, s.Directory)
+	if err != nil || skipped != 0 || visited != 2 {
+		t.Fatalf("visited=%d skipped=%d err=%v", visited, skipped, err)
+	}
+	for _, name := range []string{"a.py", "b.py", "c.py"} {
+		if err := os.WriteFile(filepath.Join(files, name), []byte(strings.Repeat("print('hello')\n", 25)), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ApproveBaseline(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

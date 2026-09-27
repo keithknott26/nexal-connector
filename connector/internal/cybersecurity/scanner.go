@@ -270,8 +270,8 @@ func (s Scanner) Configure(enabled bool, roots []string, engine string) error {
 		if !safeRoot(path) {
 			return errors.New("scan roots must be real absolute directories without symlinks")
 		}
-		if path == s.Directory || strings.HasPrefix(s.Directory, path+"/") || strings.HasPrefix(path, s.Directory+"/") {
-			return errors.New("scan roots must not contain connector private state")
+		if scanPathExcluded(path, []string{s.Directory}) {
+			return errors.New("choose a folder outside neXal’s private state; parent folders are allowed and private state is automatically excluded")
 		}
 	}
 	if engine != "" && !filepath.IsAbs(engine) {
@@ -312,9 +312,48 @@ var errScanLimit = errors.New("scan limit reached")
 
 // walkInputs never follows symlinks and reads through os.Root confinement. The
 // scanned engine input is this bounded immutable byte snapshot, not a user path.
-func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) error) (int, error) {
+// scanPathExcluded resolves aliases and compares directory identities as well as
+// paths, including on case-insensitive volumes. Failure to resolve fails closed.
+func scanPathExcluded(path string, exclusions []string) bool {
+	for _, excluded := range exclusions {
+		canonical, err := filepath.EvalSymlinks(excluded)
+		if err != nil {
+			return true
+		}
+		candidate, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return true
+		}
+		rel, err := filepath.Rel(canonical, candidate)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+		privateInfo, err := os.Stat(canonical)
+		if err != nil {
+			return true
+		}
+		for current := candidate; ; current = filepath.Dir(current) {
+			info, err := os.Stat(current)
+			if err != nil {
+				return true
+			}
+			if os.SameFile(privateInfo, info) {
+				return true
+			}
+			if filepath.Dir(current) == current {
+				break
+			}
+		}
+	}
+	return false
+}
+
+func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) error, exclusions ...string) (int, error) {
 	entries, files, total, skipped := 0, 0, 0, 0
 	for _, path := range roots {
+		if scanPathExcluded(path, exclusions) {
+			continue
+		}
 		root, err := openScanRoot(path)
 		if err != nil {
 			skipped++
@@ -322,6 +361,9 @@ func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) 
 		}
 		var walk func(string, int) error
 		walk = func(directory string, depth int) error {
+			if scanPathExcluded(filepath.Join(path, directory), exclusions) {
+				return nil
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -344,6 +386,9 @@ func walkInputs(ctx context.Context, roots []string, visit func(string, []byte) 
 					name := filepath.Join(directory, d.Name())
 					if d.Type()&os.ModeSymlink != 0 {
 						skipped++
+						continue
+					}
+					if scanPathExcluded(filepath.Join(path, name), exclusions) {
 						continue
 					}
 					if d.IsDir() {
@@ -441,7 +486,7 @@ func (s Scanner) ApproveBaseline(ctx context.Context) error {
 				counts[ext]++
 			}
 			return nil
-		})
+		}, s.Directory)
 		if err != nil || skipped > 0 {
 			return errors.New("baseline scan incomplete; nothing approved")
 		}
@@ -654,7 +699,7 @@ func (s Scanner) Scan(ctx context.Context, now time.Time, report func(context.Co
 			state.Cache[pathID] = key
 			oldContent[key] = true
 			return saveScanner(root, state)
-		})
+		}, s.Directory)
 		if err != nil {
 			if errors.Is(err, errScanLimit) || ctx.Err() != nil {
 				return fail("scan_limit")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"nexal/connector/internal/observability"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -109,7 +110,7 @@ func TestClientSafetyDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr, ok := c.http.Transport.(*http.Transport)
+	tr, ok := observability.Underlying(c.http.Transport).(*http.Transport)
 	if !ok || tr.Proxy != nil || tr.TLSClientConfig.InsecureSkipVerify ||
 		tr.TLSHandshakeTimeout <= 0 || tr.ResponseHeaderTimeout <= 0 ||
 		c.http.Timeout <= 0 || c.http.Timeout > 10*time.Second {

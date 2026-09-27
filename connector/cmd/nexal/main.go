@@ -26,6 +26,7 @@ import (
 	"nexal/connector/internal/diagnostics"
 	"nexal/connector/internal/discovery"
 	"nexal/connector/internal/mesh"
+	"nexal/connector/internal/observability"
 	"nexal/connector/internal/presence"
 	"nexal/connector/internal/sysinfo"
 	"nexal/connector/internal/tunnel"
@@ -36,7 +37,17 @@ func emit(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:]); err != nil {
+	shutdown, telemetryErr := observability.Start(ctx)
+	if telemetryErr != nil {
+		slog.Warn("telemetry disabled: invalid or unavailable collector configuration")
+	}
+	runErr := run(ctx, os.Args[1:])
+	if shutdown != nil {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		_ = shutdown(flushCtx)
+		cancel()
+	}
+	if err := runErr; err != nil {
 		_ = json.NewEncoder(os.Stderr).Encode(map[string]any{"error": map[string]string{"code": errorCode(err), "message": err.Error()}})
 		os.Exit(1)
 	}

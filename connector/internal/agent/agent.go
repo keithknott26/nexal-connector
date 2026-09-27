@@ -19,6 +19,7 @@ import (
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/contribution"
 	"nexal/connector/internal/mesh"
+	"nexal/connector/internal/observability"
 	"nexal/connector/internal/throttle"
 	"nexal/connector/internal/wol"
 )
@@ -492,7 +493,7 @@ func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
 	return a.execute(ctx, at, nil)
 }
 
-func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint64) error {
+func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint64) (executionError error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -539,6 +540,8 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 		return err
 	}
 	a.mu.Unlock()
+	finishTelemetry := observability.Compute(ctx)
+	defer func() { finishTelemetry(executionError == nil) }()
 	defer func() { cancel(); a.mu.Lock(); a.active = ""; a.cancel = nil; a.mu.Unlock() }()
 	var leaseMu sync.Mutex
 	expiry := at.LeaseExpiresAt
@@ -809,6 +812,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.api == nil || !client.ValidID(hostID) {
 		return errors.New("enroll this host before running")
 	}
+	releaseCapacity := observability.ExecutorCapacity(ctx)
+	defer releaseCapacity()
 	a.Refresh(ctx)
 	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup

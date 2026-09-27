@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"nexal/connector/internal/observability"
 	"strings"
 	"testing"
 	"time"
@@ -127,7 +128,7 @@ func TestCoordinatorHandshakeIsTLS13AndPostQuantum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := c.http.Transport.(*http.Transport).TLSClientConfig
+	cfg := observability.Underlying(c.http.Transport).(*http.Transport).TLSClientConfig
 	if cfg.CurvePreferences != nil {
 		t.Fatal("CurvePreferences is set: Go then offers only the listed groups, which silently drops post-quantum key agreement")
 	}

@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"nexal/connector/internal/observability"
 	"os"
 	"strconv"
 	"strings"
@@ -276,7 +277,7 @@ func NewPeerServer(o PeerOptions) (*PeerServer, error) {
 				return
 			}
 			req.Body = http.MaxBytesReader(w, req.Body, req.ContentLength)
-			blob, err := o.Store.Put(class, digest, req.ContentLength, req.Body)
+			blob, err := o.Store.Put(class, digest, req.ContentLength, observability.PeerReader{Reader: req.Body, Context: req.Context()})
 			if err != nil {
 				peerStoreError(w, err)
 				return
@@ -299,7 +300,8 @@ func NewPeerServer(o PeerOptions) (*PeerServer, error) {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 			w.Header().Set("ETag", `"`+digest+`"`)
-			_, _ = io.Copy(w, file)
+			sent, _ := io.Copy(w, file)
+			observability.PeerTransfer(req.Context(), "sent", sent)
 		default:
 			w.Header().Set("Allow", "GET, PUT")
 			peerError(w, http.StatusMethodNotAllowed, "method_not_allowed")

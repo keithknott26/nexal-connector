@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/observability"
 )
 
 type Attempt struct {
@@ -120,7 +121,7 @@ func New(base, token string, dev bool) (*Client, error) {
 		IdleConnTimeout:       30 * time.Second,
 	}
 	return &Client{base: strings.TrimRight(base, "/"), token: token, dev: dev, http: &http.Client{
-		Timeout: 10 * time.Second, Transport: tr,
+		Timeout: 10 * time.Second, Transport: observability.Transport{Base: tr},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return errRedirectForbidden },
 	}}, nil
 }

@@ -32,28 +32,38 @@ func (c *Client) ReportSecurityEvent(ctx context.Context, hostID string, event c
 }
 
 // ReportWatermarkState sends metadata only. Marker values and paths stay local.
-func (c *Client) ReportWatermarkState(ctx context.Context, hostID string, state cybersecurity.CanaryState) error {
+func (c *Client) ExchangeWatermarkState(ctx context.Context, hostID string, state cybersecurity.CanaryState) (*cybersecurity.WatermarkOperation, error) {
 	if !ValidID(hostID) {
-		return errors.New("invalid host id")
+		return nil, errors.New("invalid host id")
 	}
 	reportedAt := time.Now().UTC().Format(cybersecurity.TimeLayout)
 	body := struct {
-		SchemaVersion int    `json:"schemaVersion"`
-		ReportedAt    string `json:"reportedAt"`
-		Enabled       bool   `json:"enabled"`
-		Status        string `json:"status"`
-		LastCheckedAt string `json:"lastCheckedAt,omitempty"`
-	}{1, reportedAt, state.Enabled, state.Status, state.LastCheckedAt}
+		SchemaVersion   int                            `json:"schemaVersion"`
+		ReportedAt      string                         `json:"reportedAt"`
+		Enabled         bool                           `json:"enabled"`
+		Status          string                         `json:"status"`
+		LastCheckedAt   string                         `json:"lastCheckedAt,omitempty"`
+		OperationResult *cybersecurity.WatermarkResult `json:"operationResult,omitempty"`
+	}{1, reportedAt, state.Enabled, state.Status, state.LastCheckedAt, state.OperationResult}
+	if state.OperationReported {
+		body.OperationResult = nil
+	}
 	var ack struct {
-		SchemaVersion int    `json:"schemaVersion"`
-		Accepted      bool   `json:"accepted"`
-		ReportedAt    string `json:"reportedAt"`
+		SchemaVersion int                               `json:"schemaVersion"`
+		Accepted      bool                              `json:"accepted"`
+		Operation     *cybersecurity.WatermarkOperation `json:"operation"`
+		ReportedAt    string                            `json:"reportedAt"`
 	}
 	if err := c.call(ctx, "POST", "/api/hosts/"+hostID+"/watermark-state", body, &ack); err != nil {
-		return err
+		return nil, err
 	}
 	if ack.SchemaVersion != 1 || !ack.Accepted || ack.ReportedAt != reportedAt {
-		return errors.New("invalid watermark acknowledgement")
+		return nil, errors.New("invalid watermark acknowledgement")
 	}
-	return nil
+	return ack.Operation, nil
+}
+
+func (c *Client) ReportWatermarkState(ctx context.Context, hostID string, state cybersecurity.CanaryState) error {
+	_, err := c.ExchangeWatermarkState(ctx, hostID, state)
+	return err
 }

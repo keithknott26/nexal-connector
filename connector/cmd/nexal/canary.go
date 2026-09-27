@@ -40,7 +40,7 @@ func runCanary(ctx context.Context, monitor cybersecurity.Canary, report func(co
 	var lastStatus string
 	var lastReported time.Time
 	for {
-		request, stop := context.WithTimeout(ctx, 15*time.Second)
+		request, stop := context.WithTimeout(ctx, 60*time.Second)
 		tickErr := monitor.Tick(request, time.Now(), report)
 		if len(reportState) > 0 {
 			state, err := monitor.Status()

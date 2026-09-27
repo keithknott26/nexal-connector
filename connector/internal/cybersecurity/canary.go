@@ -18,12 +18,15 @@ import (
 // network listener, claims to detect reads, or executes a mitigation.
 type Canary struct{ Directory string }
 type CanaryState struct {
-	Enabled       bool   `json:"enabled"`
-	Baseline      string `json:"baseline"`
-	Observed      string `json:"observed"`
-	LastCheckedAt string `json:"lastCheckedAt,omitempty"`
-	Status        string `json:"status"`
-	Pending       *Event `json:"pending,omitempty"`
+	OperationReported bool               `json:"operationReported,omitempty"`
+	OperationResult   *WatermarkResult   `json:"operationResult,omitempty"`
+	Rotation          *watermarkRotation `json:"rotation,omitempty"`
+	Enabled           bool               `json:"enabled"`
+	Baseline          string             `json:"baseline"`
+	Observed          string             `json:"observed"`
+	LastCheckedAt     string             `json:"lastCheckedAt,omitempty"`
+	Status            string             `json:"status"`
+	Pending           *Event             `json:"pending,omitempty"`
 }
 
 const canaryName = "nexal-decoy.txt"
@@ -182,6 +185,9 @@ func (c Canary) Status() (CanaryState, error) {
 // exact event ID and content for an idempotent retry after restart.
 func (c Canary) Tick(ctx context.Context, now time.Time, report func(context.Context, Event) error) error {
 	return c.locked(func(root *os.Root, s *CanaryState) error {
+		if s.Rotation != nil {
+			return finishRotation(root, s)
+		}
 		if !s.Enabled {
 			return nil
 		}

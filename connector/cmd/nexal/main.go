@@ -606,7 +606,34 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		runCanary(ctx, canary, func(ctx context.Context, event cybersecurity.Event) error {
 			return api.ReportSecurityEvent(ctx, c.HostID, event)
 		}, func(ctx context.Context, state cybersecurity.CanaryState) error {
-			return api.ReportWatermarkState(ctx, c.HostID, state)
+			operation, err := api.ExchangeWatermarkState(ctx, c.HostID, state)
+			if err != nil {
+				return err
+			}
+			if state.OperationResult != nil {
+				if err := canary.MarkOperationReported(state.OperationResult.ID); err != nil {
+					return err
+				}
+			}
+			if operation == nil {
+				return nil
+			}
+			operationCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+			defer cancel()
+			if err := canary.ExecuteOperation(operationCtx, *operation, scanner, func(ctx context.Context, e cybersecurity.Event) error {
+				return api.ReportSecurityEvent(ctx, c.HostID, e)
+			}); err != nil {
+				return err
+			}
+			updated, err := canary.Status()
+			if err != nil {
+				return err
+			}
+			_, err = api.ExchangeWatermarkState(ctx, c.HostID, updated)
+			if err == nil && updated.OperationResult != nil {
+				return canary.MarkOperationReported(updated.OperationResult.ID)
+			}
+			return err
 		})
 	}()
 	go func() { defer wg.Done(); results <- a.Serve(ctx, admin) }()

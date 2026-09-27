@@ -21,6 +21,7 @@ struct NetworkPanel: View {
                     case .linking(let linking): pairing(linking)
                     case .linked(let network): connected(network)
                     }
+                    AccountPortalEntry()
                     message
                     footer
                 }

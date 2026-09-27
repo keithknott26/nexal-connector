@@ -30,6 +30,17 @@ type TunnelStatusReport struct {
 	// Services this computer offers (ssh, vnc, smb). A pointer so that "none"
 	// is sent as [] (closing their ports) while an unset value is omitted.
 	Services *[]string `json:"services,omitempty"`
+	// CoordinatorTraffic is separate from mesh peer traffic. The HTTP client
+	// does not currently expose trustworthy wire-byte counters, so Available is
+	// false and both counters are omitted. Never encode unknown as measured zero.
+	CoordinatorTraffic CoordinatorTraffic `json:"coordinatorTraffic"`
+}
+
+type CoordinatorTraffic struct {
+	Available     bool    `json:"available"`
+	BytesSent     *uint64 `json:"bytesSent,omitempty"`
+	BytesReceived *uint64 `json:"bytesReceived,omitempty"`
+	Reason        string  `json:"reason,omitempty"`
 }
 
 type TunnelPath struct {
@@ -45,7 +56,8 @@ type TunnelTraffic struct {
 
 func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusReport {
 	status = mesh.SanitizeSnapshot(status)
-	report := TunnelStatusReport{AuthStage: "not_started", SecurityState: "unknown", Path: TunnelPath{Type: "none"}}
+	report := TunnelStatusReport{AuthStage: "not_started", SecurityState: "unknown", Path: TunnelPath{Type: "none"},
+		CoordinatorTraffic: CoordinatorTraffic{Available: false, Reason: "wire byte counters are not available from this connector build"}}
 	switch status.Lifecycle {
 	case mesh.LifecycleProvisioning:
 		report.AuthStage = "provisioning"

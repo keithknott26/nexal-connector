@@ -111,11 +111,24 @@ func TestOperatorStopIsACleanEnding(t *testing.T) {
 	f := fixture(t, "waiting for connections")
 	f.share.TimeBox = time.Minute
 	privateDir := filepath.Join(t.TempDir(), "private")
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { time.Sleep(300 * time.Millisecond); cancel() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ready := make(chan struct{}, 1)
 	err := Run(ctx, f.pin, f.share, privateDir, Options{Password: NewPassword([]byte("A1B2C3")),
-		Probe: healthy, FreeSpace: plenty, HealthInterval: 50 * time.Millisecond, HealthGrace: time.Second})
+		Probe: func(context.Context) error {
+			select {
+			case ready <- struct{}{}:
+			default:
+			}
+			cancel()
+			return nil
+		}, FreeSpace: plenty, HealthInterval: 50 * time.Millisecond, HealthGrace: time.Second})
 	cancel()
+	select {
+	case <-ready:
+	default:
+		t.Fatal("share never became ready")
+	}
 	if err != nil {
 		t.Fatalf("operator stop reported as a failure: %v", err)
 	}

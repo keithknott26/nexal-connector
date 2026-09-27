@@ -74,6 +74,10 @@ type Config struct {
 	StaticPeers []StaticPeer     `json:"staticPeers,omitempty"`
 	Enrollment  *EnrollmentState `json:"enrollment,omitempty"`
 	GuestAccess *GuestAccess     `json:"guestAccess,omitempty"`
+	// RecoveryAuthorityPublicKey is the coordinator's public Ed25519 key in
+	// unpadded base64url. It authorizes a selected helper; it is not a secret.
+	// Absent means production disaster-recovery sharing is disabled.
+	RecoveryAuthorityPublicKey string `json:"recoveryAuthorityPublicKey,omitempty"`
 }
 
 // EnrollmentState contains durable, non-secret identifiers only. The credential

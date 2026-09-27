@@ -153,6 +153,26 @@ func TestShareStatusReportsAnExpiredSessionAsOver(t *testing.T) {
 	}
 }
 
+func TestLeavingNetworkRequestsRecoveryCleanupBeforeTakingConfigLock(t *testing.T) {
+	path := shareConfig(t, true)
+	record := sessionRecord{SessionID: "live", ShareName: "NexalRecovery", Username: "owner@example.test",
+		Port: 445, StartedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), TimeBox: "1h",
+		Serves: []string{"smb-share"}, Refuses: []string{"jobs"}, Transport: smbshare.TransportNote}
+	if err := writeSession(path, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := leavePairV2(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(stopPath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "network-leave\n" {
+		t.Fatalf("leave sentinel = %q", b)
+	}
+}
+
 func TestShareStopRequiresASessionAndWritesAPrivateSentinel(t *testing.T) {
 	path := shareConfig(t, true)
 	if _, err := captureShare(t, "", []string{"share", "stop", "--config", path}); err == nil {

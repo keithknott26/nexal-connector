@@ -600,3 +600,43 @@
 +	d := w.GetWGDevice()
 +	return d != nil && d.QuantumSessionReady([32]byte(key))
 +}
+--- a/client/internal/rosenpass/manager.go
++++ b/client/internal/rosenpass/manager.go
+@@ -164,6 +164,20 @@
+ 	if err := control.ConfigureQuantumControl(wireGuardPubKey, wireGuardIP, uint16(m.port), uint16(port)); err != nil {
+ 		return err
+ 	}
++	// Endpoint configuration may have preserved the previous ML-KEM PSK before
++	// addPeer discarded its recovery state. Reset it under the closed quantum
++	// gate so a restarted peer can reach the control listener again.
++	seed, err := DeterministicSeedKey(m.localWgKey.String(), wireGuardPubKey)
++	if err != nil {
++		return fmt.Errorf("derive ML-KEM bootstrap key: %w", err)
++	}
++	if m.preSharedKey != nil {
++		configured := wgtypes.Key(*m.preSharedKey)
++		seed = &configured
++	}
++	if err := m.wgIface.SetPresharedKey(wireGuardPubKey, *seed, true); err != nil {
++		return fmt.Errorf("reset ML-KEM bootstrap key: %w", err)
++	}
+ 	m.tcpConn.AuthorizeEndpoint(endpoint, true)
+ 	m.controlEndpoints[wireGuardPubKey] = endpoint
+ 	peerID := rp.PeerIDFromPublicKey(rosenpassPubKey)
+--- a/client/internal/rosenpass/manager.go
++++ b/client/internal/rosenpass/manager.go
+@@ -108,6 +108,14 @@
+ 		return fmt.Errorf("rosenpass wg handler not initialized")
+ 	}
+ 
++	// Relay-to-direct updates can report the same control identity twice.
++	// Preserve the in-flight exchange and its installed key on this no-op.
++	if id, exists := m.rpPeerIDs[wireGuardPubKey]; exists && id != nil && *id == rp.PeerIDFromPublicKey(rosenpassPubKey) {
++		_, remotePort, err := net.SplitHostPort(rosenpassAddr)
++		if ep := m.controlEndpoints[wireGuardPubKey]; err == nil && ep != nil && ep.String() == net.JoinHostPort(wireGuardIP, remotePort) {
++			return nil
++		}
++	}
+ 	if _, exists := m.rpPeerIDs[wireGuardPubKey]; exists {
+ 		if err := m.removePeer(wireGuardPubKey); err != nil {
+ 			return err

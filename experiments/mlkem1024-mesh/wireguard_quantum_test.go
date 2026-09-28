@@ -93,6 +93,15 @@ func TestNexalWireGuardSessionGate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Old-generation packets are deliberately dropped while re-keying. Wait for
+	// the new session instead of assuming the first datagram is retransmitted.
+	deadline := time.Now().Add(12 * time.Second)
+	for !pair[0].dev.QuantumSessionReady(keys[0]) || !pair[1].dev.QuantumSessionReady(keys[1]) {
+		if time.Now().After(deadline) {
+			t.Fatal("fresh PSK session did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	// Trigger a fresh PSK-bound WireGuard handshake; old queued sessions cannot qualify.
 	pair.Send(t, Ping, nil)
 	pair.Send(t, Pong, nil)
@@ -106,4 +115,58 @@ func TestNexalWireGuardSessionGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	reject()
+}
+
+// Real Linux sockets exposed an empty-batch panic hidden by channel test binds.
+func TestNexalRealSocketGateDropsEmptyBatch(t *testing.T) {
+	pair := genTestPair(t, true)
+	pair.Send(t, Ping, nil)
+	for _, tp := range pair {
+		tp.dev.peers.RLock()
+		peers := make([]*Peer, 0, len(tp.dev.peers.keyMap))
+		for _, peer := range tp.dev.peers.keyMap {
+			peers = append(peers, peer)
+		}
+		tp.dev.peers.RUnlock()
+		for _, peer := range peers {
+			if err := peer.SendBuffers(nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+		tp.dev.RequireQuantum()
+	}
+	pair[1].tun.Outbound <- tuntest.Ping(pair[0].ip, pair[1].ip)
+	select {
+	case <-pair[0].tun.Inbound:
+		t.Fatal("unprotected packet admitted")
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestNexalKeyTransitionPreservesControlOnlySession(t *testing.T) {
+	pair := genTestPair(t, false)
+	pair.Send(t, Ping, nil)
+	d := pair[0].dev
+	d.RequireQuantum()
+	var key [32]byte
+	for k := range d.peers.keyMap {
+		key = [32]byte(k)
+	}
+	if err := d.ConfigureQuantumControl(key, pair[0].ip, pair[1].ip, 10001, 10002); err != nil {
+		t.Fatal(err)
+	}
+	p := d.LookupPeer(NoisePublicKey(key))
+	old := p.keypairs.Current()
+	if err := d.InstallQuantumKey(key, [32]byte{42}, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if old.sendNonce.Load() >= RejectAfterMessages {
+		t.Fatal("key transition killed the control session before delivery completed")
+	}
+	if p.quantumAllows(tuntest.Ping(pair[1].ip, pair[0].ip), old, true) {
+		t.Fatal("old session admitted application traffic")
+	}
+	if !p.quantumAllows(controlPacket(pair[0].ip, pair[1].ip, 10001, 10002), old, true) {
+		t.Fatal("old session rejected authorized control traffic")
+	}
 }

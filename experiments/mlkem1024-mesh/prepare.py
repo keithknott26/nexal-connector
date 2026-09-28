@@ -34,6 +34,7 @@ for name, source in [('netbird', opts.netbird_source), ('rosenpass', opts.rosenp
     for f in destination.rglob('*'):
         f.chmod(f.stat().st_mode | 0o200)
     subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / f'{name}-mlkem1024.patch')], cwd=destination, check=True)
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-health-budget.patch')], cwd=opts.output / 'netbird', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'
@@ -51,3 +52,5 @@ shutil.copyfile(root / 'netbird_gate_mock_test.go', opts.output / 'netbird/clien
 shutil.copyfile(root / 'netbird_endtoend_test.go', opts.output / 'netbird/client/internal/rosenpass/nexal_endtoend_test.go')
 shutil.copyfile(root / 'wireguard_quantum_test.go', opts.output / 'wireguard/device/nexal_quantum_test.go')
 print('Prepared isolated experimental sources. No installed runtime or production packaging changed.')
+
+shutil.copyfile(root / "netbird_reconnect_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_reconnect_test.go")

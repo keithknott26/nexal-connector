@@ -242,8 +242,7 @@ struct NetworkPanel: View {
         VStack(alignment: .leading, spacing: 7) {
             LabeledContent("Tunnel") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(mesh.lifecycle.capitalized)") }
             LabeledContent("Post-quantum protection") { pqText(mesh.pq) }
-            LabeledContent("Post-quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
-                .help(quantumProfileExplanation)
+            LabeledContent("Post-quantum type") { quantumType(mesh.peers) }
             LabeledContent("Network path", value: pathSummary(mesh.peers))
             if let step = mesh.authenticationStep, !step.isEmpty {
                 LabeledContent("Connection step", value: step)
@@ -282,19 +281,20 @@ struct NetworkPanel: View {
                 }
                 detailSection("Security") {
                     detailRow("Post-quantum") { pqText(peer.pq) }
-                    detailRow("Post-quantum type") { Text(MeshQuantumPresentation.label(peers: [peer])).help(quantumProfileExplanation) }
+                    detailRow("Post-quantum type") { quantumType([peer]) }
                     if let verified = lastVerified(peer) {
                         detailRow("Last verified") {
                             Text(verified.relative).help(verified.exact)
                         }
                     }
-                    detailRow("Time Machine location") {
-                        if storage { Text("🕰️ Yes").foregroundStyle(.green).fontWeight(.semibold) } else { Text("No") }
-                    }
+                }
+                detailSection("Services") {
+                    advertisedServices(peer)
+
                 }
                 detailSection("Actions") {
                     VStack(alignment: .leading, spacing: 6) {
-                        quickLinks(peer)
+                        peerActions(peer)
                         exitNodeCheckbox(peer)
                     }
                 }
@@ -316,6 +316,22 @@ struct NetworkPanel: View {
             HStack(alignment: .top, spacing: Self.hostDotSpacing) {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
                     .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
+                Button {
+                    Task { await model.refreshPeer(peer) }
+                } label: {
+                    if model.refreshingPeerID == peer.id {
+                        ProgressView().controlSize(.mini).frame(width: 16, height: 16)
+                    } else {
+                        Image(systemName: "arrow.clockwise").frame(width: 16, height: 16)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.busy)
+                .help(model.peerRefreshedAt[peer.id].map {
+                    "Refresh live status · Last refreshed \($0.formatted(date: .omitted, time: .standard))"
+                } ?? "Refresh live connection and ML-KEM status")
+                .accessibilityLabel("Refresh \(displayName(peer)) status")
+                .accessibilityIdentifier("refresh-peer-\(peer.id)")
                 VStack(alignment: .leading, spacing: 2) {
                     // Line 1: name, role icons, and the two things worth a glance.
                     HStack(spacing: 5) {
@@ -342,6 +358,10 @@ struct NetworkPanel: View {
                     Text((storage ? [location] : [publicIP, privateIP, location]).compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
                         .font(.caption).foregroundStyle(.secondary)
                         .help(storage ? "" : "Public IP · Private IP · Location")
+                    if let error = model.peerRefreshErrors[peer.id] {
+                        Text(error).font(.caption2).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .textSelection(.enabled)
             }
@@ -398,7 +418,7 @@ struct NetworkPanel: View {
         let name = peer.name.lowercased()
         if let host = model.timeMachine?.timeMachine.host?.lowercased(),
            let label = host.split(separator: ".").first, !label.isEmpty {
-            return name == label
+            return name == label || peer.tunnelAddress == host
         }
         return name.range(of: #"^gw-[a-z0-9-]+$"#, options: .regularExpression) != nil
     }
@@ -429,7 +449,7 @@ struct NetworkPanel: View {
     /// plus the status dot and the gap after it.
     private static let hostDotSize: CGFloat = 7
     private static let hostDotSpacing: CGFloat = 8
-    private static let hostDetailIndent: CGFloat = 12 + hostDotSize + hostDotSpacing
+    private static let hostDetailIndent: CGFloat = 12 + hostDotSize + hostDotSpacing + 16 + hostDotSpacing
     /// Width of the label column in a host's details: fits "Time Machine location".
     private static let detailLabelWidth: CGFloat = 130
 
@@ -553,14 +573,21 @@ struct NetworkPanel: View {
     private func pqText(_ value: String) -> some View {
         HStack(spacing: 4) {
             if value == "protected" {
-                Text("🔐 Protected").foregroundStyle(.green).fontWeight(.semibold)
+                Text("Protected").foregroundStyle(.green).fontWeight(.semibold)
             } else {
                 Text(pqLabel(value)).foregroundStyle(value == "failed" ? .red : .orange)
             }
-            pqInfoButton
         }
         .lineLimit(1)
         .fixedSize()
+    }
+
+    private func quantumType(_ peers: [ConnectorStatus.MeshPeer]) -> some View {
+        HStack(alignment: .lastTextBaseline, spacing: 4) {
+            Text(MeshQuantumPresentation.label(peers: peers))
+            pqInfoButton
+        }
+        .help(quantumProfileExplanation)
     }
 
     private var quantumProfileExplanation: String {
@@ -626,25 +653,57 @@ struct NetworkPanel: View {
         return out.string(from: date)
     }
 
-    /// SSH, VNC and file-sharing links for services the peer offers. An
-    /// advertised neXal address wins; otherwise the tunnel address is used.
+    /// Only offer known protocols, using the private-network service evidence.
     @ViewBuilder
-    private func quickLinks(_ peer: ConnectorStatus.MeshPeer) -> some View {
+    private func advertisedServices(_ peer: ConnectorStatus.MeshPeer) -> some View {
         let services = Set(peer.services ?? [])
+        let features = model.status?.features ?? ConnectorFeatures()
+        let storage = isStorageGateway(peer)
+        let ssh = !storage && features.remoteSSH && services.contains("ssh") ? peer.tunnelAddress : nil
+        let vnc = !storage && features.remoteVNC
+            ? (peer.screenSharing?.authorized == true && peer.screenSharing?.available == true
+                ? peer.screenSharing?.address : (services.contains("vnc") ? peer.tunnelAddress : nil)) : nil
+        let files = !storage && features.networkFiles
+            ? (peer.fileSharing?.authorized == true && peer.fileSharing?.available == true
+                ? peer.fileSharing?.address : (services.contains("smb") ? peer.tunnelAddress : nil)) : nil
+        VStack(alignment: .leading, spacing: 6) {
+            if let host = ssh { serviceRow("SSH", symbol: "terminal", scheme: "ssh", host: host) }
+            if let host = vnc { serviceRow("VNC", symbol: "display", scheme: "vnc", host: host) }
+            if let host = files {
+                serviceRow("FileShare", symbol: "folder", scheme: "smb", host: host,
+                           share: peer.fileSharing?.shareName)
+            }
+            if storage {
+                HStack(spacing: 8) {
+                    Text("Time Machine Backup").foregroundStyle(.secondary)
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Button("Open") { model.openServiceApplication("com.apple.MigrateAssistant") }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Open Migration Assistant to browse available backup sources")
+                }
+            }
+            if ssh == nil && vnc == nil && files == nil && !storage {
+                Text("No services available").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func serviceRow(_ title: String, symbol: String, scheme: String, host: String,
+                            share: String? = nil) -> some View {
+        detailRow(title) {
+            if let url = PeerServiceURL.make(scheme: scheme, host: host, share: share) {
+                linkButton("Open", symbol, url.absoluteString)
+            } else {
+                Text("Unavailable").foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func peerActions(_ peer: ConnectorStatus.MeshPeer) -> some View {
         let tunnel = peer.tunnelAddress
         let features = model.status?.features ?? ConnectorFeatures()
         HStack(spacing: 6) {
-            if features.remoteSSH, services.contains("ssh"), let host = tunnel {
-                linkButton("SSH", "terminal", "ssh://\(host)")
-            }
-            if features.remoteVNC, let host = (peer.screenSharing?.available == true ? peer.screenSharing?.address : nil)
-                ?? (services.contains("vnc") ? tunnel : nil) {
-                linkButton("VNC", "display", "vnc://\(host)")
-            }
-            if features.networkFiles, let host = (peer.fileSharing?.available == true ? peer.fileSharing?.address : nil)
-                ?? (services.contains("smb") ? tunnel : nil) {
-                linkButton("Files", "folder", "smb://\(host)")
-            }
             if features.wakeOnLAN, tunnel != nil {
                 Button {
                     Task { await model.wake(peer) }
@@ -668,7 +727,13 @@ struct NetworkPanel: View {
 
     private func linkButton(_ title: String, _ symbol: String, _ link: String) -> some View {
         Button {
-            if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+            if let url = URL(string: link) {
+                switch url.scheme {
+                case "ssh": model.openServiceApplication("com.apple.Terminal", url: url)
+                case "vnc": model.openServiceApplication("com.apple.ScreenSharing", url: url)
+                default: NSWorkspace.shared.open(url)
+                }
+            }
         } label: {
             Label(title, systemImage: symbol)
         }
@@ -718,6 +783,15 @@ struct NetworkPanel: View {
 		VStack(alignment: .leading, spacing: 7) {
 			Label("Time Machine", systemImage: "externaldrive.badge.timemachine")
 				.font(.subheadline.weight(.semibold))
+            Button("Allow Full Disk Access…") {
+                PermissionHelpWindow.shared.showFullDiskAccess()
+            }
+            .accessibilityIdentifier("request-full-disk-access")
+            if report.timeMachine.role == "client" && report.timeMachine.enabled {
+                Button("Reveal credentials…") { Task { await model.revealTimeMachineCredentials() } }
+                    .disabled(model.busy)
+                    .help("Show this Mac's SMB username and password for manual Time Machine setup")
+            }
 			LabeledContent("Status", value: timeMachineStatus(report.timeMachine.state))
 			if let name = report.timeMachine.shareName { LabeledContent("Backup destination", value: name) }
 			if let cap = report.timeMachine.capacityBytes { LabeledContent("Storage limit", value: bytes(cap)) }

@@ -4,7 +4,7 @@ The platform repository now includes double-click `Setup neXal.command` and
 `Start neXal.command` launchers. See its `docs/MAC-SETUP.md` for the recommended
 native setup. Packaging builds into a separate staging directory and preserves
 the previous complete app on ordinary build failure; quit the app before updates.
-This is still an unsigned source-build workflow, not a notarized installer.
+Packaging requires the approved custom ML-KEM runtime and a neXal Developer ID signature. Notarization remains a separate release gate.
 
 The current enrollment UI uses an HTTPS Universal-Link QR plus a separately
 generated eight-character manual code. It persists successful account/network
@@ -13,8 +13,18 @@ vendor-neutral per-peer authentication, direct/relay path, traffic, latency and
 post-quantum evidence; it says unavailable when no privileged mesh provider is
 installed rather than simulating connectivity.
 
-For a local development artifact run `bash scripts/build-local-dmg.sh`. Install
-it explicitly with `bash scripts/install-local-dmg.sh --confirm-local-unsigned`.
+Set `NEXAL_MESH_RUNTIME_ARTIFACT` to the reviewed universal runtime artifact and
+`NEXAL_CODE_SIGN_IDENTITY` to the neXal Developer ID identity, then run
+`bash scripts/build-local-dmg.sh`. Install with
+`bash scripts/install-local-dmg.sh --confirm-local-signed`.
+
+`scripts/runtime-policy.json` pins the approved runtime checksum, exact version,
+and signing team. Both packaging paths and the local installer fail closed on
+unapproved or stock runtimes. The installer checks signatures before executing
+the candidate runtime or replacing the existing app. For a reviewed runtime
+upgrade, update the policy checksum and version together; never weaken the
+checks to accept a stock fallback. Run `python3 scripts/test_runtime_policy.py`
+and verify the signed candidate with `python3 scripts/verify-runtime.py app PATH`.
 This is recoverable (an existing app is moved to Trash) and is not a substitute
 for the signed, notarized release workflow.
 

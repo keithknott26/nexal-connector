@@ -124,3 +124,21 @@ Assistant discovery, interrupted writes, quota exhaustion, R2 outage, and
 concurrent clients on every supported macOS release. Apple does not document an
 R2/​JuiceFS network filesystem as a supported shared Time Machine backing store.
 Do not advertise Migration Assistant compatibility until that matrix passes.
+
+## Private gateway discovery (2026-09-27)
+
+The macOS app registers the assigned ready gateway share as local-only Bonjour
+`_smb._tcp` and `_adisk._tcp` services while its gateway peer is connected.
+RFC 6598 gateway addresses receive a local-only A record; names must be under
+`mesh.nexal.systems`. Records are withdrawn when the assignment or connection
+becomes unavailable, and app termination removes them. No tenant share records
+are broadcast onto the LAN. The app must remain running for this discovery.
+
+The Services row's Open button launches Migration Assistant. Selecting a backup
+and starting a backup remain separate macOS actions. Authentication still uses
+the enrolled Mac's assigned SMB account; discovery does not grant access.
+
+Live development repair: enabled this MacBook's current enrollment, provisioned
+its fruit share, and replaced the nonresolving gateway name with its private IP.
+Verified JuiceFS uses the OVH S3 backend. End-to-end discovery, backup, and restore
+remain unverified while the gateway ML-KEM session blocks TCP 445.

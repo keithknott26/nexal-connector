@@ -433,7 +433,7 @@
  	lblPeerID                       = []byte("peer id")
 --- /dev/null
 +++ b/conn_tcp.go
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,281 @@
 +// SPDX-License-Identifier: Apache-2.0
 +package rosenpass
 +
@@ -569,6 +569,17 @@
 +			if _, err := io.ReadFull(conn, data); err != nil {
 +				return
 +			}
++			// Finish the delivery exchange before dispatch can install a new PSK.
++			// Half-close sends EOF to Send, whose deferred Close acknowledges it.
++			// Waiting for that peer EOF prevents a key switch from stranding our FIN.
++			writer, ok := conn.(interface{ CloseWrite() error })
++			if !ok || writer.CloseWrite() != nil {
++				return
++			}
++			var trailing [1]byte
++			if n, err := conn.Read(trailing[:]); n != 0 || !errors.Is(err, io.EOF) {
++				return
++			}
 +			select {
 +			case c.incoming <- tcpFrame{data, (*UDPEndpoint)(addr)}:
 +			case <-c.done:
@@ -639,6 +650,30 @@
 +			return io.ErrShortWrite
 +		}
 +		frame = frame[n:]
++	}
++	// Send our FIN before waiting for the peer's FIN: neither side may change
++	// the tunnel key while its delivery confirmation is still unqueued.
++	writer, ok := conn.(interface{ CloseWrite() error })
++	if !ok {
++		return errors.New("TCP half-close unavailable")
++	}
++	if err := writer.CloseWrite(); err != nil {
++		return err
++	}
++	// Write only queues bytes locally. The receiver closes after reading the
++	// complete bounded frame. Wait for that EOF before a completion callback
++	// can replace the WireGuard PSK and invalidate the transport carrying it.
++	// This is delivery ordering, not authentication; envelope checks remain mandatory.
++	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
++		return err
++	}
++	var response [1]byte
++	n, err := conn.Read(response[:])
++	if n != 0 || !errors.Is(err, io.EOF) {
++		if err != nil {
++			return err
++		}
++		return errors.New("unexpected control transport response")
 +	}
 +	return nil
 +}

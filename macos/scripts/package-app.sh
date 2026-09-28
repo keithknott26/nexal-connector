@@ -8,6 +8,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/build/neXal-Connector.app"
+: "${NEXAL_MESH_RUNTIME_ARTIFACT:?Provide the approved custom runtime artifact}"
+: "${NEXAL_CODE_SIGN_IDENTITY:?A neXal Developer ID signing identity is required}"
+python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
+
 test "$(uname -s)" = Darwin || { echo "Packaging requires macOS."; exit 1; }
 # Build host must be Apple silicon: an arm64 host can cross-compile x86_64, but
 # an Intel host cannot produce arm64, so a universal bundle is impossible there.
@@ -61,25 +65,10 @@ install -m 755 "$BIN/NexalMac" "$CANDIDATE/Contents/MacOS/NexalMac"
 /usr/bin/lipo -create "$STAGE/nexal-arm64" "$STAGE/nexal-amd64" \
     -output "$CANDIDATE/Contents/Helpers/nexal"
 chmod 755 "$CANDIDATE/Contents/Helpers/nexal"
-# Build the pinned, headless mesh runtime into the neXal bundle. Customers must
-# never be sent to install a separately branded desktop application. The BSD
-# license permits redistribution; its notice is shipped beside the runtime.
-MESH_VERSION="${NEXAL_MESH_RUNTIME_VERSION:-v0.79.0}"
-MESH_SOURCE="$STAGE/mesh-source.tar.gz"
-MESH_SHA256="a74f9c260ef48cdf8332ffd5379114550f8ed3fe5cf8457449af80b1b9f17dc6"
-/usr/bin/curl -fL --proto '=https' --proto-redir '=https' \
-  -o "$MESH_SOURCE" "https://github.com/netbirdio/netbird/archive/refs/tags/$MESH_VERSION.tar.gz"
-printf '%s  %s\n' "$MESH_SHA256" "$MESH_SOURCE" | /usr/bin/shasum -a 256 -c -
-mkdir "$STAGE/mesh-source"
-/usr/bin/tar -xzf "$MESH_SOURCE" -C "$STAGE/mesh-source" --strip-components=1
-for ARCH in arm64 amd64; do
-  (cd "$STAGE/mesh-source" && CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" \
-    go build -trimpath -ldflags="-s -w -X github.com/netbirdio/netbird/version.version=${MESH_VERSION#v} -X main.commit=nexal-embedded -X main.builtBy=nexal" \
-      -o "$STAGE/mesh-$ARCH" ./client)
-done
-/usr/bin/lipo -create "$STAGE/mesh-arm64" "$STAGE/mesh-amd64" \
-    -output "$CANDIDATE/Contents/Helpers/nexal-network"
-chmod 755 "$CANDIDATE/Contents/Helpers/nexal-network"
+# Runtime artifacts must come from the reviewed custom patch build. Never fall
+# back to downloading stock NetBird when a custom artifact is unavailable.
+python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
+install -m 755 "$NEXAL_MESH_RUNTIME_ARTIFACT" "$CANDIDATE/Contents/Helpers/nexal-network"
 /bin/bash "$ROOT/scripts/bundle-yara-x.sh" "$STAGE" "$CANDIDATE"
 install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
@@ -108,21 +97,16 @@ if [ -n "$PRIVATE_PAYLOAD" ]; then
   printf 'Refusing to package private runtime payloads or credential files.\n' >&2
   exit 1
 fi
-if [ -n "${NEXAL_CODE_SIGN_IDENTITY:-}" ]; then
-  /usr/bin/codesign --force --options runtime --timestamp=none --entitlements "$ROOT/Resources/YARA-X.entitlements" --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE/Contents/Helpers/yr"
-  for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/MacOS/NexalMac"; do
-    /usr/bin/codesign --force --options runtime --timestamp=none --sign "$NEXAL_CODE_SIGN_IDENTITY" "$BINARY"
-  done
-  /usr/bin/codesign --force --options runtime --timestamp=none --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE"
-  /usr/bin/codesign --verify --deep --strict --verbose=2 "$CANDIDATE"
-fi
+/usr/bin/codesign --force --options runtime --timestamp --entitlements "$ROOT/Resources/YARA-X.entitlements" --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE/Contents/Helpers/yr"
+for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/MacOS/NexalMac"; do
+  /usr/bin/codesign --force --options runtime --timestamp --sign "$NEXAL_CODE_SIGN_IDENTITY" "$BINARY"
+done
+/usr/bin/codesign --force --options runtime --timestamp --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE"
+/usr/bin/codesign --verify --deep --strict --verbose=2 "$CANDIDATE"
+python3 "$ROOT/scripts/verify-runtime.py" app "$CANDIDATE"
 # Same-filesystem rename only after every build/test/validation succeeded.
 # SIGKILL/power loss during the two renames can require manual recovery from
 # .nexal-stage.*/previous.app. Do not claim a transactional filesystem install.
 if [ -d "$APP" ]; then mv "$APP" "$STAGE/previous.app"; fi
 mv "$CANDIDATE" "$APP"
-if [ -n "${NEXAL_CODE_SIGN_IDENTITY:-}" ]; then
-  printf 'Locally signed app assembled: %s\nDeveloper ID signing and notarization are still required for distribution.\n' "$APP"
-else
-  printf 'Unsigned app assembled: %s\nFollow README signing and notarization gates before distribution.\n' "$APP"
-fi
+printf 'Developer ID signed app assembled: %s\nNotarization is still required for distribution.\n' "$APP"

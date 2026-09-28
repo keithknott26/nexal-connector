@@ -11,6 +11,7 @@ a=p.parse_args()
 a.artifacts=a.artifacts.resolve(); a.base_app=a.base_app.resolve(); a.output=a.output.resolve()
 root=pathlib.Path(__file__).resolve().parents[2]
 if a.output.exists(): raise SystemExit('Output must be new; existing builds are preserved.')
+subprocess.run(['python3', str(root/'macos/scripts/verify-runtime.py'), 'source', str(a.artifacts/'nexal-network')], check=True)
 manifest=json.loads((a.artifacts/'manifest.json').read_text())
 if manifest['profile']!='nexal-mlkem1024-tcp-v2': raise SystemExit('Wrong runtime profile')
 runtime=a.artifacts/'nexal-network'
@@ -45,6 +46,7 @@ for file in [helpers/'yr',helpers/'nexal',helpers/'nexal-network',macos/'NexalMa
  run(*args,file)
 run('/usr/bin/codesign','--force','--options','runtime','--timestamp','--sign',a.identity,app)
 run('/usr/bin/codesign','--verify','--deep','--strict',app)
-result={'profile':manifest['profile'],'runtimeVersion':manifest['runtimeVersion'],'notarized':False,'installed':False,'files':{str(f.relative_to(app)):hashlib.sha256(f.read_bytes()).hexdigest() for f in app.rglob('*') if f.is_file()}}
+run('python3',root/'macos/scripts/verify-runtime.py','app',app)
+result={'profile':manifest['profile'],'runtimeVersion':manifest.get('runtimeVersion',manifest.get('version')),'notarized':False,'installed':False,'files':{str(f.relative_to(app)):hashlib.sha256(f.read_bytes()).hexdigest() for f in app.rglob('*') if f.is_file()}}
 (a.output/'manifest.json').write_text(json.dumps(result,indent=2)+'\n')
 print(app)

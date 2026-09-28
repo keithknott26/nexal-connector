@@ -97,9 +97,17 @@ enum ConnectorFailure {
     /// or carried no usable message -- in which case the caller falls back to the
     /// generic exit-code wording rather than showing an empty string.
     static func reason(in stderr: Data) -> String? {
-        guard !stderr.isEmpty,
-              let envelope = try? JSONDecoder().decode(Envelope.self, from: stderr),
-              let message = envelope.error.message else { return nil }
+        guard !stderr.isEmpty else { return nil }
+        // tmutil/Expect may write diagnostics before the CLI's final JSON envelope.
+        // Decode only the whole envelope or the final nonempty line, never raw
+        // diagnostics or an earlier JSON-looking line embedded in tool output.
+        let decoder = JSONDecoder()
+        let finalLine = stderr.split(separator: 0x0A).last(where: {
+            !$0.allSatisfy { $0 == 0x20 || $0 == 0x09 || $0 == 0x0D }
+        })
+        let envelope = (try? decoder.decode(Envelope.self, from: stderr))
+            ?? finalLine.flatMap { try? decoder.decode(Envelope.self, from: Data($0)) }
+        guard let message = envelope?.error.message else { return nil }
         // Control characters are stripped and the length is bounded, so a hostile
         // or malformed message cannot reflow or flood the panel.
         let cleaned = message

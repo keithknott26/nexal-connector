@@ -442,3 +442,12 @@ not CPU percentages; compare them with core count. Unknown values are omitted
 and measured zero is retained. `exitNodeStatus` reads the runtime's default-route
 selection as `selected`, `not_selected`, `unavailable`, or `unknown`. Selection
 does not independently prove successful internet forwarding.
+
+### Manual Time Machine credential reveal
+
+`time-machine --reveal-credentials` explicitly returns `host`, `share`,
+`username`, and `password` for this enrolled computer's enabled gateway
+assignment. It cannot be combined with `--connect` or `--dry-run`. Normal
+status and setup responses remain redacted. The native app consumes this
+response only for the user-triggered Reveal credentials window; do not log
+or persist it. The coordinator still authorizes the credential request.

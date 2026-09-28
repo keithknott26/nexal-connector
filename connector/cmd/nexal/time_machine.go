@@ -20,30 +20,50 @@ import (
 	"nexal/connector/internal/timemachine"
 )
 
-// Adding the gateway runs, as root:
-//
-//	sudo [-n] -- /usr/bin/script -q /dev/null /usr/bin/tmutil setdestination -a -p smb://user@host/share
-//
-// The SMB password is never in any argv (ps shows argv to every local user)
-// and therefore never in sudo's command log. tmutil -p reads it at a
-// non-echoing prompt from its terminal, so script(1) gives tmutil a
-// pseudo-terminal as its controlling tty and forwards our stdin pipe into it.
-// sudo authenticates on the user's own /dev/tty (we never pass -S), so it
-// cannot consume the piped password; the password is only written after
-// tmutil has printed its prompt, i.e. after echo is off.
-//
-// From the neXal-Connector app there is no terminal for sudo to ask on, so the
-// same script(1)+tmutil command runs as root through macOS's own administrator
-// dialog instead (see runElevated). The password rules are unchanged.
+// Time Machine reads its share password from a controlling terminal. Expect
+// allocates that terminal even when the app's stdin is a pipe or FIFO. The
+// password travels through stdin only, after the non-echoing password prompt;
+// it is never included in command arguments or the AppleScript source.
 const (
 	sudoPath      = "/usr/bin/sudo"
-	scriptPath    = "/usr/bin/script"
+	expectPath    = "/usr/bin/expect"
 	tmutilPath    = "/usr/bin/tmutil"
 	osascriptPath = "/usr/bin/osascript"
 
 	setDestinationTimeout = 3 * time.Minute
 	tmutilOutputLimit     = 64 << 10
 )
+
+// tmTerminalScript runs only the explicitly supplied command. Command arguments
+// are Tcl list elements, never evaluated as script. Hide all output after the
+// password prompt so a child cannot accidentally echo the secret into logs.
+const tmTerminalScript = `set timeout 150
+spawn -noecho {*}$argv
+expect {
+    -nocase -re {password[^\r\n]*: ?$} {
+        log_user 0
+        if {[gets stdin secret] < 0} { exit 125 }
+        send -- "$secret\r"
+        unset secret
+        expect { eof {} timeout { exit 124 } }
+    }
+    eof {}
+    timeout { exit 124 }
+}
+set result [wait]
+exit [lindex $result 3]
+`
+
+func tmExpectScript(args ...string) string {
+	var command strings.Builder
+	command.WriteString("set argv [list")
+	for _, arg := range args {
+		fmt.Fprintf(&command, " [encoding convertfrom utf-8 [binary format H* %x]]", []byte(arg))
+	}
+	command.WriteString("]\n")
+	command.WriteString(tmTerminalScript)
+	return command.String()
+}
 
 // runTmutil is the process seam; tests replace it. The stdin reader may block
 // indefinitely, so the real runner does not wait for stdin copying to finish.
@@ -93,8 +113,8 @@ func appleScriptString(s string) string {
 // elevatedScript is the AppleScript run by osascript. It holds the
 // password-free destination URL and the two FIFO paths, nothing secret.
 func elevatedScript(destinationURL, inFIFO, outFIFO string) string {
-	shell := fmt.Sprintf("%s -q /dev/null %s setdestination -a -p %s < %s > %s 2>&1",
-		scriptPath, tmutilPath, shellQuote(destinationURL), shellQuote(inFIFO), shellQuote(outFIFO))
+	shell := fmt.Sprintf("%s -c %s < %s > %s 2>&1",
+		expectPath, shellQuote(tmExpectScript(tmutilPath, "setdestination", "-a", "-p", destinationURL)), shellQuote(inFIFO), shellQuote(outFIFO))
 	return fmt.Sprintf("do shell script %s with administrator privileges with prompt %s",
 		appleScriptString(shell), appleScriptString(elevatedPrompt))
 }
@@ -102,8 +122,8 @@ func elevatedScript(destinationURL, inFIFO, outFIFO string) string {
 // errAdminCancelled is returned when the owner dismisses the macOS dialog.
 var errAdminCancelled = errors.New("administrator approval was cancelled; the backup disk was not added")
 
-// runElevated runs script(1)+tmutil as root behind the macOS administrator
-// dialog. The password never enters argv or the disk: script's stdin and its
+// runElevated runs Expect+tmutil as root behind the macOS administrator
+// dialog. The password never enters argv or the disk: Expect's stdin and its
 // output are FIFOs in a private 0700 directory, tmutil's prompt is read back
 // through the output FIFO, and only then is the password written to the input
 // FIFO. Replaceable in tests.
@@ -183,6 +203,27 @@ var destinationConfigured = func(host, share string) bool {
 	return destinationListed(string(out), host, share)
 }
 
+// destinationVerifyWait bounds how long setup waits for Time Machine to list a
+// newly added destination. Replaceable in tests.
+var destinationVerifyWait = 10 * time.Second
+
+func destinationAppeared(ctx context.Context, host, share string) bool {
+	deadline := time.Now().Add(destinationVerifyWait)
+	for {
+		if destinationConfigured(host, share) {
+			return true
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 func destinationListed(info, host, share string) bool {
 	host, share = strings.ToLower(host), strings.ToLower(share)
 	for _, line := range strings.Split(strings.ToLower(info), "\n") {
@@ -203,12 +244,37 @@ func tmutilArgv(destinationURL string, interactive bool) []string {
 	if !interactive {
 		argv = append(argv, "-n") // fail instead of prompting when there is no terminal
 	}
-	return append(argv, "--", scriptPath, "-q", "/dev/null", tmutilPath, "setdestination", "-a", "-p", destinationURL)
+	return append(argv, "--", expectPath, "-c", tmExpectScript(tmutilPath, "setdestination", "-a", "-p", destinationURL))
+}
+
+const timeMachineAccessError = "Time Machine reported that Full Disk Access is required for this operation. If neXal-Connector is already enabled, quit and reopen it before retrying; otherwise enable it in System Settings"
+
+// A read-only probe in the connector's own process ancestry. No elevation,
+// mounting (-m), credentials, or backup changes. An explicit denial blocks the
+// admin prompt; other failures (including no backups) do not prove FDA denial.
+var probeTimeMachineAccess = func(ctx context.Context) ([]byte, error) {
+	return exec.CommandContext(ctx, tmutilPath, "listbackups").CombinedOutput()
+}
+
+func preflightTimeMachineAccess(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, _ := probeTimeMachineAccess(ctx)
+	if ctx.Err() != nil {
+		return errors.New("Time Machine permission check timed out; no administrator approval was requested. Try again")
+	}
+	if bytes.Contains(bytes.ToLower(output), []byte("requires full disk access privileges")) {
+		return errors.New(timeMachineAccessError)
+	}
+	return nil
 }
 
 // setDestination is replaceable in tests. destinationURL must be password-free;
 // password is written to tmutil's prompt and cleared by the caller.
 var setDestination = func(ctx context.Context, destinationURL string, password []byte) error {
+	if err := preflightTimeMachineAccess(ctx); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, setDestinationTimeout)
 	defer cancel()
 	interactive := hasTerminal()
@@ -229,14 +295,20 @@ var setDestination = func(ctx context.Context, destinationURL string, password [
 	if errors.Is(err, errAdminCancelled) {
 		return err
 	}
-	if detail := out.redacted(password); len(detail) > 0 {
+	detail := out.redacted(password)
+	if len(detail) > 0 {
 		_, _ = os.Stderr.Write(append(detail, '\n'))
+	}
+	// Only a specific tmutil denial establishes missing effective permission.
+	// Network, authentication, and other setup failures must not request FDA.
+	if bytes.Contains(bytes.ToLower(detail), []byte("requires full disk access privileges")) {
+		return errors.New(timeMachineAccessError)
 	}
 	switch {
 	case elevated && ctx.Err() != nil && !out.sawPrompt():
 		return errors.New("timed out waiting for administrator approval; the backup disk was not added")
 	case elevated && ctx.Err() == nil:
-		return errors.New("macOS did not add the backup disk; check that the secure network is connected and that neXal-Connector has Full Disk Access (System Settings › Privacy & Security)")
+		return errors.New("macOS did not add the backup disk; check the secure network and backup share availability, then retry")
 	case ctx.Err() != nil && !out.sawPrompt():
 		return errors.New("tmutil setdestination timed out before tmutil asked for the share password; approve the administrator prompt in Terminal")
 	case ctx.Err() != nil:
@@ -244,7 +316,7 @@ var setDestination = func(ctx context.Context, destinationURL string, password [
 	case !interactive:
 		return errors.New("tmutil setdestination needs administrator approval; run `nexal time-machine -connect` in Terminal")
 	}
-	return errors.New("tmutil setdestination failed; check that the secure network is connected, approve the administrator prompt, and grant Terminal Full Disk Access")
+	return errors.New("tmutil setdestination failed; check that the secure network and backup share are available")
 }
 
 // promptWatcher captures (bounded) tmutil output from the pty and signals once
@@ -348,10 +420,14 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	reveal := f.Bool("reveal-credentials", false, "explicitly reveal this computer’s SMB credential for manual setup")
 	connect := f.Bool("connect", false, "add the storage gateway as a Time Machine destination")
 	dryRun := f.Bool("dry-run", false, "with -connect, validate everything but do not call tmutil")
 	if err = parse(f, args, path); err != nil {
 		return err
+	}
+	if *reveal && (*connect || *dryRun) {
+		return errors.New("credential reveal cannot be combined with connect or dry-run")
 	}
 	cfg, err := config.Load(*path)
 	if err != nil {
@@ -375,6 +451,22 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 	clientCfg, err := api.TimeMachineClientConfig(ctx, cfg.HostID)
 	if err != nil {
 		return err
+	}
+	if *reveal {
+		if err := clientCfg.Validate(); err != nil {
+			return err
+		}
+		if clientCfg.Role != timemachine.RoleClient || !clientCfg.Enabled || clientCfg.Destination == nil {
+			return errors.New("Time Machine is not enabled for this computer")
+		}
+		credential, err := api.TimeMachineSMBCredential(ctx, cfg.HostID, *clientCfg.Destination)
+		if err != nil {
+			return err
+		}
+		defer credential.Zero()
+		// Only this explicit command emits a password; normal status stays redacted.
+		return emit(map[string]string{"host": credential.Host, "share": credential.Share,
+			"username": credential.Username, "password": credential.Password})
 	}
 	if clientCfg.Role == timemachine.RoleClient {
 		return timeMachineClient(ctx, api, cfg.HostID, clientCfg, *connect, *dryRun)
@@ -414,7 +506,7 @@ func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c
 		view["detail"] = err.Error()
 		return emit(map[string]any{"timeMachine": view})
 	}
-	if !connect && destinationConfigured(d.Host, d.Share) {
+	if !dryRun && destinationConfigured(d.Host, d.Share) {
 		view["state"] = "connected"
 		return emit(map[string]any{"timeMachine": view})
 	}
@@ -441,6 +533,11 @@ func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c
 	clear(password)
 	if err != nil {
 		return err
+	}
+	// tmutil can exit 0 without persisting the destination. Report success only
+	// once Time Machine itself lists this gateway share.
+	if !destinationAppeared(ctx, d.Host, d.Share) {
+		return errors.New("macOS finished without adding the neXal backup disk to Time Machine; check the secure network and backup share availability, then retry")
 	}
 	view["state"] = "destination_added"
 	return emit(map[string]any{"timeMachine": view})

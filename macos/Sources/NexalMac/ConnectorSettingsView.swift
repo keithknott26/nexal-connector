@@ -134,6 +134,10 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
+            Button("Full Disk Access…") {
+                PermissionHelpWindow.shared.showFullDiskAccess()
+            }
+            .help("Open a floating guide with the app icon to drag into System Settings.")
             GroupBox("Activity") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Graph time range", selection: $preferences.chartWindowMinutes) {

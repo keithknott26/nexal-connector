@@ -1,0 +1,7 @@
+{
+  "version": "0.79.0-nexal-mlkem1024-gated-experimental.7-recovery",
+  "profile": "nexal-mlkem1024-tcp-v2",
+  "source_sha256": "4173afbdbb0d755ff9a8c985cd094ed1fd8d544574773e3f2da4b61a70703d81",
+  "team_id": "GHN7W3WALP",
+  "bundle_id": "systems.nexal.connector"
+}

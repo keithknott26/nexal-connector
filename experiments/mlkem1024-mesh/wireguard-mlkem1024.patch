@@ -20,6 +20,17 @@
  	isRunning         atomic.Bool
  	keypairs          Keypairs
  	handshake         Handshake
+@@ -115,6 +116,10 @@
+ }
+ 
+ func (peer *Peer) SendBuffers(buffers [][]byte) error {
++	// A strict gate can drop every element; Linux sendmmsg rejects empty batches.
++	if len(buffers) == 0 {
++		return nil
++	}
+ 	peer.device.net.RLock()
+ 	defer peer.device.net.RUnlock()
+ 
 --- a/device/keypair.go
 +++ b/device/keypair.go
 @@ -22,14 +22,15 @@
@@ -146,7 +157,7 @@
  			// populate header fields
  			header := elem.buffer[:MessageTransportHeaderSize]
  
-@@ -662,6 +672,12 @@
+@@ -662,12 +672,27 @@
  		}
  		dataSent := false
  		for _, elem := range elemsContainer.elems {
@@ -159,6 +170,21 @@
  			if len(elem.packet) != MessageKeepaliveSize {
  				dataSent = true
  			}
+ 			bufs = append(bufs, elem.packet)
+ 		}
+ 
++		if len(bufs) == 0 {
++			// Release a fully filtered batch without sending or refreshing timers.
++			for _, elem := range elemsContainer.elems {
++				device.PutMessageBuffer(elem.buffer)
++				device.PutOutboundElement(elem)
++			}
++			device.PutOutboundElementsContainer(elemsContainer)
++			continue
++		}
+ 		peer.timersAnyAuthenticatedPacketTraversal()
+ 		peer.timersAnyAuthenticatedPacketSent()
+ 
 --- a/device/receive.go
 +++ b/device/receive.go
 @@ -507,6 +507,9 @@
@@ -173,7 +199,7 @@
  
 --- /dev/null
 +++ b/device/nexal_quantum.go
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,150 @@
 +// SPDX-License-Identifier: MIT
 +package device
 +
@@ -240,7 +266,12 @@
 +	p.handshake.presharedKey = NoisePresharedKey(psk)
 +	p.quantum.Store(&next)
 +	p.handshake.mutex.Unlock()
-+	p.ExpireCurrentKeypairs()
++	// Keep the previous session usable for the bounded control flow while a
++	// fresh handshake takes effect. quantumAllows rejects its application data.
++	// ExpireCurrentKeypairs would also kill in-flight TCP delivery confirmations.
++	if err := p.SendHandshakeInitiationOnEndpointChange(); err != nil {
++		d.log.Errorf("%v - Failed to start quantum session handshake: %v", p, err)
++	}
 +	return nil
 +}
 +func (p *Peer) invalidateQuantumLocked() {

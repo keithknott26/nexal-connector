@@ -34,6 +34,7 @@ enum CLICommand {
 	case timeMachine
 	/// Adds the storage gateway as a Time Machine destination behind the macOS
 	/// administrator dialog. Waits on a person, so it has a longer time limit.
+	case timeMachineCredentials
 	case timeMachineConnect
     /// Mint a phone pairing and render it. `--no-poll` is deliberate: this app
     /// polls with `pairingStatus` through the SAME bounded `ConnectorProcess`
@@ -94,6 +95,7 @@ enum CLICommand {
         case .status: command = ["status"]
         case .peersView: command = ["peers-view"]
 		case .timeMachine: command = ["time-machine"]
+		case .timeMachineCredentials: command = ["time-machine", "--reveal-credentials"]
 		case .timeMachineConnect: command = ["time-machine", "-connect"]
         case .pause: command = ["pause"]
         case .resume: command = ["resume"]

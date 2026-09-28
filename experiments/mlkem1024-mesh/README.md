@@ -190,3 +190,15 @@ Connector served local status with mesh `pq: degraded` and zero protected peers.
 Remote peers were not
 upgraded. The bootstrap/expiry traffic gate and MTU-safe transport remain open;
 this update improves local evidence reporting and does not solve those gaps.
+
+### Status probe network budget
+
+`prepare.py` also applies `netbird-health-budget.patch`: concurrent status readers
+share management health RPC results for 30 seconds after success, or 10 seconds
+after failure. Live transport state, management Sync errors, peer statistics and
+quantum evidence continue to be evaluated independently. This bounds background
+health traffic without changing peer signaling, handshakes or key renewal.
+The tradeoff is up to 30 seconds to detect a management application failure that
+does not also break the transport or Sync stream. Run
+`go test -race ./shared/management/client -run TestHealthProbe` in the prepared
+NetBird tree to verify expiry, recovery and concurrent polling.

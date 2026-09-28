@@ -1,0 +1,107 @@
+--- a/shared/management/client/grpc.go
++++ b/shared/management/client/grpc.go
+@@ -55,6 +55,7 @@
+ }
+ 
+ type GrpcClient struct {
++	healthProbe           healthProbeCache
+ 	key                   wgtypes.Key
+ 	realClient            proto.ManagementServiceClient
+ 	ctx                   context.Context
+@@ -565,7 +566,10 @@
+ 	ctx, cancel := context.WithTimeout(c.ctx, healthCheckTimeout)
+ 	defer cancel()
+ 
+-	_, err := c.realClient.IsHealthy(ctx, &proto.Empty{})
++	err := c.healthProbe.run(time.Now, func() error {
++		_, err := c.realClient.IsHealthy(ctx, &proto.Empty{})
++		return err
++	})
+ 	if err != nil {
+ 		c.notifyDisconnected(err)
+ 		log.Warnf("health check returned: %s", err)
+--- /dev/null
++++ b/shared/management/client/health_probe_cache.go
+@@ -0,0 +1,29 @@
++package client
++
++import (
++	"sync"
++	"time"
++)
++
++// Bound status-triggered network traffic without caching live peer statistics
++// or the transport and Sync stream checks performed by IsHealthy.
++type healthProbeCache struct {
++	mu   sync.Mutex
++	next time.Time
++	err  error
++}
++
++func (p *healthProbeCache) run(now func() time.Time, probe func() error) error {
++	p.mu.Lock()
++	defer p.mu.Unlock()
++	if now().Before(p.next) {
++		return p.err
++	}
++	p.err = probe()
++	interval := 30 * time.Second
++	if p.err != nil {
++		interval = 10 * time.Second
++	}
++	p.next = now().Add(interval)
++	return p.err
++}
+--- /dev/null
++++ b/shared/management/client/health_probe_cache_test.go
+@@ -0,0 +1,50 @@
++package client
++
++import (
++	"errors"
++	"sync"
++	"testing"
++	"time"
++)
++
++func TestHealthProbeBudget(t *testing.T) {
++	var p healthProbeCache
++	clock := time.Unix(100, 0)
++	now := func() time.Time { return clock }
++	calls := 0
++	var failure error
++	probe := func() error { calls++; return failure }
++	p.run(now, probe)
++	clock = clock.Add(29 * time.Second)
++	p.run(now, probe)
++	if calls != 1 {
++		t.Fatal(calls)
++	}
++	clock = clock.Add(time.Second)
++	failure = errors.New("offline")
++	if p.run(now, probe) != failure || calls != 2 {
++		t.Fatal("did not probe at deadline")
++	}
++	clock = clock.Add(9 * time.Second)
++	if p.run(now, probe) != failure || calls != 2 {
++		t.Fatal("failure was not cached")
++	}
++	clock = clock.Add(time.Second)
++	failure = nil
++	if p.run(now, probe) != nil || calls != 3 {
++		t.Fatal("recovery was not detected")
++	}
++}
++func TestHealthProbeSingleFlight(t *testing.T) {
++	var p healthProbeCache
++	var wg sync.WaitGroup
++	calls := 0
++	for i := 0; i < 50; i++ {
++		wg.Add(1)
++		go func() { defer wg.Done(); p.run(time.Now, func() error { calls++; return nil }) }()
++	}
++	wg.Wait()
++	if calls != 1 {
++		t.Fatal(calls)
++	}
++}

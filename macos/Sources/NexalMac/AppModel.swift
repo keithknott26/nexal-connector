@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor
 final class AppModel: ObservableObject {
+    private let timeMachineDiscovery = TimeMachineDiscovery()
     /// The deployed development coordinator, prefilled so a fresh install has a
     /// working destination without the owner typing one. The connector is a
     /// client of a hosted service; it does not discover peers on the LAN and
@@ -482,6 +483,33 @@ final class AppModel: ObservableObject {
         }
     }
 
+    @Published private(set) var refreshingPeerID: String?
+    @Published private(set) var peerRefreshErrors: [String: String] = [:]
+    @Published private(set) var peerRefreshedAt: [String: Date] = [:]
+
+    /// Read live runtime evidence through the connector's existing status seam.
+    /// A refresh never fabricates protection or restarts unrelated peer links.
+    func refreshPeer(_ peer: ConnectorStatus.MeshPeer) async {
+        guard !busy, selection != nil else { return }
+        busy = true
+        refreshingPeerID = peer.id
+        peerRefreshErrors[peer.id] = nil
+        activity = "Refreshing peer status…"
+        defer { busy = false; refreshingPeerID = nil; activity = nil }
+        do {
+            try await updateStatus()
+            await updateTunnelEvidence()
+            await updatePeers()
+            guard status?.mesh?.peers.contains(where: { $0.id == peer.id }) == true else {
+                peerRefreshErrors[peer.id] = "This peer is no longer reported by the networking service."
+                return
+            }
+            peerRefreshedAt[peer.id] = Date()
+        } catch {
+            peerRefreshErrors[peer.id] = "Refresh failed: \(error.localizedDescription)"
+        }
+    }
+
     func refresh() async {
         guard !busy, selection != nil else { return }
 
@@ -794,6 +822,13 @@ final class AppModel: ObservableObject {
     }
 
 	func updateTimeMachine(force: Bool = false) async {
+        defer {
+            let host = timeMachine?.timeMachine.host?.split(separator: ".").first.map(String.init)
+            let connected = status?.mesh?.peers.contains {
+                ($0.name.lowercased() == host?.lowercased() || $0.tunnelAddress == timeMachine?.timeMachine.host) && $0.lifecycle == "connected"
+            } == true
+            timeMachineDiscovery.update(timeMachine?.timeMachine, connected: connected)
+        }
 		if !force, let lastTimeMachineCheck, Date().timeIntervalSince(lastTimeMachineCheck) < 60 { return }
 		lastTimeMachineCheck = Date()
 		guard hasPersistedHostIdentity, let data = try? await invoke(.timeMachine),
@@ -807,15 +842,61 @@ final class AppModel: ObservableObject {
 	/// One-click Time Machine: adds this network's storage gateway as a backup
 	/// disk. macOS shows its own administrator dialog; the backup password goes
 	/// from the coordinator to tmutil without ever being shown or stored here.
+    func openServiceApplication(_ bundleID: String, url: URL? = nil) {
+        guard let application = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            message = "The macOS app for this service could not be found."
+            return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        let completion: @Sendable (NSRunningApplication?, Error?) -> Void = { _, error in
+            if let error {
+                Task { @MainActor in self.message = "Could not open service: \(error.localizedDescription)" }
+            }
+        }
+        if let url {
+            NSWorkspace.shared.open([url], withApplicationAt: application,
+                                    configuration: configuration, completionHandler: completion)
+        } else {
+            NSWorkspace.shared.openApplication(at: application,
+                                               configuration: configuration, completionHandler: completion)
+        }
+    }
+
+    func revealTimeMachineCredentials() async {
+        guard !busy else { return }
+        TimeMachineCredentialWindow.shared.begin()
+        busy = true
+        defer { busy = false }
+        do {
+            let data = try await invoke(.timeMachineCredentials)
+            let credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
+            TimeMachineCredentialWindow.shared.show(credential)
+        } catch {
+            message = "Could not retrieve Time Machine credentials. Check that backup is enabled and the coordinator is reachable."
+            TimeMachineCredentialWindow.shared.showError()
+        }
+    }
+
 	func setUpTimeMachine() async {
 		guard !busy else { return }
-		busy = true; activity = "Adding the backup disk\u{2026} Approve the macOS prompt."
+		TimeMachineSetupWindow.shared.begin()
+		busy = true; activity = "Checking Time Machine access before administrator approval…"
 		defer { busy = false; activity = nil }
 		do {
-			_ = try await invoke(.timeMachineConnect)
-			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, and backups start automatically."
+            let result = try await invoke(.timeMachineConnect)
+            struct SetupResult: Decodable {
+                struct Status: Decodable { let state: String; let detail: String? }
+                let timeMachine: Status
+            }
+            let report = try JSONDecoder().decode(SetupResult.self, from: result).timeMachine
+            guard ["connected", "destination_added"].contains(report.state) else {
+                throw ShellError.commandFailed(1, reason: report.detail ?? "Time Machine setup did not add a destination (status: \(report.state)).")
+            }
+			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, where you can review the backup schedule."
+			TimeMachineSetupWindow.shared.finish(error: nil)
 		} catch {
 			message = error.localizedDescription
+            TimeMachineSetupWindow.shared.finish(error: error.localizedDescription)
 		}
 		await updateTimeMachine(force: true)
 	}

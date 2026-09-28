@@ -47,6 +47,11 @@ func (a realGateAdapter) QuantumSessionReady(k string) bool {
 // This is rootless and exercises TCP segmentation, bootstrap, generation change,
 // app traffic, expiry and recovery rather than treating an interface mock as proof.
 func TestNexalEndToEndGatedMLKEM(t *testing.T) {
+	oldResponder, oldInitiator, oldReject := rp.RekeyAfterTimeResponder, rp.RekeyAfterTimeInitiator, rp.RejectAfterTime
+	rp.RekeyAfterTimeResponder, rp.RekeyAfterTimeInitiator, rp.RejectAfterTime = 10*time.Second, 15*time.Second, 45*time.Second
+	t.Cleanup(func() {
+		rp.RekeyAfterTimeResponder, rp.RekeyAfterTimeInitiator, rp.RejectAfterTime = oldResponder, oldInitiator, oldReject
+	})
 	binds := bindtest.NewChannelBinds()
 	var devs [2]*wg.Device
 	var nets [2]*netstack.Net
@@ -171,7 +176,7 @@ func TestNexalEndToEndGatedMLKEM(t *testing.T) {
 	}
 	assertApp := func() {
 		t.Helper()
-		deadline := time.Now().Add(12 * time.Second)
+		deadline := time.Now().Add(30 * time.Second)
 		for time.Now().Before(deadline) {
 			c, err := dialApp(time.Second)
 			if err != nil {
@@ -195,6 +200,23 @@ func TestNexalEndToEndGatedMLKEM(t *testing.T) {
 		profile, _, _ := handlers[i].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1-i]))
 		if profile != "nexal-mlkem1024-tcp-v2" {
 			t.Fatal("active session evidence missing")
+		}
+	}
+	// Exercise multiple automatic renewals while verifying application traffic.
+	_, previous, _ := handlers[0].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1]))
+	for renewal := 0; renewal < 3; renewal++ {
+		deadline := time.Now().Add(30 * time.Second)
+		for {
+			assertApp()
+			profile, installed, _ := handlers[0].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1]))
+			if profile != "" && installed != previous {
+				previous = installed
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("automatic renewal did not produce fresh session evidence")
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	for i := range handlers {

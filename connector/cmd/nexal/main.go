@@ -581,16 +581,27 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	defer cancel()
 	results := make(chan error, 3)
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(7)
+	learningConnected := func() bool {
+		status := a.Snapshot()
+		observed, err := time.Parse(time.RFC3339Nano, status.Mesh.UpdatedAt)
+		return err == nil && time.Since(observed) >= 0 && time.Since(observed) < 30*time.Second && meshProvider.Enrolled() &&
+			status.Mesh.ProviderAvailable && status.Mesh.Lifecycle == mesh.LifecycleConnected && !status.Paused &&
+			!status.Contribution.Withholding && status.ActiveAttempt == "" && !status.CredentialRejected
+	}
 	go func() {
 		defer wg.Done()
-		manager := privateruntime.Manager{API: api, HostID: c.HostID, Root: filepath.Join(filepath.Dir(*path), "runtime-sessions"), Connected: func() bool {
-			status := a.Snapshot()
-			observed, err := time.Parse(time.RFC3339Nano, status.Mesh.UpdatedAt)
-			return err == nil && time.Since(observed) >= 0 && time.Since(observed) < 30*time.Second && meshProvider.Enrolled() &&
-				status.Mesh.ProviderAvailable && status.Mesh.Lifecycle == mesh.LifecycleConnected && !status.Paused &&
-				!status.Contribution.Withholding && status.ActiveAttempt == "" && !status.CredentialRejected
-		}}
+		runLearningWithInterval(ctx, learningConnected, func(parent context.Context) error {
+			return api.ValidationTick(parent, c.HostID, canary, scanner)
+		}, 5*time.Minute, 5*time.Second)
+	}()
+	go func() {
+		defer wg.Done()
+		runLearning(ctx, learningConnected, func(ctx context.Context) error { return api.LearningTick(ctx, c.HostID) })
+	}()
+	go func() {
+		defer wg.Done()
+		manager := privateruntime.Manager{API: api, HostID: c.HostID, Root: filepath.Join(filepath.Dir(*path), "runtime-sessions"), Connected: learningConnected}
 		if err := manager.RunLoop(ctx); err != nil {
 			logger.Warn("private runtime bootstrap stopped", "reason", "bootstrap_unavailable")
 		}

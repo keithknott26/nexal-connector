@@ -8,8 +8,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/build/neXal-Connector.app"
-: "${NEXAL_MESH_RUNTIME_ARTIFACT:?Provide the approved custom runtime artifact}"
-: "${NEXAL_CODE_SIGN_IDENTITY:?A neXal Developer ID signing identity is required}"
+source "$ROOT/scripts/resolve-runtime.sh"
 python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
 
 test "$(uname -s)" = Darwin || { echo "Packaging requires macOS."; exit 1; }

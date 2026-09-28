@@ -13,9 +13,13 @@ vendor-neutral per-peer authentication, direct/relay path, traffic, latency and
 post-quantum evidence; it says unavailable when no privileged mesh provider is
 installed rather than simulating connectivity.
 
-Set `NEXAL_MESH_RUNTIME_ARTIFACT` to the reviewed universal runtime artifact and
-`NEXAL_CODE_SIGN_IDENTITY` to the neXal Developer ID identity, then run
-`bash scripts/build-local-dmg.sh`. Install with
+Run `gh auth login` with access to this private repository, then
+`bash scripts/build-local-dmg.sh`. The build downloads and checksum-verifies
+the approved runtime prerelease and selects the neXal Developer ID identity
+from Keychain. The signing certificate **and private key** must be available
+on the build Mac; otherwise use a signed DMG produced on the release Mac.
+For offline builds, set `NEXAL_MESH_RUNTIME_ARTIFACT` to the approved artifact;
+`NEXAL_CODE_SIGN_IDENTITY` can explicitly select the signing identity. Install with
 `bash scripts/install-local-dmg.sh --confirm-local-signed`.
 
 `scripts/runtime-policy.json` pins the approved runtime checksum, exact version,

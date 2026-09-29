@@ -35,21 +35,14 @@ import (
 // zero remains distinguishable from an unavailable measurement.
 // JSON names are the wire contract with the coordinator's host.info frame.
 type Info struct {
-	ThreatScannerStatus    string `json:"threatScannerStatus,omitempty"`
-	LastThreatScanAt       string `json:"lastThreatScanAt,omitempty"`
-	ThreatRulesVersion     string `json:"threatRulesVersion,omitempty"`
-	ThreatScanLastError    string `json:"threatScanLastError,omitempty"`
-	ThreatScanCoverage     string `json:"threatScanCoverage,omitempty"`
-	ThreatScanFilesScanned *int   `json:"threatScanFilesScanned,omitempty"`
-	ThreatScanFilesSkipped *int   `json:"threatScanFilesSkipped,omitempty"`
-	ThreatScanFindings     *int   `json:"threatScanFindings,omitempty"`
-
 	LoadAverage1m           *float64 `json:"loadAverage1m,omitempty"`
 	LoadAverage5m           *float64 `json:"loadAverage5m,omitempty"`
 	LoadAverage15m          *float64 `json:"loadAverage15m,omitempty"`
 	ExitNodeStatus          string   `json:"exitNodeStatus,omitempty"`
 	CanaryStatus            string   `json:"canaryStatus,omitempty"`
 	CanaryLastCheckedAt     string   `json:"canaryLastCheckedAt,omitempty"`
+	HoneypotStatus          string   `json:"honeypotStatus,omitempty"`
+	HoneypotLastTriggeredAt string   `json:"honeypotLastTriggeredAt,omitempty"`
 	CPUUsagePercent         *float64 `json:"cpuUsagePercent,omitempty"`
 	MemoryAvailableBytes    *uint64  `json:"memoryAvailableBytes,omitempty"`
 	MemoryUsedBytes         *uint64  `json:"memoryUsedBytes,omitempty"`

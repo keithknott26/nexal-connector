@@ -3,12 +3,11 @@
 import argparse, hashlib, json, pathlib, plistlib, shutil, subprocess
 p=argparse.ArgumentParser()
 p.add_argument('--artifacts',type=pathlib.Path,required=True)
-p.add_argument('--base-app',type=pathlib.Path,required=True)
 p.add_argument('--output',type=pathlib.Path,required=True)
 p.add_argument('--identity',required=True)
 p.add_argument('--build-number',default='20260927.1')
 a=p.parse_args()
-a.artifacts=a.artifacts.resolve(); a.base_app=a.base_app.resolve(); a.output=a.output.resolve()
+a.artifacts=a.artifacts.resolve(); a.output=a.output.resolve()
 root=pathlib.Path(__file__).resolve().parents[2]
 if a.output.exists(): raise SystemExit('Output must be new; existing builds are preserved.')
 subprocess.run(['python3', str(root/'macos/scripts/verify-runtime.py'), 'source', str(a.artifacts/'nexal-network')], check=True)
@@ -31,18 +30,16 @@ for arch in ['arm64','amd64']:
  subprocess.run(['go','build','-trimpath','-ldflags=-s -w','-o',str(a.output/('nexal-'+arch)),'./cmd/nexal'],cwd=root/'connector',env=env,check=True)
 run('/usr/bin/lipo','-create',a.output/'nexal-arm64',a.output/'nexal-amd64','-output',helpers/'nexal')
 shutil.copy2(runtime,helpers/'nexal-network')
-# Reuse only the previously verified scanner engine and declarative resources.
+# Reuse only declarative resources from the source tree.
 # No configuration, credentials, user data or previous app executables are copied.
-shutil.copy2(a.base_app/'Contents/Helpers/yr',helpers/'yr')
 for item in (root/'macos/Resources').iterdir():
  if item.is_file() and item.suffix in ['.txt','.icns']: shutil.copy2(item,resources/item.name)
 info=plistlib.loads((root/'macos/Resources/Info.plist').read_bytes())
 info['CFBundleVersion']=a.build_number
 (app/'Contents/Info.plist').write_bytes(plistlib.dumps(info))
-for file in [helpers/'yr',helpers/'nexal',helpers/'nexal-network',macos/'NexalMac']:
+for file in [helpers/'nexal',helpers/'nexal-network',macos/'NexalMac']:
  file.chmod(0o755)
  args=['/usr/bin/codesign','--force','--options','runtime','--timestamp','--sign',a.identity]
- if file.name=='yr': args+=['--entitlements',root/'macos/Resources/YARA-X.entitlements']
  run(*args,file)
 run('/usr/bin/codesign','--force','--options','runtime','--timestamp','--sign',a.identity,app)
 run('/usr/bin/codesign','--verify','--deep','--strict',app)

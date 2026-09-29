@@ -23,7 +23,7 @@ struct NexalMacApp: App {
                     Button("Settings…") { appDelegate.showSettings() }.keyboardShortcut(",")
                 }
                 CommandGroup(replacing: .appInfo) {
-                    Button("About neXal Systems Connector") { appDelegate.showAbout() }
+                    Button("About neXal@home") { appDelegate.showAbout() }
                 }
             }
     }
@@ -158,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                               backing: .buffered, defer: false)
         window.contentViewController = hosting
         window.setContentSize(Self.panelSize)
-        window.title = "neXal-Connector"
+        window.title = "neXal@home"
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.collectionBehavior.insert(.fullScreenNone)
@@ -258,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let menu = NSMenu()
             for (title, action) in [("Open Connector", #selector(openConnector)),
                                     ("Settings…", #selector(showSettings)),
-                                    ("About neXal Systems Connector", #selector(showAbout))] {
+                                    ("About neXal@home", #selector(showAbout))] {
                 let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
                 entry.target = self
             }
@@ -294,7 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 .environmentObject(preferences).environmentObject(model))
             let window = NSWindow(contentViewController: controller)
             window.styleMask = [.titled, .closable]
-            window.title = "neXal Systems Connector Settings"
+            window.title = "neXal@home Settings"
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window
@@ -307,7 +307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         popover.performClose(nil)
         dismissHint()
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: "neXal Systems Connector",
+            .applicationName: "neXal@home",
             .credits: NSAttributedString(string: "Connect this Mac to your neXal network.")
         ])
         NSApp.activate()
@@ -385,11 +385,11 @@ private struct MenuBarHintView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             menuBarPicture
-            Text("neXal-Connector is still running")
+            Text("neXal@home is still running")
                 .font(.headline)
             Text(iconHidden
-                 ? "Its icon is hidden right now. Turn on neXal-Connector in System Settings › Menu Bar, or open the app again from Applications."
-                 : "Click this icon in the menu bar at any time to see your network and connected computers.")
+                 ? "Its icon is hidden right now. Turn on neXal@home in System Settings › Menu Bar, or open the app again from Applications."
+                 : "Click this icon in the menu bar at any time to see your network and connected Macs.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

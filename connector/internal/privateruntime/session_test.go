@@ -22,7 +22,7 @@ func envelope(t *testing.T, files []File) Envelope {
 	if e != nil {
 		t.Fatal(e)
 	}
-	raw, _ := json.Marshal(Manifest{1, "release_1", "runtime", files})
+	raw, _ := json.Marshal(Manifest{SchemaVersion: 1, ReleaseID: "release_1", Entrypoint: "runtime", Files: files})
 	return Envelope{base64.StdEncoding.EncodeToString(raw), base64.StdEncoding.EncodeToString(ed25519.Sign(key, raw)), base64.StdEncoding.EncodeToString(public)}
 }
 func file(data []byte) File {
@@ -165,5 +165,101 @@ func TestExpiredOrOverlongLeaseRejected(t *testing.T) {
 		if _, err := leaseDuration(Lease{1, now, now.Add(duration)}); err == nil {
 			t.Fatal("invalid lease accepted")
 		}
+	}
+}
+
+func TestSignedNetworkScopeCompatibility(t *testing.T) {
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"", "network", "global"} {
+		raw, _ := json.Marshal(Manifest{AssignmentScope: scope, SchemaVersion: 1, ReleaseID: "release", Entrypoint: "runtime", Files: []File{file([]byte("fixture"))}})
+		e := Envelope{base64.StdEncoding.EncodeToString(raw), base64.StdEncoding.EncodeToString(ed25519.Sign(key, raw)), base64.StdEncoding.EncodeToString(public)}
+		_, err := Verify(e)
+		if (err != nil) != (scope == "global") {
+			t.Fatalf("unexpected scope acceptance: %s", scope)
+		}
+	}
+}
+
+func networkEnvelope(t *testing.T) Envelope {
+	t.Helper()
+	public, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(Manifest{AssignmentScope: "network", SchemaVersion: 1, ReleaseID: "release_1", Entrypoint: "runtime", Files: []File{file([]byte("not executed by tests"))}})
+	return Envelope{base64.StdEncoding.EncodeToString(raw), base64.StdEncoding.EncodeToString(ed25519.Sign(key, raw)), base64.StdEncoding.EncodeToString(public)}
+}
+
+func TestNetworkRuntimeRequiresLocalAdmission(t *testing.T) {
+	for _, mode := range []string{"missing", "denied", "invalid", "cancelled"} {
+		t.Run(mode, func(t *testing.T) {
+			f, m := fixture(t)
+			f.session.Bundle = networkEnvelope(t)
+			released := false
+			if mode != "missing" {
+				m.AdmitNetwork = func(ctx context.Context, _ Manifest) (context.Context, func(), error) {
+					release := func() { released = true }
+					if mode == "denied" {
+						return nil, release, ErrClosed
+					}
+					if mode == "invalid" {
+						return nil, release, nil
+					}
+					stopped, cancel := context.WithCancel(ctx)
+					cancel()
+					return stopped, release, nil
+				}
+			}
+			m.Run = func(context.Context, string, string) error { t.Fatal("unadmitted runtime executed"); return nil }
+			if m.once(context.Background()) == nil || f.downloads != 0 || f.closed != 1 {
+				t.Fatal("unadmitted runtime was not rejected before download")
+			}
+			if mode != "missing" && !released {
+				t.Fatal("failed admission leaked reservation")
+			}
+		})
+	}
+}
+
+func TestNetworkReservationRevocationStopsRuntimeBeforeRelease(t *testing.T) {
+	f, m := fixture(t)
+	f.session.Bundle = networkEnvelope(t)
+	admission, revoke := context.WithCancel(context.Background())
+	defer revoke()
+	started := make(chan struct{})
+	stopped := false
+	released := false
+	m.AdmitNetwork = func(context.Context, Manifest) (context.Context, func(), error) {
+		return admission, func() {
+			if !stopped {
+				t.Error("reservation released before child stopped")
+			}
+			entries, _ := os.ReadDir(m.Root)
+			if len(entries) != 0 {
+				t.Error("reservation released before payload cleanup")
+			}
+			released = true
+		}, nil
+	}
+	m.Run = func(ctx context.Context, _, _ string) error {
+		close(started)
+		<-ctx.Done()
+		stopped = true
+		return ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() { done <- m.once(context.Background()) }()
+	<-started
+	revoke()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reservation revocation did not stop runtime")
+	}
+	if !released || f.closed != 1 {
+		t.Fatal("reservation or session leaked")
 	}
 }

@@ -47,10 +47,11 @@ type File struct {
 	ObjectKey string `json:"objectKey"`
 }
 type Manifest struct {
-	SchemaVersion int    `json:"schemaVersion"`
-	ReleaseID     string `json:"releaseId"`
-	Entrypoint    string `json:"entrypoint"`
-	Files         []File `json:"files"`
+	AssignmentScope string `json:"assignmentScope,omitempty"`
+	SchemaVersion   int    `json:"schemaVersion"`
+	ReleaseID       string `json:"releaseId"`
+	Entrypoint      string `json:"entrypoint"`
+	Files           []File `json:"files"`
 }
 type API interface {
 	OpenRuntime(context.Context, string) (Session, error)
@@ -75,7 +76,7 @@ func Verify(e Envelope) (Manifest, error) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.SchemaVersion != 1 || !safeID.MatchString(out.ReleaseID) || out.Entrypoint != "runtime" || len(out.Files) < 1 || len(out.Files) > 128 {
+	if decoder.Decode(&out) != nil || (out.AssignmentScope != "" && out.AssignmentScope != "network") || decoder.Decode(new(any)) != io.EOF || out.SchemaVersion != 1 || !safeID.MatchString(out.ReleaseID) || out.Entrypoint != "runtime" || len(out.Files) < 1 || len(out.Files) > 128 {
 		return out, ErrClosed
 	}
 	seen := map[string]bool{}
@@ -121,6 +122,11 @@ type Manager struct {
 	HostID    string
 	Root      string
 	Connected func() bool
+	// AdmitNetwork must acquire an exclusive local resource reservation and return
+	// a context cancelled when that reservation is revoked. Release is called
+	// after the child and session monitors stop. Nil deliberately blocks network
+	// defaults until the host scheduler integration is available.
+	AdmitNetwork func(context.Context, Manifest) (context.Context, func(), error)
 	// Run may be replaced by a test harness. Production uses the fixed executable.
 	Run  func(context.Context, string, string) error
 	Poll time.Duration
@@ -204,6 +210,22 @@ func (m Manager) once(parent context.Context) error {
 	manifest, err := Verify(session.Bundle)
 	if err != nil {
 		return err
+	}
+	if manifest.AssignmentScope == "network" {
+		if m.AdmitNetwork == nil {
+			return ErrClosed
+		}
+		admitted, release, admissionErr := m.AdmitNetwork(ctx, manifest)
+		if release != nil {
+			defer release()
+		}
+		if admissionErr != nil || admitted == nil || release == nil || admitted.Err() != nil {
+			return ErrClosed
+		}
+		// Merge cancellation rather than trusting a callback to preserve the
+		// parent context. Revocation stops both download and execution.
+		stopAdmission := context.AfterFunc(admitted, cancel)
+		defer stopAdmission()
 	}
 	directory, err := os.MkdirTemp(m.Root, "session-")
 	if err != nil {

@@ -78,15 +78,15 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|security-import|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|security-import|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "exit-route":
 		return exitRouteCommand(ctx, args[1:])
 	case "guest":
 		return guestCommand(ctx, args[1:])
-	case "security":
-		return securityCommand(ctx, args[1:])
+	case "honeypot":
+		return honeypotCommand(ctx, args[1:])
 	case "canary":
 		return canaryCommand(ctx, args[1:])
 	case "security-import":
@@ -523,7 +523,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	// presence stream below (one frame, only on material change).
 	hostInfo := sysinfo.NewCollector()
 	canary := cybersecurity.CanaryForConfig(*path)
-	scanner := cybersecurity.ScannerForConfig(*path)
+	honeypot := cybersecurity.HoneypotForConfig(*path)
 	// Live presence (GET /api/v2/hosts/events) and Wake-on-LAN. The stream uses
 	// the same client, so the same origin/TLS/no-proxy policy and host token as
 	// every REST call. A coordinator without these routes answers 404 and both
@@ -534,28 +534,18 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		Info: func(ctx context.Context) sysinfo.Info {
 			info := hostInfo.Collect(ctx)
 			info.ExitNodeStatus = mesh.ReadExitNodeStatus(ctx)
-			if state, err := scanner.Status(); err == nil {
-				info.ThreatScannerStatus = state.Status
-				info.LastThreatScanAt = state.LastScanAt
-				info.ThreatRulesVersion = state.RulesVersion
-				info.ThreatScanLastError = state.LastError
-				info.ThreatScanCoverage = state.Coverage
-				if state.LastScanAt != "" {
-					scanned, skipped, findings := state.FilesScanned, state.FilesSkipped, state.Findings
-					info.ThreatScanFilesScanned = &scanned
-					info.ThreatScanFilesSkipped = &skipped
-					info.ThreatScanFindings = &findings
-				}
-			} else {
-				info.ThreatScannerStatus = "error"
-				info.ThreatScanLastError = "state_error"
-			}
-
 			if state, err := canary.Status(); err == nil {
 				info.CanaryStatus = state.Status
 				info.CanaryLastCheckedAt = state.LastCheckedAt
 			} else {
 				info.CanaryStatus = "error"
+			}
+			// Status and last-trigger time only; source addresses never leave this Mac.
+			if state, err := honeypot.Status(); err == nil {
+				info.HoneypotStatus = state.Status
+				info.HoneypotLastTriggeredAt = state.LastTriggeredAt
+			} else {
+				info.HoneypotStatus = "error"
 			}
 			if ip := meshProvider.Snapshot().SelfTunnelAddress; client.ValidTunnelAddress(ip) {
 				info.TunnelAddress = ip
@@ -581,7 +571,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	defer cancel()
 	results := make(chan error, 3)
 	var wg sync.WaitGroup
-	wg.Add(7)
+	wg.Add(6)
 	learningConnected := func() bool {
 		status := a.Snapshot()
 		observed, err := time.Parse(time.RFC3339Nano, status.Mesh.UpdatedAt)
@@ -592,12 +582,8 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	go func() {
 		defer wg.Done()
 		runLearningWithInterval(ctx, learningConnected, func(parent context.Context) error {
-			return api.ValidationTick(parent, c.HostID, canary, scanner)
+			return api.ValidationTick(parent, c.HostID, canary)
 		}, 5*time.Minute, 5*time.Second)
-	}()
-	go func() {
-		defer wg.Done()
-		runLearning(ctx, learningConnected, func(ctx context.Context) error { return api.LearningTick(ctx, c.HostID) })
 	}()
 	go func() {
 		defer wg.Done()
@@ -608,7 +594,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	}()
 	go func() {
 		defer wg.Done()
-		runScanner(ctx, scanner, func(ctx context.Context, event cybersecurity.Event) error {
+		honeypot.Run(ctx, func(ctx context.Context, event cybersecurity.Event) error {
 			return api.ReportSecurityEvent(ctx, c.HostID, event)
 		})
 	}()
@@ -631,7 +617,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 			}
 			operationCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			defer cancel()
-			if err := canary.ExecuteOperation(operationCtx, *operation, scanner, func(ctx context.Context, e cybersecurity.Event) error {
+			if err := canary.ExecuteOperation(operationCtx, *operation, func(ctx context.Context, e cybersecurity.Event) error {
 				return api.ReportSecurityEvent(ctx, c.HostID, e)
 			}); err != nil {
 				return err

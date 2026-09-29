@@ -24,11 +24,11 @@ struct ResourceSharingPresentation: Equatable {
 
     /// Existing honesty strings, unchanged. They are constants here so the view
     /// cannot quietly reword them and the tests can assert on them.
-    static let telemetryUnknown = "Telemetry unknown — Go admission fails closed"
-    static let synthetic = "Synthetic development telemetry"
+    static let telemetryUnknown = "Activity on this Mac is unknown, so no jobs run"
+    static let synthetic = "Test activity data"
     static let optInCaveat = """
-        Opt-in permits the Go connector to apply its resource and idle policies. \
-        It does not promise that a workload is available or enabled.
+        Turning this on lets neXal share resources under your limits and idle rules. \
+        It does not mean work is available right now.
         """
 
     /// The existing owner-activity line, verbatim, moved out of the view so the
@@ -39,10 +39,10 @@ struct ResourceSharingPresentation: Equatable {
         guard let telemetry = status?.telemetry else { return nil }
         if telemetry.synthetic { return synthetic }
         if !telemetry.known { return telemetryUnknown }
-        guard telemetry.ownerActive else { return "Owner idle" }
+        guard telemetry.ownerActive else { return "Mac is idle" }
         return status?.ownerActivityOverride == true
-            ? "Owner active; private work explicitly permitted"
-            : "Owner active; owner priority applies"
+            ? "You are using this Mac; private work is allowed"
+            : "You are using this Mac; your work comes first"
     }
 
     let state: State
@@ -111,16 +111,16 @@ struct ResourceSharingPresentation: Equatable {
     private var reason: String {
         switch state {
         case .sharing:
-            return "The connector reports no blocker. Execution still requires its admission and release gates."
+            return "Nothing is blocking sharing. neXal still checks each job before it runs."
         case .waiting:
             // Same wording the panel used before the redesign.
             return "Waiting: \(blocker ?? "")"
         case .pausedByOwner:
-            return "Paused by the owner; the Go connector cancels active work."
+            return "Paused by you. Any running work is stopped."
         case .telemetryUnknown:
             return Self.telemetryUnknown
         case .notConnected:
-            return "No connector status has been read. Nothing is shared and nothing is assumed."
+            return "neXal is not connected yet. Nothing is shared."
         }
     }
 }

@@ -266,7 +266,7 @@ final class AppModel: ObservableObject {
             try await Task.detached(priority: .userInitiated) {
                 try NetworkService.repairHostSettings(firewall: firewall, lazy: lazy, wake: wake)
             }.value
-            message = "Network settings updated: incoming peer connections allowed, lazy connections off, Wake for network access on."
+            message = "Network settings updated: connections from your other Macs are allowed, connections stay on, and Wake for network access is on."
         } catch {
             pairingProblem = error.localizedDescription
         }
@@ -284,7 +284,7 @@ final class AppModel: ObservableObject {
 
     func chooseConnector() {
         let panel = NSOpenPanel()
-        panel.title = "Choose your installed neXal Go connector"
+        panel.title = "Choose the neXal connector"
         panel.message = "Select nexal in this app’s Contents/Helpers or ~/Library/Application Support/Nexal/bin. Review its code signature first."
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -306,17 +306,12 @@ final class AppModel: ObservableObject {
     }
 
 
-    func scannerFindings() async throws -> LocalScannerFindingsReply {
-        let reply = try JSONDecoder().decode(LocalScannerFindingsReply.self, from: try await invoke(.securityFindings))
-        return reply
-    }
-
-    func scanner(_ command: CLICommand) async throws -> ScannerReply {
-        try JSONDecoder().decode(ScannerReply.self, from: try await invoke(command))
-    }
-
     func canary(action: String) async throws -> CanaryReply {
         try JSONDecoder().decode(CanaryReply.self, from: try await invoke(.canary(action: action)))
+    }
+
+    func honeypot(action: String) async throws -> HoneypotReply {
+        try JSONDecoder().decode(HoneypotReply.self, from: try await invoke(.honeypot(action: action)))
     }
 
     @Published var guestInvitationCode = ""
@@ -376,7 +371,7 @@ final class AppModel: ObservableObject {
 
     func initializeAndEnroll() async {
         guard !busy, consent, !showsEnrollmentConfirmation else { return }
-        activity = "Contacting the coordinator\u{2026}"
+        activity = "Contacting neXal\u{2026}"
         busy = true
         defer { busy = false; activity = nil; enrollmentCode = "" }
         do {
@@ -393,10 +388,10 @@ final class AppModel: ObservableObject {
                                                memoryMiB: memoryMiB, reserveMiB: reserveMiB))
                 }
             }
-            activity = "Authenticating with the coordinator\u{2026}"
+            activity = "Signing in to neXal\u{2026}"
             _ = try await invoke(.enroll, input: Data((code + "\n").utf8))
             enrollmentPresentation.recordSuccess(for: selectedConfig)
-            message = "Enrolled with contribution paused. Start the connector, then explicitly enable private resources."
+            message = "This Mac joined with resource sharing paused. Start neXal, then turn on resource sharing when you are ready."
         } catch { message = error.localizedDescription }
     }
 
@@ -494,14 +489,14 @@ final class AppModel: ObservableObject {
         busy = true
         refreshingPeerID = peer.id
         peerRefreshErrors[peer.id] = nil
-        activity = "Refreshing peer status…"
+        activity = "Refreshing Mac status…"
         defer { busy = false; refreshingPeerID = nil; activity = nil }
         do {
             try await updateStatus()
             await updateTunnelEvidence()
             await updatePeers()
             guard status?.mesh?.peers.contains(where: { $0.id == peer.id }) == true else {
-                peerRefreshErrors[peer.id] = "This peer is no longer reported by the networking service."
+                peerRefreshErrors[peer.id] = "This Mac is no longer on your neXal network."
                 return
             }
             peerRefreshedAt[peer.id] = Date()
@@ -674,7 +669,7 @@ final class AppModel: ObservableObject {
             }
             var text = "Wake packet sent by \(senders) Mac\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
             if !reply.targetWakeForNetwork {
-                text += " Wake for network access is off on that Mac, so it may not wake \u{2014} open neXal-Connector on it once while it\u{2019}s awake to fix that."
+                text += " Wake for network access is off on that Mac, so it may not wake \u{2014} open neXal@home on it once while it\u{2019}s awake to fix that."
             }
             wakeStatus[peer.id] = text
         } catch {
@@ -722,14 +717,14 @@ final class AppModel: ObservableObject {
         guard !exitRouteBusy else { return }
         exitRouteBusy = true
         defer { exitRouteBusy = false }
-        exitRouteStatus[peer.id] = enabled ? "Preparing this computer as your exit node…" : "Turning off exit routing…"
+        exitRouteStatus[peer.id] = enabled ? "Preparing this exit node…" : "Turning off exit routing…"
         do {
             let previous = exitRoute
             var route = storageGateway ? NetworkService.storageExitRoute : peerExitRoutes[peer.id]
             if enabled, !storageGateway {
-                guard let tunnel = peer.tunnelAddress else { throw NetworkService.RoutingFailure.failed("This peer has no secure network address.") }
+                guard let tunnel = peer.tunnelAddress else { throw NetworkService.RoutingFailure.failed("This Mac does not have a neXal network address yet.") }
                 let reply = try JSONDecoder().decode(ExitRouteReply.self, from: try await invoke(.exitRoute(tunnelAddress: tunnel, enabled: true)))
-                guard reply.configured, NetworkService.validExitRouteID(reply.routeId) else { throw NetworkService.RoutingFailure.failed("The coordinator did not configure this exit route.") }
+                guard reply.configured, NetworkService.validExitRouteID(reply.routeId) else { throw NetworkService.RoutingFailure.failed("neXal could not set up this exit route. Try again shortly.") }
                 route = reply.routeId
                 peerExitRoutes[peer.id] = reply.routeId
                 if let targetID = reply.targetDeviceId { peerExitDeviceIDs[peer.id] = targetID }
@@ -738,7 +733,7 @@ final class AppModel: ObservableObject {
                 pendingExitTeardown.removeValue(forKey: peer.id)
                 UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
             }
-            guard let route else { throw NetworkService.RoutingFailure.failed("This peer has no configured exit route.") }
+            guard let route else { throw NetworkService.RoutingFailure.failed("No exit route is set up for this Mac.") }
             if enabled {
                 exitRouteStatus[peer.id] = "Waiting for the network service to receive this route…"
                 var offered = false
@@ -781,7 +776,7 @@ final class AppModel: ObservableObject {
                 availableExitRoutes.remove(route)
             }
             exitRouteStatus[peer.id] = enabled
-                ? "The network service selected this exit node. Internet access still depends on that computer being online."
+                ? "Your internet traffic now goes through this exit node. Internet access depends on it staying online."
                 : "Exit routing is off. Normal routing and access rules are restored."
         } catch {
             if let state = await Task.detached(operation: { NetworkService.exitRoutes() }).value {
@@ -872,7 +867,7 @@ final class AppModel: ObservableObject {
             let credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
             TimeMachineCredentialWindow.shared.show(credential)
         } catch {
-            message = "Could not retrieve Time Machine credentials. Check that backup is enabled and the coordinator is reachable."
+            message = "Could not get Time Machine credentials. Check that backup is turned on and this Mac is online."
             TimeMachineCredentialWindow.shared.showError()
         }
     }
@@ -890,7 +885,7 @@ final class AppModel: ObservableObject {
             }
             let report = try JSONDecoder().decode(SetupResult.self, from: result).timeMachine
             guard ["connected", "destination_added"].contains(report.state) else {
-                throw ShellError.commandFailed(1, reason: report.detail ?? "Time Machine setup did not add a destination (status: \(report.state)).")
+                throw ShellError.commandFailed(1, reason: report.detail ?? "Time Machine setup did not add a backup destination.")
             }
 			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, where you can review the backup schedule."
 			TimeMachineSetupWindow.shared.finish(error: nil)
@@ -922,7 +917,7 @@ final class AppModel: ObservableObject {
                 message = "The connector has not confirmed an active acceptance window. Refresh and check its status; no permission is assumed."
                 return
             }
-            message = "The connector confirmed private zero-cost CPU permission until the displayed time. Memory, lease and connection checks still apply. Pause cancels this permission and active work."
+            message = "This Mac accepts private jobs at no cost until the time shown. Memory and connection checks still apply. Pause stops this and any running work."
         } catch {
             status = nil
             lastUpdated = nil
@@ -939,8 +934,8 @@ final class AppModel: ObservableObject {
             _ = try await invoke(enabled ? .resume : .pause)
             try await updateStatus()
             message = enabled
-                ? "Private resource policy enabled. Execution still requires Go admission and release gates."
-                : "Paused by the owner; the Go connector cancels active work."
+                ? "Resource sharing is on. neXal still checks each job before it runs."
+                : "Resource sharing is paused. Any running work is stopped."
         } catch {
             status = nil // Never claim a pause/resume succeeded when confirmation failed.
             message = error.localizedDescription
@@ -1004,7 +999,7 @@ final class AppModel: ObservableObject {
             }
             pairing = presentation
             watchPairing()
-            message = "Pairing code ready. In neXal@home, choose \u{201C}Pair a computer\u{201D} and scan it; it expires shortly and nothing is shared by scanning alone."
+            message = "Pairing code ready. In neXal@home, choose \u{201C}Pair a Mac\u{201D} and scan it. The code expires shortly, and scanning alone shares nothing."
         } catch {
             pairing = nil
             // The connector's text is shown verbatim because it names the actual
@@ -1102,7 +1097,7 @@ final class AppModel: ObservableObject {
             let updated = current.updated(with: report.pairingStatus)
             pairing = updated
             if updated.status == .scanned {
-                message = "Your phone claimed this pairing. Approve what it may use on the phone; nothing is shared by pairing alone."
+                message = "Your iPhone scanned the code. Finish on your iPhone; nothing is shared until you approve it there."
             }
             return updated.status.isLive
         } catch {

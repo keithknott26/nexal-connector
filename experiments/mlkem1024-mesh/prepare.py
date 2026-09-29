@@ -35,6 +35,7 @@ for name, source in [('netbird', opts.netbird_source), ('rosenpass', opts.rosenp
         f.chmod(f.stat().st_mode | 0o200)
     subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / f'{name}-mlkem1024.patch')], cwd=destination, check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-health-budget.patch')], cwd=opts.output / 'netbird', check=True)
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpass-retry.patch')], cwd=opts.output / 'rosenpass', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'

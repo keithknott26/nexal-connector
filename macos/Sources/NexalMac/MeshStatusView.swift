@@ -6,17 +6,17 @@ struct MeshStatusView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.tightSpacing) {
-            Label(mesh.lifecycle.capitalized, systemImage: mesh.pq == "protected" ? "lock.shield.fill" : "network")
+            Label(mesh.lifecycle == "connected" ? "Connected" : "Not connected", systemImage: mesh.pq == "protected" ? "lock.shield.fill" : "network")
                 .font(.subheadline.weight(.semibold))
             if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
-            Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum protection: \(mesh.pq.replacingOccurrences(of: "_", with: " "))")
+            Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum-safe protection not confirmed")
                 .font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
-            LabeledContent("Post-quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
+            LabeledContent("Quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
                 .font(.caption)
             Divider()
-            Label("Local threat detection not reporting", systemImage: "shield.lefthalf.filled.badge.checkmark")
+            Label("Host watermarks and honeypot", systemImage: "shield.lefthalf.filled.badge.checkmark")
                 .font(.caption.weight(.semibold))
-            Text("The encrypted mesh can be active without local traffic inspection. neXal will show detection, sensor routing, alerts, and containment only after the connector reports fresh evidence.")
+            Text("Turn these on in Settings › Security. neXal does not scan files for malware. If you see an alert, check the Mac with your own security software.")
                 .font(.caption2).foregroundStyle(.secondary)
             discoveryView
             ForEach(mesh.peers) { peer in
@@ -38,7 +38,7 @@ struct MeshStatusView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(peer.name.isEmpty ? peer.id : peer.name).font(.caption.weight(.semibold))
             Text(peer.pathLabel).font(.caption)
-            LabeledContent("Post-quantum type", value: MeshQuantumPresentation.label(peers: [peer])).font(.caption)
+            LabeledContent("Quantum type", value: MeshQuantumPresentation.label(peers: [peer])).font(.caption)
             if let region = peer.relayRegion, peer.path == "relay" { Text("neXal Relay — \(region)").font(.caption).foregroundStyle(.secondary) }
             Text("↑ \(peer.traffic.sentBytes) B  ↓ \(peer.traffic.receivedBytes) B").font(.caption2).foregroundStyle(.secondary)
             fileSharingView(peer.fileSharing)
@@ -52,7 +52,7 @@ struct MeshStatusView: View {
         Text(value.detail).font(.caption2).foregroundStyle(.secondary)
         if let address = value.finderAddress {
             Text(address).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
-            HStack { Button("Copy Finder Address") { copy(address) }; Button("Open Shared Files") { open(address, scheme: "smb") } }
+            HStack { Button("Copy Finder address") { copy(address) }; Button("Open shared files") { open(address, scheme: "smb") } }
         } else if value.state == .needsMacSharing { settingsButton("Open File Sharing Settings") }
     }
 
@@ -61,7 +61,7 @@ struct MeshStatusView: View {
         Text("Screen Sharing: \(label(value.state))").font(.caption.weight(.medium))
         Text(value.detail).font(.caption2).foregroundStyle(.secondary)
         if let address = value.address {
-            HStack { Button("Copy Screen Sharing Address") { copy(address) }; Button("Open Screen Sharing") { open(address, scheme: "vnc") } }
+            HStack { Button("Copy Screen Sharing address") { copy(address) }; Button("Open Screen Sharing") { open(address, scheme: "vnc") } }
         } else if value.state == .needsMacSharing { settingsButton("Open Sharing Settings") }
     }
 

@@ -68,3 +68,20 @@ func TestTunnelPathVocabularyIsProviderNeutral(t *testing.T) {
 		}
 	}
 }
+
+func TestMixedPeerEvidencePreservesHealthyLinkWithoutGrantingAggregateProtection(t *testing.T) {
+	now := time.Now().UTC()
+	good := mesh.Peer{ID: "ovh", Name: "Storage", Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQProtected, QuantumProfile: "nexal-mlkem1024-tcp-v2", PQVerifiedAt: now.Format(time.RFC3339Nano), PQExpiresAt: now.Add(180 * time.Second).Format(time.RFC3339Nano)}
+	bad := mesh.Peer{ID: "mini", Name: "Mini", Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQUnsupported}
+	report := TunnelReportFromRuntime(mesh.Status{Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQProtected, Peers: []mesh.Peer{good, bad}}, now)
+	if report.SecurityState == "quantum_protected" || report.NegotiatedSecurity != nil {
+		t.Fatal("mixed links granted aggregate protection")
+	}
+	if len(report.PeerSecurity) != 2 || report.PeerSecurity[0].NegotiatedSecurity == nil || report.PeerSecurity[1].NegotiatedSecurity != nil {
+		t.Fatalf("lost per-link evidence: %+v", report.PeerSecurity)
+	}
+	report = TunnelReportFromRuntime(mesh.Status{Peers: []mesh.Peer{good}}, now.Add(121*time.Second))
+	if report.PeerSecurity[0].NegotiatedSecurity != nil {
+		t.Fatal("stale link stayed protected")
+	}
+}

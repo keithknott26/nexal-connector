@@ -27,10 +27,10 @@ struct ExitNodeCheckbox: View {
             if let status = model.exitRouteStatus[peer.id] {
                 Text(status).font(.caption2).foregroundStyle(.secondary)
             } else if selected {
-                Text("This exit route is selected in the network service.")
+                Text("Your internet traffic goes through this exit node.")
                     .font(.caption2).foregroundStyle(.secondary)
             } else {
-                Text("Routes internet access through this computer while selected. Uncheck to restore normal routing.")
+                Text("While checked, your internet traffic goes through this exit node. Uncheck to go back to normal.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }

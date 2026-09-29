@@ -48,7 +48,7 @@ struct LinkingState: Equatable {
     /// moment, and a progress bar would imply a duration this does not have.
     var statusLine: String {
         isExpired ? "Code expired — generate a new one"
-                  : "Scan with the neXal app on your iPhone — \(secondsRemaining)s left"
+                  : "Scan with neXal@home on your iPhone — \(secondsRemaining)s left"
     }
 }
 
@@ -84,28 +84,27 @@ enum TunnelIndicator: Equatable {
 
     var title: String {
         switch self {
-        case .notConfigured:             return "Quantum-safe tunnel not configured"
-        case .connecting:                return "Establishing quantum-safe tunnel…"
-        case .quantumSafe:               return "Quantum-safe tunnel established"
-        case .connectedNotConfirmed:     return "Tunnel up — post-quantum NOT confirmed"
-        case .quarantined:               return "Tunnel quarantined — work stopped"
+        case .notConfigured:             return "Secure connection not set up"
+        case .connecting:                return "Establishing quantum-safe connection…"
+        case .quantumSafe:               return "Quantum-safe connection active"
+        case .connectedNotConfirmed:     return "Connected — quantum-safe not confirmed"
+        case .quarantined:               return "Connection stopped for safety"
         }
     }
 
     var detail: String {
         switch self {
         case .notConfigured:
-            return "This Mac has no tunnel configured, so it is reachable only on the local network."
+            return "This Mac is not set up for secure remote access, so it can be reached only on its local network."
         case .connecting:
-            return "Waiting for cloudflared to report a connection."
+            return "Waiting for the secure connection to come up."
         case .quantumSafe(let group):
-            return "QUIC with \(group) hybrid key agreement."
-        case .connectedNotConfirmed(let proto):
-            return "Connected over \(proto), but no hybrid key-agreement group has been observed. "
-                 + "A QUIC connection alone is not evidence of post-quantum protection."
+            return "Protected with hybrid post-quantum key agreement (\(group))."
+        case .connectedNotConfirmed:
+            return "Connected and encrypted, but post-quantum key agreement has not been confirmed."
         case .quarantined:
-            return "cloudflared reported an unsafe or ambiguous state — a protocol fallback, "
-                 + "post-quantum disabled, or output that could not be trusted. Restart to clear it."
+            return "The secure connection reported an unexpected state, so neXal stopped work to stay safe. "
+                 + "Quit and reopen neXal@home to try again."
         }
     }
 
@@ -177,12 +176,12 @@ struct NetworkState: Equatable {
     /// explained rather than just empty.
     var unreachableNote: String? {
         guard !peers.isEmpty, connectablePeers.isEmpty else { return nil }
-        return "No Mac on this network right now. Remote Macs need a private network route "
-             + "before ssh or VNC can reach them."
+        return "No Mac on this network right now. Other Macs need a private network route "
+             + "before SSH or Screen Sharing can reach them."
     }
 
     var emptyNote: String? {
-        peers.isEmpty ? "No other Macs linked yet. Link another Mac with the neXal app." : nil
+        peers.isEmpty ? "No other Macs linked yet. Pair another Mac with neXal@home on your iPhone." : nil
     }
 }
 
@@ -217,13 +216,13 @@ enum LeavePhase: Equatable {
     var detail: String {
         switch self {
         case .confirming:
-            return "This revokes this Mac, disconnects its tunnel, and removes its local network credentials. You can pair it again afterwards."
+            return "This removes this Mac from your neXal network, disconnects it, and deletes its network sign-in from this Mac. You can pair it again afterwards."
         case .preparing:
             return "Finishing the current status check and stopping pairing activity."
         case .leaving:
-            return "Revoking this Mac with the coordinator and disconnecting its tunnel."
+            return "Removing this Mac from neXal and disconnecting it."
         case .left:
-            return "This Mac is no longer on the neXal network. To pair it again, choose \u{201C}Pair a computer\u{201D} in the neXal@home iPhone app and scan the code below, or enter the manual pairing code."
+            return "This Mac is no longer on the neXal network. To pair it again, choose \u{201C}Pair a Mac\u{201D} in neXal@home on your iPhone and scan the code below, or enter the manual pairing code."
         case .failed(let reason):
             return reason
         }

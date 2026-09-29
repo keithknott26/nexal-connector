@@ -160,7 +160,7 @@ final class PairingPresentationTests: XCTestCase {
         XCTAssertEqual(future, .unknown("linked"))
         XCTAssertFalse(future.isLive)
         XCTAssertTrue(future.explanation.contains("linked"))
-        XCTAssertTrue(future.explanation.contains("does not recognise"))
+        XCTAssertTrue(future.explanation.contains("does not recognize"))
     }
 
     /// A role this build does not know must still be reported as what it was, not
@@ -177,7 +177,7 @@ final class PairingPresentationTests: XCTestCase {
     /// sentence, in the order the owner has to fix them.
     func testUnavailableReasonsNameTheActualBlocker() throws {
         XCTAssertTrue(try XCTUnwrap(PairingPresentation.unavailableReason(
-            hasExecutable: false, configurationExists: false, status: nil)).contains("Choose the Go connector"))
+            hasExecutable: false, configurationExists: false, status: nil)).contains("Choose the neXal connector"))
         // No configuration is not a blocker: startPairing runs `init` first.
         XCTAssertNil(PairingPresentation.unavailableReason(
             hasExecutable: true, configurationExists: false, status: nil))
@@ -196,7 +196,7 @@ final class PairingPresentationTests: XCTestCase {
     func testIndicatorCarriesSymbolAndTextNotOnlyColour() throws {
         let presentation = try XCTUnwrap(PairingPresentation(mint: try PairingMint.decode(mintJSON())))
         let indicator = presentation.indicator
-        XCTAssertEqual(indicator.heading, "Phone pairing")
+        XCTAssertEqual(indicator.heading, "iPhone pairing")
         XCTAssertEqual(indicator.systemImage, "qrcode.viewfinder")
         XCTAssertFalse(indicator.reason.isEmpty)
         XCTAssertTrue(try XCTUnwrap(indicator.detail).contains(presentation.pairingId))

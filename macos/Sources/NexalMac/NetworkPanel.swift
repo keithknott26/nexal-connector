@@ -51,14 +51,14 @@ struct NetworkPanel: View {
         HStack(spacing: 10) {
             Image(systemName: model.menuBarSymbol).font(.title2).foregroundStyle(.tint).frame(width: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text("neXal-Connector").font(.headline)
+                Text("neXal@home").font(.headline)
                 Text(model.hostNameDisplay).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if model.busy { ProgressView().controlSize(.small) }
             Menu {
                 Button("Settings…", action: showSettings)
-                Button("About neXal Systems Connector", action: showAbout)
+                Button("About neXal@home", action: showAbout)
             } label: {
                 Image(systemName: "gearshape")
             }
@@ -73,7 +73,7 @@ struct NetworkPanel: View {
             step(number: "1", title: "Sign in on your iPhone",
                  detail: "Open neXal@home on your iPhone (available in the Apple App Store) and sign in with Apple.", symbol: "apple.logo")
             step(number: "2", title: "Pair this Mac",
-                 detail: "Show a one-time code here, then choose \u{201C}Pair a computer\u{201D} in neXal@home and scan it.", symbol: "qrcode")
+                 detail: "Show a one-time code here, then choose \u{201C}Pair a Mac\u{201D} in neXal@home and scan it.", symbol: "qrcode")
             GuestInvitationEntry()
             CoordinatorChoice()
             Button { Task { await model.startPairing() } } label: {
@@ -100,14 +100,14 @@ struct NetworkPanel: View {
     private func pairing(_ linking: LinkingState) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Scan to connect this Mac").font(.title3.weight(.semibold))
-            Text("In the neXal@home iOS application (available in the Apple App Store), choose \u{201C}Pair a computer\u{201D} and scan this QR code.")
+            Text("In neXal@home on your iPhone, choose \u{201C}Pair a Mac\u{201D} and scan this code.")
                 .font(.caption).foregroundStyle(.secondary)
             if let symbol = model.pairing?.symbol {
                 HStack { Spacer(minLength: 0); PairingCodeView(symbol: symbol, isLive: !linking.isExpired); Spacer(minLength: 0) }
             }
             if let code = model.pairing?.manualCode {
                 VStack(spacing: 5) {
-                    Text("PAIR MANUALLY").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    Text("Pair manually").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     Text(code).font(.system(.title, design: .monospaced).weight(.semibold))
                         .textSelection(.enabled).accessibilityLabel("Manual pairing code \(code)")
                     Text("If scanning does not work, tap Pair manually on your iPhone and enter this code.")
@@ -145,16 +145,16 @@ struct NetworkPanel: View {
                 meshSummary(mesh)
             } else {
                 status(network.tunnel)
-                LabeledContent("Post-quantum type", value: "Not reported")
-                Text("The networking service has not reported peer routes yet.")
+                LabeledContent("Quantum type", value: "Not reported")
+                Text("Connection details are not available yet.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
-            Text("Connected computers").font(.subheadline.weight(.semibold))
+            Text("Your Macs").font(.subheadline.weight(.semibold))
             if let peers = model.status?.mesh?.peers, !peers.isEmpty {
                 ForEach(peers) { peer in host(peer) }
             } else if network.peers.isEmpty {
-                Text("No other computers are connected yet.").font(.caption).foregroundStyle(.secondary)
+                Text("No other Macs are connected yet.").font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(network.peers) { peer in
                     HStack(alignment: .top, spacing: 8) {
@@ -240,15 +240,15 @@ struct NetworkPanel: View {
 
     private func meshSummary(_ mesh: ConnectorStatus.MeshStatus) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            LabeledContent("Tunnel") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(mesh.lifecycle.capitalized)") }
+            LabeledContent("Connection") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(lifecycleText(mesh.lifecycle))") }
             LabeledContent("Post-quantum protection") { pqText(mesh.pq) }
-            LabeledContent("Post-quantum type") { quantumType(mesh.peers) }
+            LabeledContent("Quantum type") { quantumType(mesh.peers) }
             LabeledContent("Network path", value: pathSummary(mesh.peers))
             if let step = mesh.authenticationStep, !step.isEmpty {
-                LabeledContent("Connection step", value: step)
+                LabeledContent("Current step", value: humanized(step))
             }
             if let updated = mesh.updatedAt, !updated.isEmpty {
-                Text("Evidence updated \(friendlyTime(updated))").font(.caption2).foregroundStyle(.secondary)
+                Text("Updated \(friendlyTime(updated))").font(.caption2).foregroundStyle(.secondary)
             }
         }
         .font(.caption)
@@ -267,9 +267,9 @@ struct NetworkPanel: View {
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
                 detailSection("Connection") {
-                    detailRow("Status") { Text("\(lifecycleEmoji(peer.lifecycle)) \(peer.lifecycle.capitalized)") }
+                    detailRow("Status") { Text("\(lifecycleEmoji(peer.lifecycle)) \(lifecycleText(peer.lifecycle))") }
                     detailRow("Path") { routeText(peer) }
-                    if let step = peer.authenticationStep, !step.isEmpty { detailRow("Authentication") { Text(step) } }
+                    if let step = peer.authenticationStep, !step.isEmpty { detailRow("Current step") { Text(humanized(step)) } }
                     if let latency = peer.latencyMs {
                         detailRow("Latency") { Text(latency.formatted(.number.precision(.fractionLength(0))) + " ms") }
                     }
@@ -280,8 +280,8 @@ struct NetworkPanel: View {
                     if let hostname = peer.hostname?.hostname { detailRow("neXal address") { Text(hostname) } }
                 }
                 detailSection("Security") {
-                    detailRow("Post-quantum") { pqText(peer.pq) }
-                    detailRow("Post-quantum type") { quantumType([peer]) }
+                    detailRow("Post-quantum protection") { pqText(peer.pq) }
+                    detailRow("Quantum type") { quantumType([peer]) }
                     if let verified = lastVerified(peer) {
                         detailRow("Last verified") {
                             Text(verified.relative).help(verified.exact)
@@ -329,7 +329,7 @@ struct NetworkPanel: View {
                 .disabled(model.busy)
                 .help(model.peerRefreshedAt[peer.id].map {
                     "Refresh live status · Last refreshed \($0.formatted(date: .omitted, time: .standard))"
-                } ?? "Refresh live connection and ML-KEM status")
+                } ?? "Refresh connection and quantum-safe status")
                 .accessibilityLabel("Refresh \(displayName(peer)) status")
                 .accessibilityIdentifier("refresh-peer-\(peer.id)")
                 VStack(alignment: .leading, spacing: 2) {
@@ -346,7 +346,7 @@ struct NetworkPanel: View {
                         }
                         Text(peer.pq == "protected" ? "· 🔐" : "· Not quantum-safe")
                             .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
-                            .help(peer.pq == "protected" ? "Quantum-safe" : "This link has no post-quantum layer")
+                            .help(peer.pq == "protected" ? "Quantum-safe" : "This link is encrypted but not quantum-safe")
                         if peer.lifecycle == "connected", let latency = peer.latencyMs {
                             Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -405,8 +405,8 @@ struct NetworkPanel: View {
         let relative = abs(latest.timeIntervalSinceNow) < 5 ? "just now"
             : RelativeDateTimeFormatter().localizedString(for: latest, relativeTo: Date())
         var exact: [String] = []
-        if let h = peer.lastHandshakeAt { exact.append("Last handshake: \(friendlyTime(h))") }
-        if let v = peer.pqVerifiedAt { exact.append("Post-quantum verified: \(friendlyTime(v))") }
+        if let h = peer.lastHandshakeAt { exact.append("Last key exchange: \(friendlyTime(h))") }
+        if let v = peer.pqVerifiedAt { exact.append("Quantum-safe confirmed: \(friendlyTime(v))") }
         return (relative, exact.joined(separator: "\n"))
     }
 
@@ -502,24 +502,12 @@ struct NetworkPanel: View {
             if let exit = d.exitNodeStatus {
                 detailRow("Internet routing") {
                     Text(exit == "selected" ? "Exit route selected" : exit == "not_selected" ? "Exit route not selected" : exit == "unavailable" ? "No exit route offered" : "Not reported")
-                        .help("Reports the computer’s route selection. It does not independently verify where traffic exits.")
+                        .help("As reported by that Mac. neXal does not separately check where traffic leaves the network.")
                 }
             }
             if let canary = d.canaryStatus {
-                detailRow("Integrity canary") {
-                    Text(canary == "watching" ? "Watching its decoy" : canary == "alert" ? "Change detected" : canary == "disabled" ? "Off" : "Unavailable")
-                }
-            }
-            if d.threatScannerStatus != nil {
-                DisclosureGroup("File scan coverage") {
-                    Text("Last reported: \(ScannerPresentation.status(d.threatScannerStatus))").font(.caption)
-                    Text("Report: \(ScannerPresentation.date(d.reportedAt))").font(.caption2).foregroundStyle(.secondary)
-                    Text("Completed pass: \(ScannerPresentation.date(d.lastThreatScanAt))").font(.caption2)
-                    Text(d.threatScanCoverage == "configured_roots" ? "Configured folders only" : "Scope not reported").font(.caption2)
-                    Text("Rules: \(d.threatRulesVersion ?? "Not reported")").font(.caption2)
-                    Text("Scanned: \(d.threatScanFilesScanned.map(String.init) ?? "Unknown") · Skipped: \(d.threatScanFilesSkipped.map(String.init) ?? "Unknown") · Findings: \(d.threatScanFindings.map(String.init) ?? "Unknown")").font(.caption2)
-                    if let error = d.threatScanLastError, error != "none" { Text(ScannerPresentation.error(error)).font(.caption2).foregroundStyle(.orange) }
-                    Text("Historical reports do not confirm the scanner is running now. Style signals do not prove malware or AI authorship.").font(.caption2).foregroundStyle(.secondary)
+                detailRow("Host watermarks") {
+                    Text(canary == "watching" ? "On" : canary == "alert" ? "Change detected" : canary == "disabled" ? "Off" : "Not available")
                 }
             }
             if let thermal = d.thermal {
@@ -538,7 +526,7 @@ struct NetworkPanel: View {
                 }
             }
         } else {
-            Text("System details have not been reported yet. They appear once that computer runs the latest neXal-Connector.")
+            Text("System details are not available yet. They appear once that Mac runs the latest neXal@home.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -556,6 +544,24 @@ struct NetworkPanel: View {
         case "ac": "on power adapter"
         default: "on battery"
         }
+    }
+
+    /// Plain words for the connector's lifecycle values; never shows the raw code.
+    private func lifecycleText(_ lifecycle: String) -> String {
+        switch lifecycle {
+        case "connected": "Connected"
+        case "authenticating": "Signing in"
+        case "provisioning": "Setting up"
+        case "degraded": "Limited"
+        case "failed": "Not connected"
+        default: "Not available"
+        }
+    }
+
+    /// A reported step name with underscores removed and a capital first letter.
+    private func humanized(_ value: String) -> String {
+        let words = value.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
     }
 
     private func lifecycleEmoji(_ lifecycle: String) -> String {
@@ -591,7 +597,7 @@ struct NetworkPanel: View {
     }
 
     private var quantumProfileExplanation: String {
-        "The algorithm is shown only for a fresh, active ML-KEM-bound tunnel session. Category 5 describes the ML-KEM-1024 parameter set, not certification of the complete app. The current integration is experimental."
+        "The algorithm is shown only for connected links that have recently confirmed post-quantum key exchange. Post-quantum support is still being rolled out."
     }
 
     /// The documentation explains the pinned build profile separately from
@@ -614,14 +620,14 @@ struct NetworkPanel: View {
     private func routeText(_ peer: ConnectorStatus.MeshPeer) -> some View {
         if peer.path == "direct" {
             HStack(spacing: 4) {
-                Text("⚡️ P2P Direct").foregroundStyle(.green).fontWeight(.semibold)
+                Text("⚡️ Direct").foregroundStyle(.green).fontWeight(.semibold)
                 switch peer.directVia {
                 case "lan": Text("· local network").foregroundStyle(.secondary)
                 case "nat": Text("· via router's public address").foregroundStyle(.secondary)
                 default: EmptyView()
                 }
             }
-            .help(peer.directAddress.map { "Tunnel endpoint: \($0)" } ?? "")
+            .help(peer.directAddress.map { "Direct address: \($0)" } ?? "")
         } else {
             Text(routeLabel(peer)).foregroundStyle(peer.path == "relay" ? .orange : .secondary)
         }
@@ -670,12 +676,12 @@ struct NetworkPanel: View {
             if let host = ssh { serviceRow("SSH", symbol: "terminal", scheme: "ssh", host: host) }
             if let host = vnc { serviceRow("VNC", symbol: "display", scheme: "vnc", host: host) }
             if let host = files {
-                serviceRow("FileShare", symbol: "folder", scheme: "smb", host: host,
+                serviceRow("File Sharing", symbol: "folder", scheme: "smb", host: host,
                            share: peer.fileSharing?.shareName)
             }
             if storage {
                 HStack(spacing: 8) {
-                    Text("Time Machine Backup").foregroundStyle(.secondary)
+                    Text("Time Machine backup").foregroundStyle(.secondary)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                     Button("Open") { model.openServiceApplication("com.apple.MigrateAssistant") }
                         .buttonStyle(.bordered).controlSize(.small)
@@ -712,7 +718,7 @@ struct NetworkPanel: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Send a Wake-on-LAN packet through a neXal Mac on its network")
+                .help("Wake this Mac using another neXal Mac on the same local network")
             }
         }
         // neXal Storage is operator infrastructure: shown, but greyed out, since
@@ -759,17 +765,17 @@ struct NetworkPanel: View {
                 }
                 ChartCard(title: "neXal network latency (ms)", caption: ConnectorHistory.networkLatencyCaption,
                           isEmpty: latency.isEmpty,
-                          emptyMessage: "No latency yet: no other computer is connected.") {
+                          emptyMessage: "No latency yet: no other Mac is connected.") {
                     SeriesChart(points: latency, unit: "ms")
                 }
-                ChartCard(title: "Peer latency (ms)", caption: ConnectorHistory.peerLatencyCaption,
+                ChartCard(title: "Latency per Mac (ms)", caption: ConnectorHistory.peerLatencyCaption,
                           isEmpty: peers.isEmpty,
-                          emptyMessage: "No peer latency samples yet.") {
+                          emptyMessage: "No latency data yet.") {
                     SeriesChart(points: peers, unit: "ms")
                 }
                 ChartCard(title: "Traffic in / out (KB/s)", caption: ConnectorHistory.trafficCaption,
                           isEmpty: traffic.isEmpty,
-                          emptyMessage: "No traffic samples yet (needs two polls with a connected peer).") {
+                          emptyMessage: "No traffic data yet. It appears shortly after another Mac connects.") {
                     SeriesChart(points: traffic, unit: "KB/s")
                 }
             }
@@ -842,39 +848,39 @@ struct NetworkPanel: View {
 		case "connected": return "Connected"
 		case "blocked": return "Not reachable yet"
 		case "disabled": return "Off"
-		default: return state.replacingOccurrences(of: "_", with: " ").capitalized
+		default: return "Needs attention"
 		}
 	}
 
 	private func timeMachineDetail(_ code: String) -> String {
 		switch code {
-		case "juicefs_metadata_unconfigured": return "Cloud backup storage is not ready on this computer yet. No storage credential was downloaded."
+		case "juicefs_metadata_unconfigured": return "Backup storage is not ready for this Mac yet."
 		case "paid_entitlement_required": return "This feature requires an eligible subscription."
-		case "administrator_approval_required": return "Administrator approval is required to publish the backup destination."
-		case "bonjour_advertisement_missing": return "The backup share is running but is not currently discoverable."
-		default: return "The backup destination needs attention (\(code))."
+		case "administrator_approval_required": return "Administrator approval is needed to add the backup destination."
+		case "bonjour_advertisement_missing": return "The backup destination is running but cannot be found on the network right now."
+		default: return "The backup destination needs attention. Check again in a few minutes."
 		}
 	}
 
     private func pathSummary(_ peers: [ConnectorStatus.MeshPeer]) -> String {
-        guard !peers.isEmpty else { return "Waiting for another computer" }
+        guard !peers.isEmpty else { return "Waiting for another Mac" }
         let direct = peers.filter { $0.path == "direct" }.count
         let relay = peers.filter { $0.path == "relay" }.count
         let cloud = peers.filter { $0.path == "cloud" }.count
         var parts: [String] = []
         if direct > 0 { parts.append("\(direct) direct") }
         if relay > 0 { parts.append("\(relay) via neXal Relay") }
-        if cloud > 0 { parts.append("\(cloud) via Cloudflare") }
+        if cloud > 0 { parts.append("\(cloud) via neXal cloud") }
         let unknown = peers.count - direct - relay - cloud
-        if unknown > 0 { parts.append("\(unknown) unknown") }
+        if unknown > 0 { parts.append("\(unknown) not reported") }
         return parts.joined(separator: " · ")
     }
 
     private func routeLabel(_ peer: ConnectorStatus.MeshPeer) -> String {
         switch peer.path {
-        case "direct": return peer.pathLabel.isEmpty ? "P2P — direct" : peer.pathLabel
+        case "direct": return peer.pathLabel.isEmpty ? "Direct" : peer.pathLabel
         case "relay": return peer.relayRegion.map { "neXal Relay — \($0) · metered" } ?? "neXal Relay · metered"
-        case "cloud": return "Cloudflare route"
+        case "cloud": return "neXal cloud route"
         default: return "Route unavailable"
         }
     }
@@ -886,8 +892,8 @@ struct NetworkPanel: View {
         case "rekeying": "Rotating keys"
         // Encrypted with WireGuard, but this link has no post-quantum layer: the
         // other side has not enabled Rosenpass, or it has not handshaken yet.
-        case "degraded": "⚠️ Not quantum-safe (WireGuard only)"
-        case "verification_stale": "Verification stale"
+        case "degraded": "⚠️ Encrypted, not quantum-safe"
+        case "verification_stale": "Needs recheck"
         case "failed": "Failed"
         default: "Unavailable"
         }
@@ -909,7 +915,7 @@ struct NetworkPanel: View {
 
     private func blocked(_ reason: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Connector setup needs attention", systemImage: "exclamationmark.triangle.fill")
+            Label("Setup needs attention", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline).foregroundStyle(.orange)
             Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             Button("Try again") { Task { await model.refresh() } }
@@ -949,11 +955,11 @@ struct NetworkPanel: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let stale = model.coordinatorMismatch {
-                Label("Saved configuration points at \(stale), which this build does not use. Remove config.json and pair again.",
+                Label("This Mac's saved settings point to a neXal server this version does not use (\(stale)). Remove config.json, then pair again.",
                       systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             } else if let origin = model.configuredCoordinator {
-                Text("Coordinator: \(URL(string: origin)?.host ?? origin)").foregroundStyle(.secondary)
+                Text("Server: \(URL(string: origin)?.host ?? origin)").foregroundStyle(.secondary)
             }
             footerButtons
         }.font(.caption)

@@ -1,0 +1,114 @@
+--- a/server.go
++++ b/server.go
+@@ -325,21 +325,7 @@
+ 		hs.nextMsg = msgTypeEmptyData
+ 
+ 	case *initConf:
+-		hs := &responderHandshake{
+-			handshake: handshake{
+-				server: s,
+-			},
+-		}
+-
+-		if err = hs.handleInitConf(req); err != nil {
+-			return err
+-		}
+-
+-		if err = hs.sendEmptyData(from); err != nil {
+-			return err
+-		}
+-
+-		s.completeHandshake(&hs.handshake, from, RekeyAfterTimeResponder)
++		return s.handleConfirmedReply(req, from)
+ 
+ 	case *emptyData:
+ 		hs, ok := s.getHandshake(req.sid)
+@@ -402,6 +388,7 @@
+ 
+ func (s *Server) completeHandshake(hs *handshake, ep Endpoint, rekeyAfter time.Duration) {
+ 	hs.peer.generation++
++	hs.peer.confirmedReply = nil
+ 	hs.peer.logger.Debug("Exchanged key with peer")
+ 
+ 	if hs.peer.endpoint == nil || !hs.peer.endpoint.Equal(ep) {
+--- a/peer.go
++++ b/peer.go
+@@ -28,8 +28,9 @@
+ }
+ 
+ type peer struct {
+-	server     *Server
+-	generation uint64
++	server         *Server
++	generation     uint64
++	confirmedReply *confirmedReply
+ 
+ 	rekeyTimer *time.Timer
+ 
+--- a/protocol.go
++++ b/protocol.go
+@@ -47,7 +47,7 @@
+ 
+ 	// From the WireGuard paper
+ 	// Rekey every two minutes, discard the key if no rekey is achieved within three.
+-	RekeyAfterTimeResponder = 2 * time.Minute
++	RekeyAfterTimeResponder = 90 * time.Second
+ 	RekeyAfterTimeInitiator = RekeyAfterTimeResponder + 10*time.Second
+ 	RejectAfterTime         = 3 * time.Minute
+ 
+--- /dev/null
++++ b/nexal_retry.go
+@@ -0,0 +1,53 @@
++package rosenpass
++
++import "time"
++
++// One authenticated final reply per peer. The fixed deadline and generation
++// prevent duplicates from extending a key lifetime or reinstalling an old key.
++// Access is serialized by Server.stateMu, like the other handshake state.
++type confirmedReply struct {
++	request    initConf
++	handshake  *responderHandshake
++	deadline   time.Time
++	generation uint64
++	completed  bool
++}
++
++func (s *Server) handleConfirmedReply(req *initConf, from Endpoint) error {
++	now := time.Now()
++	for _, p := range s.peers {
++		cached := p.confirmedReply
++		if cached == nil {
++			continue
++		}
++		if !now.Before(cached.deadline) || cached.generation != p.generation {
++			p.confirmedReply = nil
++			continue
++		}
++		// Match the entire already-authenticated request, including its MAC. Never
++		// relax the biscuit replay checks for a different request or transcript.
++		if cached.request == *req {
++			return s.deliverConfirmedReply(cached, from)
++		}
++	}
++	hs := &responderHandshake{handshake: handshake{server: s}}
++	if err := hs.handleInitConf(req); err != nil {
++		return err
++	}
++	cached := &confirmedReply{request: *req, handshake: hs, deadline: now.Add(RejectAfterTime), generation: hs.peer.generation}
++	hs.peer.confirmedReply = cached
++	return s.deliverConfirmedReply(cached, from)
++}
++
++func (s *Server) deliverConfirmedReply(cached *confirmedReply, from Endpoint) error {
++	if err := cached.handshake.sendEmptyData(from); err != nil {
++		return err
++	}
++	if !cached.completed {
++		s.completeHandshake(&cached.handshake.handshake, from, RekeyAfterTimeResponder)
++		cached.completed = true
++		cached.generation = cached.handshake.peer.generation
++		cached.handshake.peer.confirmedReply = cached
++	}
++	return nil
++}

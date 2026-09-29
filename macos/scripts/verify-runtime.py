@@ -28,7 +28,7 @@ def verify_app(app):
     run('/usr/bin/codesign', '--verify', '--deep', '--strict', app)
     requirement = '=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "' + POLICY['team_id'] + '"'
     run('/usr/bin/codesign', '--verify', '-R', requirement + ' and identifier "' + POLICY['bundle_id'] + '"', app)
-    for relative in ['MacOS/NexalMac', 'Helpers/nexal', 'Helpers/nexal-network', 'Helpers/yr']:
+    for relative in ['MacOS/NexalMac', 'Helpers/nexal', 'Helpers/nexal-network']:
         binary = app / 'Contents' / relative
         if binary.is_symlink():
             raise ValueError('Bundled executables must not be symlinks')

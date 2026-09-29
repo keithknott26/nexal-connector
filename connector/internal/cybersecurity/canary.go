@@ -18,6 +18,7 @@ import (
 // network listener, claims to detect reads, or executes a mitigation.
 type Canary struct{ Directory string }
 type CanaryState struct {
+	LastEvent         *Event             `json:"lastEvent,omitempty"`
 	OperationReported bool               `json:"operationReported,omitempty"`
 	OperationResult   *WatermarkResult   `json:"operationResult,omitempty"`
 	Rotation          *watermarkRotation `json:"rotation,omitempty"`
@@ -222,6 +223,7 @@ func (c Canary) Tick(ctx context.Context, now time.Time, report func(context.Con
 				}
 				event := Event{SchemaVersion: 1, EventID: "canary_" + key, ObservedAt: now.UTC().Format(TimeLayout), Kind: "behavior_alert", Severity: "medium", Detector: "nexal_canary_" + kind, DetectorVersion: "2", OriginAssessment: "unknown", EvidenceRef: "canary_" + key}
 				s.Pending = &event
+				s.LastEvent = &event
 			}
 			s.Observed = fingerprint
 			if err := saveCanary(root, s); err != nil {

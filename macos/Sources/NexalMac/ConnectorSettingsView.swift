@@ -76,7 +76,7 @@ struct ConnectorSettingsView: View {
                                 CanarySettingsView().padding(8)
                             }
                             GroupBox {
-                                ScannerSettingsView().padding(8)
+                                HoneypotSettingsView().padding(8)
                             }
                         } else {
                             Label("Connect this Mac to neXal to configure security features.", systemImage: "shield")
@@ -102,14 +102,14 @@ struct ConnectorSettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("Startup") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Start neXal Systems Connector at login", isOn: Binding(
+                    Toggle("Start neXal@home at login", isOn: Binding(
                         get: { loginItem.startsAtLogin },
                         set: { loginItem.setStartsAtLogin($0) }
                     ))
                     Text("Automatically start the connector when you sign in to your Mac.")
                         .font(.caption).foregroundStyle(.secondary)
                     if loginItem.requiresApproval {
-                        Text("Allow neXal Systems Connector in macOS Login Items to finish enabling startup.")
+                        Text("Allow neXal@home in macOS Login Items to finish enabling startup.")
                             .font(.callout)
                         Button("Open Login Items Settings") { SMAppService.openSystemSettingsLoginItems() }
                     }

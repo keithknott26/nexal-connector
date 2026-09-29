@@ -59,33 +59,3 @@ func FuzzNormalizeEVE(f *testing.F) {
 		}
 	})
 }
-
-func TestScannerEvidenceContract(t *testing.T) {
-	now := time.Now()
-	score := 0.4
-	e := scannerEvent(now, "code_style_signal", "info", "nexal_style", "style_baseline_deviation", strings.Repeat("a", 64), strings.Repeat("b", 64), "observation")
-	e.OriginAssessment = "insufficient_evidence"
-	e.Evidence = &Evidence{Engine: "nexal_style", RuleID: "style_baseline_deviation", RulesVersion: StyleVersion, ContentSHA256: strings.Repeat("a", 64), BaselineID: strings.Repeat("b", 64), Score: &score}
-	if err := e.Validate(now); err != nil {
-		t.Fatal(err)
-	}
-	e.Severity = "high"
-	if e.Validate(now) == nil {
-		t.Fatal("style signal escalated to threat")
-	}
-	e.Severity = "info"
-	e.OriginAssessment = "suspected"
-	if e.Validate(now) == nil {
-		t.Fatal("style attributed AI origin")
-	}
-	e.OriginAssessment = "insufficient_evidence"
-	e.Evidence.RuleID = "/Users/private/script.py"
-	if e.Validate(now) == nil {
-		t.Fatal("file path escaped evidence validator")
-	}
-	e.Evidence.RuleID = "style_baseline_deviation"
-	score = 2
-	if e.Validate(now) == nil {
-		t.Fatal("unbounded score")
-	}
-}

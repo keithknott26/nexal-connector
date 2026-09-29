@@ -36,8 +36,8 @@ struct ConnectorHistory: Equatable {
         """
 
     static let ownerActivityCaption = """
-        Owner activity gates admission. Polls where the connector reported unknown \
-        telemetry contribute no point, because unknown is not idle.
+        Jobs run only when your activity allows it. When your activity is unknown, \
+        no point is shown, because unknown does not mean idle.
         """
 
     /// Series names, defined once so the charts and the tests cannot drift.
@@ -81,14 +81,14 @@ struct ConnectorHistory: Equatable {
     }
 
     static let networkLatencyCaption = """
-        Average round-trip time to the connected computers in your neXal network, \
-        as the secure-network runtime measures it. Gaps are polls with no connected peer.
+        Average round-trip time to the other Macs on your neXal network. \
+        Gaps mean no other Mac was connected.
         """
     static let peerLatencyCaption = """
-        Round-trip time to each computer, one line per peer.
+        Round-trip time to each Mac, one line per Mac.
         """
     static let trafficCaption = """
-        Data sent to (out) and received from (in) each computer, averaged between polls.
+        Data sent to (out) and received from (in) each Mac, averaged over each interval.
         """
 
     /// One point in one chart series.

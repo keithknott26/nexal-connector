@@ -53,8 +53,7 @@ enum CLICommand {
     case wake(tunnelAddress: String)
     case exitRoute(tunnelAddress: String, enabled: Bool, targetDeviceID: String? = nil)
     case canary(action: String)
-    case securityStatus, securityScan, securityBaseline, securityFindings
-    case securityConfigure(roots: [String], engine: String?, enabled: Bool)
+    case honeypot(action: String)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination, which waits for a person to
@@ -64,8 +63,6 @@ enum CLICommand {
         if case .redeemGuestInvitation = self { return 60 }
         if case .activateGuestInvitation = self { return 40 }
         if case .exitRoute = self { return 35 }
-        if case .securityScan = self { return 130 }
-        if case .securityBaseline = self { return 130 }
         return 20
     }
 
@@ -113,14 +110,10 @@ enum CLICommand {
             command = ["pair-v2", "--leave"]
         case .rejoinNetwork:
             command = ["pair-v2", "--rejoin"]
-        case .securityFindings: command = ["security", "findings"]
-        case .securityStatus: command = ["security", "status"]
-        case .securityScan: command = ["security", "scan"]
-        case .securityBaseline: command = ["security", "baseline", "--approve"]
-        case let .securityConfigure(roots, engine, enabled):
-            command = ["security", "configure", "--enabled=\(enabled)"] + roots.flatMap { ["--root", $0] } + (engine.map { ["--engine", $0] } ?? [])
         case let .canary(action):
             command = ["canary", "--action", action]
+        case let .honeypot(action):
+            command = ["honeypot", "--action", action]
         case let .exitRoute(tunnelAddress, enabled, targetDeviceID):
             command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):
@@ -151,8 +144,8 @@ enum PairingRole: String, CaseIterable, Identifiable {
 
     var explanation: String {
         switch self {
-        case .receiver: return "The phone pairs this Mac as the device that receives resources from your other devices."
-        case .donor: return "The phone pairs this Mac as the device that donates its resources to your other devices."
+        case .receiver: return "Your iPhone pairs this Mac to receive resources from your other Macs."
+        case .donor: return "Your iPhone pairs this Mac to share its resources with your other Macs."
         }
     }
 }
@@ -171,19 +164,19 @@ enum ShellError: LocalizedError {
             return "Choose the nexal executable in this app’s Helpers folder or ~/Library/Application Support/Nexal/bin. It must not be a symlink or writable by other users."
         case .executableChanged:
             return "The selected connector changed. Review its signature and choose it again."
-        case let .commandFailed(code, reason):
+        case let .commandFailed(_, reason):
             // Prefer the connector's own words. It knows which precondition failed;
             // this app can only guess, and its guess used to name three subsystems
             // at once while pointing at none of them.
             if let reason { return reason }
-            return "The connector could not complete this operation (exit \(code)) and gave no reason. Credentials are never displayed."
-        case .timeout: return "The connector did not respond before the timeout."
-        case .oversizedOutput: return "The connector returned too much data."
-        case .invalidStatus: return "The connector status schema is not supported. Update the app and connector together."
-        case .noExecutable: return "Choose an installed Go connector before continuing."
-        case .invalidCode: return "Enter a one-use enrollment code (at most 255 bytes)."
+            return "neXal@home could not finish this and gave no reason. Try again, or quit and reopen the app."
+        case .timeout: return "neXal@home did not respond in time. Try again."
+        case .oversizedOutput: return "neXal@home returned more data than expected. Try again."
+        case .invalidStatus: return "neXal@home reported its status in a format this app does not support. Update neXal@home."
+        case .noExecutable: return "Choose the neXal connector before continuing."
+        case .invalidCode: return "Enter a valid one-time code."
         case .invalidPairing:
-            return "The connector returned a pairing this app cannot display. Update the app and connector together; no code is shown rather than showing one that may not scan."
+            return "neXal returned a pairing code this app cannot show. Update neXal@home, then try again."
         }
     }
 }
@@ -280,9 +273,6 @@ struct ConnectorStatus: Decodable {
         var cpuUsagePercent: Double? = nil; var memoryUsedBytes: UInt64? = nil; var idleSeconds: UInt64? = nil
         var lastTimeMachineBackupAt: String? = nil; var reportedAt: String? = nil
         var exitNodeStatus: String? = nil
-        var threatScannerStatus: String? = nil; var lastThreatScanAt: String? = nil
-        var threatRulesVersion: String? = nil; var threatScanLastError: String? = nil; var threatScanCoverage: String? = nil
-        var threatScanFilesScanned: Int? = nil; var threatScanFilesSkipped: Int? = nil; var threatScanFindings: Int? = nil
         var canaryStatus: String? = nil; var canaryLastCheckedAt: String? = nil
         let thermal: String?; let batteryPercent: Int?; let batteryState: String?
 		let tunnelAddress: String?; let publicIp: String?; let location: String?

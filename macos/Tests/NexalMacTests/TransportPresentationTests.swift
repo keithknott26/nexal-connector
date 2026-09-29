@@ -21,7 +21,7 @@ final class TransportPresentationTests: XCTestCase {
         XCTAssertEqual(TransportPresentation(capability: capability(.tcpPrivateLAN)).label,
                        "TCP private-LAN transport")
         XCTAssertEqual(TransportPresentation(capability: capability(.coordinatorMediated)).label,
-                       "Relayed through the coordinator")
+                       "Relayed through neXal")
         XCTAssertEqual(TransportPresentation(capability: capability(.controlPlaneOnly)).label,
                        "No data transport established")
         XCTAssertEqual(TransportPresentation(capability: capability(.unknown)).label,

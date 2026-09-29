@@ -8,7 +8,7 @@ import (
 )
 
 // ValidationTick asks for work only; absence of an enrolled lease never runs a test.
-func (c *Client) ValidationTick(ctx context.Context, hostID string, canary cybersecurity.Canary, scanner cybersecurity.Scanner) error {
+func (c *Client) ValidationTick(ctx context.Context, hostID string, canary cybersecurity.Canary) error {
 	if !ValidID(hostID) {
 		return errors.New("invalid host")
 	}
@@ -67,7 +67,7 @@ func (c *Client) ValidationTick(ctx context.Context, hostID string, canary cyber
 		}
 		executed, reason, err = cybersecurity.ServeValidation(ctx, run, authorized, ready, report)
 	} else {
-		executed, reason, err = canary.ValidateLocal(ctx, scanner, run, report)
+		executed, reason, err = canary.ValidateLocal(ctx, run, report)
 	}
 	if err != nil {
 		executed = false

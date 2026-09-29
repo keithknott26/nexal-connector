@@ -13,7 +13,7 @@ struct FullDiskAccessHelpView: View {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: appURL.path))
                     .resizable().frame(width: 64, height: 64)
                     .onDrag { NSItemProvider(object: appURL as NSURL) }
-                    .accessibilityLabel("Drag neXal-Connector into Full Disk Access")
+                    .accessibilityLabel("Drag neXal@home into Full Disk Access")
                 Text("Drag me").font(.caption.bold())
             }
             VStack(alignment: .leading, spacing: 8) {

@@ -85,7 +85,7 @@ enum TransportSubsystem: String, CaseIterable {
     var scope: String {
         switch self {
         case .computeCollectives:
-            return "Tensors between inference ranks, over the compute runtime's own collective backend."
+            return "Model data exchanged between Macs running shared AI work."
         case .memoryPager:
             return "Paged memory between Macs, over a separate path that cannot reuse the collective backend."
         }
@@ -180,7 +180,7 @@ protocol TransportCapabilityProviding {
 /// the compute runtime's collective backend, which reports nowhere yet, so this
 /// source leaves it `unknown` always rather than answering for it (§29.8).
 struct ConnectorStatusCapabilitySource: TransportCapabilityProviding {
-    let sourceName = "the Go connector"
+    let sourceName = "neXal@home"
 
     func capability(from status: ConnectorStatus?) -> TransportCapability {
         let reported = status?.transport?.trimmingCharacters(in: .whitespacesAndNewlines)

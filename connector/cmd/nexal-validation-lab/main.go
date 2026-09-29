@@ -49,7 +49,7 @@ func run() error {
 	defer os.RemoveAll(directory)
 	ctx, cancel := context.WithTimeout(context.Background(), 130*time.Second)
 	defer cancel()
-	if err = api.ValidationTick(ctx, cfg.HostID, cybersecurity.Canary{Directory: directory}, cybersecurity.Scanner{}); err != nil {
+	if err = api.ValidationTick(ctx, cfg.HostID, cybersecurity.Canary{Directory: directory}); err != nil {
 		return fmt.Errorf("validation did not complete; inspect coordinator result")
 	}
 	fmt.Println("Validation poll completed; inspect the coordinator for the evidence-backed outcome.")

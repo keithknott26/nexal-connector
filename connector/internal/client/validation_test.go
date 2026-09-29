@@ -55,7 +55,7 @@ func TestValidationLeaseToCorrelatedReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = c.ValidationTick(context.Background(), "host_1", cybersecurity.Canary{Directory: t.TempDir()}, cybersecurity.Scanner{}); err != nil {
+	if err = c.ValidationTick(context.Background(), "host_1", cybersecurity.Canary{Directory: t.TempDir()}); err != nil {
 		t.Fatal(err)
 	}
 	if !completed {

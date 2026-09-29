@@ -48,26 +48,26 @@ struct PairingPresentation: Equatable {
 
         var label: String {
             switch self {
-            case .waiting: return "Waiting for your phone"
-            case .scanned: return "Scanned by your phone"
+            case .waiting: return "Waiting for your iPhone"
+            case .scanned: return "Scanned by your iPhone"
             case .cancelled: return "Cancelled"
             case .expired: return "Expired"
-            case .unknown: return "Reported an unfamiliar state"
+            case .unknown: return "Status not recognized"
             }
         }
 
         var explanation: String {
             switch self {
             case .waiting:
-                return "The coordinator is holding this pairing open. Scan the code in neXal@home."
+                return "Scan the code with neXal@home on your iPhone."
             case .scanned:
-                return "The phone claimed this pairing. Claiming is not linking: nothing is shared until you approve it on the phone."
+                return "Your iPhone scanned the code. Scanning is not linking: nothing is shared until you approve it on your iPhone."
             case .cancelled:
-                return "This pairing was cancelled and cannot be scanned. Create a new one if you still want to pair."
+                return "This code was cancelled and can no longer be scanned. Show a new code if you still want to pair."
             case .expired:
-                return "The pairing window closed before a phone scanned it. Create a new one; codes are short-lived on purpose."
+                return "This code expired before it was scanned. Show a new one; codes are short-lived on purpose."
             case let .unknown(value):
-                return "The connector reported \"\(value)\", which this app does not recognise. Update the app and connector together."
+                return "neXal reported a pairing status this app does not recognize (\"\(value)\"). Update neXal@home."
             }
         }
 
@@ -146,9 +146,9 @@ struct PairingPresentation: Equatable {
     func countdown(now: Date = Date()) -> String {
         guard status.isLive else { return status.label }
         guard let seconds = secondsRemaining(now: now) else {
-            return "The connector did not report a readable expiry for this code."
+            return "The expiry time for this code is not available."
         }
-        if seconds == 0 { return "This code has reached its expiry. Refresh to confirm with the coordinator." }
+        if seconds == 0 { return "This code has reached its expiry time. Refresh to confirm its status." }
         let minutes = seconds / 60
         let remainder = seconds % 60
         let time = minutes > 0 ? "\(minutes)m \(remainder)s" : "\(remainder)s"
@@ -158,18 +158,18 @@ struct PairingPresentation: Equatable {
     /// The role line, which must stay honest even for a role this build does not
     /// know: the owner needs to see what the connector actually said.
     var roleLine: String {
-        guard let role else { return "Role reported as \"\(rawRole)\", which this app does not recognise." }
+        guard let role else { return "This pairing has a role this app does not recognize (\"\(rawRole)\"). Update neXal@home." }
         return "\(role.label). \(role.explanation)"
     }
 
     var indicator: IndicatorState {
         IndicatorState(
-            heading: "Phone pairing",
+            heading: "iPhone pairing",
             label: status.label,
             systemImage: status.systemImage,
             tone: status == .waiting || status == .scanned ? .colour : .grey,
             reason: status.explanation,
-            detail: "Pairing id \(pairingId). Minted by the Go connector against \(coordinator); this app never contacts a coordinator itself.",
+            detail: "Pairing \(pairingId), created by neXal@home on this Mac.",
             detailLines: [roleLine])
     }
 
@@ -182,7 +182,7 @@ struct PairingPresentation: Equatable {
     /// guessed here — they arrive as the connector's own error text.
     static func unavailableReason(hasExecutable: Bool, configurationExists: Bool,
                                   status: ConnectorStatus?) -> String? {
-        if !hasExecutable { return "Choose the Go connector under Setup before pairing a phone." }
+        if !hasExecutable { return "Choose the neXal connector under Setup before pairing." }
         // A missing configuration is not a blocker: `startPairing` creates it with
         // `nexal init` first. Version 2 pairing IS enrollment, so nothing else is
         // needed before a code can be shown. The customer panel has no separate

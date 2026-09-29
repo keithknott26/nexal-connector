@@ -50,7 +50,7 @@ final class TimeMachineCredentialWindow: NSObject, NSWindowDelegate {
         panel.contentView = NSHostingView(rootView:
             VStack(alignment: .leading, spacing: 12) {
                 Text("Could not retrieve credentials").font(.headline)
-                Text("Check that backup is enabled and the coordinator is reachable, then close this window and try again.")
+                Text("Check that backup is turned on and this Mac is online, then close this window and try again.")
             }.padding(24).frame(width: 530))
         present()
     }

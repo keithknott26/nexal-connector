@@ -28,6 +28,18 @@ must restore the prior system state at expiry or network departure. Until that
 complete lifecycle exists, neXal only advertises services the owner has already
 enabled in System Settings.
 
+Security scope is tripwire, decoy and honeypot only: neXal does not provide
+antivirus, malware or file scanning, or process inspection (the YARA-X scanner
+and `nexal security` commands were removed). The opt-in honeypot
+(`nexal honeypot --action status|enable|disable`) opens fake SSH 2222, Telnet
+2323, RDP 3389, SMB 4445, VNC 5909 and HTTP 8081 services bound only to this
+Mac's neXal network and private-LAN IPv4 addresses, never a public address. Any
+non-loopback connection gets a banner, is held at most five seconds with at most
+512 bytes read and discarded, and produces a `network_alert` event
+(`nexal_honeypot_<service>`; no address leaves the Mac). Alerts are limited to one
+per source and port per hour and 20 per hour, with a 20-event outbox; the source
+address is kept locally in the last 20 connections only.
+
 ## Telemetry contract
 
 Each peer reports cumulative `traffic.sentBytes`, `traffic.receivedBytes`,

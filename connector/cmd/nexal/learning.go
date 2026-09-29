@@ -5,11 +5,9 @@ import (
 	"time"
 )
 
-// runLearning requests only coordinator-owned work. A connectivity watcher also
-// cancels an in-flight request when mesh membership, consent, or capacity changes.
-func runLearning(ctx context.Context, connected func() bool, tick func(context.Context) error) {
-	runLearningWithInterval(ctx, connected, tick, 180*time.Second, time.Second)
-}
+// runLearningWithInterval runs coordinator-owned periodic work (defense
+// validation) only while connected. A connectivity watcher also cancels an
+// in-flight request when mesh membership, consent, or capacity changes.
 func runLearningWithInterval(ctx context.Context, connected func() bool, tick func(context.Context) error, interval, watch time.Duration) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()

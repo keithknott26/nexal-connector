@@ -14,13 +14,13 @@ final class ConnectorUIContractTests: XCTestCase {
         let text = try source
         XCTAssertTrue(text.contains("sign in with Apple"))
         XCTAssertTrue(text.contains("Show pairing code"))
-        XCTAssertTrue(text.contains("PAIR MANUALLY"))
+        XCTAssertTrue(text.contains("Pair manually"))
         XCTAssertTrue(text.contains("tap Pair manually"))
-        XCTAssertTrue(text.contains("Connected computers"))
+        XCTAssertTrue(text.contains("Your Macs"))
         XCTAssertTrue(text.contains("Activity graphs"))
         XCTAssertTrue(text.contains("Post-quantum protection"))
-        XCTAssertTrue(text.contains("Cloudflare route"))
-        XCTAssertTrue(text.contains("P2P — direct"))
+        XCTAssertTrue(text.contains("neXal cloud route"))
+        XCTAssertTrue(text.contains("pathLabel.isEmpty ? \"Direct\""))
         XCTAssertTrue(text.contains("Leave neXal network"))
         XCTAssertTrue(text.contains("metered"))
     }

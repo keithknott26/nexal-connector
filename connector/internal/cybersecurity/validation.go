@@ -34,7 +34,7 @@ func (r ValidationRun) Validate(now time.Time) error {
 		return errors.New("invalid validation deadline")
 	}
 	switch r.Module {
-	case "canary_integrity", "scanner_fixture":
+	case "canary_integrity":
 		return nil
 	case "network_canary":
 		ip, err := netip.ParseAddr(r.TargetIP)
@@ -48,27 +48,14 @@ func validationEvent(r ValidationRun) Event {
 	return Event{SchemaVersion: 1, EventID: uuid.NewString(), ObservedAt: time.Now().UTC().Format(TimeLayout), Kind: "sensor_health", Severity: "info", Detector: "validation_" + r.Module, DetectorVersion: "1", OriginAssessment: "unknown", EvidenceRef: "validation_" + r.ID}
 }
 
-// ValidateLocal uses owned artifacts and the same canary/scanner implementation as normal detection.
+// ValidateLocal uses owned artifacts and the same canary implementation as normal detection.
 // It does not infer a CVE verdict from an exercise match.
-func (c Canary) ValidateLocal(ctx context.Context, scanner Scanner, r ValidationRun, report func(context.Context, Event) error) (bool, string, error) {
+func (c Canary) ValidateLocal(ctx context.Context, r ValidationRun, report func(context.Context, Event) error) (bool, string, error) {
 	if err := r.Validate(time.Now()); err != nil {
 		return false, "execution_failed", err
 	}
 	if err := ctx.Err(); err != nil {
 		return false, "cancelled", err
-	}
-	if r.Module == "scanner_fixture" {
-		for _, check := range scanner.ConfigurationSelfTest(ctx) {
-			if check.Name == "scanner_fixture" {
-				if check.Status == "passed" {
-					return true, "completed", report(ctx, validationEvent(r))
-				}
-				if check.Status == "failed" {
-					return false, "sensor_unavailable", nil
-				}
-			}
-		}
-		return false, "sensor_unavailable", nil
 	}
 	if r.Module != "canary_integrity" {
 		return false, "execution_failed", errors.New("not a local exercise")

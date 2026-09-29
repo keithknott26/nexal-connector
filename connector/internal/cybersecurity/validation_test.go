@@ -25,7 +25,7 @@ func TestValidationRealCanaryAndCleanup(t *testing.T) {
 	dir := t.TempDir()
 	r := validationGrant()
 	calls := 0
-	executed, reason, err := (Canary{Directory: dir}).ValidateLocal(context.Background(), Scanner{}, r, func(_ context.Context, e Event) error {
+	executed, reason, err := (Canary{Directory: dir}).ValidateLocal(context.Background(), r, func(_ context.Context, e Event) error {
 		calls++
 		if e.EvidenceRef != "validation_"+r.ID || e.Detector != "validation_canary_integrity" {
 			t.Fatal("uncorrelated event")
@@ -40,16 +40,16 @@ func TestValidationRealCanaryAndCleanup(t *testing.T) {
 		t.Fatal("artifact left behind")
 	}
 }
-func TestValidationNoSensorIsInconclusive(t *testing.T) {
+func TestValidationRejectsRetiredScannerModule(t *testing.T) {
 	r := validationGrant()
 	r.Module = "scanner_fixture"
-	executed, reason, err := (Canary{Directory: t.TempDir()}).ValidateLocal(context.Background(), Scanner{}, r, func(context.Context, Event) error { t.Fatal("fabricated evidence"); return nil })
-	if err != nil || executed || reason != "sensor_unavailable" {
+	executed, reason, err := (Canary{Directory: t.TempDir()}).ValidateLocal(context.Background(), r, func(context.Context, Event) error { t.Fatal("fabricated evidence"); return nil })
+	if err == nil || executed || reason != "execution_failed" {
 		t.Fatalf("%v %v %s", err, executed, reason)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err = (Canary{}).ValidateLocal(ctx, Scanner{}, validationGrant(), nil); err == nil {
+	if _, _, err = (Canary{}).ValidateLocal(ctx, validationGrant(), nil); err == nil {
 		t.Fatal("ignored cancellation")
 	}
 }

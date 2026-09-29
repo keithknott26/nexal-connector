@@ -20,7 +20,7 @@ struct TransportPresentation: Equatable {
         switch mechanism {
         case .nativeThunderboltRDMA: return "Native Thunderbolt RDMA"
         case .tcpPrivateLAN: return "TCP private-LAN transport"
-        case .coordinatorMediated: return "Relayed through the coordinator"
+        case .coordinatorMediated: return "Relayed through neXal"
         case .controlPlaneOnly: return "No data transport established"
         case .unknown: return "Transport unknown"
         }

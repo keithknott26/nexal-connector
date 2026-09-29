@@ -89,6 +89,7 @@ type Agent struct {
 	telemetryAt   time.Time
 	pq            client.PQ
 	active        string
+	runtimeMemory uint64 // exclusive private-runtime reservation, guarded by mu
 	cancel        context.CancelFunc
 	lastOutcome   string
 	records       map[string]Record
@@ -276,7 +277,7 @@ func (a *Agent) AcceptJobsNow() error {
 	if a.manualActiveLocked() {
 		return nil
 	} // retries do not extend consent
-	if a.active != "" {
+	if a.active != "" || a.runtimeMemory != 0 {
 		return errors.New("wait for the active attempt or pause it first")
 	}
 	next := a.cfg
@@ -458,11 +459,11 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	}
 	if a.telemetry.AvailableMemoryBytes > a.telemetry.TotalMemoryBytes ||
 		a.telemetry.AvailableMemoryBytes < a.cfg.ReserveMemoryBytes ||
-		a.telemetry.AvailableMemoryBytes-a.cfg.ReserveMemoryBytes < WorkloadMemoryBytes ||
-		a.cfg.MemoryLimitBytes < WorkloadMemoryBytes {
+		a.telemetry.AvailableMemoryBytes-a.cfg.ReserveMemoryBytes < a.requiredMemoryLocked() ||
+		a.cfg.MemoryLimitBytes < a.requiredMemoryLocked() {
 		return errors.New("insufficient approved memory headroom")
 	}
-	if checkBusy && a.active != "" {
+	if checkBusy && (a.active != "" || a.runtimeMemory != 0) {
 		return errors.New("host already has an active attempt")
 	}
 	return nil

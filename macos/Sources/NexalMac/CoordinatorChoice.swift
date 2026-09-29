@@ -13,7 +13,7 @@ struct CoordinatorChoice: View {
     private static let known = [CoordinatorOrigins.development, CoordinatorOrigins.production]
 
     var body: some View {
-        Picker("Coordinator", selection: $model.coordinator) {
+        Picker("Server", selection: $model.coordinator) {
             Text("Development").tag(CoordinatorOrigins.development)
             Text("Production").tag(CoordinatorOrigins.production)
             if let saved = model.configuredCoordinator, !Self.known.contains(saved) {
@@ -23,8 +23,8 @@ struct CoordinatorChoice: View {
         .pickerStyle(.menu)
         .disabled(model.busy || model.configurationExists)
         .help(model.configurationExists
-              ? "Fixed by this Mac's saved configuration. Remove config.json to choose again."
-              : "Which neXal coordinator this Mac pairs with.")
+              ? "Set by this Mac's saved settings. Remove config.json to choose again."
+              : "Which neXal server this Mac pairs with.")
         .onAppear { if let saved = model.configuredCoordinator { model.coordinator = saved } }
         .accessibilityIdentifier("coordinator-picker")
     }

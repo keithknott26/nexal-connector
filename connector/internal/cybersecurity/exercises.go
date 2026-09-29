@@ -12,7 +12,7 @@ import (
 
 // ExerciseChecks uses temporary owned artifacts and actual bundled detectors.
 // It never touches user files or attempts real credential access.
-func (c Canary) ExerciseChecks(ctx context.Context, scanner Scanner) ([]WatermarkCheck, error) {
+func (c Canary) ExerciseChecks(ctx context.Context) ([]WatermarkCheck, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -24,18 +24,6 @@ func (c Canary) ExerciseChecks(ctx context.Context, scanner Scanner) ([]Watermar
 		return nil, err
 	}
 	checks := []WatermarkCheck{{"canary_integrity", integrity}}
-	for _, check := range scanner.ConfigurationSelfTest(ctx) {
-		if check.Name == "scanner_fixture" {
-			outcome := "unavailable"
-			if check.Status == "passed" {
-				outcome = "detected"
-			}
-			if check.Status == "failed" {
-				outcome = "missed"
-			}
-			checks = append(checks, WatermarkCheck{"scanner_fixture", outcome})
-		}
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -68,7 +56,7 @@ func (c Canary) ExerciseChecks(ctx context.Context, scanner Scanner) ([]Watermar
 
 // RunExercises journals metadata before delivery, retaining event IDs for retry.
 // Artifact bytes and the fake credential never leave this host.
-func (c Canary) RunExercises(ctx context.Context, scanner Scanner, report func(context.Context, Event) error) error {
+func (c Canary) RunExercises(ctx context.Context, report func(context.Context, Event) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -95,7 +83,7 @@ func (c Canary) RunExercises(ctx context.Context, scanner Scanner, report func(c
 		return err
 	}
 	if len(events) == 0 {
-		checks, err := c.ExerciseChecks(ctx, scanner)
+		checks, err := c.ExerciseChecks(ctx)
 		if err != nil {
 			return err
 		}

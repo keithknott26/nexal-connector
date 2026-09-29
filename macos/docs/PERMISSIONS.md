@@ -19,7 +19,6 @@ access:
   when the app becomes active.
 - Networking installation, firewall/wake changes, and guest expiry guards:
   macOS administrator authentication with an explanation of the requested action.
-- Scanner roots and file selections: native file/folder picker.
 - iOS camera and notifications: native authorization prompts and supported recovery.
 - Browser camera/microphone: browser permission prompts.
 

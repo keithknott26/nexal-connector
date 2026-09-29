@@ -3,12 +3,12 @@ package cybersecurity
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"time"
 )
 
@@ -69,7 +69,7 @@ func finishRotation(root *os.Root, s *CanaryState) error {
 
 // ExecuteOperation accepts only two fixed actions from the authenticated
 // coordinator. No paths, shell commands, rule bytes or credentials are accepted.
-func (c Canary) ExecuteOperation(ctx context.Context, op WatermarkOperation, scanner Scanner, report func(context.Context, Event) error) error {
+func (c Canary) ExecuteOperation(ctx context.Context, op WatermarkOperation, report func(context.Context, Event) error) error {
 	expiry, err := time.Parse(time.RFC3339Nano, op.ExpiresAt)
 	if err != nil || !operationID.MatchString(op.ID) || !contains(op.Kind, "regenerate", "self_test") || !expiry.After(time.Now()) || expiry.After(time.Now().Add(11*time.Minute)) {
 		return errors.New("invalid or expired watermark operation")
@@ -89,7 +89,9 @@ func (c Canary) ExecuteOperation(ctx context.Context, op WatermarkOperation, sca
 		result := WatermarkResult{ID: op.ID, Kind: op.Kind}
 		if op.Kind == "regenerate" {
 			status := "blocked"
-			if s.Enabled && s.Pending == nil {
+			// Never overwrite a new change that the monitoring loop has not observed.
+			// A previously delivered change may be rotated, preserving LastEvent.
+			if s.Enabled && s.Pending == nil && canaryFingerprint(root) == s.Observed {
 				random := make([]byte, 32)
 				if _, err := rand.Read(random); err != nil {
 					return err
@@ -127,7 +129,6 @@ func (c Canary) ExecuteOperation(ctx context.Context, op WatermarkOperation, sca
 				}
 			}
 			result.Checks = append(result.Checks, WatermarkCheck{"watermark_integrity", integrity})
-			result.Checks = append(result.Checks, scanner.ConfigurationSelfTest(ctx)...)
 			delivery := "failed"
 			event := Event{SchemaVersion: 1, EventID: "watermark_test_" + op.ID, ObservedAt: time.Now().UTC().Format(TimeLayout), Kind: "sensor_health", Severity: "info", Detector: "nexal_watermark_self_test", DetectorVersion: "1", OriginAssessment: "unknown", EvidenceRef: "test_" + op.ID}
 			if report != nil && report(ctx, event) == nil {
@@ -163,61 +164,6 @@ func (c Canary) testIntegrity(ctx context.Context) error {
 	}
 	return nil
 }
-func (s Scanner) ConfigurationSelfTest(ctx context.Context) []WatermarkCheck {
-	checks := []WatermarkCheck{{"scanner_configuration", "not_configured"}, {"scanner_engine", "not_configured"}, {"scanner_fixture", "not_configured"}}
-	state, err := s.Status()
-	if err != nil {
-		checks[0].Status = "failed"
-		return checks
-	}
-	if !state.Enabled {
-		return checks
-	}
-	checks[0].Status = "passed"
-	if len(state.Roots) == 0 || state.RulesVersion != RulesVersion {
-		checks[0].Status = "failed"
-	}
-	for _, path := range state.Roots {
-		root, err := openScanRoot(path)
-		if err != nil {
-			checks[0].Status = "failed"
-		} else {
-			root.Close()
-		}
-	}
-	checks[1].Status = "failed"
-	checks[2].Status = "blocked"
-	if _, err := checkEngine(ctx, state.EnginePath); err != nil {
-		return checks
-	}
-	checks[1].Status = "passed"
-	temp, err := os.MkdirTemp(s.Directory, "scanner-selftest-")
-	if err != nil {
-		return checks
-	}
-	defer os.RemoveAll(temp)
-	rules := filepath.Join(temp, "rules.yar")
-	compiled := filepath.Join(temp, "rules.yarc")
-	target := filepath.Join(temp, "fixture.txt")
-	if os.WriteFile(rules, bundledRules, 0600) != nil {
-		return checks
-	}
-	if _, err := engineCommand(ctx, state.EnginePath, "compile", "--output", compiled, rules); err != nil {
-		checks[2].Status = "failed"
-		return checks
-	}
-	fixture := []byte(`X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`)
-	if os.WriteFile(target, fixture, 0600) != nil {
-		return checks
-	}
-	matched, err := scanBytes(ctx, state.EnginePath, compiled, target)
-	checks[2].Status = "failed"
-	if err == nil && slices.Contains(matched, "nexal_eicar_test") {
-		checks[2].Status = "passed"
-	}
-	return checks
-}
-
 func (c Canary) MarkOperationReported(id string) error {
 	return c.locked(func(root *os.Root, s *CanaryState) error {
 		if s.OperationResult != nil && s.OperationResult.ID == id {
@@ -227,3 +173,5 @@ func (c Canary) MarkOperationReported(id string) error {
 		return nil
 	})
 }
+
+func digest(data []byte) string { h := sha256.Sum256(data); return hex.EncodeToString(h[:]) }

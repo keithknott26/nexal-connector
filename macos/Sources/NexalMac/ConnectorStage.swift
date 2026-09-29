@@ -104,11 +104,11 @@ enum ConnectorStage: Equatable {
             return "Start the connector to link this Mac to your other Macs."
         case .notJoined:
             return "The connector is running but has not joined an account yet. "
-                + "Choose a connector and join with an invitation under Setup."
+                + "Join with an invitation code under Setup."
         case .needsPairing:
-            return "Show a code, then choose \u{201C}Pair a computer\u{201D} in neXal@home on your iPhone and scan it."
+            return "Show a code, then choose \u{201C}Pair a Mac\u{201D} in neXal@home on your iPhone and scan it."
         case .showingCode:
-            return "In neXal@home on your iPhone, choose \u{201C}Pair a computer\u{201D} and scan the code. This Mac joins the same "
+            return "In neXal@home on your iPhone, choose \u{201C}Pair a Mac\u{201D} and scan the code. This Mac joins the same "
                 + "account your iPhone is signed in to."
         case .paired:
             return nil
@@ -117,7 +117,7 @@ enum ConnectorStage: Equatable {
         case .pairingEnded(.cancelled):
             return "Show a new code when you are ready to link this Mac."
         case let .pairingEnded(status):
-            return "The connector reported: \(status.raw). Show a new code to try again."
+            return "Pairing stopped with a status this app does not recognize (\(status.raw)). Show a new code to try again."
         }
     }
 }

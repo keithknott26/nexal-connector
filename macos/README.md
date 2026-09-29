@@ -1,4 +1,4 @@
-# neXal-Connector for macOS
+# neXal@home for macOS
 
 The platform repository now includes double-click `Setup neXal.command` and
 `Start neXal.command` launchers. See its `docs/MAC-SETUP.md` for the recommended
@@ -229,8 +229,8 @@ Quitting sends SIGTERM only to the child launched by this app; independently
 started services remain running. The core's cancellation and descendant cleanup
 must be validated on macOS. Launch at login is enabled by default on first launch through macOS Login Items.
 Use the connector’s gear menu or right-click its menu-bar icon for **Settings…**
-and **About neXal Systems Connector**. Settings includes a **Start neXal Systems
-Connector at login** checkbox; disabling it is preserved across relaunches.
+and **About neXal@home**. Settings includes a **Start neXal@home at login**
+checkbox; disabling it is preserved across relaunches.
 If macOS requires approval, Settings provides a link to Login Items. When enabled, the two-second
 splash closes directly to the menu bar without opening a main window. Reopening
 the app from Finder or choosing **Open Connector** opens the main window.
@@ -241,8 +241,8 @@ three default to on, preserving existing behavior; the graph defaults to 30
 minutes. Changing the range in either Settings or the network panel updates
 both. Turning off flashing retains the static red alert icon.
 
-Security contains the existing integrity canary and file-scanning/code-style
-controls for linked Macs. Opening Settings does not enable either feature.
+Security contains the integrity canary and the honeypot controls for linked
+Macs. Opening Settings does not enable either feature.
 Automatic signed updates are not installed.
 
 File Sharing and Screen Sharing are consent-preserving: the UI can open System
@@ -253,12 +253,8 @@ reported active macOS service and a stable private
 Wide-Area Bonjour, the optional site gateway, and the authenticated bridge; it
 does not claim that multicast or a shared Ethernet segment spans sites.
 
-### Local file scanning and code-style review
+### Honeypot
 
-The **Security** tab in Settings includes **File scanning & code-style review** alongside the integrity canary. Opening it reads local status only. Use the native folder picker, then Save/Enable to opt in; Pause preserves saved settings. Scan now invokes a bounded pass. The complete app uses its bundled `yr` engine; an optional trusted executable override is available in Advanced.
+The **Security** tab in Settings includes **Honeypot** alongside the integrity canary. Opening it only reads `nexal honeypot --action status`; Enable/Turn off run `--action enable|disable`. When enabled the connector opens fake services (SSH 2222, Telnet 2323, RDP 3389, SMB 4445, VNC 5909, HTTP 8081). Nothing legitimate should ever connect, so any connection from another computer is reported as an alert. It never runs commands or accepts logins. The view shows per-port listening state, trigger count, last trigger and recent connections (time, service, source address, source class).
 
-Approving a style baseline requires an explicit confirmation and operates on the saved folders. Review those scripts first. The baseline requires at least three supported scripts of the same type with 20 nonblank lines each; it measures style differences, not threat probability or AI authorship. Status shows actual scope, last completed pass, rules version, counts, errors, and pending delivery. Peer coverage is labeled as historical reporting, with timestamps. No path or source content is added to peer telemetry by this UI.
-
-`security scan` and `security baseline --approve` have a 130-second process limit around the connector's 120-second pass budget. Configuration arguments are passed as separate argv entries, including folder names containing spaces or shell metacharacters. Native tests cover these contracts and partial status decoding; complete signed-package engine discovery and physical-device UI remain separate acceptance checks.
-
-**Recent local findings** shows up to 100 scanner observations with the local filename/path, timestamp, known-rule explanation, content hash, and optional style score. Refresh is manual and also runs after a user-initiated scan. The view does not open or execute a flagged file. Paths remain in the private local ledger; status/peer telemetry and outbound events exclude that ledger.
+neXal does not provide antivirus, file scanning or process inspection; the earlier file-scanning feature and bundled YARA-X helper were removed.

@@ -21,7 +21,7 @@ struct AccountPortalEntry: View {
             if let url = AccountPortal.url(coordinator: model.coordinator) {
                 Link("Open account & network sign-in", destination: url).buttonStyle(.bordered)
             }
-            Text("In the browser, choose your workspace. To connect this Mac, show its one-time pairing code here and enter it under People & networks. Existing computers stay in their current network until you explicitly leave and pair again.").font(.caption).foregroundStyle(.secondary)
+            Text("In the browser, choose your workspace. To connect this Mac, show its one-time pairing code here and enter it under People & networks. Macs you have already paired stay in their current network until you leave it and pair again.").font(.caption).foregroundStyle(.secondary)
         }.padding(12).background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
 }

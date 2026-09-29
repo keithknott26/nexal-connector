@@ -39,7 +39,7 @@ final class ResourceSharingPresentationTests: XCTestCase {
         for value in [try status(known: false), try ConnectorStatus.decode(Data(#"{"paused":false}"#.utf8))] {
             let state = ResourceSharingPresentation(status: value)
             XCTAssertEqual(state.state, .telemetryUnknown)
-            XCTAssertEqual(state.indicator.reason, "Telemetry unknown — Go admission fails closed")
+            XCTAssertEqual(state.indicator.reason, "Activity on this Mac is unknown, so no jobs run")
             XCTAssertEqual(state.indicator.tone, .grey)
         }
     }
@@ -53,13 +53,13 @@ final class ResourceSharingPresentationTests: XCTestCase {
 
     func testSyntheticTelemetryIsAlwaysDisclosed() throws {
         XCTAssertEqual(ResourceSharingPresentation(status: try status(synthetic: true)).syntheticNotice,
-                       "Synthetic development telemetry")
+                       "Test activity data")
         XCTAssertNil(ResourceSharingPresentation(status: try status()).syntheticNotice)
     }
 
     func testOptInCaveatIsUnchanged() {
         XCTAssertEqual(ResourceSharingPresentation.optInCaveat,
-                       "Opt-in permits the Go connector to apply its resource and idle policies. It does not promise that a workload is available or enabled.")
+                       "Turning this on lets neXal share resources under your limits and idle rules. It does not mean work is available right now.")
     }
 
     // The two indicators answer different questions and must not be merged: a
@@ -98,19 +98,19 @@ final class ResourceSharingPresentationTests: XCTestCase {
         }
         XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
             status: try status(known: true, synthetic: true, ownerActive: true, override: false)),
-                       "Synthetic development telemetry")
+                       "Test activity data")
         XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
             status: try status(known: false, synthetic: false, ownerActive: false, override: false)),
-                       "Telemetry unknown — Go admission fails closed")
+                       "Activity on this Mac is unknown, so no jobs run")
         XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
             status: try status(known: true, synthetic: false, ownerActive: true, override: true)),
-                       "Owner active; private work explicitly permitted")
+                       "You are using this Mac; private work is allowed")
         XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
             status: try status(known: true, synthetic: false, ownerActive: true, override: false)),
-                       "Owner active; owner priority applies")
+                       "You are using this Mac; your work comes first")
         XCTAssertEqual(ResourceSharingPresentation.ownerActivityLine(
             status: try status(known: true, synthetic: false, ownerActive: false, override: false)),
-                       "Owner idle")
+                       "Mac is idle")
     }
 
     func testOwnerActivityLineIsNilWithoutTelemetry() throws {
@@ -122,6 +122,6 @@ final class ResourceSharingPresentationTests: XCTestCase {
     // Synthetic telemetry wins the line, exactly as the previous layout did.
     func testSyntheticNoticeStillExistsSeparately() throws {
         let state = ResourceSharingPresentation(status: try status(synthetic: true))
-        XCTAssertEqual(state.syntheticNotice, "Synthetic development telemetry")
+        XCTAssertEqual(state.syntheticNotice, "Test activity data")
     }
 }

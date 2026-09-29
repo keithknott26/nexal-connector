@@ -44,9 +44,9 @@ enum NetworkService {
         var errorDescription: String? {
             switch self {
             case .helperMissing:
-                return "The secure networking runtime is missing from this app. Reinstall neXal-Connector."
+                return "The secure networking component is missing from this app. Reinstall neXal@home."
             case .helperUnsafe:
-                return "The secure networking runtime in this app is a link or writable by other users, so it was not run as administrator. Reinstall neXal-Connector."
+                return "The secure networking component in this app has been modified or can be changed by other users, so it was not run. Reinstall neXal@home."
             case .cancelled:
                 return "The secure networking service was not installed because the administrator prompt was cancelled. This Mac cannot join until it is."
             case .failed(let detail):
@@ -100,7 +100,7 @@ enum NetworkService {
                 + "& \"\(wakeForNetworkCommand)\" "
                 + "& firewallCommands "
                 + "& p & \" service start\" "
-                + "with prompt \"neXal needs to install its secure networking service, allow incoming peer connections in the macOS firewall (turning off Block all incoming connections and stealth mode), and turn on Wake for network access so other Macs can wake this one.\" "
+                + "with prompt \"neXal needs to install its secure networking service, allow connections from your other Macs in the macOS firewall (turning off Block all incoming connections and stealth mode), and turn on Wake for network access so other Macs can wake this one.\" "
                 + "with administrator privileges",
             "end run",
         ]
@@ -171,7 +171,7 @@ enum NetworkService {
         let out = Pipe()
         process.standardOutput = out
         process.standardError = out
-        guard (try? process.run()) != nil else { return (-1, "could not start the secure networking runtime") }
+        guard (try? process.run()) != nil else { return (-1, "could not start the secure networking service") }
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + 8, execute: timeout)
         defer { timeout.cancel() }
@@ -235,7 +235,7 @@ enum NetworkService {
     static func selectExitRoute(_ id: String?, previous: String?,
                                 execute: ([String]) -> (Int32, String) = runHelper) throws {
         guard [id, previous].compactMap({ $0 }).allSatisfy(validExitRouteID) else {
-            throw RoutingFailure.failed("Invalid exit route identifier.")
+            throw RoutingFailure.failed("This exit route is not valid.")
         }
         if let previous, previous != id {
             let (code, text) = execute(["networks", "deselect", previous])
@@ -310,8 +310,8 @@ enum NetworkService {
             command += " & p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
                 + "& p & \" service start >/dev/null 2>&1; \""
         }
-        let what = [firewall ? "allow incoming peer connections in the macOS firewall (turning off Block all incoming connections and stealth mode)" : nil,
-                    lazy ? "keep peer connections always on (turning off lazy connections)" : nil,
+        let what = [firewall ? "allow connections from your other Macs in the macOS firewall (turning off Block all incoming connections and stealth mode)" : nil,
+                    lazy ? "keep connections to your other Macs always on" : nil,
                     wake ? "turn on Wake for network access so other Macs can wake this one" : nil]
             .compactMap { $0 }.joined(separator: " and ")
         let script = [
@@ -356,7 +356,7 @@ enum NetworkService {
         let script = [
             "on run argv",
             "set p to quoted form of (item 1 of argv)",
-            "do shell script p & \" guest remove-guard\" with prompt \"neXal needs to disconnect the previous temporary access before pairing this Mac as your own computer.\" with administrator privileges",
+            "do shell script p & \" guest remove-guard\" with prompt \"neXal needs to disconnect the previous temporary access before pairing this Mac as one of your own Macs.\" with administrator privileges",
             "end run",
         ]
         try runAdminScript(script, argument: helper.path)

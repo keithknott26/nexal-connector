@@ -17,16 +17,24 @@ type NegotiatedSecurity struct {
 	ExpiresAt  string `json:"expiresAt"`
 }
 
-type TunnelStatusReport struct {
+type PeerSecurityReport struct {
+	ID                 string              `json:"id"`
+	Name               string              `json:"name"`
+	Connected          bool                `json:"connected"`
 	NegotiatedSecurity *NegotiatedSecurity `json:"negotiatedSecurity,omitempty"`
-	AuthStage          string              `json:"authStage"`
-	SecurityState      string              `json:"securityState"`
-	Path               TunnelPath          `json:"path"`
-	Traffic            TunnelTraffic       `json:"traffic"`
-	LastHandshakeAt    string              `json:"lastHandshakeAt,omitempty"`
-	LastTrafficAt      string              `json:"lastTrafficAt,omitempty"`
-	PQVerifiedAt       string              `json:"pqVerifiedAt,omitempty"`
-	DetailCode         string              `json:"detailCode,omitempty"`
+}
+
+type TunnelStatusReport struct {
+	PeerSecurity       []PeerSecurityReport `json:"peerSecurity"`
+	NegotiatedSecurity *NegotiatedSecurity  `json:"negotiatedSecurity,omitempty"`
+	AuthStage          string               `json:"authStage"`
+	SecurityState      string               `json:"securityState"`
+	Path               TunnelPath           `json:"path"`
+	Traffic            TunnelTraffic        `json:"traffic"`
+	LastHandshakeAt    string               `json:"lastHandshakeAt,omitempty"`
+	LastTrafficAt      string               `json:"lastTrafficAt,omitempty"`
+	PQVerifiedAt       string               `json:"pqVerifiedAt,omitempty"`
+	DetailCode         string               `json:"detailCode,omitempty"`
 	// Services this computer offers (ssh, vnc, smb). A pointer so that "none"
 	// is sent as [] (closing their ports) while an unset value is omitted.
 	Services *[]string `json:"services,omitempty"`
@@ -83,6 +91,15 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 		default:
 			report.SecurityState = "degraded"
 		}
+	}
+	report.PeerSecurity = make([]PeerSecurityReport, 0, len(status.Peers))
+	for _, p := range status.Peers {
+		item := PeerSecurityReport{ID: p.ID, Name: p.Name, Connected: p.Lifecycle == mesh.LifecycleConnected}
+		single := mesh.Status{PQ: p.PQ, Peers: []mesh.Peer{p}}
+		if single.StrictPQReadyAt(now, 2*time.Minute) {
+			item.NegotiatedSecurity = &NegotiatedSecurity{Algorithm: "ML-KEM-1024", Category: 5, Profile: p.QuantumProfile, VerifiedAt: wireTimestamp(p.PQVerifiedAt), ExpiresAt: wireTimestamp(p.PQExpiresAt)}
+		}
+		report.PeerSecurity = append(report.PeerSecurity, item)
 	}
 	peer := bestRuntimePeer(status.Peers)
 	if peer == nil {

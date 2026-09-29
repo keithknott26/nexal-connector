@@ -102,6 +102,8 @@ struct NetworkPanel: View {
             Text("Scan to connect this Mac").font(.title3.weight(.semibold))
             Text("In neXal@home on your iPhone, choose \u{201C}Pair a Mac\u{201D} and scan this code.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text("Paired Macs can process your de-identified work if available.")
+                .font(.caption).foregroundStyle(.secondary)
             if let symbol = model.pairing?.symbol {
                 HStack { Spacer(minLength: 0); PairingCodeView(symbol: symbol, isLive: !linking.isExpired); Spacer(minLength: 0) }
             }

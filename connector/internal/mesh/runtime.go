@@ -158,7 +158,9 @@ func translateRuntime(out []byte, now time.Time) Status {
 			peer.LatencyMS = ns / 1e6
 		}
 		installed, verified := validQuantumEvidence(rp.QuantumProfile, rp.QuantumKeyInstalledAt, rp.QuantumKeyExpiresAt, now)
-		if peer.Lifecycle == LifecycleConnected && rs.QuantumResistance && rp.QuantumResistance && verified {
+		// The per-link evidence is the proof; the management-side quantumResistance flag
+		// for the remote peer can lag (e.g. iPhones), so it does not veto fresh evidence.
+		if peer.Lifecycle == LifecycleConnected && rs.QuantumResistance && verified {
 			peer.PQ, peer.PQVerifiedAt = PQProtected, installed.Format(time.RFC3339Nano)
 			peer.QuantumProfile, peer.PQExpiresAt = rp.QuantumProfile, rp.QuantumKeyExpiresAt
 		} else {

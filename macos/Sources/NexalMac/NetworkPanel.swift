@@ -257,7 +257,7 @@ struct NetworkPanel: View {
                     if let hostname = peer.hostname?.hostname { detailRow("neXal address") { Text(hostname) } }
                 }
                 detailSection("Security") {
-                    detailRow("Post-quantum protection") { pqText(peer.pq) }
+                    detailRow("Post-quantum protection") { pqText(effectivePQ(peer.pq, peers: [peer])) }
                     detailRow("Quantum type") { quantumType([peer]) }
                     if let verified = lastVerified(peer) {
                         detailRow("Last verified") {
@@ -324,9 +324,9 @@ struct NetworkPanel: View {
                         } else if model.availableExitRoutes.contains(exitRouteID(for: peer)) {
                             Image(systemName: "cloud").help("Can be used as an exit node")
                         }
-                        Text(peer.pq == "protected" ? "· 🔐" : "· Not quantum-safe")
+                        Text(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "· 🔐" : "· Not quantum-safe")
                             .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
-                            .help(peer.pq == "protected" ? "Quantum-safe" : "This link is encrypted but not quantum-safe")
+                            .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe" : "This link is encrypted but not quantum-safe")
                         if peer.lifecycle == "connected", let latency = peer.latencyMs {
                             Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -384,7 +384,7 @@ struct NetworkPanel: View {
                     }
                 }
                 detailSection("Security") {
-                    detailRow("Post-quantum protection") { pqText(mesh.pq) }
+                    detailRow("Post-quantum protection") { pqText(effectivePQ(mesh.pq, peers: mesh.peers)) }
                     detailRow("Quantum type") { quantumType(mesh.peers) }
                     if let gateway, let verified = lastVerified(gateway) {
                         detailRow("Last verified") { Text(verified.relative).help(verified.exact) }
@@ -934,6 +934,13 @@ struct NetworkPanel: View {
         }
     }
 
+    /// The protection shown next to "Quantum type" must agree with it: fresh ML-KEM-1024
+    /// evidence (the same test that labels the quantum type) means protected, whatever
+    /// the runtime's coarser flag says.
+    private func effectivePQ(_ value: String, peers: [ConnectorStatus.MeshPeer]) -> String {
+        MeshQuantumPresentation.label(peers: peers) == "Not reported" ? value : "protected"
+    }
+
     private func pqLabel(_ value: String) -> String {
         switch value {
         case "protected": "Protected"
@@ -941,7 +948,7 @@ struct NetworkPanel: View {
         case "rekeying": "Rotating keys"
         // Encrypted with WireGuard, but this link has no post-quantum layer: the
         // other side has not enabled Rosenpass, or it has not handshaken yet.
-        case "degraded": "⚠️ Encrypted, not quantum-safe"
+        case "degraded": "Encrypted"
         case "verification_stale": "Needs recheck"
         case "failed": "Failed"
         default: "Unavailable"

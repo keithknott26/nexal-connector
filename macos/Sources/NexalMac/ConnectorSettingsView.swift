@@ -152,7 +152,7 @@ struct ConnectorSettingsView: View {
                         Text("5 minutes").tag(5)
                         Text("30 minutes").tag(30)
                     }
-                    Text("Remembers your selection here and in the connector panel across launches.")
+                    Text("How much history the connector panel's activity graphs show. Remembered across launches.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

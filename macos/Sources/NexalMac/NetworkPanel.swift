@@ -25,7 +25,6 @@ struct NetworkPanel: View {
                     case .linking(let linking): pairing(linking)
                     case .linked(let network): connected(network)
                     }
-                    AccountPortalEntry()
                     message
                     footer
                 }
@@ -740,15 +739,6 @@ struct NetworkPanel: View {
             let peers = windowed(model.history.peerLatencyPoints)
             let traffic = windowed(model.history.trafficPoints)
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 4) {
-                    Text("Show last").font(.caption).foregroundStyle(.secondary)
-                    ForEach([5, 30], id: \.self) { minutes in
-                        Button("\(minutes) min") { preferences.chartWindowMinutes = minutes }
-                            .buttonStyle(.bordered).controlSize(.small)
-                            .tint(preferences.chartWindowMinutes == minutes ? .accentColor : .secondary)
-                            .accessibilityAddTraits(preferences.chartWindowMinutes == minutes ? .isSelected : [])
-                    }
-                }
                 ChartCard(title: "neXal network latency (ms)", caption: ConnectorHistory.networkLatencyCaption,
                           isEmpty: latency.isEmpty,
                           emptyMessage: "No latency yet: nothing else is connected.") {

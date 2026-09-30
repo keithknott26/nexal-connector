@@ -294,18 +294,21 @@ struct NetworkPanel: View {
                     advertisedServices(peer)
 
                 }
-                detailSection("Actions") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        peerActions(peer)
-                        exitNodeCheckbox(peer)
+                // A phone has no Mac services to act on and no Mac system details to show.
+                if !isMobileDevice(peer) {
+                    detailSection("Actions") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            peerActions(peer)
+                            exitNodeCheckbox(peer)
+                        }
                     }
-                }
-                detailSection("System") {
-                    if storage {
-                        Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
-                            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        systemDetails(details)
+                    detailSection("System") {
+                        if storage {
+                            Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
+                                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            systemDetails(details)
+                        }
                     }
                 }
             }
@@ -416,6 +419,14 @@ struct NetworkPanel: View {
     /// the peer whose device name is the first label of the Time Machine
     /// destination host the coordinator gave this Mac, or, before Time Machine
     /// is configured, a peer following the operator's gateway naming (gw-<region>).
+    /// iPhones and iPads that joined through the neXal@home app. They run no connector,
+    /// so no host details are reported for them; their mesh name is the device name.
+    private func isMobileDevice(_ peer: ConnectorStatus.MeshPeer) -> Bool {
+        guard hostDetails(for: peer) == nil, !isStorageGateway(peer) else { return false }
+        let name = peer.name.lowercased()
+        return name.contains("iphone") || name.contains("ipad")
+    }
+
     private func isStorageGateway(_ peer: ConnectorStatus.MeshPeer) -> Bool {
         let name = peer.name.lowercased()
         if let host = model.timeMachine?.timeMachine.host?.lowercased(),

@@ -425,3 +425,30 @@ diff -ruN nbp/client/internal/rosenpass/manager.go nbq/client/internal/rosenpass
  }
  
  // OnConnected is a handler function that is triggered when a connection to a remote peer establishes
+diff -ruN nbp/client/ios/NetBirdSDK/client.go nbq/client/ios/NetBirdSDK/client.go
+--- a/client/ios/NetBirdSDK/client.go	2026-09-30 02:32:05.733009639 +0000
++++ b/client/ios/NetBirdSDK/client.go	2026-09-30 02:46:39.434010056 +0000
+@@ -381,6 +381,9 @@
+ 			Relayed:                    p.Relayed,
+ 			RosenpassEnabled:           p.RosenpassEnabled,
+ 			Routes:                     routes,
++			QuantumProfile:             p.QuantumProfile,
++			QuantumKeyInstalledAt:      p.QuantumKeyInstalledAt,
++			QuantumKeyExpiresAt:        p.QuantumKeyExpiresAt,
+ 		}
+ 		peerInfos[n] = pi
+ 	}
+diff -ruN nbp/client/ios/NetBirdSDK/peer_notifier.go nbq/client/ios/NetBirdSDK/peer_notifier.go
+--- a/client/ios/NetBirdSDK/peer_notifier.go	2026-09-30 02:32:05.734009639 +0000
++++ b/client/ios/NetBirdSDK/peer_notifier.go	2026-09-30 02:46:39.433010056 +0000
+@@ -22,6 +22,10 @@
+ 	Relayed                    bool
+ 	RosenpassEnabled           bool
+ 	Routes                     RoutesDetails
++	// neXal ML-KEM-1024 evidence for this link (empty when none).
++	QuantumProfile        string
++	QuantumKeyInstalledAt string
++	QuantumKeyExpiresAt   string
+ }
+ 
+ // GetIPv6 returns the IPv6 address of the peer

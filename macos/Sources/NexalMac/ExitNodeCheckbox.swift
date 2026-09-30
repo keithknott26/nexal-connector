@@ -10,9 +10,21 @@ struct ExitNodeCheckbox: View {
         storageGateway ? NetworkService.storageExitRoute : model.peerExitRoutes[peer.id]
     }
 
-    var body: some View {
+    /// Offered only when it can be used (or is in use, so it can be turned off).
+    private var available: Bool {
         let selected = route != nil && model.exitRoute == route
-        VStack(alignment: .leading, spacing: 2) {
+        if selected { return true }
+        guard peer.lifecycle == "connected" else { return false }
+        return !storageGateway || model.availableExitRoutes.contains(NetworkService.storageExitRoute)
+    }
+
+    var body: some View {
+        if available { content }
+    }
+
+    private var content: some View {
+        let selected = route != nil && model.exitRoute == route
+        return VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: Binding(
                 get: { selected },
                 set: { on in Task { await model.setPeerExitRoute(peer, storageGateway: storageGateway, enabled: on) } }
@@ -22,8 +34,7 @@ struct ExitNodeCheckbox: View {
             .toggleStyle(.checkbox)
             // A selected offline peer can always be deselected. Ordinary peers
             // no longer require a nonexistent pre-created route to enable setup.
-            .disabled(model.exitRouteBusy || (!selected && peer.lifecycle != "connected") ||
-                      (!selected && storageGateway && !model.availableExitRoutes.contains(NetworkService.storageExitRoute)))
+            .disabled(model.exitRouteBusy)
             if let status = model.exitRouteStatus[peer.id] {
                 Text(status).font(.caption2).foregroundStyle(.secondary)
             } else if selected {

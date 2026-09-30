@@ -274,7 +274,7 @@ struct NetworkPanel: View {
                             exitNodeCheckbox(peer)
                         }
                     }
-                    detailSection("System") {
+                    collapsibleSection("System") {
                         if storage {
                             Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
                                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -360,6 +360,19 @@ struct NetworkPanel: View {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
                 content()
             }
+        }
+    }
+
+    /// Like `detailSection`, but collapsed until the owner opens it.
+    private func collapsibleSection<Content: View>(_ title: String, @ViewBuilder _ content: @escaping () -> Content) -> some View {
+        DisclosureGroup {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+                content()
+            }
+            .padding(.top, 4)
+        } label: {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
         }
     }
 

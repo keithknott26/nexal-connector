@@ -76,7 +76,9 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 	case mesh.LifecycleFailed:
 		report.AuthStage = "failed"
 	}
-	if status.StrictPQReadyAt(now, 2*time.Minute) {
+	// The claim is about the gateway link (see mesh.GatewayPQReadyAt); per-peer links
+	// are reported individually in PeerSecurity below.
+	if status.GatewayPQReadyAt(now, 2*time.Minute) {
 		report.SecurityState = "quantum_protected"
 	} else {
 		switch status.PQ {
@@ -112,8 +114,16 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 	report.LastHandshakeAt = wireTimestamp(peer.LastHandshakeAt)
 	report.LastTrafficAt = wireTimestamp(peer.Traffic.LastAt)
 	if report.SecurityState == "quantum_protected" {
-		report.PQVerifiedAt = wireTimestamp(peer.PQVerifiedAt)
-		report.NegotiatedSecurity = &NegotiatedSecurity{Algorithm: "ML-KEM-1024", Category: 5, Profile: peer.QuantumProfile, VerifiedAt: report.PQVerifiedAt, ExpiresAt: wireTimestamp(peer.PQExpiresAt)}
+		// Evidence comes from the gateway link the claim is about, not the lowest-latency peer.
+		evidence := peer
+		for i := range status.Peers {
+			if mesh.IsGatewayPeer(status.Peers[i].Name) && status.Peers[i].PQ == mesh.PQProtected {
+				evidence = &status.Peers[i]
+				break
+			}
+		}
+		report.PQVerifiedAt = wireTimestamp(evidence.PQVerifiedAt)
+		report.NegotiatedSecurity = &NegotiatedSecurity{Algorithm: "ML-KEM-1024", Category: 5, Profile: evidence.QuantumProfile, VerifiedAt: report.PQVerifiedAt, ExpiresAt: wireTimestamp(evidence.PQExpiresAt)}
 	}
 	if report.SecurityState != "quantum_protected" {
 		report.DetailCode = "strict_pq_evidence_unavailable"

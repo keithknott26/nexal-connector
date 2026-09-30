@@ -12,7 +12,7 @@ import (
 func TestTunnelReportMapsOnlyFreshVerifiedRuntimeEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	status := mesh.Status{Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQProtected, Peers: []mesh.Peer{{
-		ID: "peer", Lifecycle: mesh.LifecycleConnected, Path: mesh.PathRelay, RelayRegion: "New York",
+		ID: "peer", Name: "gw-us-east-1", Lifecycle: mesh.LifecycleConnected, Path: mesh.PathRelay, RelayRegion: "New York",
 		QuantumProfile: "nexal-mlkem1024-tcp-v2", PQExpiresAt: now.Add(3 * time.Minute).Format(time.RFC3339Nano),
 		LatencyMS: 31.4, PacketLossPercent: .2, PQ: mesh.PQProtected, PQVerifiedAt: now.Format(time.RFC3339Nano),
 		LastHandshakeAt: now.Add(-time.Second).Format(time.RFC3339Nano),
@@ -69,19 +69,27 @@ func TestTunnelPathVocabularyIsProviderNeutral(t *testing.T) {
 	}
 }
 
-func TestMixedPeerEvidencePreservesHealthyLinkWithoutGrantingAggregateProtection(t *testing.T) {
+func TestGatewayLinkDecidesHostProtection(t *testing.T) {
 	now := time.Now().UTC()
-	good := mesh.Peer{ID: "ovh", Name: "Storage", Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQProtected, QuantumProfile: "nexal-mlkem1024-tcp-v2", PQVerifiedAt: now.Format(time.RFC3339Nano), PQExpiresAt: now.Add(180 * time.Second).Format(time.RFC3339Nano)}
-	bad := mesh.Peer{ID: "mini", Name: "Mini", Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQUnsupported}
-	report := TunnelReportFromRuntime(mesh.Status{Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQProtected, Peers: []mesh.Peer{good, bad}}, now)
-	if report.SecurityState == "quantum_protected" || report.NegotiatedSecurity != nil {
-		t.Fatal("mixed links granted aggregate protection")
+	evidence := func(p mesh.Peer) mesh.Peer {
+		p.Lifecycle, p.PQ, p.QuantumProfile = mesh.LifecycleConnected, mesh.PQProtected, "nexal-mlkem1024-tcp-v2"
+		p.PQVerifiedAt, p.PQExpiresAt = now.Format(time.RFC3339Nano), now.Add(180*time.Second).Format(time.RFC3339Nano)
+		return p
 	}
-	if len(report.PeerSecurity) != 2 || report.PeerSecurity[0].NegotiatedSecurity == nil || report.PeerSecurity[1].NegotiatedSecurity != nil {
+	gateway := evidence(mesh.Peer{ID: "ovh", Name: "gw-us-east-1"})
+	mini := mesh.Peer{ID: "mini", Name: "mini", Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQUnsupported}
+	report := TunnelReportFromRuntime(mesh.Status{Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQDegraded, Peers: []mesh.Peer{mini, gateway}}, now)
+	if report.SecurityState != "quantum_protected" || report.NegotiatedSecurity == nil || report.DetailCode != "" {
+		t.Fatalf("protected gateway link with an unprotected Mac peer should be protected: %#v", report)
+	}
+	if len(report.PeerSecurity) != 2 || report.PeerSecurity[0].NegotiatedSecurity != nil || report.PeerSecurity[1].NegotiatedSecurity == nil {
 		t.Fatalf("lost per-link evidence: %+v", report.PeerSecurity)
 	}
-	report = TunnelReportFromRuntime(mesh.Status{Peers: []mesh.Peer{good}}, now.Add(121*time.Second))
-	if report.PeerSecurity[0].NegotiatedSecurity != nil {
-		t.Fatal("stale link stayed protected")
+	badGateway := mesh.Peer{ID: "ovh", Name: "gw-us-east-1", Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQUnsupported}
+	macOnly := evidence(mesh.Peer{ID: "m4", Name: "mini"})
+	for name, peers := range map[string][]mesh.Peer{"unprotected gateway": {macOnly, badGateway}, "no gateway": {macOnly}} {
+		if r := TunnelReportFromRuntime(mesh.Status{Lifecycle: mesh.LifecycleConnected, PQ: mesh.PQProtected, Peers: peers}, now); r.SecurityState == "quantum_protected" {
+			t.Fatalf("%s granted host protection", name)
+		}
 	}
 }

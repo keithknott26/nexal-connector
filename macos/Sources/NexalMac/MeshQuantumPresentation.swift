@@ -3,8 +3,12 @@ import Foundation
 /// Labels only evidence from the runtime with an enforced session-generation gate.
 /// An enabled flag, old install-only profile, or stale snapshot cannot earn a label.
 enum MeshQuantumPresentation {
+    /// With several peers, only the neXal gateway links ("gw-…") decide the label, matching
+    /// the connector's host-level claim. A single peer is judged on its own link.
     static func label(peers: [ConnectorStatus.MeshPeer], now: Date = Date()) -> String {
-        guard !peers.isEmpty, peers.allSatisfy({ peer in
+        let gateways = peers.filter { $0.name.lowercased().hasPrefix("gw-") && $0.lifecycle == "connected" }
+        let judged = peers.count == 1 ? peers : gateways
+        guard !judged.isEmpty, judged.allSatisfy({ peer in
             guard peer.pq == "protected", peer.lifecycle == "connected",
                   peer.quantumProfile == "nexal-mlkem1024-tcp-v2",
                   let installed = timestamp(peer.pqVerifiedAt),

@@ -170,7 +170,7 @@ func translateRuntime(out []byte, now time.Time) Status {
 		s.Peers = append(s.Peers, peer)
 	}
 	switch {
-	case len(s.Peers) > 0 && allProtected:
+	case s.GatewayPQReadyAt(now, 2*time.Minute), len(s.Peers) > 0 && allProtected:
 		s.PQ = PQProtected
 	case rs.QuantumResistance && len(s.Peers) == 0:
 		s.PQ = PQNegotiating

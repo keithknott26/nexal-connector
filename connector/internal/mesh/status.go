@@ -166,6 +166,33 @@ func SanitizeSnapshot(s Status) Status {
 	return s
 }
 
+// IsGatewayPeer reports whether a peer is a neXal gateway (storage and exit). The
+// platform enrolls every gateway with the hostname "gw-<region>-<n>"
+// (self-hosted-config/gateway/bootstrap.sh), and the runtime reports that label.
+func IsGatewayPeer(name string) bool {
+	return strings.HasPrefix(strings.ToLower(name), "gw-")
+}
+
+// GatewayPQReadyAt is the host-level post-quantum claim: every connected neXal
+// gateway link carries fresh ML-KEM-1024 evidence, and at least one does. The
+// gateway link is the one that carries backups and exit traffic off the owner's
+// devices; links between the owner's own devices are reported per peer instead
+// and do not change this claim.
+func (s Status) GatewayPQReadyAt(now time.Time, maxAge time.Duration) bool {
+	protected := false
+	for _, peer := range s.Peers {
+		if !IsGatewayPeer(peer.Name) || peer.Lifecycle != LifecycleConnected {
+			continue
+		}
+		verified, valid := validQuantumEvidence(peer.QuantumProfile, peer.PQVerifiedAt, peer.PQExpiresAt, now)
+		if peer.PQ != PQProtected || !valid || now.Sub(verified) > maxAge {
+			return false
+		}
+		protected = true
+	}
+	return protected
+}
+
 func (s Status) StrictPQReady() bool {
 	return s.StrictPQReadyAt(time.Now(), 2*time.Minute)
 }

@@ -751,17 +751,17 @@ struct NetworkPanel: View {
                 }
                 ChartCard(title: "neXal network latency (ms)", caption: ConnectorHistory.networkLatencyCaption,
                           isEmpty: latency.isEmpty,
-                          emptyMessage: "No latency yet: no other Mac is connected.") {
+                          emptyMessage: "No latency yet: nothing else is connected.") {
                     SeriesChart(points: latency, unit: "ms")
                 }
-                ChartCard(title: "Latency per Mac (ms)", caption: ConnectorHistory.peerLatencyCaption,
+                ChartCard(title: "Latency across connections (ms)", caption: ConnectorHistory.peerLatencyCaption,
                           isEmpty: peers.isEmpty,
                           emptyMessage: "No latency data yet.") {
                     SeriesChart(points: peers, unit: "ms")
                 }
-                ChartCard(title: "Traffic in / out (KB/s)", caption: ConnectorHistory.trafficCaption,
+                ChartCard(title: "Total traffic in / out (KB/s)", caption: ConnectorHistory.trafficCaption,
                           isEmpty: traffic.isEmpty,
-                          emptyMessage: "No traffic data yet. It appears shortly after another Mac connects.") {
+                          emptyMessage: "No traffic data yet. It appears shortly after another connection comes up.") {
                     SeriesChart(points: traffic, unit: "KB/s")
                 }
             }

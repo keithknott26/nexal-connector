@@ -145,8 +145,8 @@ struct ChartCard<Content: View>: View {
                 // the card sizes to it and the panel stays scannable.
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             } else {
+                // The chart sets its own plot height and adds its legend below it.
                 content()
-                    .frame(height: PanelMetrics.chartHeight)
                 Text(caption)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -158,9 +158,8 @@ struct ChartCard<Content: View>: View {
 }
 
 /// Activity graph in the style of ScrollableGraphView (as used in the iPhone app):
-/// smooth lines over a soft fill, light reference lines, and a plot you drag sideways
-/// to scroll back. It opens on the newest samples with half the window visible.
-/// Legend labels come from the series name, so it is readable without colour.
+/// smooth lines over a soft fill and light reference lines. Series are aggregates
+/// (never one line per connection), so it stays readable with hundreds of peers.
 struct SeriesChart: View {
     let points: [ConnectorHistory.SeriesPoint]
     let unit: String
@@ -170,18 +169,14 @@ struct SeriesChart: View {
         return peak <= 0 ? 1 : peak * 1.15
     }
 
-    private var span: (start: Date, end: Date)? {
-        guard let first = points.map(\.at).min(), let last = points.map(\.at).max() else { return nil }
-        return (first, last)
-    }
-
-    /// Half the recorded range, at least a minute, so there is always something to scroll to.
-    private var visibleSeconds: TimeInterval {
-        guard let span else { return 60 }
-        return max(60, span.end.timeIntervalSince(span.start) / 2)
-    }
-
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            chart
+            legend
+        }
+    }
+
+    private var chart: some View {
         Chart(points) { point in
             AreaMark(
                 x: .value("Time", point.at),
@@ -215,10 +210,34 @@ struct SeriesChart: View {
                 AxisValueLabel(format: .dateTime.hour().minute()).font(.caption2)
             }
         }
-        .chartScrollableAxes(.horizontal)
-        .chartXVisibleDomain(length: visibleSeconds)
-        .chartScrollPosition(initialX: (span?.end ?? Date()).addingTimeInterval(-visibleSeconds))
+        // A handful of named series at most (see ConnectorHistory); a compact legend
+        // sits outside the fixed-height plot so it can never spill over other cards.
+        .chartLegend(.hidden)
+        .chartForegroundStyleScale(domain: seriesNames, range: Array(Self.palette.prefix(max(1, seriesNames.count))))
+        .frame(height: PanelMetrics.chartHeight)
     }
+
+    private var seriesNames: [String] {
+        var seen = Set<String>()
+        return points.map(\.series).filter { seen.insert($0).inserted }
+    }
+
+    @ViewBuilder private var legend: some View {
+        let names = seriesNames
+        if names.count > 1 {
+            HStack(spacing: 10) {
+                ForEach(Array(names.enumerated()), id: \.element) { index, name in
+                    HStack(spacing: 4) {
+                        Circle().fill(Self.palette[index % Self.palette.count]).frame(width: 7, height: 7)
+                        Text(name).lineLimit(1)
+                    }
+                }
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    static let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal]
 }
 
 /// The pairing code, drawn from the module matrix the Go connector reported.

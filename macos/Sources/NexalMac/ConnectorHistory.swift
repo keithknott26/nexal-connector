@@ -81,14 +81,15 @@ struct ConnectorHistory: Equatable {
     }
 
     static let networkLatencyCaption = """
-        Average round-trip time to the other Macs on your neXal network. \
-        Gaps mean no other Mac was connected.
+        Average round-trip time across your neXal connections. \
+        Gaps mean nothing else was connected.
         """
     static let peerLatencyCaption = """
-        Round-trip time to each Mac, one line per Mac.
+        Fastest, median and slowest round-trip time across your connections. \
+        Each connection's own latency is shown in its row above.
         """
     static let trafficCaption = """
-        Data sent to (out) and received from (in) each Mac, averaged over each interval.
+        Total data received (in) and sent (out) across all connections, averaged over each interval.
         """
 
     /// One point in one chart series.
@@ -190,37 +191,41 @@ struct ConnectorHistory: Equatable {
         }
     }
 
-    /// Latency per peer; the series name is the peer's name.
+    /// Fastest, median and slowest latency across connected peers per poll. Three lines
+    /// however many connections there are; per-connection latency is shown in its row.
     var peerLatencyPoints: [SeriesPoint] {
         var points: [SeriesPoint] = []
         for sample in samples {
-            for peer in sample.peers where peer.connected {
-                guard let latency = peer.latencyMs, latency > 0 else { continue }
-                points.append(SeriesPoint(id: points.count, at: sample.at, series: peer.name, value: latency))
+            let values = sample.peers.filter(\.connected).compactMap(\.latencyMs).filter { $0 > 0 }.sorted()
+            guard let fastest = values.first, let slowest = values.last else { continue }
+            let median = values[values.count / 2]
+            for (series, value) in [("Fastest", fastest), ("Median", median), ("Slowest", slowest)]
+            where values.count > 1 || series == "Median" {
+                points.append(SeriesPoint(id: points.count, at: sample.at, series: series, value: value))
             }
         }
         return points
     }
 
-    /// Transfer rate in KB/s per peer and direction, from the change in the
-    /// cumulative counters between consecutive polls. A counter that went
-    /// backwards (runtime restart) contributes no point rather than a negative.
+    /// Total transfer rate in KB/s, in and out, summed over all peers, from the change
+    /// in cumulative counters between consecutive polls. A peer whose counter went
+    /// backwards (runtime restart) or that just appeared contributes nothing.
     var trafficPoints: [SeriesPoint] {
         var points: [SeriesPoint] = []
         for (previous, sample) in zip(samples, samples.dropFirst()) {
             let seconds = sample.at.timeIntervalSince(previous.at)
             guard seconds > 0 else { continue }
+            let before = Dictionary(previous.peers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            var received: UInt64 = 0, sent: UInt64 = 0, measured = false
             for peer in sample.peers {
-                guard let before = previous.peers.first(where: { $0.id == peer.id }) else { continue }
-                if peer.receivedBytes >= before.receivedBytes {
-                    points.append(SeriesPoint(id: points.count, at: sample.at, series: "\(peer.name) · in",
-                        value: Double(peer.receivedBytes - before.receivedBytes) / 1_000 / seconds))
-                }
-                if peer.sentBytes >= before.sentBytes {
-                    points.append(SeriesPoint(id: points.count, at: sample.at, series: "\(peer.name) · out",
-                        value: Double(peer.sentBytes - before.sentBytes) / 1_000 / seconds))
-                }
+                guard let old = before[peer.id] else { continue }
+                measured = true
+                if peer.receivedBytes >= old.receivedBytes { received &+= peer.receivedBytes - old.receivedBytes }
+                if peer.sentBytes >= old.sentBytes { sent &+= peer.sentBytes - old.sentBytes }
             }
+            guard measured else { continue }
+            points.append(SeriesPoint(id: points.count, at: sample.at, series: "In", value: Double(received) / 1_000 / seconds))
+            points.append(SeriesPoint(id: points.count, at: sample.at, series: "Out", value: Double(sent) / 1_000 / seconds))
         }
         return points
     }

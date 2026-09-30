@@ -134,18 +134,6 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
-            GroupBox("Entitlements") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Button("Full Disk Access…") {
-                        PermissionHelpWindow.shared.showFullDiskAccess()
-                    }
-                    .help("Open a floating guide with the app icon to drag into System Settings.")
-                    Text("Needed for Time Machine backups to neXal storage. Granted in System Settings; neXal never changes it for you.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-            }
             GroupBox("Activity") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Graph time range", selection: $preferences.chartWindowMinutes) {

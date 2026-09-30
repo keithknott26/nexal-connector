@@ -157,10 +157,10 @@ struct ChartCard<Content: View>: View {
     }
 }
 
-/// Step-drawn series, because every value here is the last reported state rather
-/// than a continuously varying signal; interpolating between polls would invent
-/// intermediate values. Legend labels come from the series name, so the chart is
-/// readable without relying on colour.
+/// Activity graph in the style of ScrollableGraphView (as used in the iPhone app):
+/// smooth lines over a soft fill, light reference lines, and a plot you drag sideways
+/// to scroll back. It opens on the newest samples with half the window visible.
+/// Legend labels come from the series name, so it is readable without colour.
 struct SeriesChart: View {
     let points: [ConnectorHistory.SeriesPoint]
     let unit: String
@@ -170,24 +170,54 @@ struct SeriesChart: View {
         return peak <= 0 ? 1 : peak * 1.15
     }
 
+    private var span: (start: Date, end: Date)? {
+        guard let first = points.map(\.at).min(), let last = points.map(\.at).max() else { return nil }
+        return (first, last)
+    }
+
+    /// Half the recorded range, at least a minute, so there is always something to scroll to.
+    private var visibleSeconds: TimeInterval {
+        guard let span else { return 60 }
+        return max(60, span.end.timeIntervalSince(span.start) / 2)
+    }
+
     var body: some View {
         Chart(points) { point in
-            LineMark(
+            AreaMark(
                 x: .value("Time", point.at),
-                y: .value(unit, point.value)
+                yStart: .value(unit, 0),
+                yEnd: .value(unit, point.value),
+                series: .value("Series", point.series)
             )
             .foregroundStyle(by: .value("Series", point.series))
-            .interpolationMethod(.stepEnd)
+            .opacity(0.18)
+            .interpolationMethod(.catmullRom)
+            LineMark(
+                x: .value("Time", point.at),
+                y: .value(unit, point.value),
+                series: .value("Series", point.series)
+            )
+            .foregroundStyle(by: .value("Series", point.series))
+            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .interpolationMethod(.catmullRom)
         }
         .chartYScale(domain: 0...upperBound)
-        .chartYAxisLabel(unit)
-        .chartXAxis {
-            // Clock times along the bottom, so a range is readable at a glance.
-            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
-                AxisGridLine()
-                AxisValueLabel(format: .dateTime.hour().minute())
+        .chartYAxis {
+            AxisMarks(position: .leading, values: [0, upperBound / 2, upperBound]) { value in
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
+                AxisValueLabel {
+                    if let v = value.as(Double.self) { Text("\(v, specifier: v < 10 ? "%.1f" : "%.0f") \(unit)").font(.caption2) }
+                }
             }
         }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                AxisValueLabel(format: .dateTime.hour().minute()).font(.caption2)
+            }
+        }
+        .chartScrollableAxes(.horizontal)
+        .chartXVisibleDomain(length: visibleSeconds)
+        .chartScrollPosition(initialX: (span?.end ?? Date()).addingTimeInterval(-visibleSeconds))
     }
 }
 

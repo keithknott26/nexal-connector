@@ -1,6 +1,7 @@
 #!/bin/bash
-# Rebuilds only the Go `nexal` helper and swaps it into the installed app, keeping
-# the app's existing nexal-network runtime. Re-signs the helper and the app.
+# Rebuilds the Go `nexal` helper and the Mac app (NexalMac) and swaps them into the
+# installed app, keeping its existing nexal-network runtime (the normal packaging
+# would replace an ML-KEM-1024 runtime with stock NetBird). Re-signs and verifies.
 # Usage: bash macos/scripts/update-helper.sh ["Developer ID Application: …"]
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -16,14 +17,18 @@ for arch in arm64 amd64; do
   (cd "$ROOT/connector" && CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath -ldflags='-s -w' -o "$OUT/nexal-$arch" ./cmd/nexal)
 done
 lipo -create "$OUT/nexal-arm64" "$OUT/nexal-amd64" -output "$OUT/nexal"
+(cd "$ROOT/macos" && swift build --scratch-path "$OUT/swift" -c release --arch arm64 --arch x86_64)
 echo "== install (backup: $OUT/nexal.previous)"
 osascript -e 'quit app "neXal@home"' 2>/dev/null || true
 osascript -e 'quit app "neXal-Connector"' 2>/dev/null || true
 sleep 2
 cp "$APP/Contents/Helpers/nexal" "$OUT/nexal.previous"
+cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
 sudo install -m 755 "$OUT/nexal" "$APP/Contents/Helpers/nexal"
+sudo install -m 755 "$OUT/swift/out/Products/Release/NexalMac" "$APP/Contents/MacOS/NexalMac"
 sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
+sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 open "$APP"
-echo "Done. Roll back with: sudo install -m 755 $OUT/nexal.previous $APP/Contents/Helpers/nexal (then re-run the two codesign lines)"
+echo "Done. Previous binaries kept in $OUT (nexal.previous, NexalMac.previous) for rollback."

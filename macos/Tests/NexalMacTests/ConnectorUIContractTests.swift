@@ -16,7 +16,7 @@ final class ConnectorUIContractTests: XCTestCase {
         XCTAssertTrue(text.contains("Show pairing code"))
         XCTAssertTrue(text.contains("Pair manually"))
         XCTAssertTrue(text.contains("tap Pair manually"))
-        XCTAssertTrue(text.contains("Your Macs"))
+        XCTAssertTrue(text.contains("Your connections"))
         XCTAssertTrue(text.contains("Activity graphs"))
         XCTAssertTrue(text.contains("Post-quantum protection"))
         XCTAssertTrue(text.contains("neXal cloud route"))

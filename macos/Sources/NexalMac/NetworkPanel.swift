@@ -143,20 +143,12 @@ struct NetworkPanel: View {
                 Label("Connected to the neXal@home network", systemImage: "checkmark.circle.fill")
                     .font(.title3.weight(.semibold)).foregroundStyle(.green)
             }
-            if let mesh = model.status?.mesh {
-                meshSummary(mesh)
-            } else {
-                status(network.tunnel)
-                LabeledContent("Quantum type", value: "Not reported")
-                Text("Connection details are not available yet.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
             Divider()
-            Text("Your Macs").font(.subheadline.weight(.semibold))
+            Text("Your connections").font(.subheadline.weight(.semibold))
             if let peers = model.status?.mesh?.peers, !peers.isEmpty {
                 ForEach(peers) { peer in host(peer) }
             } else if network.peers.isEmpty {
-                Text("No other Macs are connected yet.").font(.caption).foregroundStyle(.secondary)
+                Text("No other connections yet.").font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(network.peers) { peer in
                     HStack(alignment: .top, spacing: 8) {
@@ -238,25 +230,6 @@ struct NetworkPanel: View {
             .background(color(phase.severity).opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
             .accessibilityIdentifier("leave-status")
         }
-    }
-
-    private func meshSummary(_ mesh: ConnectorStatus.MeshStatus) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            LabeledContent("Connection") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(lifecycleText(mesh.lifecycle))") }
-            LabeledContent("Post-quantum protection") { pqText(mesh.pq) }
-            LabeledContent("Quantum type") { quantumType(mesh.peers) }
-            LabeledContent("Network path", value: pathSummary(mesh.peers))
-            if let step = mesh.authenticationStep, !step.isEmpty {
-                LabeledContent("Current step", value: humanized(step))
-            }
-            if let updated = mesh.updatedAt, !updated.isEmpty {
-                Text("Updated \(friendlyTime(updated))").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .font(.caption)
-        .padding(12)
-        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityIdentifier("mesh-summary")
     }
 
     private func host(_ peer: ConnectorStatus.MeshPeer) -> some View {

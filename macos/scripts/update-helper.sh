@@ -19,8 +19,12 @@ done
 lipo -create "$OUT/nexal-arm64" "$OUT/nexal-amd64" -output "$OUT/nexal"
 (cd "$ROOT/macos" && swift build --scratch-path "$OUT/swift" -c release --arch arm64 --arch x86_64)
 echo "== install (backup: $OUT/nexal.previous)"
-osascript -e 'quit app "neXal@home"' 2>/dev/null || true
-osascript -e 'quit app "neXal-Connector"' 2>/dev/null || true
+# Quit the app and stop its connector agent: a running process keeps the old code
+# in memory even after the file on disk is replaced.
+osascript -e 'tell application id "systems.nexal.connector" to quit' 2>/dev/null || true
+sleep 2
+pkill -x NexalMac 2>/dev/null || true
+pkill -f "$APP/Contents/Helpers/nexal run" 2>/dev/null || true
 sleep 2
 cp "$APP/Contents/Helpers/nexal" "$OUT/nexal.previous"
 cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"

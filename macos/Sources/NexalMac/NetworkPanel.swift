@@ -8,6 +8,8 @@ struct NetworkPanel: View {
     var showSettings: () -> Void = {}
     var showAbout: () -> Void = {}
     @EnvironmentObject private var preferences: ConnectorPreferences
+    /// Sharing services listening on this Mac, checked when its row is opened.
+    @State private var localServices: LocalServiceProbe.Result?
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -144,6 +146,7 @@ struct NetworkPanel: View {
             }
             Divider()
             Text("Your connections").font(.subheadline.weight(.semibold))
+            if let mesh = model.status?.mesh { thisMac(mesh) }
             if let peers = model.status?.mesh?.peers, !peers.isEmpty {
                 ForEach(peers) { peer in host(peer) }
             } else if network.peers.isEmpty {
@@ -361,6 +364,63 @@ struct NetworkPanel: View {
                 content()
             }
         }
+    }
+
+    /// This Mac, first in the list: its own connection, its post-quantum claim (which
+    /// follows the neXal gateway link) and the services it offers to the others.
+    private func thisMac(_ mesh: ConnectorStatus.MeshStatus) -> some View {
+        let gateway = mesh.peers.first { isStorageGateway($0) && $0.lifecycle == "connected" }
+        let protected = mesh.pq == "protected"
+        return DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                detailSection("Connection") {
+                    detailRow("Status") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(lifecycleText(mesh.lifecycle))") }
+                    detailRow("Path") { Text(pathSummary(mesh.peers)) }
+                    if let step = mesh.authenticationStep, !step.isEmpty {
+                        detailRow("Current step") { Text(humanized(step)) }
+                    }
+                    if let updated = mesh.updatedAt, !updated.isEmpty {
+                        detailRow("Updated") { Text(friendlyTime(updated)) }
+                    }
+                }
+                detailSection("Security") {
+                    detailRow("Post-quantum protection") { pqText(mesh.pq) }
+                    detailRow("Quantum type") { quantumType(mesh.peers) }
+                    if let gateway, let verified = lastVerified(gateway) {
+                        detailRow("Last verified") { Text(verified.relative).help(verified.exact) }
+                    }
+                    Text("Based on this Mac's link to neXal storage.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                detailSection("Services") {
+                    detailRow("Remote Login (SSH)") { serviceState(localServices?.remoteLogin) }
+                    detailRow("Screen Sharing") { serviceState(localServices?.screenSharing) }
+                    detailRow("File Sharing") { serviceState(localServices?.fileSharing) }
+                }
+            }
+            .font(.caption)
+            .padding(.top, 6)
+            .padding(.leading, Self.hostDetailIndent)
+            .task { localServices = await LocalServiceProbe.run() }
+        } label: {
+            HStack(alignment: .top, spacing: Self.hostDotSpacing) {
+                Circle().fill(mesh.lifecycle == "connected" ? Color.green : Color.orange)
+                    .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("\(model.hostName) (this Mac)").font(.body.weight(.semibold))
+                        if protected { Text("· 🔐").help("Quantum-safe link to neXal storage") }
+                    }
+                    Text(lifecycleText(mesh.lifecycle)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("this-mac")
+    }
+
+    private func serviceState(_ on: Bool?) -> some View {
+        Text(on == nil ? "Checking…" : on == true ? "On" : "Off")
+            .foregroundStyle(on == true ? .primary : .secondary)
     }
 
     /// Like `detailSection`, but collapsed until the owner opens it.

@@ -1,0 +1,427 @@
+diff -ruN nbp/client/iface/device/device_filter.go nbq/client/iface/device/device_filter.go
+--- a/client/iface/device/device_filter.go	2026-09-30 02:32:05.588009639 +0000
++++ b/client/iface/device/device_filter.go	2026-09-30 02:33:20.478009675 +0000
+@@ -49,6 +49,9 @@
+ 	// panicHandler is invoked after a panic in the underlying device is
+ 	// recovered in Read or Write.
+ 	panicHandler atomic.Pointer[func()]
++	// inboundHook sees decrypted packets before the OS does; returning true
++	// consumes the packet (neXal: in-process ML-KEM control stack on iOS).
++	inboundHook atomic.Pointer[func([]byte) bool]
+ 	mutex        sync.RWMutex
+ 	closeOnce    sync.Once
+ }
+@@ -116,15 +119,18 @@
+ 	d.mutex.RLock()
+ 	filter := d.filter
+ 	d.mutex.RUnlock()
++	hook := d.inboundHook.Load()
+ 
+-	if filter == nil {
++	if filter == nil && hook == nil {
+ 		return d.deviceWrite(bufs, offset)
+ 	}
+ 
+ 	filteredBufs := make([][]byte, 0, len(bufs))
+ 	dropped := 0
+ 	for _, buf := range bufs {
+-		if filter.FilterInbound(buf[offset:], len(buf)) {
++		if hook != nil && (*hook)(buf[offset:]) {
++			dropped++
++		} else if filter != nil && filter.FilterInbound(buf[offset:], len(buf)) {
+ 			dropped++
+ 		} else {
+ 			filteredBufs = append(filteredBufs, buf)
+@@ -171,6 +177,16 @@
+ 	}
+ }
+ 
++// SetInboundHook installs (or with nil removes) a hook that may consume decrypted
++// packets before they reach the OS.
++func (d *FilteredDevice) SetInboundHook(hook func([]byte) bool) {
++	if hook == nil {
++		d.inboundHook.Store(nil)
++		return
++	}
++	d.inboundHook.Store(&hook)
++}
++
+ // SetFilter sets packet filter to device
+ func (d *FilteredDevice) SetFilter(filter PacketFilter) {
+ 	d.mutex.Lock()
+diff -ruN nbp/client/internal/rosenpass/control.go nbq/client/internal/rosenpass/control.go
+--- a/client/internal/rosenpass/control.go	1970-01-01 00:00:00.000000000 +0000
++++ b/client/internal/rosenpass/control.go	2026-09-30 02:33:20.480009675 +0000
+@@ -0,0 +1,8 @@
++package rosenpass
++
++// controlTransport replaces the OS sockets of the ML-KEM control channel where the
++// OS cannot route them through the tunnel (iOS). nil means OS sockets are used.
++type controlTransport interface {
++	Attach(iface any) error
++	Close()
++}
+diff -ruN nbp/client/internal/rosenpass/control_ios.go nbq/client/internal/rosenpass/control_ios.go
+--- a/client/internal/rosenpass/control_ios.go	1970-01-01 00:00:00.000000000 +0000
++++ b/client/internal/rosenpass/control_ios.go	2026-09-30 02:33:20.480009675 +0000
+@@ -0,0 +1,291 @@
++//go:build ios
++
++package rosenpass
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"math/rand"
++	"net"
++	"net/netip"
++	"sync"
++
++	log "github.com/sirupsen/logrus"
++	"gvisor.dev/gvisor/pkg/buffer"
++	"gvisor.dev/gvisor/pkg/tcpip"
++	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
++	"gvisor.dev/gvisor/pkg/tcpip/header"
++	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
++	"gvisor.dev/gvisor/pkg/tcpip/stack"
++	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
++
++	rp "cunicu.li/go-rosenpass"
++	"github.com/netbirdio/netbird/client/iface/device"
++	"github.com/netbirdio/netbird/client/iface/wgaddr"
++	wgdevice "golang.zx2c4.com/wireguard/device"
++)
++
++// On iOS a Network Extension's own sockets never use its own tunnel, so the ML-KEM
++// control connections (which run between WireGuard tunnel addresses) cannot use OS
++// sockets. This transport runs them on a private userspace TCP/IP stack bound to
++// the tunnel address instead:
++//
++//   - packets decrypted by WireGuard for our control ports are taken off the path
++//     to the OS (FilteredDevice inbound hook) and delivered to the stack;
++//   - packets the stack sends are handed straight to WireGuard for encryption
++//     (Device.InjectOutbound), where the quantum gate still applies.
++//
++// Only TCP to our listen port, or to ports of connections we dialled, is diverted.
++// Everything else is untouched. Envelope authentication is unchanged.
++type iosControl struct {
++	mu        sync.Mutex
++	port      uint16
++	s         *stack.Stack
++	ep        *controlLink
++	listener  *gonet.TCPListener
++	local     netip.Addr
++	filtered  *device.FilteredDevice
++	dialPorts map[uint16]bool
++	ready     chan struct{}
++	closed    chan struct{}
++	closeOnce sync.Once
++}
++
++type controlInterface interface {
++	Address() wgaddr.Address
++	MTU() uint16
++	GetDevice() *device.FilteredDevice
++	GetWGDevice() *wgdevice.Device
++}
++
++func newControlTransport(conn *rp.TCPConn) controlTransport {
++	c := &iosControl{
++		// Ephemeral range; the stack is private to this process, so no OS port clash.
++		port:      uint16(49152 + rand.Intn(16000)),
++		dialPorts: map[uint16]bool{},
++		ready:     make(chan struct{}),
++		closed:    make(chan struct{}),
++	}
++	conn.Listen = func(network, _ string) (net.Listener, error) {
++		if network != "tcp" {
++			return nil, fmt.Errorf("unsupported control network %q", network)
++		}
++		return &lazyListener{c: c}, nil
++	}
++	conn.DialContext = c.dial
++	return c
++}
++
++// Attach binds the stack to the tunnel once the WireGuard interface exists.
++func (c *iosControl) Attach(iface any) error {
++	ci, ok := iface.(controlInterface)
++	if !ok {
++		return errors.New("ML-KEM control: interface does not expose the userspace device")
++	}
++	wg, filtered := ci.GetWGDevice(), ci.GetDevice()
++	if wg == nil || filtered == nil {
++		return errors.New("ML-KEM control: userspace WireGuard device unavailable")
++	}
++	local := ci.Address().IP.Unmap()
++	if !local.Is4() {
++		return errors.New("ML-KEM control: IPv4 tunnel address required")
++	}
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	select {
++	case <-c.ready:
++		return nil // already attached
++	case <-c.closed:
++		return net.ErrClosed
++	default:
++	}
++	s := stack.New(stack.Options{
++		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol},
++		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol},
++	})
++	ep := &controlLink{wg: wg}
++	ep.mtu = uint32(ci.MTU())
++	if ep.mtu == 0 {
++		ep.mtu = 1280
++	}
++	const nic = tcpip.NICID(1)
++	if err := s.CreateNIC(nic, ep); err != nil {
++		s.Close()
++		return fmt.Errorf("ML-KEM control NIC: %v", err)
++	}
++	addr := tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber,
++		AddressWithPrefix: tcpip.AddressWithPrefix{Address: tcpip.AddrFromSlice(local.AsSlice()), PrefixLen: 32}}
++	if err := s.AddProtocolAddress(nic, addr, stack.AddressProperties{}); err != nil {
++		s.Close()
++		return fmt.Errorf("ML-KEM control address: %v", err)
++	}
++	any4, _ := tcpip.NewSubnet(tcpip.AddrFrom4([4]byte{}), tcpip.MaskFromBytes([]byte{0, 0, 0, 0}))
++	s.SetRouteTable([]tcpip.Route{{Destination: any4, NIC: nic}})
++	l, err := gonet.ListenTCP(s, tcpip.FullAddress{NIC: nic, Addr: addr.AddressWithPrefix.Address, Port: c.port}, ipv4.ProtocolNumber)
++	if err != nil {
++		s.Close()
++		return fmt.Errorf("ML-KEM control listen: %w", err)
++	}
++	c.s, c.ep, c.listener, c.local, c.filtered = s, ep, l, local, filtered
++	filtered.SetInboundHook(c.divert)
++	close(c.ready)
++	log.Infof("ML-KEM control: in-tunnel TCP stack on %s:%d", local, c.port)
++	return nil
++}
++
++// divert takes ownership of inbound control packets. Returns true when consumed.
++func (c *iosControl) divert(packet []byte) bool {
++	if len(packet) < 40 || packet[0] != 0x45 || packet[9] != 6 {
++		return false
++	}
++	if netip.AddrFrom4([4]byte(packet[16:20])) != c.local {
++		return false
++	}
++	dport := uint16(packet[22])<<8 | uint16(packet[23])
++	c.mu.Lock()
++	ours := dport == c.port || c.dialPorts[dport]
++	ep := c.ep
++	c.mu.Unlock()
++	if !ours || ep == nil || ep.dispatcher == nil {
++		return false
++	}
++	// WireGuard reuses its buffers; the stack needs its own copy.
++	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(append([]byte(nil), packet...))})
++	ep.dispatcher.DeliverNetworkPacket(ipv4.ProtocolNumber, pkt)
++	pkt.DecRef()
++	return true
++}
++
++func (c *iosControl) dial(ctx context.Context, network, address string) (net.Conn, error) {
++	select {
++	case <-c.ready:
++	case <-c.closed:
++		return nil, net.ErrClosed
++	case <-ctx.Done():
++		return nil, ctx.Err()
++	}
++	ap, err := netip.ParseAddrPort(address)
++	if err != nil {
++		return nil, err
++	}
++	// Reserve the local port before the SYN leaves, so the SYN-ACK is diverted.
++	c.mu.Lock()
++	var port uint16
++	for i := 0; i < 64; i++ {
++		p := uint16(49152 + rand.Intn(16000))
++		if p != c.port && !c.dialPorts[p] {
++			port = p
++			break
++		}
++	}
++	if port == 0 {
++		c.mu.Unlock()
++		return nil, errors.New("ML-KEM control: no free local port")
++	}
++	c.dialPorts[port] = true
++	s, local := c.s, c.local
++	c.mu.Unlock()
++	release := func() { c.mu.Lock(); delete(c.dialPorts, port); c.mu.Unlock() }
++	conn, err := gonet.DialTCPWithBind(ctx, s,
++		tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(local.AsSlice()), Port: port},
++		tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(ap.Addr().Unmap().AsSlice()), Port: ap.Port()},
++		ipv4.ProtocolNumber)
++	if err != nil {
++		release()
++		return nil, err
++	}
++	return &releasingConn{TCPConn: conn, release: release}, nil
++}
++
++func (c *iosControl) Close() {
++	c.closeOnce.Do(func() {
++		close(c.closed)
++		c.mu.Lock()
++		defer c.mu.Unlock()
++		if c.filtered != nil {
++			c.filtered.SetInboundHook(nil)
++		}
++		if c.listener != nil {
++			c.listener.Close()
++		}
++		if c.s != nil {
++			c.s.Close()
++		}
++		c.ep = nil
++	})
++}
++
++type releasingConn struct {
++	*gonet.TCPConn
++	once    sync.Once
++	release func()
++}
++
++func (r *releasingConn) Close() error {
++	err := r.TCPConn.Close()
++	r.once.Do(r.release)
++	return err
++}
++
++// lazyListener exists before the tunnel does: the rosenpass server opens its
++// transport before NetBird attaches the WireGuard interface.
++type lazyListener struct{ c *iosControl }
++
++func (l *lazyListener) Accept() (net.Conn, error) {
++	select {
++	case <-l.c.ready:
++	case <-l.c.closed:
++		return nil, net.ErrClosed
++	}
++	l.c.mu.Lock()
++	inner := l.c.listener
++	l.c.mu.Unlock()
++	if inner == nil {
++		return nil, net.ErrClosed
++	}
++	return inner.Accept()
++}
++func (l *lazyListener) Close() error { l.c.Close(); return nil }
++func (l *lazyListener) Addr() net.Addr {
++	return &net.TCPAddr{IP: net.IPv6unspecified, Port: int(l.c.port)}
++}
++
++// controlLink hands the stack's outgoing IP packets to WireGuard for encryption.
++type controlLink struct {
++	dispatcher stack.NetworkDispatcher
++	wg         *wgdevice.Device
++	mtu        uint32
++}
++
++func (e *controlLink) Attach(d stack.NetworkDispatcher)                { e.dispatcher = d }
++func (e *controlLink) IsAttached() bool                                { return e.dispatcher != nil }
++func (e *controlLink) MTU() uint32                                     { return e.mtu }
++func (e *controlLink) Capabilities() stack.LinkEndpointCapabilities    { return stack.CapabilityNone }
++func (e *controlLink) MaxHeaderLength() uint16                         { return 0 }
++func (e *controlLink) LinkAddress() tcpip.LinkAddress                  { return "" }
++func (e *controlLink) Wait()                                           {}
++func (e *controlLink) ARPHardwareType() header.ARPHardwareType         { return header.ARPHardwareNone }
++func (e *controlLink) AddHeader(*stack.PacketBuffer)                   {}
++func (e *controlLink) ParseHeader(*stack.PacketBuffer) bool            { return true }
++func (e *controlLink) Close()                                          {}
++func (e *controlLink) SetLinkAddress(tcpip.LinkAddress)                {}
++func (e *controlLink) SetMTU(mtu uint32)                               { e.mtu = mtu }
++func (e *controlLink) SetOnCloseAction(func())                         {}
++func (e *controlLink) WritePackets(pkts stack.PacketBufferList) (int, tcpip.Error) {
++	written := 0
++	for _, pkt := range pkts.AsSlice() {
++		data := stack.PayloadSince(pkt.NetworkHeader())
++		if data == nil {
++			continue
++		}
++		raw := append([]byte(nil), data.AsSlice()...)
++		data.Release()
++		if err := e.wg.InjectOutbound(raw); err != nil {
++			log.Tracef("ML-KEM control: outbound packet not sent: %v", err)
++			continue
++		}
++		written++
++	}
++	return written, nil
++}
+diff -ruN nbp/client/internal/rosenpass/control_other.go nbq/client/internal/rosenpass/control_other.go
+--- a/client/internal/rosenpass/control_other.go	1970-01-01 00:00:00.000000000 +0000
++++ b/client/internal/rosenpass/control_other.go	2026-09-30 02:33:20.481009675 +0000
+@@ -0,0 +1,8 @@
++//go:build !ios
++
++package rosenpass
++
++import rp "cunicu.li/go-rosenpass"
++
++// Outside iOS the control connections use ordinary sockets over the tunnel.
++func newControlTransport(*rp.TCPConn) controlTransport { return nil }
+diff -ruN nbp/client/internal/rosenpass/manager.go nbq/client/internal/rosenpass/manager.go
+--- a/client/internal/rosenpass/manager.go	2026-09-30 02:32:06.349009640 +0000
++++ b/client/internal/rosenpass/manager.go	2026-09-30 02:33:20.477009675 +0000
+@@ -51,6 +51,7 @@
+ 	port             int
+ 	wgIface          PresharedKeySetter
+ 	tcpConn          *rp.TCPConn
++	control          controlTransport
+ 	controlEndpoints map[string]*net.UDPAddr
+ }
+ 
+@@ -283,6 +284,7 @@
+ 	}
+ 
+ 	tcpConn := rp.NewTCPConn("[::]:0")
++	control := newControlTransport(tcpConn)
+ 	server, err := rp.NewTCPServer(conf, tcpConn)
+ 	if err != nil {
+ 		return err
+@@ -291,6 +293,12 @@
+ 	m.lock.Lock()
+ 	m.server = server
+ 	m.tcpConn = tcpConn
++	m.control = control
++	if control != nil && m.wgIface != nil {
++		if err := control.Attach(m.wgIface); err != nil {
++			log.Errorf("ML-KEM control transport: %v", err)
++		}
++	}
+ 	endpoints, err := tcpConn.LocalEndpoints()
+ 	if err != nil {
+ 		m.lock.Unlock()
+@@ -312,7 +320,12 @@
+ 	server := m.server
+ 	m.rpWgHandler.SetInterface(nil)
+ 	m.server = nil
++	control := m.control
++	m.control = nil
+ 	m.lock.Unlock()
++	if control != nil {
++		control.Close()
++	}
+ 	if server == nil {
+ 		return nil
+ 	}
+@@ -334,6 +347,11 @@
+ 	if m.rpWgHandler != nil {
+ 		m.rpWgHandler.SetInterface(iface)
+ 	}
++	if m.control != nil && iface != nil {
++		if err := m.control.Attach(iface); err != nil {
++			log.Errorf("ML-KEM control transport: %v", err)
++		}
++	}
+ }
+ 
+ // OnConnected is a handler function that is triggered when a connection to a remote peer establishes

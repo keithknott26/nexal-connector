@@ -36,6 +36,10 @@ for name, source in [('netbird', opts.netbird_source), ('rosenpass', opts.rosenp
     subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / f'{name}-mlkem1024.patch')], cwd=destination, check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-health-budget.patch')], cwd=opts.output / 'netbird', check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpass-retry.patch')], cwd=opts.output / 'rosenpass', check=True)
+# iOS: run the ML-KEM control channel on an in-process stack inside the tunnel,
+# because a Network Extension's own sockets never use its own tunnel. No-op elsewhere.
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'wireguard-inject.patch')], cwd=opts.output / 'wireguard', check=True)
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-ios-control.patch')], cwd=opts.output / 'netbird', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'

@@ -1,0 +1,55 @@
+diff -ruN wgp/device/nexal_inject.go wgq/device/nexal_inject.go
+--- a/device/nexal_inject.go	1970-01-01 00:00:00.000000000 +0000
++++ b/device/nexal_inject.go	2026-09-30 02:33:33.405009681 +0000
+@@ -0,0 +1,51 @@
++package device
++
++import (
++	"errors"
++	"net"
++
++	"golang.org/x/net/ipv4"
++	"golang.org/x/net/ipv6"
++)
++
++// InjectOutbound queues one plaintext IP packet for encryption exactly as if it had
++// been read from the TUN device: peer lookup by destination, staging, and the
++// normal send path (including the neXal quantum gate). neXal uses it on iOS, where
++// the Network Extension's own control traffic cannot be routed through the OS.
++func (device *Device) InjectOutbound(packet []byte) error {
++	if device.isClosed() {
++		return errors.New("device closed")
++	}
++	if len(packet) == 0 || len(packet) > MaxContentSize {
++		return errors.New("invalid packet size")
++	}
++	var peer *Peer
++	switch packet[0] >> 4 {
++	case 4:
++		if len(packet) < ipv4.HeaderLen {
++			return errors.New("short IPv4 packet")
++		}
++		peer = device.allowedips.Lookup(packet[IPv4offsetDst : IPv4offsetDst+net.IPv4len])
++	case 6:
++		if len(packet) < ipv6.HeaderLen {
++			return errors.New("short IPv6 packet")
++		}
++		peer = device.allowedips.Lookup(packet[IPv6offsetDst : IPv6offsetDst+net.IPv6len])
++	default:
++		return errors.New("unknown IP version")
++	}
++	if peer == nil {
++		return errors.New("no peer for destination")
++	}
++	if !peer.isRunning.Load() {
++		return errors.New("peer not running")
++	}
++	elem := device.NewOutboundElement()
++	n := copy(elem.buffer[MessageTransportHeaderSize:], packet)
++	elem.packet = elem.buffer[MessageTransportHeaderSize : MessageTransportHeaderSize+n]
++	container := device.GetOutboundElementsContainer()
++	container.elems = append(container.elems, elem)
++	peer.StagePackets(container)
++	peer.SendStagedPackets()
++	return nil
++}

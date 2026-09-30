@@ -9,7 +9,7 @@ struct MeshStatusView: View {
             Label(mesh.lifecycle == "connected" ? "Connected" : "Not connected", systemImage: mesh.pq == "protected" ? "lock.shield.fill" : "network")
                 .font(.subheadline.weight(.semibold))
             if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
-            Text(mesh.pq == "protected" ? "Quantum-safe protection active" : "Quantum-safe protection not confirmed")
+            Text(mesh.pq == "protected" ? "Level 5 · quantum-safe link to neXal Storage" : mesh.lifecycle == "connected" ? "Encrypted" : "Waiting to connect")
                 .font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
             LabeledContent("Quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
                 .font(.caption)

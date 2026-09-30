@@ -3,26 +3,22 @@
 The connector is the trusted Go host component for neXal@home. It joins a Mac or
 Linux computer to the customer's private network, reports verified tunnel and
 route state, enforces host policy, presents approved local services, and provides
-the execution boundary for MCP tools, security monitoring and distributed work.
+the execution boundary for MCP tools, tripwire and honeypot alerts, and the
+owner's own distributed work.
 
 Implemented foundations include secure QR/manual pairing, strict Rosenpass mesh
 startup, tunnel evidence, coordinator-driven access rules, SMB and screen-sharing
 presentation, wide-area discovery contracts, privacy-preserving security baseline
 states, and signed encrypted model/rule bundle verification with anti-rollback.
 
-Direct private-mesh MCP, production Endpoint Security/eBPF collection, live
-multi-site route evidence, distributed compute and CPU paging still require
-integration or physical-host acceptance. CPU paging remains research; it is not
+Direct private-mesh MCP, live multi-site route evidence, distributed compute
+and CPU paging still require integration or physical-host acceptance. CPU paging remains research; it is not
 additional macOS RAM or VRAM.
 
-Suricata network inspection is a required but not-yet-implemented connector
-capability. The Go connector will manage the local sensor, inspect selected PQS
-and/or conventional traffic after tunnel decryption, normalize EVE JSON locally,
-and report payload-free alerts and coverage evidence to the Cloudflare control
-plane. Linux may provide passive IDS and reviewed NFQUEUE/nftables inline IPS;
-macOS uses verified passive capture with Network Extension/Endpoint Security for
-enforcement. Authenticated neXal peer or Cloudflare provenance is event context,
-never a detection bypass. Raw packets do not flow through Workers.
+Security scope is limited to tripwires (Host watermarks: decoy files), an opt-in
+decoy honeypot, and alerts. The connector does not provide antivirus, malware or
+file scanning, process inspection, or network traffic inspection. See
+[FEATURES.md](FEATURES.md#security-contract).
 
 Go is the primary host language. Swift is limited to the native macOS interface.
 The Python MLX adapter under `runtimes/` is an isolated experimental compatibility

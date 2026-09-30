@@ -85,7 +85,7 @@ enum TransportSubsystem: String, CaseIterable {
     var scope: String {
         switch self {
         case .computeCollectives:
-            return "Model data exchanged between Macs running shared AI work."
+            return "Model data exchanged between your paired Macs while they process your AI work."
         case .memoryPager:
             return "Paged memory between Macs, over a separate path that cannot reuse the collective backend."
         }

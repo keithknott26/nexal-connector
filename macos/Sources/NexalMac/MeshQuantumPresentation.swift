@@ -16,7 +16,7 @@ enum MeshQuantumPresentation {
             return installed <= now && now.timeIntervalSince(installed) <= 120 &&
                 expires > now && expires > installed && expires.timeIntervalSince(installed) <= 180
         }) else { return "Not reported" }
-        return "🔐 ML-KEM-1024"
+        return "🔐 Level 5 · ML-KEM-1024"
     }
 
     private static func timestamp(_ text: String?) -> Date? {

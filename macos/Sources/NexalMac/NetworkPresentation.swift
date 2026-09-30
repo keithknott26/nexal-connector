@@ -87,7 +87,7 @@ enum TunnelIndicator: Equatable {
         case .notConfigured:             return "Secure connection not set up"
         case .connecting:                return "Establishing quantum-safe connection…"
         case .quantumSafe:               return "Quantum-safe connection active"
-        case .connectedNotConfirmed:     return "Connected — quantum-safe not confirmed"
+        case .connectedNotConfirmed:     return "Connected · Encrypted"
         case .quarantined:               return "Connection stopped for safety"
         }
     }
@@ -101,7 +101,7 @@ enum TunnelIndicator: Equatable {
         case .quantumSafe(let group):
             return "Protected with hybrid post-quantum key agreement (\(group))."
         case .connectedNotConfirmed:
-            return "Connected and encrypted, but post-quantum key agreement has not been confirmed."
+            return "Connected and encrypted. Post-quantum key agreement has not been confirmed on this connection."
         case .quarantined:
             return "The secure connection reported an unexpected state, so neXal stopped work to stay safe. "
                  + "Quit and reopen neXal@home to try again."
@@ -181,7 +181,7 @@ struct NetworkState: Equatable {
     }
 
     var emptyNote: String? {
-        peers.isEmpty ? "No other Macs linked yet. Pair another Mac with neXal@home on your iPhone." : nil
+        peers.isEmpty ? "No other connections yet. Pair another Mac with neXal@home on your iPhone." : nil
     }
 }
 

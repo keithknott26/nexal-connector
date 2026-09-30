@@ -389,7 +389,7 @@ private struct MenuBarHintView: View {
                 .font(.headline)
             Text(iconHidden
                  ? "Its icon is hidden right now. Turn on neXal@home in System Settings › Menu Bar, or open the app again from Applications."
-                 : "Click this icon in the menu bar at any time to see your network and connected Macs.")
+                 : "Click this icon in the menu bar at any time to see your network and connections.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

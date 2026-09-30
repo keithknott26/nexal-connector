@@ -324,9 +324,9 @@ struct NetworkPanel: View {
                         } else if model.availableExitRoutes.contains(exitRouteID(for: peer)) {
                             Image(systemName: "cloud").help("Can be used as an exit node")
                         }
-                        Text(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "· 🔐" : "· Not quantum-safe")
+                        Text(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "· 🔐" : "· Encrypted")
                             .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
-                            .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe" : "This link is encrypted but not quantum-safe")
+                            .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe (ML-KEM-1024)" : "Encrypted. ML-KEM-1024 key exchange is not confirmed on this link.")
                         if peer.lifecycle == "connected", let latency = peer.latencyMs {
                             Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -655,7 +655,7 @@ struct NetworkPanel: View {
     }
 
     private var quantumProfileExplanation: String {
-        "The algorithm is shown only for connected links that have recently confirmed post-quantum key exchange. Post-quantum support is still being rolled out."
+        "Level 5 means the link to neXal Storage recently confirmed ML-KEM-1024 key exchange (NIST Category 5 parameters). Links between your own devices are shown separately and do not change this Mac's level. Other links are shown as Encrypted."
     }
 
     /// The documentation explains the pinned build profile separately from
@@ -841,6 +841,7 @@ struct NetworkPanel: View {
             Button("Allow Full Disk Access…") {
                 PermissionHelpWindow.shared.showFullDiskAccess()
             }
+            .help("Needed only for Time Machine")
             .accessibilityIdentifier("request-full-disk-access")
             if report.timeMachine.role == "client" && report.timeMachine.enabled {
                 Button("Reveal credentials…") { Task { await model.revealTimeMachineCredentials() } }

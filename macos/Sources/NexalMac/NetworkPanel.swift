@@ -247,14 +247,18 @@ struct NetworkPanel: View {
                     detailRow("Status") { Text("\(lifecycleEmoji(peer.lifecycle)) \(lifecycleText(peer.lifecycle))") }
                     detailRow("Path") { routeText(peer) }
                     if let step = peer.authenticationStep, !step.isEmpty { detailRow("Current step") { Text(humanized(step)) } }
-                    if let latency = peer.latencyMs {
-                        detailRow("Latency") { Text(latency.formatted(.number.precision(.fractionLength(0))) + " ms") }
-                    }
                     if let loss = peer.packetLossPercent {
                         detailRow("Packet loss") { Text(loss.formatted(.number.precision(.fractionLength(1))) + "%") }
                     }
                     detailRow("Traffic") { Text("↑ \(bytes(peer.traffic.sentBytes)) sent · ↓ \(bytes(peer.traffic.receivedBytes)) received") }
                     if let hostname = peer.hostname?.hostname { detailRow("neXal address") { Text(hostname) } }
+                }
+                detailSection("Latency") {
+                    HStack(alignment: .center, spacing: 14) {
+                        // Only a live connection has a current round-trip time.
+                        LatencyGauge(latencyMs: peer.lifecycle == "connected" ? peer.latencyMs : nil)
+                        latencySummary(peer)
+                    }
                 }
                 detailSection("Security") {
                     detailRow("Post-quantum protection") { pqText(effectivePQ(peer.pq, peers: [peer])) }
@@ -361,6 +365,27 @@ struct NetworkPanel: View {
     private func windowed(_ points: [ConnectorHistory.SeriesPoint]) -> [ConnectorHistory.SeriesPoint] {
         let since = Date().addingTimeInterval(-Double(preferences.chartWindowMinutes) * 60)
         return points.filter { $0.at >= since }
+    }
+
+    /// Lowest, mean and highest latency this connection reported over the last five
+    /// minutes of polls, next to its gauge. Says so when there is nothing to summarise.
+    private func latencySummary(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Last 5 min").foregroundStyle(.secondary)
+            if let stats = model.history.latencyStats(forPeer: peer.id) {
+                Text("Min \(milliseconds(stats.min))")
+                Text("Avg \(milliseconds(stats.avg))")
+                Text("Max \(milliseconds(stats.max))")
+            } else {
+                Text("No measurements yet.").foregroundStyle(.secondary)
+            }
+        }
+        .monospacedDigit()
+        .accessibilityElement(children: .combine)
+    }
+
+    private func milliseconds(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0))) + " ms"
     }
 
     /// A titled group of aligned label/value rows inside a host's details.
@@ -816,20 +841,8 @@ struct NetworkPanel: View {
 
     private var activityGraphs: some View {
         DisclosureGroup("Activity graphs") {
-            let latency = windowed(model.history.networkLatencyPoints)
-            let peers = windowed(model.history.peerLatencyPoints)
             let traffic = windowed(model.history.trafficPoints)
             VStack(alignment: .leading, spacing: 14) {
-                ChartCard(title: "neXal network latency (ms)", caption: ConnectorHistory.networkLatencyCaption,
-                          isEmpty: latency.isEmpty,
-                          emptyMessage: "No latency yet: nothing else is connected.") {
-                    SeriesChart(points: latency, unit: "ms")
-                }
-                ChartCard(title: "Latency across connections (ms)", caption: ConnectorHistory.peerLatencyCaption,
-                          isEmpty: peers.isEmpty,
-                          emptyMessage: "No latency data yet.") {
-                    SeriesChart(points: peers, unit: "ms")
-                }
                 ChartCard(title: "Total traffic in / out (KB/s)", caption: ConnectorHistory.trafficCaption,
                           isEmpty: traffic.isEmpty,
                           emptyMessage: "No traffic data yet. It appears shortly after another connection comes up.") {

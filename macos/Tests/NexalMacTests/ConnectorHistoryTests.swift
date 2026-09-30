@@ -141,6 +141,13 @@ final class ConnectorHistoryTests: XCTestCase {
         XCTAssertTrue(ConnectorHistory.throughputUnavailable.contains("No data yet"))
     }
 
+    func testLatencyStatsAreNilWithoutMeasurements() throws {
+        var history = ConnectorHistory()
+        XCTAssertNil(history.latencyStats(forPeer: "peer", since: start))
+        history.record(try status(), at: start)
+        XCTAssertNil(history.latencyStats(forPeer: "peer", since: start))
+    }
+
     func testEveryEmptyChartMessageSaysNoDataYet() {
         XCTAssertTrue(ConnectorHistory.throughputUnavailable.hasPrefix("No data yet"))
     }

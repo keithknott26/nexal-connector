@@ -207,6 +207,20 @@ struct ConnectorHistory: Equatable {
         return points
     }
 
+    /// Lowest, mean and highest measured latency for one connection over the samples
+    /// taken at or after `since`. Only polls where that connection was up and reported
+    /// a positive round-trip time count; nil when there are none, so nothing is invented.
+    func latencyStats(forPeer peerID: String,
+                      since: Date = Date().addingTimeInterval(-5 * 60)) -> (min: Double, avg: Double, max: Double)? {
+        let values = samples.filter { $0.at >= since }.compactMap { sample -> Double? in
+            guard let peer = sample.peers.first(where: { $0.id == peerID }), peer.connected,
+                  let latency = peer.latencyMs, latency > 0 else { return nil }
+            return latency
+        }
+        guard let lowest = values.min(), let highest = values.max() else { return nil }
+        return (min: lowest, avg: values.reduce(0, +) / Double(values.count), max: highest)
+    }
+
     /// Total transfer rate in KB/s, in and out, summed over all peers, from the change
     /// in cumulative counters between consecutive polls. A peer whose counter went
     /// backwards (runtime restart) or that just appeared contributes nothing.

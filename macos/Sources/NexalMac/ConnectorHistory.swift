@@ -230,6 +230,26 @@ struct ConnectorHistory: Equatable {
         return points
     }
 
+    /// One connection's transfer rate in KB/s, in and out, from the change in its
+    /// cumulative counters between consecutive polls.
+    func trafficPoints(forPeer peerID: String) -> [SeriesPoint] {
+        var points: [SeriesPoint] = []
+        for (previous, sample) in zip(samples, samples.dropFirst()) {
+            let seconds = sample.at.timeIntervalSince(previous.at)
+            guard seconds > 0, let now = sample.peers.first(where: { $0.id == peerID }),
+                  let before = previous.peers.first(where: { $0.id == peerID }) else { continue }
+            if now.receivedBytes >= before.receivedBytes {
+                points.append(SeriesPoint(id: points.count, at: sample.at, series: "In",
+                                          value: Double(now.receivedBytes - before.receivedBytes) / 1_000 / seconds))
+            }
+            if now.sentBytes >= before.sentBytes {
+                points.append(SeriesPoint(id: points.count, at: sample.at, series: "Out",
+                                          value: Double(now.sentBytes - before.sentBytes) / 1_000 / seconds))
+            }
+        }
+        return points
+    }
+
     /// Always empty. See `throughputUnavailable`: the field does not exist, so
     /// no line is drawn and no number is invented.
     var throughputPoints: [SeriesPoint] { [] }

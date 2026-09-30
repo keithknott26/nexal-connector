@@ -265,6 +265,14 @@ struct NetworkPanel: View {
                         }
                     }
                 }
+                // This connection's own traffic, same chart style as Activity graphs.
+                let peerTraffic = windowed(model.history.trafficPoints(forPeer: peer.id))
+                ChartCard(title: "Traffic in / out (KB/s)",
+                          caption: "Data received from (in) and sent to (out) this connection.",
+                          isEmpty: peerTraffic.isEmpty,
+                          emptyMessage: "No traffic data yet for this connection.") {
+                    SeriesChart(points: peerTraffic, unit: "KB/s")
+                }
                 detailSection("Services") {
                     advertisedServices(peer)
 

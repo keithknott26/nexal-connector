@@ -140,6 +140,7 @@ func (a *Agent) RefreshConditions(ctx context.Context) {
 		// owner has since changed must not decide anything.
 		return
 	}
+	wasWithholding := a.contributionLocked().Withholding
 	a.conditions = s
 	if a.contributionLocked().Withholding {
 		// Cancel running work for the same reason Refresh does: a machine that
@@ -149,7 +150,12 @@ func (a *Agent) RefreshConditions(ctx context.Context) {
 			a.cancel()
 		}
 	}
-	a.wakeHeartbeatLocked()
+	// Only a change in withholding needs the coordinator told early. Waking on every
+	// probe (every 15 s) doubled the heartbeat rate, since the probe and the heartbeat
+	// ticker run on separate 15 s schedules.
+	if a.contributionLocked().Withholding != wasWithholding {
+		a.wakeHeartbeatLocked()
+	}
 }
 
 // contributionLocked composes the latest platform observation with the owner

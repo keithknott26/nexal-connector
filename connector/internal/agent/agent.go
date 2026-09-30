@@ -102,6 +102,12 @@ type Agent struct {
 	credentialRejectedAt time.Time
 
 	heartbeatWake chan struct{}
+	// Tunnel status rides the heartbeat but is only sent once a minute, or at once when
+	// the tunnel's lifecycle changes. The coordinator treats a report as fresh for two
+	// minutes and samples traffic per minute, so sending it on every 15 s beat only
+	// multiplied writes.
+	lastTunnelReport    time.Time
+	lastTunnelLifecycle string
 	// A consent change fences asynchronous observations started under the old
 	// policy. Per-operation sequence numbers also prevent out-of-order results.
 	stateGeneration     uint64
@@ -714,6 +720,10 @@ func errorText(err error) string {
 // not to fill the coordinator's logs with 401s from a Mac nobody re-paired.
 const credentialRetryInterval = 10 * time.Minute
 
+// tunnelReportInterval is the steady-state tunnel-status cadence. Slightly under a
+// minute so a 15 s heartbeat tick lands on it every fourth beat, not every fifth.
+const tunnelReportInterval = 55 * time.Second
+
 // hostHeartbeatIntervalLocked reduces background coordinator traffic only when
 // job admission is explicitly disabled. Potentially runnable work keeps its
 // existing lease cadence; consent/manual transitions bypass this interval.
@@ -796,10 +806,19 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
 	err := a.api.Heartbeat(ctx, hostID, h)
 	if err == nil && enrolledMesh {
+		lifecycle := string(meshStatus.Lifecycle) + "/" + meshStatus.AuthenticationStep
+		a.mu.Lock()
+		due := time.Since(a.lastTunnelReport) >= tunnelReportInterval || lifecycle != a.lastTunnelLifecycle
+		a.mu.Unlock()
 		if reporter, ok := a.api.(interface {
 			ReportTunnelStatus(context.Context, string, mesh.Status) error
-		}); ok {
+		}); ok && due {
 			err = reporter.ReportTunnelStatus(ctx, hostID, meshStatus)
+			if err == nil {
+				a.mu.Lock()
+				a.lastTunnelReport, a.lastTunnelLifecycle = time.Now(), lifecycle
+				a.mu.Unlock()
+			}
 		}
 	}
 	a.mu.Lock()

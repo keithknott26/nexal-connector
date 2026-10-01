@@ -130,10 +130,16 @@ func AdmitCaps(c Caps, h HostFacts, u Usage, req Size) error {
 	}
 	maxCPU := int(float64(h.CPUs)*c.MaxCPUFraction + 1e-9)
 	if u.CPUs+req.CPUs > maxCPU {
+		if req.CPUs > maxCPU {
+			return refuse(RefuseCPU, "this size needs %d CPUs but this Mac offers at most %d to instances; choose a smaller size", req.CPUs, maxCPU)
+		}
 		return refuse(RefuseCPU, "needs %d CPUs; %d of %d allowed are already in use", req.CPUs, u.CPUs, maxCPU)
 	}
 	maxMem := int(float64(h.MemoryMB)*c.MaxMemFraction + 1e-9)
 	if u.MemoryMB+req.MemoryMB > maxMem {
+		if req.MemoryMB > maxMem {
+			return refuse(RefuseMemory, "this size needs %d MB of memory but this Mac offers at most %d MB to instances; choose a smaller size", req.MemoryMB, maxMem)
+		}
 		return refuse(RefuseMemory, "needs %d MB; %d of %d MB allowed are already in use", req.MemoryMB, u.MemoryMB, maxMem)
 	}
 	if !c.AllowOnBattery {

@@ -183,7 +183,8 @@ final class ThrowawayHosting: ObservableObject {
             local = []
             return
         }
-        local = records.filter { $0.state != "deleted" }
+        // Valid instances only: deleted and failed records stay in state.json for the connector but are not shown.
+        local = records.filter { $0.state != "deleted" && $0.state != "failed" }
     }
 
     static func validID(_ id: String) -> Bool {
@@ -214,7 +215,7 @@ final class ThrowawayHosting: ObservableObject {
         // An older connector without the `sandbox` command simply yields no list.
         guard let data = try? await model.sandbox(action: "list", id: nil, kind: nil),
               let list = try? JSONDecoder().decode(NetworkSandboxList.self, from: data) else { return }
-        network = list.sandboxes ?? []
+        network = (list.sandboxes ?? []).filter { $0.state != "deleted" && $0.state != "failed" }
     }
 
     func connect(_ box: NetworkSandbox, kind: String, model: AppModel) async {

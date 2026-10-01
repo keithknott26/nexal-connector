@@ -159,6 +159,9 @@ func (m *Manager) refreshConfig(ctx context.Context, hostID string) {
 	}
 	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if f, ferr := m.opts.Host.Facts(pctx, m.opts.DataDir); ferr == nil {
+		c.MaxCPUs, c.MaxMemoryMB = offerable(m.Caps(), f)
+	}
 	err = pubr.PutSandboxHosting(pctx, hostID, c)
 	m.mu.Lock()
 	if err == nil {
@@ -734,4 +737,9 @@ func ackIf(cond bool, id string) string {
 		return id
 	}
 	return ""
+}
+
+// offerable is the largest single instance this Mac would admit when idle.
+func offerable(c Caps, f HostFacts) (cpus, memoryMB int) {
+	return int(float64(f.CPUs)*c.MaxCPUFraction + 1e-9), int(float64(f.MemoryMB)*c.MaxMemFraction + 1e-9)
 }

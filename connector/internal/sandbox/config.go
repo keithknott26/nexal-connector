@@ -21,6 +21,11 @@ type HostingConfig struct {
 	Enabled      bool   `json:"enabled"`
 	MaxSandboxes int    `json:"maxSandboxes"`
 	Placement    string `json:"placement"` // "members" | "owner"
+	// MaxCPUs and MaxMemoryMB are what this Mac can offer to ONE instance (host
+	// size x the caps fractions). The connector fills them in when publishing so
+	// the coordinator can refuse sizes that could never be admitted.
+	MaxCPUs     int `json:"maxCpus,omitempty"`
+	MaxMemoryMB int `json:"maxMemoryMb,omitempty"`
 }
 
 // Placement values.

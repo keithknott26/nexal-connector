@@ -158,6 +158,13 @@ func NewManager(o Options) (*Manager, error) {
 
 // SetCaps replaces the per-Mac limits (the owner changed a setting). Running
 // sandboxes are not touched; new tasks see the new limits.
+// Caps returns the current admission caps.
+func (m *Manager) Caps() Caps {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.caps
+}
+
 func (m *Manager) SetCaps(c Caps) {
 	m.mu.Lock()
 	m.caps = c.Normalized()

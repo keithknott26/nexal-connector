@@ -563,6 +563,12 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		return err
 	}
 	opts = append(opts, agent.WithPresence(pres), agent.WithWakeInfo(api))
+	// Throwaway-host runner (macOS only; opt-in via sandbox-hosting.json). Running
+	// VMs are separate launchd jobs, so closing the manager never stops them.
+	if sbx := newSandboxManager(logger); sbx != nil {
+		opts = append(opts, agent.WithSandbox(sbx))
+		defer sbx.Close()
+	}
 	a, err := agent.New(c, *path, api, probe, *pull, opts...)
 	if err != nil {
 		return err

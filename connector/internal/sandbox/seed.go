@@ -23,6 +23,12 @@ type SeedParams struct {
 	SSHPublicKeys []string
 	Desktop       bool
 	DriveWritable bool
+	// v2: per-network SSH CA (installed as TrustedUserCAKeys), scoped drive token,
+	// lifecycle, mesh management URL.
+	SSHCAPublicKey string
+	DriveToken     string
+	Lifecycle      Lifecycle
+	ManagementURL  string
 }
 
 // First-boot protocol. The guest's first-boot script (shipped in the pre-baked
@@ -63,6 +69,20 @@ func ValidateSeed(p SeedParams) error {
 		if !validSSHPublicKey(k) {
 			return errors.New("invalid ssh public key")
 		}
+	}
+	if p.SSHCAPublicKey != "" && !validCAKey(p.SSHCAPublicKey) {
+		return errors.New("invalid ssh ca public key")
+	}
+	if p.DriveToken != "" && !validToken(p.DriveToken) {
+		return errors.New("invalid drive token")
+	}
+	switch p.Lifecycle {
+	case "", LifecyclePersistent, LifecycleEphemeral:
+	default:
+		return errors.New("invalid lifecycle")
+	}
+	if p.ManagementURL != "" && validateV2(Task{ManagementURL: p.ManagementURL}) != nil {
+		return errors.New("invalid management url")
 	}
 	return nil
 }
@@ -128,6 +148,19 @@ func RenderUserData(p SeedParams) string {
 	w("      NEXAL_VNC_PASSWORD=%s\n", p.VNCPassword)
 	w("      NEXAL_DESKTOP=%s\n", boolDigit(p.Desktop))
 	w("      NEXAL_DRIVE_WRITABLE=%s\n", boolDigit(p.DriveWritable))
+	w("      NEXAL_DRIVE_MODE=%s\n", driveMode(p.DriveWritable))
+	w("      NEXAL_DRIVE_TOKEN=%s\n", p.DriveToken)
+	lc := p.Lifecycle
+	if lc == "" {
+		lc = LifecycleEphemeral
+	}
+	w("      NEXAL_LIFECYCLE=%s\n", string(lc))
+	if p.SSHCAPublicKey != "" {
+		w("      NEXAL_SSH_CA='%s'\n", p.SSHCAPublicKey)
+	}
+	if p.ManagementURL != "" {
+		w("      NEXAL_MANAGEMENT_URL=%s\n", p.ManagementURL)
+	}
 	b.WriteString("      NEXAL_SSH_MESH_ONLY=1\n")
 	b.WriteString("      NEXAL_VNC_MESH_ONLY=1\n")
 	b.WriteString("  - path: /etc/ssh/sshd_config.d/10-nexal.conf\n")
@@ -138,6 +171,25 @@ func RenderUserData(p SeedParams) string {
 	b.WriteString("      KbdInteractiveAuthentication no\n")
 	b.WriteString("      PermitRootLogin no\n")
 	b.WriteString("      AllowUsers nexal\n")
+	if p.SSHCAPublicKey != "" {
+		// Members connect with a 10-minute certificate (principal nexal) signed by the
+		// per-network CA; no long-lived member key is distributed.
+		b.WriteString("      TrustedUserCAKeys /etc/ssh/nexal_user_ca.pub\n")
+		b.WriteString("  - path: /etc/ssh/nexal_user_ca.pub\n")
+		b.WriteString("    owner: root:root\n")
+		b.WriteString("    permissions: \"0644\"\n")
+		b.WriteString("    content: |\n")
+		w("      %s\n", p.SSHCAPublicKey)
+	}
+	if p.DriveToken != "" {
+		// The scoped drive token outlives first boot (the mount service needs it);
+		// it expires with the sandbox on the coordinator side.
+		b.WriteString("  - path: /etc/nexal/drive.env\n")
+		b.WriteString("    owner: root:root\n")
+		b.WriteString("    permissions: \"0600\"\n")
+		b.WriteString("    content: |\n")
+		w("      NEXAL_DRIVE_TOKEN=%s\n", p.DriveToken)
+	}
 	b.WriteString("  - path: /etc/systemd/system/nexal-drive.service\n")
 	b.WriteString("    owner: root:root\n")
 	b.WriteString("    permissions: \"0644\"\n")
@@ -151,9 +203,9 @@ func RenderUserData(p SeedParams) string {
 	b.WriteString("      Type=simple\n")
 	b.WriteString("      EnvironmentFile=-/etc/nexal/drive.env\n")
 	if p.DriveWritable {
-		b.WriteString("      ExecStart=/usr/local/bin/nexal drive mount --read-write /mnt/nexal-drive\n")
+		b.WriteString("      ExecStart=/usr/local/bin/nexal drive mount --rw /mnt/nexal-drive\n")
 	} else {
-		b.WriteString("      ExecStart=/usr/local/bin/nexal drive mount --read-only /mnt/nexal-drive\n")
+		b.WriteString("      ExecStart=/usr/local/bin/nexal drive mount --ro /mnt/nexal-drive\n")
 	}
 	b.WriteString("      ExecStop=/bin/umount -l /mnt/nexal-drive\n")
 	b.WriteString("      Restart=on-failure\n")
@@ -168,6 +220,13 @@ func RenderUserData(p SeedParams) string {
 	// NEXAL-FIRSTBOOT line, then shreds first-boot.env).
 	b.WriteString("  - [ sh, -c, \"if [ -x /usr/local/sbin/nexal-first-boot ]; then /usr/local/sbin/nexal-first-boot > /dev/console 2>&1; else echo 'NEXAL-FIRSTBOOT-FAILED no first-boot script in image' > /dev/console; fi\" ]\n")
 	return b.String()
+}
+
+func driveMode(writable bool) string {
+	if writable {
+		return "rw"
+	}
+	return "ro"
 }
 
 func boolDigit(b bool) string {

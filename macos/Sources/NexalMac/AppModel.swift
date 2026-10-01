@@ -314,6 +314,12 @@ final class AppModel: ObservableObject {
         try JSONDecoder().decode(HoneypotReply.self, from: try await invoke(.honeypot(action: action)))
     }
 
+    /// Throwaway hosts on the network and Connect, through the connector (this app has no coordinator client).
+    /// `action` is "list" or "connect"; a public key, when needed, goes in on stdin.
+    func sandbox(action: String, id: String?, kind: String?, input: Data? = nil) async throws -> Data {
+        try await invoke(.sandbox(action: action, id: id, kind: kind), input: input)
+    }
+
     @Published var guestInvitationCode = ""
     @Published private(set) var guestInvitationProblem: String?
     var guestAccess: GuestAccessRecord? { GuestAccessRecord.read(at: selectedConfig) }

@@ -985,6 +985,14 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 	if c, ok := a.api.(sandbox.Coordinator); ok {
 		a.sandbox.BindCoordinator(c)
 	}
+	// Sleep/wake observation (no keep-awake assertion): it suspends and resumes
+	// the hosted sandboxes with the Mac and tells the coordinator awake/asleep.
+	powerDone := make(chan struct{})
+	go func() {
+		defer close(powerDone)
+		a.sandbox.RunPower(ctx)
+	}()
+	defer func() { <-powerDone }()
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for {
@@ -992,9 +1000,10 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := a.sandbox.Poll(ctx, hostID); err != nil && !client.IsNotSupported(err) {
-				a.logger.Debug("sandbox poll failed", "error", errorText(err))
-			}
+		case <-a.sandbox.Nudge(): // just woke: poll and re-report right away
+		}
+		if err := a.sandbox.Poll(ctx, hostID); err != nil && !client.IsNotSupported(err) {
+			a.logger.Debug("sandbox poll failed", "error", errorText(err))
 		}
 	}
 }

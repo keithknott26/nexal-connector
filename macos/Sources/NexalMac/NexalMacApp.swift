@@ -262,6 +262,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
                 entry.target = self
             }
+            let hosting = ThrowawayHosting.shared
+            hosting.reloadLocal()
+            if !hosting.runningHere.isEmpty {
+                menu.addItem(.separator())
+                let info = menu.addItem(withTitle: hosting.runningLine, action: nil, keyEquivalent: "")
+                info.isEnabled = false
+                menu.addItem(withTitle: "Stop throwaway hosts", action: #selector(stopThrowawayHosts), keyEquivalent: "").target = self
+            }
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp
             itemMenu(menu, button: button)
@@ -284,6 +292,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func openConnector() { showWindow() }
+
+    @objc private func stopThrowawayHosts() { ThrowawayHosting.shared.stopAll() }
 
     @objc func showSettings() {
         popover.performClose(nil)

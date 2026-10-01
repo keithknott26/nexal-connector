@@ -10,8 +10,10 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -24,7 +26,37 @@ const (
 	KindCreate Kind = "create"
 	KindReset  Kind = "reset"
 	KindDelete Kind = "delete"
+	// KindVNCPassword sets a one-time VNC password in a running VM (v2 contract).
+	KindVNCPassword Kind = "vnc-password"
+	// KindRejoin carries a fresh one-use mesh key for a sandbox whose mesh peer was
+	// dropped (the Mac slept, or the VM/container was re-created). The runner asks
+	// for it with StateReport.NeedsKey.
+	KindRejoin Kind = "rejoin"
 )
+
+// SandboxKind is what a sandbox is: a full VM or a dev container.
+type SandboxKind string
+
+const (
+	SandboxVM           SandboxKind = "vm"
+	SandboxDevcontainer SandboxKind = "devcontainer"
+)
+
+// Lifecycle is persistent (disk and identity kept, no expiry) or ephemeral
+// (wiped on every restart or stop, expires).
+type Lifecycle string
+
+const (
+	LifecyclePersistent Lifecycle = "persistent"
+	LifecycleEphemeral  Lifecycle = "ephemeral"
+)
+
+// Devcontainer is the dev-container payload: exactly one of the three fields.
+type Devcontainer struct {
+	RepoURL  string `json:"repoUrl,omitempty"`
+	Template string `json:"template,omitempty"`
+	JSON     string `json:"json,omitempty"`
+}
 
 // State is a sandbox lifecycle state; the values are the wire names.
 type State string
@@ -32,6 +64,7 @@ type State string
 const (
 	StateProvisioning State = "provisioning"
 	StateRunning      State = "running"
+	StatePaused       State = "paused" // the host Mac is asleep or its lid is closed
 	StateStopping     State = "stopping"
 	StateDeleted      State = "deleted"
 	StateFailed       State = "failed"
@@ -43,6 +76,8 @@ type Image struct {
 	SHA256    string `json:"sha256"`
 	Arch      string `json:"arch"`
 	CloudInit bool   `json:"cloudInit"`
+	// CloudInitFlavor is the coordinator's spelling ("nocloud"); it implies CloudInit.
+	CloudInitFlavor string `json:"cloudInitFlavor,omitempty"`
 }
 
 // Size is the requested virtual hardware.
@@ -68,6 +103,107 @@ type Task struct {
 	Desktop       bool       `json:"desktop,omitempty"`
 	ExpiresAt     *time.Time `json:"expiresAt"`
 	Reach         string     `json:"reach"`
+
+	// v2 fields.
+	ManagementURL  string        `json:"-"`
+	SandboxKind    SandboxKind   `json:"sandboxKind,omitempty"`
+	Lifecycle      Lifecycle     `json:"lifecycle,omitempty"`
+	Devcontainer   *Devcontainer `json:"devcontainer,omitempty"`
+	SSHCAPublicKey string        `json:"sshCaPublicKey,omitempty"`
+	DriveMode      string        `json:"driveMode,omitempty"` // "rw" | "ro"
+	DriveToken     string        `json:"driveToken,omitempty"`
+	Password       string        `json:"password,omitempty"` // vnc-password task
+
+	// keepData is set by the runner (never the wire) when a re-create must keep
+	// the persistent workspace's data.
+	keepData bool
+}
+
+// taskWire is the coordinator's JSON shape (docs/sandboxes/API.md): it differs
+// from Task (id vs taskId, resources, nested mesh).
+type taskWire struct {
+	ID                string        `json:"id"`
+	TaskID            string        `json:"taskId"`
+	Kind              Kind          `json:"kind"`
+	SandboxID         string        `json:"sandboxId"`
+	Hostname          string        `json:"hostname"`
+	Desktop           bool          `json:"desktop"`
+	Reach             string        `json:"reach"`
+	ExpiresAt         *time.Time    `json:"expiresAt"`
+	Image             Image         `json:"image"`
+	Resources         *wireRes      `json:"resources"`
+	Size              *Size         `json:"size"`
+	Mesh              *wireMesh     `json:"mesh"`
+	SetupKey          string        `json:"setupKey"`
+	SSHAuthorizedKeys []string      `json:"sshAuthorizedKeys"`
+	SSHPublicKeys     []string      `json:"sshPublicKeys"`
+	VNCPassword       string        `json:"vncPassword"`
+	Password          string        `json:"password"`
+	SandboxKind       SandboxKind   `json:"sandboxKind"`
+	Lifecycle         Lifecycle     `json:"lifecycle"`
+	Persistent        bool          `json:"persistent"`
+	Devcontainer      *Devcontainer `json:"devcontainer"`
+	SSHCAPublicKey    string        `json:"sshCaPublicKey"`
+	DriveMode         string        `json:"driveMode"`
+	DriveToken        string        `json:"driveToken"`
+}
+
+type wireRes struct {
+	CPU      int `json:"cpu"`
+	MemoryMB int `json:"memoryMb"`
+	DiskGB   int `json:"diskGb"`
+}
+
+type wireMesh struct {
+	ManagementURL string `json:"managementUrl"`
+	SetupKey      string `json:"setupKey"`
+}
+
+// UnmarshalJSON accepts the coordinator's wire shape. Unknown fields are ignored
+// (the coordinator deploys before connectors update).
+func (t *Task) UnmarshalJSON(b []byte) error {
+	var w taskWire
+	if err := json.Unmarshal(b, &w); err != nil {
+		return err
+	}
+	*t = Task{TaskID: w.ID, SandboxID: w.SandboxID, Kind: w.Kind, Image: w.Image, SetupKey: w.SetupKey,
+		VNCPassword: w.VNCPassword, Hostname: w.Hostname, Desktop: w.Desktop, ExpiresAt: w.ExpiresAt,
+		Reach: w.Reach, SandboxKind: w.SandboxKind, Lifecycle: w.Lifecycle, Devcontainer: w.Devcontainer,
+		SSHCAPublicKey: w.SSHCAPublicKey, DriveMode: w.DriveMode, DriveToken: w.DriveToken, Password: w.Password}
+	if t.TaskID == "" {
+		t.TaskID = w.TaskID
+	}
+	if w.Size != nil {
+		t.Size = *w.Size
+	}
+	if w.Resources != nil {
+		t.Size = Size{CPUs: w.Resources.CPU, MemoryMB: w.Resources.MemoryMB, DiskGB: w.Resources.DiskGB}
+	}
+	if w.Mesh != nil {
+		t.ManagementURL = w.Mesh.ManagementURL
+		if w.Mesh.SetupKey != "" {
+			t.SetupKey = w.Mesh.SetupKey
+		}
+	}
+	t.SSHPublicKeys = w.SSHAuthorizedKeys
+	if len(t.SSHPublicKeys) == 0 {
+		t.SSHPublicKeys = w.SSHPublicKeys
+	}
+	if t.Image.CloudInitFlavor == "nocloud" {
+		t.Image.CloudInit = true
+	}
+	if w.Persistent && t.Lifecycle == "" {
+		t.Lifecycle = LifecyclePersistent
+	}
+	return nil
+}
+
+// IsPersistent reports whether the sandbox keeps its disk, identity and has no expiry.
+func (t Task) IsPersistent() bool { return t.Lifecycle == LifecyclePersistent }
+
+// IsDev reports whether the task is for a dev container.
+func (t Task) IsDev() bool {
+	return t.SandboxKind == SandboxDevcontainer || (t.SandboxKind == "" && t.Devcontainer != nil)
 }
 
 // String implements fmt.Stringer without any secret.
@@ -88,8 +224,13 @@ type TasksResponse struct {
 
 // StateReport is the body of POST /api/v2/hosts/:id/sandbox-state.
 type StateReport struct {
-	SandboxID          string `json:"sandboxId"`
-	State              State  `json:"state"`
+	SandboxID string `json:"sandboxId"`
+	State     State  `json:"state"`
+	// NeedsKey asks the coordinator for a fresh one-use mesh key (a rejoin task):
+	// the peer was dropped while the Mac slept, or the sandbox was re-created.
+	NeedsKey bool `json:"needsKey,omitempty"`
+	// AckedTask names a task (vnc-password) this report acknowledges.
+	AckedTask          string `json:"ackedTask,omitempty"`
 	MeshIP             string `json:"meshIp,omitempty"`
 	HostKeyFingerprint string `json:"hostKeyFingerprint,omitempty"`
 	Error              string `json:"error,omitempty"`
@@ -116,7 +257,7 @@ func ValidateTask(t Task) error {
 		return fmt.Errorf("invalid sandboxId")
 	}
 	switch t.Kind {
-	case KindCreate, KindReset, KindDelete:
+	case KindCreate, KindReset, KindDelete, KindVNCPassword, KindRejoin:
 	default:
 		return fmt.Errorf("unknown task kind %q", string(t.Kind))
 	}
@@ -146,7 +287,13 @@ func ValidateSize(s Size) error {
 
 // ValidateBoot checks a create/reset task's boot inputs.
 func ValidateBoot(t Task) error {
-	if err := ValidateSize(t.Size); err != nil {
+	dev := t.IsDev()
+	if !dev || t.Size != (Size{}) {
+		if err := ValidateSize(t.Size); err != nil {
+			return err
+		}
+	}
+	if err := validateV2(t); err != nil {
 		return err
 	}
 	if !ValidHostname(t.Hostname) {
@@ -199,4 +346,88 @@ type Coordinator interface {
 	SandboxTasks(ctx context.Context, hostID string) ([]Task, error)
 	// ReportSandboxState is POST /api/v2/hosts/{hostID}/sandbox-state.
 	ReportSandboxState(ctx context.Context, hostID string, r StateReport) error
+}
+
+// validateV2 checks the lifecycle, access and dev-container fields.
+func validateV2(t Task) error {
+	switch t.Lifecycle {
+	case "", LifecyclePersistent, LifecycleEphemeral:
+	default:
+		return fmt.Errorf("unknown lifecycle")
+	}
+	switch t.SandboxKind {
+	case "", SandboxVM, SandboxDevcontainer:
+	default:
+		return fmt.Errorf("unknown sandbox kind")
+	}
+	switch t.DriveMode {
+	case "", "ro", "rw":
+	default:
+		return fmt.Errorf("invalid drive mode")
+	}
+	if t.DriveToken != "" && !validToken(t.DriveToken) {
+		return fmt.Errorf("invalid drive token")
+	}
+	if t.SSHCAPublicKey != "" && !validCAKey(t.SSHCAPublicKey) {
+		return fmt.Errorf("invalid ssh ca public key")
+	}
+	if t.ManagementURL != "" {
+		u, err := url.Parse(t.ManagementURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || strings.ContainsAny(t.ManagementURL, " \r\n'\"\\$`") {
+			return fmt.Errorf("invalid management url")
+		}
+	}
+	if t.IsDev() {
+		return ValidateDevcontainer(t.Devcontainer)
+	}
+	return nil
+}
+
+var tokenPattern = regexp.MustCompile(`^[A-Za-z0-9._~+=/-]+$`)
+
+// validToken accepts scoped-token characters (JWT/base64url-like) and nothing
+// that could break out of a quoted file value.
+func validToken(s string) bool { return len(s) <= 2048 && tokenPattern.MatchString(s) }
+
+// validCAKey accepts a single-line OpenSSH public key that is also safe inside a
+// single-quoted shell/env value.
+func validCAKey(k string) bool {
+	return validSSHPublicKey(k) && !strings.ContainsAny(k, "'\"\\$`")
+}
+
+var templatePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+const maxDevcontainerJSON = 64 << 10
+
+// ValidateDevcontainer checks the dev-container payload: exactly one of repoUrl,
+// template or inline json.
+func ValidateDevcontainer(d *Devcontainer) error {
+	if d == nil {
+		return fmt.Errorf("devcontainer payload required")
+	}
+	n := 0
+	if d.RepoURL != "" {
+		n++
+		u, err := url.Parse(d.RepoURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || len(d.RepoURL) > 2048 ||
+			strings.ContainsAny(d.RepoURL, " \t\r\n\x00'\"\\$`") {
+			return fmt.Errorf("invalid devcontainer repoUrl")
+		}
+	}
+	if d.Template != "" {
+		n++
+		if !templatePattern.MatchString(d.Template) {
+			return fmt.Errorf("invalid devcontainer template")
+		}
+	}
+	if d.JSON != "" {
+		n++
+		if len(d.JSON) > maxDevcontainerJSON || !json.Valid([]byte(d.JSON)) {
+			return fmt.Errorf("invalid devcontainer json")
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("devcontainer needs exactly one of repoUrl, template, json")
+	}
+	return nil
 }

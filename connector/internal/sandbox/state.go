@@ -4,14 +4,16 @@ package sandbox
 //
 //	""           -> provisioning
 //	provisioning -> running | failed | stopping
-//	running      -> stopping | failed | provisioning (reset)
+//	running      -> stopping | failed | provisioning (reset/re-create) | paused
+//	paused       -> running | stopping | failed | provisioning
 //	failed       -> stopping | provisioning (reset)
 //	stopping     -> deleted | failed
 //	deleted      -> (terminal)
 var transitions = map[State][]State{
 	"":                {StateProvisioning},
-	StateProvisioning: {StateRunning, StateFailed, StateStopping},
-	StateRunning:      {StateStopping, StateFailed, StateProvisioning},
+	StateProvisioning: {StateRunning, StateFailed, StateStopping, StateProvisioning},
+	StateRunning:      {StateStopping, StateFailed, StateProvisioning, StatePaused},
+	StatePaused:       {StateRunning, StateStopping, StateFailed, StateProvisioning},
 	StateFailed:       {StateStopping, StateProvisioning},
 	StateStopping:     {StateDeleted, StateFailed},
 	StateDeleted:      {},
@@ -30,5 +32,5 @@ func CanTransition(from, to State) bool {
 // Active reports whether a sandbox in state s holds CPU, memory or disk and so
 // counts against the caps.
 func (s State) Active() bool {
-	return s == StateProvisioning || s == StateRunning || s == StateStopping
+	return s == StateProvisioning || s == StateRunning || s == StatePaused || s == StateStopping
 }

@@ -164,6 +164,7 @@ struct NetworkPanel: View {
                     }
                 }
             }
+            ThrowawayHostsSection()
             Divider()
             activityGraphs
 			if let report = model.timeMachine, report.timeMachine.enabled {

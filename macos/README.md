@@ -258,3 +258,26 @@ does not claim that multicast or a shared Ethernet segment spans sites.
 The **Security** tab in Settings includes **Honeypot** alongside the integrity canary. Opening it only reads `nexal honeypot --action status`; Enable/Turn off run `--action enable|disable`. When enabled the connector opens fake services (SSH 2222, Telnet 2323, RDP 3389, SMB 4445, VNC 5909, HTTP 8081). Nothing legitimate should ever connect, so any connection from another computer is reported as an alert. It never runs commands or accepts logins. The view shows per-port listening state, trigger count, last trigger and recent connections (time, service, source address, source class).
 
 neXal does not provide antivirus, file scanning or process inspection; the earlier file-scanning feature and bundled YARA-X helper were removed.
+
+## Throwaway hosts (Mac side)
+
+Off by default. Settings -> General -> Throwaway hosts writes
+`~/Library/Application Support/Nexal/sandbox-hosting.json`
+(`{"enabled":false,"maxSandboxes":5,"placement":"any"|"mine"}`); the connector reads it.
+The panel's "Throwaway hosts" section reads the connector's
+`~/Library/Application Support/Nexal/sandboxes/state.json` and asks it to stop a host by creating an empty
+file `sandboxes/kill-requests/<sandboxId>` (the connector should call `Manager.Kill(id)` and delete the file).
+Hosts on the network and Connect run `nexal sandbox --action list|connect --id ID --kind ssh|vnc|files`
+(public key for ssh/files on stdin via `--public-key-stdin`; output is the coordinator's JSON); this app has
+no coordinator client of its own.
+
+`nexal-vmhost` (the Virtualization.framework helper, a separate signed binary with the
+`com.apple.security.virtualization` entitlement) is driven by the connector's launchd job:
+
+    nexal-vmhost run  --spec <file>      boot the VM (UEFI) from the JSON spec, serve a control socket,
+                                         exit 0 when the guest powers off
+    nexal-vmhost stop --control <sock>   request an ACPI power-button shutdown and return
+
+Spec fields (see `connector/internal/sandbox/vm.go`): sandboxId, hostname, cpus, memoryMB, diskPath
+(raw, read-write), seedPath (read-only), consoleLog, controlSocket, desktop, keepAwake. Devices: two virtio
+block disks, NAT network, virtio entropy, serial console to consoleLog, virtio GPU when `desktop`.

@@ -27,6 +27,8 @@ import (
 //	nexal-vmhost stop --control <sock>  request an ACPI power-button shutdown
 //	                                    and return immediately
 //
+// SeedPath may be empty (a persistent VM restarted after first boot has no seed).
+//
 // Devices: virtio block (Disk, read-write), virtio block (Seed, read-only),
 // NAT network, virtio entropy, serial console appended to ConsoleLog, and a
 // virtio GPU when Desktop is set.
@@ -39,8 +41,12 @@ type Spec struct {
 	SeedPath      string `json:"seedPath"`
 	ConsoleLog    string `json:"consoleLog"`
 	ControlSocket string `json:"controlSocket"`
-	Desktop       bool   `json:"desktop"`
+	// GuestSocket is a unix socket nexal-vmhost serves and bridges to a second
+	// virtio console port in the guest (see guest.go). Empty disables it.
+	GuestSocket string `json:"guestSocket,omitempty"`
+	Desktop     bool   `json:"desktop"`
 	// KeepAwake asks the host process to hold a power assertion while the VM runs.
+	// The runner always sends false: sandboxes sleep with the Mac (suspend-with-host).
 	KeepAwake bool `json:"keepAwake"`
 }
 
@@ -52,6 +58,7 @@ type Handle struct {
 	Spec      string `json:"spec"`  // path of the spec file
 	Control   string `json:"control"`
 	Plist     string `json:"plist"`
+	Guest     string `json:"guest,omitempty"` // guest channel socket
 }
 
 // Hypervisor starts and stops guests. Stop requests a graceful (ACPI) shutdown
@@ -80,6 +87,16 @@ type vzHypervisor struct {
 	runDir string // where spec files and plists live
 	uid    int
 	run    cmdRunner
+	// sockDir holds the control and guest sockets. unix socket paths are limited
+	// to ~104 bytes on macOS, which "~/Library/Application Support/..." can
+	// exceed, so it may point at a short directory. Empty means runDir.
+	sockDir string
+}
+
+// NewVZHypervisorWithSockets is NewVZHypervisor with a separate (short) directory
+// for the unix sockets. sockDir is created 0700.
+func NewVZHypervisorWithSockets(vmhostPath, runDir, sockDir string) Hypervisor {
+	return &vzHypervisor{vmhost: vmhostPath, runDir: runDir, uid: os.Getuid(), run: execRunner, sockDir: sockDir}
 }
 
 // NewVZHypervisor returns the launchd-backed hypervisor. vmhostPath is the
@@ -102,15 +119,24 @@ func (v *vzHypervisor) Start(ctx context.Context, s Spec) (Handle, error) {
 	if err := os.MkdirAll(v.runDir, 0o700); err != nil {
 		return Handle{}, err
 	}
+	sdir := v.runDir
+	if v.sockDir != "" {
+		sdir = v.sockDir
+		if err := os.MkdirAll(sdir, 0o700); err != nil {
+			return Handle{}, err
+		}
+	}
 	label := launchdPrefix + s.SandboxID
 	h := Handle{
 		SandboxID: s.SandboxID,
 		Label:     label,
 		Spec:      filepath.Join(v.runDir, s.SandboxID+".spec.json"),
-		Control:   filepath.Join(v.runDir, s.SandboxID+".sock"),
+		Control:   filepath.Join(sdir, s.SandboxID+".sock"),
+		Guest:     filepath.Join(sdir, s.SandboxID+".guest.sock"),
 		Plist:     filepath.Join(v.runDir, label+".plist"),
 	}
 	s.ControlSocket = h.Control
+	s.GuestSocket = h.Guest
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return Handle{}, err
@@ -170,7 +196,7 @@ func (v *vzHypervisor) Alive(ctx context.Context, h Handle) (bool, error) {
 }
 
 func (v *vzHypervisor) cleanupFiles(h Handle) {
-	for _, p := range []string{h.Plist, h.Spec, h.Control} {
+	for _, p := range []string{h.Plist, h.Spec, h.Control, h.Guest} {
 		if p != "" {
 			_ = os.Remove(p)
 		}

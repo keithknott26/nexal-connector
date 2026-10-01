@@ -1,0 +1,83 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"nexal/connector/internal/sandbox"
+)
+
+func TestSandboxRunnerRoutes(t *testing.T) {
+	var got []string
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			t.Error("missing host auth")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"hosting":{"enabled":true},"tasks":[
+{"id":"sbt_1","kind":"create","sandboxId":"sb1","hostname":"sbx-1","lifecycle":"persistent",
+ "image":{"url":"https://x/y.img","sha256":"` + strings.Repeat("a", 64) + `","arch":"arm64","cloudInitFlavor":"nocloud"},
+ "resources":{"cpu":2,"memoryMb":2048,"diskGb":10},
+ "mesh":{"managementUrl":"https://m.example:443","setupKey":"KEY-1"},
+ "sshAuthorizedKeys":["ssh-ed25519 AAAA a@b"],"sshCaPublicKey":"ssh-ed25519 AAAA ca","driveMode":"rw","driveToken":"t.k"},
+{"id":"sbt_2","kind":"vnc-password","sandboxId":"sb1","password":"abcd1234"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"accepted":true}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	tasks, err := c.SandboxTasks(ctx, "h1")
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("%v %v", tasks, err)
+	}
+	a := tasks[0]
+	if a.TaskID != "sbt_1" || a.Size.MemoryMB != 2048 || a.SetupKey != "KEY-1" || !a.Image.CloudInit ||
+		!a.IsPersistent() || a.DriveMode != "rw" || a.SSHCAPublicKey == "" || len(a.SSHPublicKeys) != 1 {
+		t.Fatalf("task decoded wrong: %+v", a)
+	}
+	if tasks[1].Kind != sandbox.KindVNCPassword || tasks[1].Password != "abcd1234" {
+		t.Fatalf("vnc task: %+v", tasks[1])
+	}
+	if err := c.ReportSandboxState(ctx, "h1", sandbox.StateReport{SandboxID: "sb1", State: sandbox.StateRunning}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PutSandboxHosting(ctx, "h1", sandbox.HostingConfig{Enabled: true, MaxSandboxes: 3, Placement: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ReportSandboxHostingState(ctx, "h1", false, true); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GET /api/v2/hosts/h1/sandbox-tasks", "POST /api/v2/hosts/h1/sandbox-state",
+		"PUT /api/v2/hosts/h1/sandbox-hosting", "POST /api/v2/hosts/h1/sandbox-hosting-state"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("routes %v", got)
+	}
+	var hs struct {
+		Awake     bool `json:"awake"`
+		OnBattery bool `json:"onBattery"`
+	}
+	if err := json.Unmarshal([]byte(bodies[3]), &hs); err != nil || hs.Awake || !hs.OnBattery {
+		t.Fatalf("hosting-state body %q", bodies[3])
+	}
+	if err := c.PutSandboxHosting(ctx, "h1", sandbox.HostingConfig{Enabled: true, MaxSandboxes: 99}); err == nil {
+		t.Fatal("out-of-range maxSandboxes must be refused client-side")
+	}
+	if _, err := c.SandboxTasks(ctx, "../x"); err == nil {
+		t.Fatal("bad host id")
+	}
+}

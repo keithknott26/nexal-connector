@@ -34,7 +34,9 @@ func TestRenderUserData(t *testing.T) {
 		"NEXAL_SSH_MESH_ONLY=1",
 		"NEXAL_VNC_MESH_ONLY=1",
 		"NEXAL_DESKTOP=1",
-		"nexal drive mount --read-only /mnt/nexal-drive",
+		"nexal drive mount --ro /mnt/nexal-drive",
+		"NEXAL_DRIVE_MODE=ro",
+		"NEXAL_LIFECYCLE=ephemeral",
 		"/etc/nexal/first-boot.env",
 		"permissions: \"0600\"",
 	} {
@@ -47,7 +49,7 @@ func TestRenderUserData(t *testing.T) {
 func TestRenderUserDataDriveWritable(t *testing.T) {
 	p := testSeed()
 	p.DriveWritable = true
-	if !strings.Contains(RenderUserData(p), "--read-write") {
+	if !strings.Contains(RenderUserData(p), "--rw") {
 		t.Fatal("writable drive not rendered")
 	}
 }
@@ -146,5 +148,45 @@ func TestScanFirstBootNewestWins(t *testing.T) {
 	fb, ok, failed, _ := scanFirstBoot(text)
 	if !ok || failed || fb.MeshIP != "100.64.0.9" {
 		t.Fatalf("got %+v %v %v", fb, ok, failed)
+	}
+}
+
+func TestRenderUserDataV2(t *testing.T) {
+	p := testSeed()
+	p.SSHCAPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIcaKey nexal-ca"
+	p.DriveToken = "tok.en-1"
+	p.Lifecycle = LifecyclePersistent
+	p.DriveWritable = true
+	p.ManagementURL = "https://mesh.example.net:443"
+	u := RenderUserData(p)
+	for _, want := range []string{
+		"TrustedUserCAKeys /etc/ssh/nexal_user_ca.pub",
+		"path: /etc/ssh/nexal_user_ca.pub",
+		"NEXAL_SSH_CA='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIcaKey nexal-ca'",
+		"NEXAL_DRIVE_TOKEN=tok.en-1",
+		"path: /etc/nexal/drive.env",
+		"NEXAL_DRIVE_MODE=rw",
+		"NEXAL_LIFECYCLE=persistent",
+		"NEXAL_MANAGEMENT_URL=https://mesh.example.net:443",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("user-data missing %q", want)
+		}
+	}
+}
+
+func TestValidateSeedV2Rejects(t *testing.T) {
+	bad := []func(*SeedParams){
+		func(p *SeedParams) { p.SSHCAPublicKey = "ssh-ed25519 AAA'; rm -rf /" },
+		func(p *SeedParams) { p.DriveToken = "a b" },
+		func(p *SeedParams) { p.Lifecycle = "forever" },
+		func(p *SeedParams) { p.ManagementURL = "http://x" },
+	}
+	for i, mut := range bad {
+		p := testSeed()
+		mut(&p)
+		if ValidateSeed(p) == nil {
+			t.Errorf("case %d: expected rejection", i)
+		}
 	}
 }

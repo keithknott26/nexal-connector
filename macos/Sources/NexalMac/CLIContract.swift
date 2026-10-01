@@ -54,6 +54,8 @@ enum CLICommand {
     case exitRoute(tunnelAddress: String, enabled: Bool, targetDeviceID: String? = nil)
     case canary(action: String)
     case honeypot(action: String)
+    /// Throwaway hosts: `list`, or `connect` with an id and kind (ssh|vnc|files; ssh/files read a public key on stdin).
+    case sandbox(action: String, id: String?, kind: String?)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination, which waits for a person to
@@ -114,6 +116,9 @@ enum CLICommand {
             command = ["canary", "--action", action]
         case let .honeypot(action):
             command = ["honeypot", "--action", action]
+        case let .sandbox(action, id, kind):
+            command = ["sandbox", "--action", action] + (id.map { ["--id", $0] } ?? [])
+                + (kind.map { ["--kind", $0] } ?? []) + (kind == "vnc" || id == nil ? [] : ["--public-key-stdin"])
         case let .exitRoute(tunnelAddress, enabled, targetDeviceID):
             command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):

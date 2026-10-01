@@ -27,20 +27,37 @@ type Options struct {
 	ISO         ISOBuilder
 	Logger      *slog.Logger
 	Now         func() time.Time
+
+	// Dev runs kind=devcontainer sandboxes; nil means dev containers are refused.
+	Dev DevOps
+	// Guest talks to running VMs (vnc-password, mesh rejoin); default SocketGuestChannel.
+	Guest GuestChannel
+	// HostingConfigPath is the Mac app's sandbox-hosting.json; it is re-read on
+	// every poll so an opt-in change applies without a restart. Empty disables it.
+	HostingConfigPath string
+	// Lid reads the lid state for the sleep heuristic; default IORegLid.
+	Lid LidReader
 }
 
 // record is the persisted view of one sandbox.
 type record struct {
-	ID             string     `json:"id"`
-	State          State      `json:"state"`
-	Size           Size       `json:"size"`
-	Hostname       string     `json:"hostname"`
-	Handle         Handle     `json:"handle"`
-	MeshIP         string     `json:"meshIp,omitempty"`
-	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
-	CleanupPending bool       `json:"cleanupPending,omitempty"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
-	busy           bool       // an operation goroutine owns this sandbox; not persisted
+	ID             string      `json:"id"`
+	State          State       `json:"state"`
+	Size           Size        `json:"size"`
+	Hostname       string      `json:"hostname"`
+	Handle         Handle      `json:"handle"`
+	MeshIP         string      `json:"meshIp,omitempty"`
+	ExpiresAt      *time.Time  `json:"expiresAt,omitempty"`
+	CleanupPending bool        `json:"cleanupPending,omitempty"`
+	UpdatedAt      time.Time   `json:"updatedAt"`
+	Kind           SandboxKind `json:"kind,omitempty"`
+	Lifecycle      Lifecycle   `json:"lifecycle,omitempty"`
+	Boot           *BootInfo   `json:"boot,omitempty"`
+	HostKey        string      `json:"hostKey,omitempty"`
+	Workspace      string      `json:"workspace,omitempty"` // dev container workspace id
+	// AwaitKey: the mesh peer is gone; a rejoin task with a fresh key is needed.
+	AwaitKey bool `json:"awaitKey,omitempty"`
+	busy     bool // an operation goroutine owns this sandbox; not persisted
 }
 
 // Manager turns coordinator tasks into running VMs and tears them down in order.
@@ -58,6 +75,14 @@ type Manager struct {
 	boxes     map[string]*record
 	inflight  map[string]bool // task ids being handled
 	recovered bool
+
+	cfgw    *configWatcher
+	pub     *HostingConfig // last config read from the file, to publish
+	pubDone bool
+	pubNext time.Time
+	lastHB  time.Time
+	hbBusy  bool
+	nudgeCh chan struct{}
 }
 
 // NewManager builds a Manager and loads persisted sandbox records.
@@ -73,6 +98,12 @@ func NewManager(o Options) (*Manager, error) {
 	}
 	if o.ISO == nil {
 		o.ISO = HdiutilISO
+	}
+	if o.Guest == nil {
+		o.Guest = SocketGuestChannel{}
+	}
+	if o.Lid == nil {
+		o.Lid = IORegLid
 	}
 	if o.DataDir == "" {
 		home, err := os.UserHomeDir()
@@ -96,7 +127,10 @@ func NewManager(o Options) (*Manager, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{opts: o, caps: o.Caps.Normalized(), ctx: ctx, cancel: cancel, coord: o.Coordinator,
-		boxes: map[string]*record{}, inflight: map[string]bool{}}
+		boxes: map[string]*record{}, inflight: map[string]bool{}, nudgeCh: make(chan struct{}, 1)}
+	if o.HostingConfigPath != "" {
+		m.cfgw = &configWatcher{path: o.HostingConfigPath}
+	}
 	if b, err := os.ReadFile(m.statePath()); err == nil {
 		var recs []*record
 		if err := json.Unmarshal(b, &recs); err != nil {
@@ -142,12 +176,15 @@ func (m *Manager) Close() {
 
 // Snapshot is a read-only view for the Mac app's list of hosted VMs.
 type Snapshot struct {
-	SandboxID string     `json:"sandboxId"`
-	State     State      `json:"state"`
-	Hostname  string     `json:"hostname"`
-	MeshIP    string     `json:"meshIp,omitempty"`
-	Size      Size       `json:"size"`
-	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	SandboxID string      `json:"sandboxId"`
+	State     State       `json:"state"`
+	Hostname  string      `json:"hostname"`
+	MeshIP    string      `json:"meshIp,omitempty"`
+	Size      Size        `json:"size"`
+	ExpiresAt *time.Time  `json:"expiresAt,omitempty"`
+	Kind      SandboxKind `json:"kind,omitempty"`
+	Lifecycle Lifecycle   `json:"lifecycle,omitempty"`
+	AwaitKey  bool        `json:"awaitKey,omitempty"`
 }
 
 // List returns the sandboxes this Mac hosts, sorted by id.
@@ -157,7 +194,7 @@ func (m *Manager) List() []Snapshot {
 	out := make([]Snapshot, 0, len(m.boxes))
 	for _, r := range m.boxes {
 		out = append(out, Snapshot{SandboxID: r.ID, State: r.State, Hostname: r.Hostname, MeshIP: r.MeshIP,
-			Size: r.Size, ExpiresAt: r.ExpiresAt})
+			Size: r.Size, ExpiresAt: r.ExpiresAt, Kind: r.Kind, Lifecycle: r.Lifecycle, AwaitKey: r.AwaitKey})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].SandboxID < out[j].SandboxID })
 	return out
@@ -249,6 +286,7 @@ func (m *Manager) report(r StateReport) {
 // cleanup, recovery). The agent calls it every few seconds; it never blocks on
 // long work, which runs in goroutines.
 func (m *Manager) Poll(ctx context.Context, hostID string) error {
+	m.refreshConfig(ctx, hostID)
 	m.mu.Lock()
 	m.hostID = hostID
 	coord := m.coord
@@ -267,6 +305,7 @@ func (m *Manager) Poll(ctx context.Context, hostID string) error {
 	if !enabled && idle {
 		return nil // opted out and nothing to look after: stay off the network
 	}
+	m.heartbeat()
 	tasks, err := coord.SandboxTasks(ctx, hostID)
 	if err != nil {
 		return err
@@ -301,19 +340,35 @@ func (m *Manager) dispatch(ctx context.Context, t Task) {
 		m.startTeardown(t.TaskID, t.SandboxID)
 	case KindCreate, KindReset:
 		m.startBoot(ctx, t)
+	case KindVNCPassword:
+		m.startVNC(t)
+	case KindRejoin:
+		m.startRejoin(ctx, t)
 	}
 }
 
 // ---- create / reset ----
 
 func (m *Manager) startBoot(ctx context.Context, t Task) {
+	dev := t.IsDev()
 	if err := ValidateBoot(t); err != nil {
 		m.fail(t.SandboxID, "invalid task: "+err.Error())
 		return
 	}
-	if err := ValidateImage(t.Image, HostArch()); err != nil {
+	if dev {
+		if m.opts.Dev == nil {
+			m.fail(t.SandboxID, devErr(DevErrNotAvailable, "dev containers are not available on this Mac").Error())
+			return
+		}
+		if t.Size == (Size{}) {
+			t.Size = devDefaultSize
+		}
+	} else if err := ValidateImage(t.Image, HostArch()); err != nil {
 		m.fail(t.SandboxID, err.Error())
 		return
+	}
+	if t.IsPersistent() {
+		t.ExpiresAt = nil // persistent sandboxes never expire
 	}
 	if t.ExpiresAt != nil && !t.ExpiresAt.After(m.opts.Now()) {
 		m.fail(t.SandboxID, "task already expired")
@@ -360,6 +415,11 @@ func (m *Manager) startBoot(ctx context.Context, t Task) {
 		m.boxes[t.SandboxID] = rec
 	}
 	rec.Size, rec.Hostname, rec.ExpiresAt = t.Size, t.Hostname, t.ExpiresAt
+	rec.Kind, rec.Lifecycle, rec.Boot = kindOf(t), lifecycleOf(t), bootInfoFrom(t)
+	rec.AwaitKey, rec.HostKey = false, ""
+	if dev {
+		rec.Workspace = DevWorkspaceID(t.SandboxID)
+	}
 	rec.busy = true
 	m.inflight[t.TaskID] = true
 	if err := m.setStateLocked(rec, StateProvisioning); err != nil {
@@ -384,7 +444,11 @@ func (m *Manager) startBoot(ctx context.Context, t Task) {
 		m.report(StateReport{SandboxID: t.SandboxID, State: StateProvisioning})
 		if err := m.boot(m.ctx, t, reset); err != nil {
 			m.opts.Logger.Warn("sandbox boot failed", "task", t, "error", err.Error())
-			m.failRecord(t.SandboxID, err.Error())
+			if t.keepData {
+				m.markAwaitKey(t.SandboxID, err.Error()) // never wipe a persistent workspace
+			} else {
+				m.failRecord(t.SandboxID, err.Error())
+			}
 		}
 	}()
 }
@@ -392,6 +456,9 @@ func (m *Manager) startBoot(ctx context.Context, t Task) {
 // boot runs the provisioning pipeline: image -> disk clone -> seed -> start ->
 // wait for the guest's first-boot report -> running -> delete seed.
 func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
+	if t.IsDev() {
+		return m.bootDev(ctx, t, reset)
+	}
 	id := t.SandboxID
 	if reset {
 		// Stop the old VM (ordered), then drop its disk and seed.
@@ -419,7 +486,9 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	}
 	seed := SeedParams{SandboxID: id, InstanceID: fmt.Sprintf("%s-%d", id, m.opts.Now().Unix()),
 		Hostname: t.Hostname, SetupKey: t.SetupKey, VNCPassword: t.VNCPassword,
-		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop}
+		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
+		DriveWritable: driveWritable(t), SSHCAPublicKey: t.SSHCAPublicKey, DriveToken: t.DriveToken,
+		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL}
 	if err := WriteSeedDir(m.seedDir(id), seed); err != nil {
 		return err
 	}
@@ -432,7 +501,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 
 	h, err := m.opts.Hypervisor.Start(ctx, Spec{SandboxID: id, Hostname: t.Hostname, CPUs: t.Size.CPUs,
 		MemoryMB: t.Size.MemoryMB, DiskPath: m.diskPath(id), SeedPath: m.seedISO(id),
-		ConsoleLog: m.consoleLog(id), Desktop: t.Desktop, KeepAwake: true})
+		ConsoleLog: m.consoleLog(id), Desktop: t.Desktop, KeepAwake: false})
 	if err != nil {
 		return err
 	}
@@ -453,7 +522,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		m.mu.Unlock()
 		return errors.New("sandbox vanished during boot")
 	}
-	r.MeshIP = fb.MeshIP
+	r.MeshIP, r.HostKey, r.AwaitKey = fb.MeshIP, fb.HostKeyFingerprint, false
 	err = m.setStateLocked(r, StateRunning)
 	m.mu.Unlock()
 	if err != nil {
@@ -626,6 +695,7 @@ func (m *Manager) teardown(id string) {
 		return
 	}
 	h := rec.Handle
+	dev := rec.Kind == SandboxDevcontainer
 	if rec.State != StateDeleted {
 		if err := m.setStateLocked(rec, StateStopping); err != nil {
 			m.mu.Unlock()
@@ -638,7 +708,9 @@ func (m *Manager) teardown(id string) {
 		m.mu.Unlock()
 	}
 
-	m.stopVM(ctx, h)
+	if !dev {
+		m.stopVM(ctx, h)
+	} // a dev container is removed by removeBoxFilesErr below
 
 	m.mu.Lock()
 	if r := m.boxes[id]; r != nil {
@@ -706,7 +778,24 @@ func (m *Manager) removeBoxFilesErr(id string) error {
 	if !ValidID(id) {
 		return errors.New("invalid sandbox id")
 	}
-	return os.RemoveAll(m.boxDir(id)) // disk, seed, seed image, console log
+	var derr error
+	if ws := m.workspaceOf(id); ws != "" && m.opts.Dev != nil {
+		// container, volumes, mesh sidecar, DevPod state, secrets
+		derr = m.opts.Dev.Delete(context.WithoutCancel(m.ctx), ws)
+	}
+	if err := os.RemoveAll(m.boxDir(id)); err != nil { // disk, seed, seed image, console log
+		return err
+	}
+	return derr
+}
+
+func (m *Manager) workspaceOf(id string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r := m.boxes[id]; r != nil {
+		return r.Workspace
+	}
+	return ""
 }
 
 // ---- housekeeping ----
@@ -727,7 +816,8 @@ func (m *Manager) reap() {
 		switch {
 		case r.CleanupPending:
 			cleanup = append(cleanup, id)
-		case r.State == StateRunning && r.ExpiresAt != nil && !r.ExpiresAt.After(now):
+		case (r.State == StateRunning || r.State == StatePaused) && r.Lifecycle != LifecyclePersistent &&
+			r.ExpiresAt != nil && !r.ExpiresAt.After(now):
 			expire = append(expire, job{"expiry-" + id, id})
 		}
 	}
@@ -745,29 +835,17 @@ func (m *Manager) reap() {
 	}
 }
 
-// recover adopts persisted sandboxes after a connector restart: anything that
-// was mid-flight, or whose VM is gone, is failed and cleaned up.
+// recover adopts persisted sandboxes after a connector restart (see reconcile).
 func (m *Manager) recover() {
 	ctx := context.WithoutCancel(m.ctx)
-	type item struct {
-		id string
-		h  Handle
-		st State
-	}
-	var items []item
 	m.mu.Lock()
-	for id, r := range m.boxes {
-		items = append(items, item{id, r.Handle, r.State})
+	ids := make([]string, 0, len(m.boxes))
+	for id := range m.boxes {
+		ids = append(ids, id)
 	}
 	m.mu.Unlock()
-	for _, it := range items {
-		switch it.st {
-		case StateProvisioning, StateStopping:
-			m.failRecord(it.id, "connector restarted during "+string(it.st))
-		case StateRunning:
-			if alive, err := m.opts.Hypervisor.Alive(ctx, it.h); err == nil && !alive {
-				m.failRecord(it.id, "VM is no longer running")
-			}
-		}
+	sort.Strings(ids)
+	for _, id := range ids {
+		m.reconcile(ctx, id, 0)
 	}
 }

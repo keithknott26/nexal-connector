@@ -134,6 +134,9 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
+            GroupBox("Throwaway hosts") {
+                ThrowawayHostingSettingsView().padding(8)
+            }
             GroupBox("Activity") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Graph time range", selection: $preferences.chartWindowMinutes) {

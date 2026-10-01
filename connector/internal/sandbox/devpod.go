@@ -205,6 +205,26 @@ func (e DevEnv) FindBinary(name string) (string, bool) {
 	return "", false
 }
 
+// devPath is the PATH for docker/devpod child processes: the resolved docker's
+// directory, the Homebrew locations, then the system directories.
+func devPath(e DevEnv, docker string) string {
+	dirs := []string{}
+	if docker != "" {
+		dirs = append(dirs, filepath.Dir(docker))
+	}
+	dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", filepath.Join(e.Home, ".local", "bin"),
+		"/usr/bin", "/bin", "/usr/sbin", "/sbin")
+	seen := map[string]bool{}
+	out := dirs[:0]
+	for _, d := range dirs {
+		if !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	return strings.Join(out, ":")
+}
+
 // runtimeCandidate is a socket a supported runtime exposes.
 type runtimeCandidate struct {
 	name   RuntimeName
@@ -647,7 +667,10 @@ func (d *DevPod) tools(ctx context.Context, ws string, needDevPod bool) (devTool
 	}
 	docker, _ := d.cfg.Env.FindBinary("docker")
 	t := devTools{rt: rt, docker: docker}
-	t.env = []string{"DOCKER_HOST=" + rt.DockerHost(), "DEVPOD_HOME=" + filepath.Join(d.wsDir(ws), "devpod")}
+	t.env = []string{"DOCKER_HOST=" + rt.DockerHost(), "DEVPOD_HOME=" + filepath.Join(d.wsDir(ws), "devpod"),
+		// devpod runs `docker` by name. A launchd-started connector has a minimal PATH
+		// without Homebrew, so put the docker we resolved (and Homebrew) first.
+		"PATH=" + devPath(d.cfg.Env, docker)}
 	if needDevPod {
 		p, ok := d.cfg.Env.FindBinary("devpod")
 		if !ok {

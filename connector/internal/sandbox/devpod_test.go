@@ -456,3 +456,10 @@ func TestDevPodDeleteRemovesBuiltImages(t *testing.T) {
 		t.Fatalf("built image must be removed: %v", f.cmds)
 	}
 }
+
+func TestDevPathPutsDockerFirst(t *testing.T) {
+	got := devPath(DevEnv{Home: "/h"}, "/opt/homebrew/bin/docker")
+	if !strings.HasPrefix(got, "/opt/homebrew/bin:") || strings.Count(got, "/opt/homebrew/bin") != 1 || !strings.Contains(got, ":/usr/bin:") {
+		t.Fatalf("%s", got)
+	}
+}

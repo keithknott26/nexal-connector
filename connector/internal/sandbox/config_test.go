@@ -35,11 +35,11 @@ func TestLoadHostingConfigFailsClosed(t *testing.T) {
 	if err != nil || c.Enabled {
 		t.Fatalf("missing file must default to disabled without error: %+v %v", c, err)
 	}
-	if err := os.WriteFile(p, []byte(`{"enabled":true,"maxSandboxes":99}`), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte(`{"enabled":true,"maxSandboxes":9}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err = LoadHostingConfig(p)
-	if err != nil || !c.Enabled || c.MaxSandboxes != 99 {
+	if err != nil || !c.Enabled || c.MaxSandboxes != 9 {
 		t.Fatalf("explicit opt-in must be honored: %+v %v", c, err)
 	}
 	if err := os.WriteFile(p, []byte(`{"maxSandboxes":11}`), 0o600); err != nil {

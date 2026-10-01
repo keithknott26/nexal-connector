@@ -30,9 +30,15 @@ cp "$APP/Contents/Helpers/nexal" "$OUT/nexal.previous"
 cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
 sudo install -m 755 "$OUT/nexal" "$APP/Contents/Helpers/nexal"
 sudo install -m 755 "$OUT/swift/out/Products/Release/NexalMac" "$APP/Contents/MacOS/NexalMac"
-sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
-sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
-sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+# Sign as the current user: root cannot reach the login keychain's private key
+# (codesign fails with errSecInternalComponent under sudo).
+sudo chown -R "$(id -un)" "$APP"
+# Secure timestamps are only needed for notarized Developer ID builds and need
+# Apple's timestamp server; skip them for local development identities.
+case "$IDENTITY" in "Developer ID Application:"*) TS=--timestamp ;; *) TS=--timestamp=none ;; esac
+codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
+codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
+codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 open "$APP"
 echo "Done. Previous binaries kept in $OUT (nexal.previous, NexalMac.previous) for rollback."

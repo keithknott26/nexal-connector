@@ -39,22 +39,15 @@ func newSandboxManager(logger *slog.Logger) *sandbox.Manager {
 		return nil
 	}
 	base := filepath.Dir(cfgPath) // ~/Library/Application Support/Nexal
+	// NEXAL_VMHOST, when set, wins; otherwise the hypervisor searches the app bundle,
+	// ~/Library/Application Support/Nexal/bin and common tool directories on every start.
 	vmhost := os.Getenv("NEXAL_VMHOST")
 	if vmhost == "" {
-		// Next to the connector (app bundle Helpers/), else the per-user dev location the install script uses.
-		var candidates []string
-		if exe, err := os.Executable(); err == nil {
-			candidates = append(candidates, filepath.Join(filepath.Dir(exe), "nexal-vmhost"))
-		}
-		candidates = append(candidates, filepath.Join(base, "bin", "nexal-vmhost"))
-		for _, c := range candidates {
-			if fi, err := os.Stat(c); err == nil && fi.Mode().IsRegular() {
-				vmhost = c
-				break
-			}
-		}
-		if vmhost == "" {
-			vmhost = candidates[0]
+		if p, _ := sandbox.ResolveVMHost("", sandbox.VMHostCandidates(base)); p != "" {
+			vmhost = p
+			log.Info("nexal-vmhost found", "path", p)
+		} else {
+			log.Warn("nexal-vmhost not found yet; instances need it (it is searched again on each start)")
 		}
 	}
 	// unix socket paths are short-limited on macOS; keep them out of "Application Support".

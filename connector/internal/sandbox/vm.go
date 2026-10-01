@@ -91,12 +91,50 @@ type vzHypervisor struct {
 	// to ~104 bytes on macOS, which "~/Library/Application Support/..." can
 	// exceed, so it may point at a short directory. Empty means runDir.
 	sockDir string
+	// search lists where to look for nexal-vmhost when v.vmhost is missing. It is
+	// evaluated on every Start, so installing the helper later needs no restart.
+	search func() []string
+}
+
+// VMHostCandidates is every place nexal-vmhost is looked for, in order: next to
+// the connector (the app bundle's Helpers folder), the per-user install location,
+// the installed app, then common tool directories. base is the neXal data
+// directory (~/Library/Application Support/Nexal).
+func VMHostCandidates(base string) []string {
+	var c []string
+	if exe, err := os.Executable(); err == nil {
+		c = append(c, filepath.Join(filepath.Dir(exe), "nexal-vmhost"))
+	}
+	c = append(c, filepath.Join(base, "bin", "nexal-vmhost"))
+	if home, err := os.UserHomeDir(); err == nil {
+		c = append(c, filepath.Join(home, "Applications", "neXal-Connector.app", "Contents", "Helpers", "nexal-vmhost"))
+	}
+	return append(c,
+		"/Applications/neXal-Connector.app/Contents/Helpers/nexal-vmhost",
+		"/opt/homebrew/bin/nexal-vmhost", "/usr/local/bin/nexal-vmhost")
+}
+
+// ResolveVMHost returns the first existing executable among preferred (if set)
+// and candidates, or "" and the list that was searched.
+func ResolveVMHost(preferred string, candidates []string) (string, []string) {
+	all := candidates
+	if preferred != "" {
+		all = append([]string{preferred}, candidates...)
+	}
+	for _, p := range all {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0 {
+			return p, all
+		}
+	}
+	return "", all
 }
 
 // NewVZHypervisorWithSockets is NewVZHypervisor with a separate (short) directory
 // for the unix sockets. sockDir is created 0700.
 func NewVZHypervisorWithSockets(vmhostPath, runDir, sockDir string) Hypervisor {
-	return &vzHypervisor{vmhost: vmhostPath, runDir: runDir, uid: os.Getuid(), run: execRunner, sockDir: sockDir}
+	base := filepath.Dir(filepath.Dir(runDir)) // runDir is <base>/sandboxes/run
+	return &vzHypervisor{vmhost: vmhostPath, runDir: runDir, uid: os.Getuid(), run: execRunner, sockDir: sockDir,
+		search: func() []string { return VMHostCandidates(base) }}
 }
 
 // NewVZHypervisor returns the launchd-backed hypervisor. vmhostPath is the
@@ -107,14 +145,31 @@ func NewVZHypervisor(vmhostPath, runDir string) Hypervisor {
 
 const launchdPrefix = "systems.nexal.vmhost."
 
+func (v *vzHypervisor) searched() []string {
+	_, all := ResolveVMHost(v.vmhost, v.candidates())
+	return all
+}
+func (v *vzHypervisor) candidates() []string {
+	if v.search == nil {
+		return nil
+	}
+	return v.search()
+}
+func (v *vzHypervisor) resolveHost() (string, bool) {
+	p, _ := ResolveVMHost(v.vmhost, v.candidates())
+	return p, p != ""
+}
+
 func (v *vzHypervisor) domain() string { return fmt.Sprintf("gui/%d", v.uid) }
 
 func (v *vzHypervisor) Start(ctx context.Context, s Spec) (Handle, error) {
 	if !ValidID(s.SandboxID) {
 		return Handle{}, errors.New("invalid sandbox id")
 	}
-	if _, err := os.Stat(v.vmhost); err != nil {
-		return Handle{}, errors.New("nexal-vmhost is not installed")
+	if p, ok := v.resolveHost(); ok {
+		v.vmhost = p
+	} else {
+		return Handle{}, fmt.Errorf("nexal-vmhost is not installed (looked in: %s). Reinstall neXal@home 0.4.0 or later, or set NEXAL_VMHOST to the helper's path", strings.Join(v.searched(), ", "))
 	}
 	if err := os.MkdirAll(v.runDir, 0o700); err != nil {
 		return Handle{}, err

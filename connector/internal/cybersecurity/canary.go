@@ -180,6 +180,7 @@ func (c Canary) Configure(enabled bool) error {
 		return saveCanary(root, s)
 	})
 }
+
 // countSubWatermarks counts regular files in the private sub/ directory, where
 // per-instance decoys register. Anything else (links, folders) is ignored.
 func countSubWatermarks(root *os.Root) int {

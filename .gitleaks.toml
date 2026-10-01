@@ -6,3 +6,14 @@ description = "Supported post-quantum key-agreement group identifiers"
 targetRules = ["generic-api-key"]
 regexTarget = "secret"
 regexes = ['''^X25519(?:MLKEM768|Kyber768Draft00)$''']
+
+[[allowlists]]
+description = "SHA-256 file digests in model provenance records (public checksums, not secrets)"
+targetRules = ["generic-api-key"]
+paths = ['''^runtimes/validation/[^/]+-provenance\.json$''']
+
+[[allowlists]]
+description = "Obvious fixed test fixtures (sequential hex / alphabet), never real credentials"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^(?:0123456789abcdef){4}$''', '''^abcdefghijklmnopqrstuvwx-_12$''']

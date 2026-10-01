@@ -28,7 +28,7 @@ ARG TARGETARCH
 # Keep in step with macos/scripts/update-runtime.sh (same number, "-linux" suffix).
 ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.9-linux
 ENV GOFLAGS= GOWORK=off GOTOOLCHAIN=local CGO_ENABLED=0
-RUN apt-get update && apt-get install -y --no-install-recommends patch python3 curl ca-certificates \
+RUN export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends patch python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=patches / /patches
 WORKDIR /work
@@ -61,7 +61,7 @@ LABEL org.opencontainers.image.title="nexal-mesh-sidecar" \
       org.opencontainers.image.version="${SIDECAR_VERSION}" \
       systems.nexal.mesh-runtime="${RUNTIME_VERSION}" \
       systems.nexal.mesh-profile="nexal-mlkem1024-tcp-v2"
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates iproute2 iptables \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/lib/nexal /var/log/nexal /run/nexal-boot

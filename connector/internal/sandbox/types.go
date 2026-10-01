@@ -72,8 +72,11 @@ const (
 
 // Image describes the base image a create/reset task boots from.
 type Image struct {
-	URL       string `json:"url"`
-	SHA256    string `json:"sha256"`
+	URL    string `json:"url"`
+	SHA256 string `json:"sha256"`
+	// DigestStr is the coordinator's "digest": "sha256:<64hex>" or
+	// "sha512:<128hex>". It wins over the legacy SHA256 field when present.
+	DigestStr string `json:"digest,omitempty"`
 	Arch      string `json:"arch"`
 	CloudInit bool   `json:"cloudInit"`
 	// CloudInitFlavor is the coordinator's spelling ("nocloud"); it implies CloudInit.

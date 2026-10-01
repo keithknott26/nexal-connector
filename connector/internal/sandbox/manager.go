@@ -124,7 +124,7 @@ func NewManager(o Options) (*Manager, error) {
 		if err != nil {
 			return nil, err
 		}
-		o.Images = NewImageStore(dir, nil)
+		o.Images = NewImageStore(dir, QCOW2Converter{})
 	}
 	if o.Hypervisor == nil {
 		return nil, errors.New("hypervisor required")

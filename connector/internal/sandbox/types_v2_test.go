@@ -98,3 +98,16 @@ func TestStatePausedTransitions(t *testing.T) {
 		t.Fatal("paused sandboxes still hold resources")
 	}
 }
+
+func TestTaskUnmarshalDigest(t *testing.T) {
+	var task Task
+	d := "sha512:" + strings.Repeat("e", 128)
+	body := `{"id":"sbt_1","kind":"create","sandboxId":"sb1","image":{"url":"https://x/u.qcow2","digest":"` + d + `","arch":"arm64","cloudInitFlavor":"nocloud"}}`
+	if err := json.Unmarshal([]byte(body), &task); err != nil {
+		t.Fatal(err)
+	}
+	got, err := task.Image.Digest()
+	if err != nil || got.String() != d || task.Image.SHA256 != "" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}

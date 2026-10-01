@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/sha512"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"net/url"
@@ -32,10 +35,11 @@ type Converter interface {
 
 // ImageStore caches verified base images.
 //
-// Cache layout, keyed by the catalog SHA-256:
+// Cache layout, keyed by the image digest (see ImageDigest.CacheKey: the bare
+// 64-hex SHA-256 for sha256, "sha512-<hex>" for sha512):
 //
-//	<sha>.src  the downloaded file, byte-for-byte what the hash covers
-//	<sha>.raw  derived raw copy, present only when .src was qcow2
+//	<key>.src  the downloaded file, byte-for-byte what the hash covers
+//	<key>.raw  derived raw copy, present only when .src was qcow2
 type ImageStore struct {
 	Dir     string
 	HTTP    *http.Client
@@ -71,6 +75,74 @@ func NewImageStore(dir string, conv Converter) *ImageStore {
 }
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var sha512Pattern = regexp.MustCompile(`^[0-9a-f]{128}$`)
+
+// ImageDigest is a parsed, validated image hash.
+type ImageDigest struct {
+	Algo string // "sha256" or "sha512"
+	Hex  string // lowercase hex
+}
+
+// String is the "algo:hex" spelling.
+func (d ImageDigest) String() string { return d.Algo + ":" + d.Hex }
+
+// CacheKey is a filesystem-safe cache name. sha256 keeps the historic bare-hex
+// name so existing caches stay valid.
+func (d ImageDigest) CacheKey() string {
+	if d.Algo == "sha256" {
+		return d.Hex
+	}
+	return d.Algo + "-" + d.Hex
+}
+
+func (d ImageDigest) newHash() hash.Hash {
+	if d.Algo == "sha512" {
+		return sha512.New()
+	}
+	return sha256.New()
+}
+
+// ParseImageDigest validates "sha256:<64hex>" or "sha512:<128hex>".
+func ParseImageDigest(v string) (ImageDigest, error) {
+	v = strings.ToLower(strings.TrimSpace(v))
+	algo, hx, ok := strings.Cut(v, ":")
+	if !ok {
+		return ImageDigest{}, errors.New("image digest must look like sha256:<hex> or sha512:<hex>")
+	}
+	switch {
+	case algo == "sha256" && sha256Pattern.MatchString(hx):
+	case algo == "sha512" && sha512Pattern.MatchString(hx):
+	case algo == "sha256" || algo == "sha512":
+		return ImageDigest{}, errors.New("image digest is malformed; refusing")
+	default:
+		return ImageDigest{}, fmt.Errorf("unsupported image digest algorithm %q", algo)
+	}
+	return ImageDigest{Algo: algo, Hex: hx}, nil
+}
+
+// Digest resolves the image hash: the new "digest" field when present, else the
+// legacy 64-hex "sha256" field. If both are present they must agree whenever the
+// digest is sha256.
+func (i Image) Digest() (ImageDigest, error) {
+	if strings.TrimSpace(i.DigestStr) != "" {
+		d, err := ParseImageDigest(i.DigestStr)
+		if err != nil {
+			return ImageDigest{}, err
+		}
+		if l := strings.ToLower(strings.TrimSpace(i.SHA256)); l != "" && d.Algo == "sha256" && l != d.Hex {
+			return ImageDigest{}, errors.New("image digest and sha256 disagree; refusing")
+		}
+		return d, nil
+	}
+	h := strings.ToLower(strings.TrimSpace(i.SHA256))
+	if h == "" || strings.Contains(h, "todo") {
+		return ImageDigest{}, errors.New("image has no real SHA-256 (placeholder); refusing")
+	}
+	if !sha256Pattern.MatchString(h) {
+		return ImageDigest{}, errors.New("image SHA-256 is malformed; refusing")
+	}
+	return ImageDigest{Algo: "sha256", Hex: h}, nil
+}
 
 // NormalizeArch maps vendor spellings to Go's GOARCH names.
 func NormalizeArch(a string) string {
@@ -94,12 +166,8 @@ func ValidateImage(img Image, hostArch string) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return errors.New("image URL must be https")
 	}
-	h := strings.ToLower(strings.TrimSpace(img.SHA256))
-	if h == "" || strings.Contains(h, "todo") {
-		return errors.New("image has no real SHA-256 (placeholder); refusing")
-	}
-	if !sha256Pattern.MatchString(h) {
-		return errors.New("image SHA-256 is malformed; refusing")
+	if _, err := img.Digest(); err != nil {
+		return err
 	}
 	if NormalizeArch(img.Arch) != NormalizeArch(hostArch) {
 		return fmt.Errorf("image arch %q does not match this Mac (%s)", img.Arch, hostArch)
@@ -127,18 +195,22 @@ func IsQCOW2(path string) (bool, error) {
 	return bytes.Equal(m[:], []byte{'Q', 'F', 'I', 0xfb}), nil
 }
 
-func hashFile(path string) (string, int64, error) {
+func hashFile(path string, d ImageDigest) (string, int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", 0, err
 	}
 	defer f.Close()
-	h := sha256.New()
+	h := d.newHash()
 	n, err := io.Copy(h, f)
 	if err != nil {
 		return "", 0, err
 	}
 	return hex.EncodeToString(h.Sum(nil)), n, nil
+}
+
+func digestEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // RemoteSize asks the mirror for the image size (HEAD). It is best effort and
@@ -169,20 +241,24 @@ func (s *ImageStore) Ensure(ctx context.Context, img Image) (string, int64, erro
 	if err := ValidateImage(img, HostArch()); err != nil {
 		return "", 0, err
 	}
-	want := strings.ToLower(strings.TrimSpace(img.SHA256))
+	dg, err := img.Digest()
+	if err != nil {
+		return "", 0, err
+	}
+	want := dg.CacheKey()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return "", 0, err
 	}
 	src := filepath.Join(s.Dir, want+".src")
-	if got, _, err := hashFile(src); err == nil && got == want {
+	if got, _, err := hashFile(src, dg); err == nil && digestEqual(got, dg.Hex) {
 		// verified cache hit
 	} else {
 		if err == nil {
 			_ = os.Remove(src) // present but wrong: discard
 		}
-		if err := s.download(ctx, img.URL, src, want); err != nil {
+		if err := s.download(ctx, img.URL, src, dg); err != nil {
 			return "", 0, err
 		}
 	}
@@ -216,7 +292,7 @@ func (s *ImageStore) Ensure(ctx context.Context, img Image) (string, int64, erro
 	return usable, fi.Size(), nil
 }
 
-func (s *ImageStore) download(ctx context.Context, rawURL, dest, wantSHA string) error {
+func (s *ImageStore) download(ctx context.Context, rawURL, dest string, want ImageDigest) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return errors.New("cannot construct image request")
@@ -237,7 +313,7 @@ func (s *ImageStore) download(ctx context.Context, rawURL, dest, wantSHA string)
 	if err != nil {
 		return err
 	}
-	h := sha256.New()
+	h := want.newHash()
 	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, MaxImageBytes+1))
 	cerr := f.Close()
 	if err == nil {
@@ -251,9 +327,9 @@ func (s *ImageStore) download(ctx context.Context, rawURL, dest, wantSHA string)
 		_ = os.Remove(part)
 		return errors.New("image is larger than the allowed maximum")
 	}
-	if got := hex.EncodeToString(h.Sum(nil)); got != wantSHA {
+	if !digestEqual(hex.EncodeToString(h.Sum(nil)), want.Hex) {
 		_ = os.Remove(part)
-		return errors.New("image SHA-256 mismatch; refusing to use it")
+		return fmt.Errorf("image %s mismatch; refusing to use it", strings.ToUpper(want.Algo))
 	}
 	return os.Rename(part, dest)
 }

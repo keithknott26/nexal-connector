@@ -60,7 +60,7 @@ func newSandboxManager(logger *slog.Logger) *sandbox.Manager {
 
 	m, err := sandbox.NewManager(sandbox.Options{
 		Caps:              cfg.Caps(),
-		Images:            sandbox.NewImageStore(imgDir, nil),
+		Images:            sandbox.NewImageStore(imgDir, sandbox.QCOW2Converter{}),
 		Hypervisor:        hv,
 		Dev:               dev,
 		HostingConfigPath: cfgPath,

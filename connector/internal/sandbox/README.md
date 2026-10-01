@@ -87,3 +87,17 @@ and secrets. It sits behind the `DevOps` interface; tests use fakes. Error codes
 - First-boot env: the seed renders `NEXAL_MESH_URL` (not `NEXAL_MANAGEMENT_URL`) and optional
   `NEXAL_DRIVE_URL`; `seed_firstboot_test.go` parses `nexal-first-boot` to keep both in sync.
 - `nexal sandbox --action list|connect --id <id> --kind ssh|vnc|files [--public-key-stdin]` (see CLI-CONTRACT.md).
+
+## Base images
+
+A task's image carries `url` plus a hash: `digest` (`sha256:<64 hex>` or
+`sha512:<128 hex>`) or the legacy `sha256` field (64 hex). `digest` wins when
+both are present. The download is verified with the matching algorithm
+(constant-time compare) and cached under the digest (`<sha256hex>` or
+`sha512-<hex>`); a mismatch is refused and nothing is kept.
+
+The hypervisor needs a raw disk. `.raw` images are used as downloaded.
+qcow2 (including compressed Ubuntu cloud images) is converted by the built-in
+pure-Go converter (`QCOW2Converter`: v2/v3, deflate clusters, sparse output;
+no backing files, encryption, external data files, zstd, or more than 64 GiB).
+Per-sandbox disks are grown to the requested size after the APFS clone.

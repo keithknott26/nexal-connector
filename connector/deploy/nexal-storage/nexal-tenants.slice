@@ -1,0 +1,14 @@
+# Parent of every tenant's slice (nexal-tenants-<tag>.slice, created on demand by
+# Docker's systemd cgroup driver). Caps what ALL tenants' containers together may
+# use, so the storage server (Time Machine, Drive) always keeps headroom.
+# Install as /etc/systemd/system/nexal-tenants.slice, then: systemctl daemon-reload
+[Unit]
+Description=neXal storage tenant containers
+
+[Slice]
+# Adjust to the server: e.g. 75% of the cores and of the memory.
+CPUQuota=600%
+MemoryMax=24G
+MemorySwapMax=0
+TasksMax=20000
+IOWeight=50

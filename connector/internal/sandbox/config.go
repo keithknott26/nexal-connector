@@ -26,7 +26,15 @@ type HostingConfig struct {
 	// the coordinator can refuse sizes that could never be admitted.
 	MaxCPUs     int `json:"maxCpus,omitempty"`
 	MaxMemoryMB int `json:"maxMemoryMb,omitempty"`
+	// Managed marks a server that hosts many tenants' dev containers (neXal
+	// storage): maxSandboxes may go up to MaxManagedSandboxes and the server may
+	// give more of itself to guests. Never sent to the coordinator.
+	Managed bool `json:"managed,omitempty"`
 }
+
+// MaxManagedSandboxes is the most a managed server may run (the coordinator's
+// MANAGED_ABSOLUTE_MAX).
+const MaxManagedSandboxes = 64
 
 // Placement values.
 const (
@@ -49,8 +57,12 @@ func (c HostingConfig) Normalize() (HostingConfig, error) {
 	if c.MaxSandboxes == 0 {
 		c.MaxSandboxes = 5
 	}
-	if c.MaxSandboxes < 1 || c.MaxSandboxes > 10 {
-		return HostingConfig{}, fmt.Errorf("maxSandboxes must be 1..10")
+	limit := 10
+	if c.Managed {
+		limit = MaxManagedSandboxes
+	}
+	if c.MaxSandboxes < 1 || c.MaxSandboxes > limit {
+		return HostingConfig{}, fmt.Errorf("maxSandboxes must be 1..%d", limit)
 	}
 	switch c.Placement {
 	case "any": // tolerated spelling from older Mac apps
@@ -107,6 +119,11 @@ func (c HostingConfig) Caps() Caps {
 	k.Enabled = c.Enabled
 	k.MaxSandboxes = c.MaxSandboxes
 	k.AllowOnBattery = true
+	if c.Managed {
+		// A dedicated server: guests may use most of it (the per-tenant slices and
+		// the coordinator's per-tenant caps bound each tenant).
+		k.MaxCPUFraction, k.MaxMemFraction = 0.85, 0.85
+	}
 	return k.Normalized()
 }
 

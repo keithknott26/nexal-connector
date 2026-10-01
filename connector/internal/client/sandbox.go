@@ -63,6 +63,7 @@ func (c *Client) PutSandboxHosting(ctx context.Context, hostID string, h sandbox
 	if err != nil {
 		return err
 	}
+	n.Managed = false // local only: the coordinator knows which hosts are managed and refuses unknown keys
 	return c.callLenient(ctx, "PUT", p, n, nil)
 }
 

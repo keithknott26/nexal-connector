@@ -1,0 +1,43 @@
+# neXal storage: the managed dev-container runner (see README.md in this directory).
+# Install as /etc/systemd/system/nexal-storage.service.
+[Unit]
+Description=neXal storage managed dev-container runner
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nexal
+Group=nexal
+# The connector talks to the Docker Engine; the docker group is root-equivalent on
+# this host, which is why the host runs nothing but this service and the gateway.
+SupplementaryGroups=docker
+Environment=HOME=/var/lib/nexal
+Environment=NEXAL_MANAGED_RUNNER=1
+Environment=NEXAL_MANAGED_STATE_DIR=/var/lib/nexal
+Environment=NEXAL_MANAGED_HOSTING=/etc/nexal/sandbox-hosting.json
+Environment=NEXAL_SECRETS_DIR=/var/lib/nexal/secrets
+# Per-tenant slices go under nexal-tenants.slice (see nexal-tenants.slice).
+Environment=NEXAL_MANAGED_SLICE=nexal-tenants
+# Set to 1 only if /var/lib/docker is overlay2 on xfs mounted with pquota.
+Environment=NEXAL_MANAGED_STORAGE_OPT=0
+ExecStart=/usr/local/bin/nexal run --config /etc/nexal/config.json
+Restart=on-failure
+RestartSec=5
+StateDirectory=nexal nexal/secrets
+StateDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nexal /etc/nexal
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

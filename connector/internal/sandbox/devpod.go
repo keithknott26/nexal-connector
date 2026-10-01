@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,8 @@ type DevUpSpec struct {
 	DriveMode      string
 	DriveToken     string
 	Lifecycle      Lifecycle
+	// Tenant is the coordinator's per-tenant tag; required in managed mode.
+	Tenant string
 	// Recreate wipes any existing workspace first (ephemeral lifecycle).
 	Recreate bool
 	Timeout  time.Duration // mesh join wait; default 3 min
@@ -138,6 +141,8 @@ const (
 	RuntimeColima   RuntimeName = "colima"
 	RuntimeLima     RuntimeName = "lima"
 	RuntimePodman   RuntimeName = "podman"
+	// RuntimeDocker is the native Docker Engine on Linux (a managed server).
+	RuntimeDocker RuntimeName = "docker"
 )
 
 // RuntimeInfo is a detected, working runtime.
@@ -160,6 +165,12 @@ type DevEnv struct {
 	Run func(ctx context.Context, env []string, name string, args ...string) ([]byte, error)
 	// LookPath finds an executable on PATH.
 	LookPath func(name string) (string, error)
+	// GOOS is the operating system ("" behaves like macOS). On "linux" the
+	// native Docker Engine socket is a supported runtime.
+	GOOS string
+	// DockerSocket, when set on Linux, is the only engine socket tried (e.g.
+	// rootless Docker's /run/user/<uid>/docker.sock).
+	DockerSocket string
 }
 
 // SystemDevEnv is the real host.
@@ -175,6 +186,7 @@ func SystemDevEnv() DevEnv {
 			return cmd.CombinedOutput()
 		},
 		LookPath: exec.LookPath,
+		GOOS:     runtime.GOOS,
 	}
 }
 
@@ -203,6 +215,14 @@ type runtimeCandidate struct {
 // order. Podman's socket is asked from `podman` itself (see DetectRuntime).
 func RuntimeCandidates(e DevEnv) []runtimeCandidate {
 	var c []runtimeCandidate
+	if e.GOOS == "linux" {
+		// A Linux server runs the native engine (Apache-2.0; Docker Desktop's
+		// licence concern does not apply to it).
+		if e.DockerSocket != "" {
+			return []runtimeCandidate{{RuntimeDocker, e.DockerSocket}}
+		}
+		c = append(c, runtimeCandidate{RuntimeDocker, "/var/run/docker.sock"}, runtimeCandidate{RuntimeDocker, "/run/docker.sock"})
+	}
 	c = append(c, runtimeCandidate{RuntimeOrbStack, filepath.Join(e.Home, ".orbstack", "run", "docker.sock")})
 	c = append(c, runtimeCandidate{RuntimeColima, filepath.Join(e.Home, ".colima", "default", "docker.sock")})
 	for _, m := range e.Glob(filepath.Join(e.Home, ".colima", "*", "docker.sock")) {
@@ -389,7 +409,7 @@ var SidecarLimitArgs = []string{"--cpus=0.5", "--memory=128m", "--memory-swap=12
 // SidecarBootMount: they are on neither the command line nor in the
 // container's environment. bootDir must not contain a comma (--mount syntax);
 // Up checks that. It is pure.
-func SidecarRunArgs(workspace, containerID, image, bootDir string, persistent bool) []string {
+func SidecarRunArgs(workspace, containerID, image, bootDir string, persistent bool, extra ...string) []string {
 	a := []string{"run", "-d", "--name", SidecarName(workspace),
 		"--label", "nexal.workspace=" + workspace,
 		"--network", "container:" + containerID,
@@ -399,6 +419,7 @@ func SidecarRunArgs(workspace, containerID, image, bootDir string, persistent bo
 	if persistent {
 		a = append(a, "-v", SidecarVolume(workspace)+":/var/lib/nexal")
 	}
+	a = append(a, extra...)
 	return append(a, image)
 }
 
@@ -562,8 +583,11 @@ type DevConfig struct {
 	Env       DevEnv
 	StateDir  string // per-workspace directories live here (0700)
 	MeshImage string // sidecar image with the neXal mesh runtime
-	Sleep     func(time.Duration)
-	Now       func() time.Time
+	// Managed, when set, runs many tenants' workspaces on this host (managed.go):
+	// per-tenant networks, slices and labels, and sanitized definitions.
+	Managed *ManagedConfig
+	Sleep   func(time.Duration)
+	Now     func() time.Time
 }
 
 // DevPod is the DevOps implementation that shells out to devpod and docker.
@@ -672,9 +696,15 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	if err := ValidateDevcontainer(&s.Devcontainer); err != nil {
 		return res, devErr(DevErrInvalid, "%v", err)
 	}
-	file, err := DevcontainerFile(s.Devcontainer, s.Size)
-	if err != nil {
-		return res, err
+	managed := d.cfg.Managed != nil
+	if managed && !ValidTenantTag(s.Tenant) {
+		return res, devErr(DevErrInvalid, "a managed host needs the task's tenant tag")
+	}
+	var file string
+	if !managed {
+		if file, err = DevcontainerFile(s.Devcontainer, s.Size); err != nil {
+			return res, err
+		}
 	}
 	t, err := d.tools(ctx, s.Workspace, true)
 	if err != nil {
@@ -699,7 +729,21 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 		return res, err
 	}
 	source := s.Devcontainer.RepoURL
-	if file != "" {
+	if managed {
+		if err = d.ensureManagedNetwork(ctx, t, s.Tenant); err != nil {
+			return res, err
+		}
+		src := filepath.Join(dir, "src")
+		_, statErr := os.Stat(src)
+		reuse := !fresh && statErr == nil // a kept workspace: its files live in src
+		if !reuse {
+			_ = os.RemoveAll(src)
+		}
+		if _, err = d.prepareManagedSource(ctx, t, s, src, reuse); err != nil {
+			return res, err
+		}
+		source = src
+	} else if file != "" {
 		src := filepath.Join(dir, "src")
 		if err = os.MkdirAll(filepath.Join(src, ".devcontainer"), 0o700); err != nil {
 			return res, err
@@ -744,7 +788,11 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	if err = os.WriteFile(filepath.Join(bootDir, SidecarBootFile), []byte(SidecarEnv(s)), 0o600); err != nil {
 		return res, err
 	}
-	if out, rerr := d.run(ctx, t, t.docker, SidecarRunArgs(s.Workspace, cid, d.cfg.MeshImage, bootDir, s.Lifecycle == LifecyclePersistent)...); rerr != nil {
+	var sidecarExtra []string
+	if managed {
+		sidecarExtra = ManagedSidecarArgs(*d.cfg.Managed, s.Tenant)
+	}
+	if out, rerr := d.run(ctx, t, t.docker, SidecarRunArgs(s.Workspace, cid, d.cfg.MeshImage, bootDir, s.Lifecycle == LifecyclePersistent, sidecarExtra...)...); rerr != nil {
 		return res, devErr(DevErrMeshFailed, "starting the mesh sidecar failed: %s", trimOutput([]byte(out)))
 	}
 	fb, err := d.awaitJoin(ctx, t, s)

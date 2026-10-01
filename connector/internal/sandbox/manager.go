@@ -37,6 +37,8 @@ type Options struct {
 	HostingConfigPath string
 	// Lid reads the lid state for the sleep heuristic; default IORegLid.
 	Lid LidReader
+	// ContainersOnly refuses VM tasks (a Linux managed host: dev containers only).
+	ContainersOnly bool
 }
 
 // record is the persisted view of one sandbox.
@@ -391,6 +393,9 @@ func (m *Manager) startBoot(ctx context.Context, t Task) {
 		if t.Size == (Size{}) {
 			t.Size = devDefaultSize
 		}
+	} else if m.opts.ContainersOnly {
+		m.fail(t.SandboxID, devErr(DevErrNotAvailable, "this host runs dev containers only").Error())
+		return
 	} else if err := ValidateImage(t.Image, HostArch()); err != nil {
 		m.fail(t.SandboxID, err.Error())
 		return

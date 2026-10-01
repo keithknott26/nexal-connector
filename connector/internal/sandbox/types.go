@@ -117,6 +117,11 @@ type Task struct {
 	DriveToken     string        `json:"driveToken,omitempty"`
 	DriveURL       string        `json:"-"`                  // optional https endpoint for the shared drive (driveUrl)
 	Password       string        `json:"password,omitempty"` // vnc-password task
+	// Tenant is the coordinator's opaque per-tenant tag (16 hex) on tasks for a
+	// managed host (neXal storage). The managed runner isolates containers by it.
+	Tenant string `json:"tenant,omitempty"`
+	// Managed is true on tasks for a managed host.
+	Managed bool `json:"managed,omitempty"`
 
 	// keepData is set by the runner (never the wire) when a re-create must keep
 	// the persistent workspace's data.
@@ -154,6 +159,8 @@ type taskWire struct {
 	DriveMode         string        `json:"driveMode"`
 	DriveToken        string        `json:"driveToken"`
 	DriveURL          string        `json:"driveUrl"`
+	Tenant            string        `json:"tenant"`
+	Managed           bool          `json:"managed"`
 }
 
 type wireRes struct {
@@ -177,7 +184,8 @@ func (t *Task) UnmarshalJSON(b []byte) error {
 	*t = Task{TaskID: w.ID, SandboxID: w.SandboxID, Kind: w.Kind, Image: w.Image, SetupKey: w.SetupKey,
 		VNCPassword: w.VNCPassword, Hostname: w.Hostname, Desktop: w.Desktop, ExpiresAt: w.ExpiresAt,
 		Reach: w.Reach, SandboxKind: w.SandboxKind, Lifecycle: w.Lifecycle, Devcontainer: w.Devcontainer,
-		SSHCAPublicKey: w.SSHCAPublicKey, DriveMode: w.DriveMode, DriveToken: w.DriveToken, DriveURL: w.DriveURL, Password: w.Password}
+		SSHCAPublicKey: w.SSHCAPublicKey, DriveMode: w.DriveMode, DriveToken: w.DriveToken, DriveURL: w.DriveURL, Password: w.Password,
+		Tenant: w.Tenant, Managed: w.Managed}
 	if t.TaskID == "" {
 		t.TaskID = w.TaskID
 	}
@@ -393,11 +401,21 @@ func validateV2(t Task) error {
 	if t.DriveURL != "" && !validHTTPSURL(t.DriveURL) {
 		return fmt.Errorf("invalid drive url")
 	}
+	if t.Tenant != "" && !ValidTenantTag(t.Tenant) {
+		return fmt.Errorf("invalid tenant tag")
+	}
 	if t.IsDev() {
 		return ValidateDevcontainer(t.Devcontainer)
 	}
 	return nil
 }
+
+var tenantTagPattern = regexp.MustCompile(`^[a-f0-9]{16}$`)
+
+// ValidTenantTag accepts the coordinator's per-tenant tag (16 lowercase hex).
+// It is used in docker network, label and cgroup slice names, so nothing else
+// is accepted.
+func ValidTenantTag(s string) bool { return tenantTagPattern.MatchString(s) }
 
 // validHTTPSURL accepts an https URL that is also safe inside a quoted env value.
 func validHTTPSURL(s string) bool {

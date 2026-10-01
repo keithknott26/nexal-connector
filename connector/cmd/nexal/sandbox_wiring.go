@@ -41,8 +41,20 @@ func newSandboxManager(logger *slog.Logger) *sandbox.Manager {
 	base := filepath.Dir(cfgPath) // ~/Library/Application Support/Nexal
 	vmhost := os.Getenv("NEXAL_VMHOST")
 	if vmhost == "" {
+		// Next to the connector (app bundle Helpers/), else the per-user dev location the install script uses.
+		var candidates []string
 		if exe, err := os.Executable(); err == nil {
-			vmhost = filepath.Join(filepath.Dir(exe), "nexal-vmhost")
+			candidates = append(candidates, filepath.Join(filepath.Dir(exe), "nexal-vmhost"))
+		}
+		candidates = append(candidates, filepath.Join(base, "bin", "nexal-vmhost"))
+		for _, c := range candidates {
+			if fi, err := os.Stat(c); err == nil && fi.Mode().IsRegular() {
+				vmhost = c
+				break
+			}
+		}
+		if vmhost == "" {
+			vmhost = candidates[0]
 		}
 	}
 	// unix socket paths are short-limited on macOS; keep them out of "Application Support".

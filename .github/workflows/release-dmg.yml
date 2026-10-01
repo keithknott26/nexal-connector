@@ -118,6 +118,11 @@ jobs:
           codesign --force --timestamp --options runtime \
             --keychain "$SIGNING_KEYCHAIN" --sign "$IDENTITY" \
             "$APP/Contents/Helpers/nexal"
+          # Virtualization.framework refuses to start a VM without this entitlement.
+          codesign --force --timestamp --options runtime \
+            --entitlements macos/NexalVMHost.entitlements \
+            --keychain "$SIGNING_KEYCHAIN" --sign "$IDENTITY" \
+            "$APP/Contents/Helpers/nexal-vmhost"
           codesign --force --timestamp --options runtime \
             --keychain "$SIGNING_KEYCHAIN" --sign "$IDENTITY" "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"

@@ -20,9 +20,12 @@ The Mac app writes, the connector only reads (re-read on every poll, no restart 
 - The connector applies it as admission caps and publishes it with
   `PUT /api/v2/hosts/:id/sandbox-hosting` whenever it changes. Disabling blocks new
   placements only; running sandboxes continue until deleted or expired.
-- Dev containers also need `NEXAL_DEV_MESH_IMAGE` (the mesh sidecar image) in the
-  connector's environment, and Colima, Lima, Podman or OrbStack plus the `docker` and
-  `devpod` command-line tools. Docker Desktop is refused (`docker_desktop_only`).
+- Dev containers need Colima, Lima, Podman or OrbStack plus the `docker` and `devpod`
+  command-line tools. Docker Desktop is refused (`docker_desktop_only`). The mesh
+  sidecar image defaults to `DefaultMeshImage` (`ghcr.io/keithknott26/nexal-mesh-sidecar:<version>`,
+  built from `connector/sidecar`; the package must be public). Set `NEXAL_DEV_MESH_IMAGE`
+  in the connector's environment to override it (local build, mirror, newer version).
+  Check an image with `macos/scripts/verify-sidecar.sh [image]`.
 
 ## Lifecycles
 

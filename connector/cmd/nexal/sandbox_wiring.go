@@ -60,7 +60,7 @@ func newSandboxManager(logger *slog.Logger) *sandbox.Manager {
 	}
 	var dev sandbox.DevOps
 	if err == nil {
-		dev = sandbox.NewDevPod(sandbox.DevConfig{StateDir: devDir, MeshImage: os.Getenv("NEXAL_DEV_MESH_IMAGE")})
+		dev = sandbox.NewDevPod(sandbox.DevConfig{StateDir: devDir, MeshImage: sandbox.ResolveMeshImage(os.Getenv(sandbox.MeshImageEnv))})
 	}
 
 	m, err := sandbox.NewManager(sandbox.Options{

@@ -243,3 +243,22 @@ func TestIgnoreMissing(t *testing.T) {
 		t.Fatal("other errors stay")
 	}
 }
+
+func TestResolveMeshImage(t *testing.T) {
+	if DefaultMeshImage == "" || !strings.Contains(DefaultMeshImage, "nexal-mesh-sidecar:") || strings.HasSuffix(DefaultMeshImage, ":latest") {
+		t.Fatalf("default must be a version-pinned tag: %q", DefaultMeshImage)
+	}
+	for _, empty := range []string{"", "  ", "\n"} {
+		if got := ResolveMeshImage(empty); got != DefaultMeshImage {
+			t.Fatalf("%q -> %q, want default", empty, got)
+		}
+	}
+	if got := ResolveMeshImage(" registry.local/mesh:dev \n"); got != "registry.local/mesh:dev" {
+		t.Fatalf("override not used: %q", got)
+	}
+	// With the default, Up gets past the unconfigured refusal (and then stops at the fake runtime).
+	d := NewDevPod(DevConfig{Env: fakeEnv(&fakeRun{}), StateDir: t.TempDir(), MeshImage: ResolveMeshImage(""), Sleep: func(time.Duration) {}})
+	if _, err := d.Up(context.Background(), upSpec()); DevErrorCode(err) == DevErrUnconfigured {
+		t.Fatalf("default image must configure the backend: %v", err)
+	}
+}

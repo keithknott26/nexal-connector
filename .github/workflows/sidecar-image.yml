@@ -1,0 +1,71 @@
+name: Mesh sidecar image
+# Builds connector/sidecar (patched NetBird, ML-KEM-1024) for linux/amd64+arm64 and
+# pushes ghcr.io/<owner>/nexal-mesh-sidecar:<version>.
+#   release:  git tag sidecar-v0.1.0 && git push origin sidecar-v0.1.0
+#   manual:   Actions > Mesh sidecar image > Run workflow (give a version)
+# The connector's DefaultMeshImage (connector/internal/sandbox/devpod.go) must name
+# the same version; the tag build fails if it does not.
+on:
+  push:
+    tags: ["sidecar-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image version (the part after sidecar-v), e.g. 0.1.0"
+        required: true
+permissions:
+  contents: read
+  packages: write
+env:
+  IMAGE_NAME: nexal-mesh-sidecar
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Resolve image name and version
+        id: v
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then ver="${INPUT_VERSION}"; else ver="${REF_NAME#sidecar-v}"; fi
+          [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "bad version: $ver"; exit 1; }
+          image="ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/${IMAGE_NAME}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Connector default must match the tag
+        if: github.event_name == 'push'
+        env:
+          WANT: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+        run: |
+          have=$(sed -n 's/^const DefaultMeshImage = "\(.*\)"$/\1/p' connector/internal/sandbox/devpod.go)
+          [ "$have" = "$WANT" ] || { echo "DefaultMeshImage is '$have' but this tag builds '$WANT'; update devpod.go first"; exit 1; }
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: connector/sidecar
+          build-contexts: patches=experiments/mlkem1024-mesh
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          build-args: SIDECAR_VERSION=${{ steps.v.outputs.version }}
+          tags: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify the pushed image (amd64 runs natively here)
+        env:
+          IMAGE: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+        run: bash macos/scripts/verify-sidecar.sh "$IMAGE" linux/amd64

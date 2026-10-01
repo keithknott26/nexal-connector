@@ -345,6 +345,26 @@ func SidecarEnv(s DevUpSpec) string {
 	return b.String()
 }
 
+// MeshImageEnv overrides DefaultMeshImage (a local build, a registry mirror, a
+// newer sidecar). An empty or unset value means the default.
+const MeshImageEnv = "NEXAL_DEV_MESH_IMAGE"
+
+// DefaultMeshImage is the version-pinned mesh sidecar image the connector uses
+// when MeshImageEnv is not set. It is built from connector/sidecar by
+// .github/workflows/sidecar-image.yml on a `sidecar-v<version>` tag, which
+// pushes ghcr.io/<owner>/nexal-mesh-sidecar:<version>. The package must be
+// public so a Mac can pull it anonymously. Bump the tag here whenever a new
+// sidecar version is released.
+const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.0"
+
+// ResolveMeshImage returns override (trimmed) or, when empty, DefaultMeshImage.
+func ResolveMeshImage(override string) string {
+	if v := strings.TrimSpace(override); v != "" {
+		return v
+	}
+	return DefaultMeshImage
+}
+
 // DevConfig configures the DevPod backend.
 type DevConfig struct {
 	Env       DevEnv
@@ -361,7 +381,8 @@ type DevPod struct {
 }
 
 // NewDevPod builds the backend. MeshImage may be empty; Up then refuses with
-// DevErrUnconfigured.
+// DevErrUnconfigured. The connector wiring passes ResolveMeshImage(env), so it
+// is never empty there.
 func NewDevPod(cfg DevConfig) *DevPod {
 	if cfg.Env.Run == nil {
 		cfg.Env = SystemDevEnv()
@@ -443,7 +464,7 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.cfg.MeshImage == "" {
-		return res, devErr(DevErrUnconfigured, "no mesh sidecar image is configured")
+		return res, devErr(DevErrUnconfigured, "no mesh sidecar image is configured (the connector defaults to its pinned release image; %s overrides it)", MeshImageEnv)
 	}
 	if !ValidID(s.Workspace) || !ValidHostname(s.Hostname) || !validSecret(s.SetupKey) {
 		return res, devErr(DevErrInvalid, "invalid dev container request")

@@ -156,7 +156,24 @@ extension AppModel {
     /// is in one: green with at least one computer connected, yellow while
     /// connecting or alone, red when the tunnel failed; otherwise the transport
     /// indicator's own severity. Grey when not paired.
+    ///
+    /// The mesh tunnel to other Macs and the heartbeat to the coordinator are
+    /// separate transports and can diverge: this Mac can stay connected to its
+    /// peers for a while after its heartbeats stop landing, which used to show
+    /// as green here while the coordinator (and every other device reading its
+    /// last-seen time) already considered this Mac stale. A green glyph should
+    /// mean the coordinator agrees this Mac is live, not just that its tunnel
+    /// to other Macs is up, so a stale/failed heartbeat downgrades green to
+    /// yellow without overriding an existing red/yellow/grey reading.
     var menuBarSeverity: IndicatorSeverity {
+        let severity = meshOnlyMenuBarSeverity
+        if severity == .good, let coordinatorHealthy = status?.coordinatorHealthy, !coordinatorHealthy {
+            return .warning
+        }
+        return severity
+    }
+
+    private var meshOnlyMenuBarSeverity: IndicatorSeverity {
         if leavePhase?.inProgress == true { return .pending }
         guard isLinked else { return .inactive }
         if let mesh = status?.mesh, mesh.providerAvailable {

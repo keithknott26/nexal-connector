@@ -175,6 +175,46 @@ final class ThrowawayHosting: ObservableObject {
         }
     }
 
+    // MARK: Container runtime (dev containers)
+
+    @Published private(set) var runtimeStatus: String?
+    @Published private(set) var installingRuntime = false
+
+    /// Runs the bundled installer (Colima plus the docker and devpod tools, via
+    /// Homebrew). The connector refuses Docker Desktop (`docker_desktop_only`), so
+    /// dev containers need Colima, Lima, Podman or OrbStack. Idempotent.
+    func installContainerRuntime() {
+        guard !installingRuntime else { return }
+        guard let script = Bundle.main.url(forResource: "install-container-runtime", withExtension: "sh") else {
+            runtimeStatus = "This build does not include the container-runtime installer."
+            return
+        }
+        installingRuntime = true
+        runtimeStatus = "Setting up a container runtime for dev containers…"
+        Task { @MainActor in
+            let status = await Task.detached { ThrowawayHosting.runInstaller(script) }.value
+            self.installingRuntime = false
+            self.runtimeStatus = status
+        }
+    }
+
+    nonisolated static func runInstaller(_ script: URL) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [script.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch {
+            return "Could not start the container-runtime installer: \(error.localizedDescription)"
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let lines = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline)
+        if let last = lines.last { return String(last) }
+        return process.terminationStatus == 0 ? "Container runtime ready." : "Container runtime setup failed."
+    }
+
     // MARK: Hosts on this Mac
 
     func reloadLocal() {
@@ -358,7 +398,10 @@ struct ThrowawayHostingSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Allow this Mac to run throwaway hosts", isOn: Binding(
                 get: { hosting.config.enabled },
-                set: { on in hosting.update { $0.enabled = on } }))
+                set: { on in
+                    hosting.update { $0.enabled = on }
+                    if on { hosting.installContainerRuntime() }
+                }))
                 .disabled(!model.isLinked)
             Text(model.isLinked
                  ? "Throwaway hosts are disposable virtual machines and dev containers that you or members of your network start. Only you, as this Mac's owner, can turn this on. Off by default."
@@ -377,6 +420,15 @@ struct ThrowawayHostingSettingsView: View {
                 Text("Hosts use at most half of this Mac's processor and memory in total, always leave room on the disk, and are not started while this Mac is on battery. Each host's disk is erased when it is removed.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Hosts are polite to you: they pause when this Mac sleeps and resume when it wakes. You can stop any host from the menu bar or the neXal panel at any time.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Button(hosting.installingRuntime ? "Setting up…" : "Set up dev-container runtime") {
+                        hosting.installContainerRuntime()
+                    }
+                    .disabled(hosting.installingRuntime)
+                    if hosting.installingRuntime { ProgressView().controlSize(.small) }
+                }
+                Text(hosting.runtimeStatus ?? "Dev containers need Colima or OrbStack (Docker Desktop is not supported). Setup installs Colima, docker and devpod with Homebrew.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let message = hosting.message { Text(message).font(.caption).foregroundStyle(.orange) }

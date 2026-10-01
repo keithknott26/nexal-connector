@@ -73,10 +73,13 @@ python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
 install -m 755 "$NEXAL_MESH_RUNTIME_ARTIFACT" "$CANDIDATE/Contents/Helpers/nexal-network"
 install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
+# Run by the app when the owner turns on throwaway hosts: sets up Colima for dev containers.
+install -m 755 "$ROOT/Resources/install-container-runtime.sh" "$CANDIDATE/Contents/Resources/install-container-runtime.sh"
 /usr/bin/plutil -lint "$CANDIDATE/Contents/Info.plist"
 test -x "$CANDIDATE/Contents/MacOS/NexalMac"
 test -x "$CANDIDATE/Contents/Helpers/nexal"
 test -x "$CANDIDATE/Contents/Helpers/nexal-network"
+test -x "$CANDIDATE/Contents/Resources/install-container-runtime.sh"
 # Fail loudly if either slice is missing. Without this a silent fallback to a
 # single-architecture build would ship an Intel-broken DMG that looks fine on
 # the arm64 machine that built it -- exactly the bug this replaces.

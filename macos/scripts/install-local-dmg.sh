@@ -42,3 +42,9 @@ done
 /usr/bin/ditto "$SOURCE" "$TARGET"
 python3 "$ROOT/scripts/verify-runtime.py" app "$TARGET"
 echo "Installed $TARGET"
+# Dev-container throwaway hosts need Colima/OrbStack (Docker Desktop is refused).
+# Best effort: a missing runtime must not fail the connector install.
+if [ "${NEXAL_SKIP_CONTAINER_RUNTIME:-0}" != "1" ]; then
+  /bin/bash "$TARGET/Contents/Resources/install-container-runtime.sh" \
+    || echo "Container runtime not set up; dev containers stay unavailable until it is (see above)." >&2
+fi

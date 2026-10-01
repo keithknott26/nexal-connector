@@ -21,7 +21,10 @@ The Mac app writes, the connector only reads (re-read on every poll, no restart 
   `PUT /api/v2/hosts/:id/sandbox-hosting` whenever it changes. Disabling blocks new
   placements only; running sandboxes continue until deleted or expired.
 - Dev containers need Colima, Lima, Podman or OrbStack plus the `docker` and `devpod`
-  command-line tools. Docker Desktop is refused (`docker_desktop_only`). The mesh
+  command-line tools. Docker Desktop is refused (`docker_desktop_only`). Turning hosting on (or
+  "Set up dev-container runtime" in settings, or `install-local-dmg.sh`) runs
+  `macos/Resources/install-container-runtime.sh`, which installs Colima, docker and
+  devpod with Homebrew and starts Colima with `brew services`. The mesh
   sidecar image defaults to `DefaultMeshImage` (`ghcr.io/keithknott26/nexal-mesh-sidecar:<version>`,
   built from `connector/sidecar`; the package must be public). Set `NEXAL_DEV_MESH_IMAGE`
   in the connector's environment to override it (local build, mirror, newer version).

@@ -24,7 +24,10 @@ NetBird/Rosenpass VPN, coordinator HTTPS, iOS URLSession, or Drive file envelope
 Validation uses the actual peer client/server configuration, real local TLS
 handshakes, and enrolled device identities. It verifies group 4589, rejects
 classical X25519 and both ML-KEM-768 hybrids on either side, and confirms that
-`GODEBUG=tlsmlkem=0,tlssecpmlkem=0` cannot weaken the explicit suite. Go's explicit
+`GODEBUG=tlsmlkem=0,tlssecpmlkem=0` cannot weaken the explicit suite. From Go 1.26.x the
+stdlib intersects `CurvePreferences` with the GODEBUG-gated defaults, so those settings would
+leave no usable group (fail closed); `EnforcePostQuantumGODEBUG` strips them from the process
+before any peer config is built. Go's explicit
 `CurvePreferences` enables the listed supported groups; the earlier claim that
 setting this field always disables PQ was incorrect.
 

@@ -164,6 +164,9 @@ func (c *peerCertificates) certificate() (*tls.Certificate, error) {
 }
 
 func peerTLS(identity Identity, policy *peerPolicy, server bool) (*tls.Config, error) {
+	// A GODEBUG that disables the hybrid groups would leave this config with no
+	// usable key exchange (fail closed, but peers stop talking). Remove it first.
+	EnforcePostQuantumGODEBUG()
 	if err := policy.enrolled(DeviceID(identity.PublicKey)); err != nil {
 		return nil, err
 	}

@@ -32,10 +32,17 @@ func TestLoadHostingConfigFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "sandbox-hosting.json")
 	c, err := LoadHostingConfig(p)
-	if err != nil || !c.Enabled {
-		t.Fatalf("missing file defaults to enabled without error: %+v %v", c, err)
+	if err != nil || c.Enabled {
+		t.Fatalf("missing file must default to disabled without error: %+v %v", c, err)
 	}
 	if err := os.WriteFile(p, []byte(`{"enabled":true,"maxSandboxes":99}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err = LoadHostingConfig(p)
+	if err != nil || !c.Enabled || c.MaxSandboxes != 99 {
+		t.Fatalf("explicit opt-in must be honored: %+v %v", c, err)
+	}
+	if err := os.WriteFile(p, []byte(`{"maxSandboxes":11}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err = LoadHostingConfig(p)

@@ -41,7 +41,7 @@ struct GuestInvitationEntry: View {
                     .font(.caption).textSelection(.enabled)
             }
             Text("Already have an invite or pairing code?").font(.headline)
-            Text("Enter the invitation code you received. Access lasts one hour from redemption. Pairing codes for your own Macs are entered in neXal@home on your iPhone instead.")
+            Text("Enter the invitation code you received. Access lasts one hour from redemption. Pairing codes for your own computers are entered in neXal@home on your iPhone instead.")
                 .font(.caption).foregroundStyle(.secondary)
             TextField("Invitation code", text: $model.guestInvitationCode)
                 .textFieldStyle(.roundedBorder).autocorrectionDisabled()

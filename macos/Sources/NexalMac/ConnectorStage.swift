@@ -101,14 +101,14 @@ enum ConnectorStage: Equatable {
         case .starting:
             return nil
         case .offline:
-            return "Start the connector to link this Mac to your other Macs."
+            return "Start the connector to link this Mac to your other computers."
         case .notJoined:
             return "The connector is running but has not joined an account yet. "
                 + "Join with an invitation code under Setup."
         case .needsPairing:
-            return "Show a code, then choose \u{201C}Pair a Mac\u{201D} in neXal@home on your iPhone and scan it."
+            return "Show a code, then choose \u{201C}Pair a computer\u{201D} in neXal@home on your iPhone and scan it."
         case .showingCode:
-            return "In neXal@home on your iPhone, choose \u{201C}Pair a Mac\u{201D} and scan the code. This Mac joins the same "
+            return "In neXal@home on your iPhone, choose \u{201C}Pair a computer\u{201D} and scan the code. This Mac joins the same "
                 + "account your iPhone is signed in to."
         case .paired:
             return nil

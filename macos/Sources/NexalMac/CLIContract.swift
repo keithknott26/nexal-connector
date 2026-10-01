@@ -149,8 +149,8 @@ enum PairingRole: String, CaseIterable, Identifiable {
 
     var explanation: String {
         switch self {
-        case .receiver: return "Your iPhone pairs this Mac to receive resources from your other Macs."
-        case .donor: return "Your iPhone pairs this Mac to share its resources with your other Macs."
+        case .receiver: return "Your iPhone pairs this Mac to receive resources from your other computers."
+        case .donor: return "Your iPhone pairs this Mac to share its resources with your other computers."
         }
     }
 }

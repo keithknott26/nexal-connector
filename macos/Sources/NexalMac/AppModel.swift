@@ -266,7 +266,7 @@ final class AppModel: ObservableObject {
             try await Task.detached(priority: .userInitiated) {
                 try NetworkService.repairHostSettings(firewall: firewall, lazy: lazy, wake: wake)
             }.value
-            message = "Network settings updated: connections from your other Macs are allowed, connections stay on, and Wake for network access is on."
+            message = "Network settings updated: connections from your other computers are allowed, connections stay on, and Wake for network access is on."
         } catch {
             pairingProblem = error.localizedDescription
         }
@@ -495,14 +495,14 @@ final class AppModel: ObservableObject {
         busy = true
         refreshingPeerID = peer.id
         peerRefreshErrors[peer.id] = nil
-        activity = "Refreshing Mac status…"
+        activity = "Refreshing computer status…"
         defer { busy = false; refreshingPeerID = nil; activity = nil }
         do {
             try await updateStatus()
             await updateTunnelEvidence()
             await updatePeers()
             guard status?.mesh?.peers.contains(where: { $0.id == peer.id }) == true else {
-                peerRefreshErrors[peer.id] = "This Mac is no longer on your neXal network."
+                peerRefreshErrors[peer.id] = "This computer is no longer on your neXal network."
                 return
             }
             peerRefreshedAt[peer.id] = Date()
@@ -670,12 +670,12 @@ final class AppModel: ObservableObject {
             let reply = try JSONDecoder().decode(Reply.self, from: try await invoke(.wake(tunnelAddress: tunnel)))
             let senders = reply.relays
             guard senders > 0 else {
-                wakeStatus[peer.id] = "No other neXal Mac on that Mac\u{2019}s local network is awake to send the wake packet."
+                wakeStatus[peer.id] = "No other neXal computer on that computer\u{2019}s local network is awake to send the wake packet."
                 return
             }
-            var text = "Wake packet sent by \(senders) Mac\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
+            var text = "Wake packet sent by \(senders) computer\(senders == 1 ? "" : "s") on its network. It can take up to 30 seconds to reconnect."
             if !reply.targetWakeForNetwork {
-                text += " Wake for network access is off on that Mac, so it may not wake \u{2014} open neXal@home on it once while it\u{2019}s awake to fix that."
+                text += " Wake for network access is off on that computer, so it may not wake \u{2014} open neXal@home on it once while it\u{2019}s awake to fix that."
             }
             wakeStatus[peer.id] = text
         } catch {
@@ -728,7 +728,7 @@ final class AppModel: ObservableObject {
             let previous = exitRoute
             var route = storageGateway ? NetworkService.storageExitRoute : peerExitRoutes[peer.id]
             if enabled, !storageGateway {
-                guard let tunnel = peer.tunnelAddress else { throw NetworkService.RoutingFailure.failed("This Mac does not have a neXal network address yet.") }
+                guard let tunnel = peer.tunnelAddress else { throw NetworkService.RoutingFailure.failed("This computer does not have a neXal network address yet.") }
                 let reply = try JSONDecoder().decode(ExitRouteReply.self, from: try await invoke(.exitRoute(tunnelAddress: tunnel, enabled: true)))
                 guard reply.configured, NetworkService.validExitRouteID(reply.routeId) else { throw NetworkService.RoutingFailure.failed("neXal could not set up this exit route. Try again shortly.") }
                 route = reply.routeId
@@ -739,7 +739,7 @@ final class AppModel: ObservableObject {
                 pendingExitTeardown.removeValue(forKey: peer.id)
                 UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
             }
-            guard let route else { throw NetworkService.RoutingFailure.failed("No exit route is set up for this Mac.") }
+            guard let route else { throw NetworkService.RoutingFailure.failed("No exit route is set up for this computer.") }
             if enabled {
                 exitRouteStatus[peer.id] = "Waiting for the network service to receive this route…"
                 var offered = false
@@ -1005,7 +1005,7 @@ final class AppModel: ObservableObject {
             }
             pairing = presentation
             watchPairing()
-            message = "Pairing code ready. In neXal@home, choose \u{201C}Pair a Mac\u{201D} and scan it. The code expires shortly, and scanning alone shares nothing."
+            message = "Pairing code ready. In neXal@home, choose \u{201C}Pair a computer\u{201D} and scan it. The code expires shortly, and scanning alone shares nothing."
         } catch {
             pairing = nil
             // The connector's text is shown verbatim because it names the actual

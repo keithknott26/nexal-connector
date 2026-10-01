@@ -74,7 +74,7 @@ struct NetworkPanel: View {
             step(number: "1", title: "Sign in on your iPhone",
                  detail: "Open neXal@home on your iPhone (available in the Apple App Store) and sign in with Apple.", symbol: "apple.logo")
             step(number: "2", title: "Pair this Mac",
-                 detail: "Show a one-time code here, then choose \u{201C}Pair a Mac\u{201D} in neXal@home and scan it.", symbol: "qrcode")
+                 detail: "Show a one-time code here, then choose \u{201C}Pair a computer\u{201D} in neXal@home and scan it.", symbol: "qrcode")
             GuestInvitationEntry()
             CoordinatorChoice()
             Button { Task { await model.startPairing() } } label: {
@@ -101,9 +101,9 @@ struct NetworkPanel: View {
     private func pairing(_ linking: LinkingState) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Scan to connect this Mac").font(.title3.weight(.semibold))
-            Text("In neXal@home on your iPhone, choose \u{201C}Pair a Mac\u{201D} and scan this code.")
+            Text("In neXal@home on your iPhone, choose \u{201C}Pair a computer\u{201D} and scan this code.")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("Paired Macs can process your de-identified work if available.")
+            Text("Paired computers can process your de-identified work if available.")
                 .font(.caption).foregroundStyle(.secondary)
             if let symbol = model.pairing?.symbol {
                 HStack { Spacer(minLength: 0); PairingCodeView(symbol: symbol, isLive: !linking.isExpired); Spacer(minLength: 0) }
@@ -292,7 +292,7 @@ struct NetworkPanel: View {
                     }
                     collapsibleSection("System") {
                         if storage {
-                            Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your Macs.")
+                            Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your computers.")
                                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         } else {
                             systemDetails(details)
@@ -594,7 +594,7 @@ struct NetworkPanel: View {
             if let exit = d.exitNodeStatus {
                 detailRow("Internet routing") {
                     Text(exit == "selected" ? "Exit route selected" : exit == "not_selected" ? "Exit route not selected" : exit == "unavailable" ? "No exit route offered" : "Not reported")
-                        .help("As reported by that Mac. neXal does not separately check where traffic leaves the network.")
+                        .help("As reported by that computer. neXal does not separately check where traffic leaves the network.")
                 }
             }
             if let canary = d.canaryStatus {
@@ -618,7 +618,7 @@ struct NetworkPanel: View {
                 }
             }
         } else {
-            Text("System details are not available yet. They appear once that Mac runs the latest neXal@home.")
+            Text("System details are not available yet. They appear once that computer runs the latest neXal@home.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -810,7 +810,7 @@ struct NetworkPanel: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Wake this Mac using another neXal Mac on the same local network")
+                .help("Wake this computer using another neXal computer on the same local network")
             }
         }
         // neXal Storage is operator infrastructure: shown, but greyed out, since
@@ -935,7 +935,7 @@ struct NetworkPanel: View {
 	}
 
     private func pathSummary(_ peers: [ConnectorStatus.MeshPeer]) -> String {
-        guard !peers.isEmpty else { return "Waiting for another Mac" }
+        guard !peers.isEmpty else { return "Waiting for another computer" }
         let direct = peers.filter { $0.path == "direct" }.count
         let relay = peers.filter { $0.path == "relay" }.count
         let cloud = peers.filter { $0.path == "cloud" }.count

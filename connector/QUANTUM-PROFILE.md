@@ -88,3 +88,17 @@ binding, review of the modified protocol, and versioned migration of the Drive
 ML-KEM-768 format remain. See the candidate README for the exact deployment and
 validation boundary. Do not replace installed binaries with this candidate until
 compatible peers and out-of-band recovery access are ready.
+
+### Resilience changes — 2026-10-01 (source only)
+
+The candidate's key exchange now backs off per peer after failed initiations, keeps a
+peer-level lease expiry timer, uses direct/relayed delivery budgets, and only initiates toward
+peers that advertise the `nexal-mlkem1024-tcp-v2` profile in signaling. Local status carries a
+machine-readable reason (`pqReason`: `exchange-pending`, `peer-unreachable`,
+`peer-lacks-profile`, `evidence-expired`, `key-install-failed`, `session-pending`,
+`peer-disconnected`, `evidence-stale`, `runtime-not-strict`) so the apps can explain an
+unprotected link. A device that never carries the profile (a phone) is reported as
+`pq: unsupported` ("not covered") rather than as a degraded link; it still gets no sharing
+services and its link stays unprotected. None of this relaxes the gate or changes the
+Category 5 **parameter** claim, which remains per link, self-reported and experimental.
+The coordinator report does not carry the reason yet. Nothing has been installed.

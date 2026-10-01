@@ -60,6 +60,7 @@ type runtimePeer struct {
 	QuantumProfile        string          `json:"quantumProfile"`
 	QuantumKeyInstalledAt string          `json:"quantumKeyInstalledAt"`
 	QuantumKeyExpiresAt   string          `json:"quantumKeyExpiresAt"`
+	QuantumReason         string          `json:"quantumReason"`
 	FQDN                  string          `json:"fqdn"`
 	NetbirdIP             string          `json:"netbirdIp"`
 	PublicKey             string          `json:"publicKey"`
@@ -164,7 +165,10 @@ func translateRuntime(out []byte, now time.Time) Status {
 			peer.PQ, peer.PQVerifiedAt = PQProtected, installed.Format(time.RFC3339Nano)
 			peer.QuantumProfile, peer.PQExpiresAt = rp.QuantumProfile, rp.QuantumKeyExpiresAt
 		} else {
-			allProtected = false
+			peer.PQReason = pqReason(rp, peer.Lifecycle, rs.QuantumResistance, now)
+			if peer.PQReason != PQReasonPeerLacksProfile {
+				allProtected = false
+			}
 		}
 		if peer.Lifecycle == LifecycleConnected && peer.TunnelAddress != "" {
 			peer.Services = probeServices(peer.TunnelAddress)
@@ -180,6 +184,30 @@ func translateRuntime(out []byte, now time.Time) Status {
 		s.PQ = PQDegraded
 	}
 	return s
+}
+
+// pqReason explains an unprotected link: the runtime's own reason when it
+// gives one, otherwise what the connector can tell from the status itself.
+func pqReason(rp runtimePeer, lifecycle Lifecycle, strict bool, now time.Time) string {
+	if rp.QuantumReason == PQReasonPeerLacksProfile {
+		return PQReasonPeerLacksProfile
+	}
+	if lifecycle != LifecycleConnected {
+		return PQReasonPeerDisconnected
+	}
+	if !strict {
+		return PQReasonRuntimeNotStrict
+	}
+	if rp.QuantumReason != "" {
+		return rp.QuantumReason
+	}
+	if rp.QuantumProfile != "" {
+		if e, err := time.Parse(time.RFC3339Nano, rp.QuantumKeyExpiresAt); err == nil && !now.Before(e) {
+			return PQReasonEvidenceExpired
+		}
+		return PQReasonEvidenceStale
+	}
+	return PQReasonExchangePending
 }
 
 // shortName keeps only the device label so no upstream domain is exposed.

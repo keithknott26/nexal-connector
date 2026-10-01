@@ -31,6 +31,23 @@ const (
 
 type PQState string
 
+// Machine-readable reasons for a link that is not protected. The runtime
+// supplies the first group (they name what the key exchange observed); the
+// connector derives the second group from the status it can see itself.
+const (
+	// Reported by the runtime's key-exchange layer.
+	PQReasonExchangePending  = "exchange-pending"   // registered, no exchange completed yet
+	PQReasonPeerUnreachable  = "peer-unreachable"   // control listener could not be reached; retries back off
+	PQReasonPeerLacksProfile = "peer-lacks-profile" // peer never advertises this profile (phone, stock or older runtime)
+	PQReasonEvidenceExpired  = "evidence-expired"   // lease ended without renewal; gate closed until a fresh exchange
+	PQReasonKeyInstallFailed = "key-install-failed" // exchange completed but the local gate refused the key
+	PQReasonSessionPending   = "session-pending"    // key installed, tunnel session for it not yet established
+	// Derived by the connector.
+	PQReasonPeerDisconnected = "peer-disconnected"  // no tunnel to the peer right now
+	PQReasonEvidenceStale    = "evidence-stale"     // evidence present but older than the connector's freshness ceiling
+	PQReasonRuntimeNotStrict = "runtime-not-strict" // local runtime is not in strict ML-KEM mode
+)
+
 const (
 	PQUnsupported PQState = "unsupported"
 	PQNegotiating PQState = "negotiating"
@@ -81,24 +98,27 @@ type DiscoveryStatus struct {
 }
 
 type Peer struct {
-	ID                 string         `json:"id"`
-	Name               string         `json:"name"`
-	Lifecycle          Lifecycle      `json:"lifecycle"`
-	AuthenticationStep string         `json:"authenticationStep,omitempty"`
-	Path               PathKind       `json:"path"`
-	PathLabel          string         `json:"pathLabel"`
-	RelayRegion        string         `json:"relayRegion,omitempty"`
-	LatencyMS          float64        `json:"latencyMs,omitempty"`
-	PacketLossPercent  float64        `json:"packetLossPercent,omitempty"`
-	LastHandshakeAt    string         `json:"lastHandshakeAt,omitempty"`
-	PQ                 PQState        `json:"pq"`
-	PQVerifiedAt       string         `json:"pqVerifiedAt,omitempty"`
-	QuantumProfile     string         `json:"quantumProfile,omitempty"`
-	PQExpiresAt        string         `json:"pqExpiresAt,omitempty"`
-	Traffic            Traffic        `json:"traffic"`
-	FileSharing        FileSharing    `json:"fileSharing"`
-	ScreenSharing      ScreenSharing  `json:"screenSharing"`
-	Hostname           HostnameStatus `json:"hostname"`
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	Lifecycle          Lifecycle `json:"lifecycle"`
+	AuthenticationStep string    `json:"authenticationStep,omitempty"`
+	Path               PathKind  `json:"path"`
+	PathLabel          string    `json:"pathLabel"`
+	RelayRegion        string    `json:"relayRegion,omitempty"`
+	LatencyMS          float64   `json:"latencyMs,omitempty"`
+	PacketLossPercent  float64   `json:"packetLossPercent,omitempty"`
+	LastHandshakeAt    string    `json:"lastHandshakeAt,omitempty"`
+	PQ                 PQState   `json:"pq"`
+	PQVerifiedAt       string    `json:"pqVerifiedAt,omitempty"`
+	QuantumProfile     string    `json:"quantumProfile,omitempty"`
+	PQExpiresAt        string    `json:"pqExpiresAt,omitempty"`
+	// PQReason is the machine-readable explanation while PQ is not protected
+	// (see PQReason* constants). Empty when the link is protected.
+	PQReason      string         `json:"pqReason,omitempty"`
+	Traffic       Traffic        `json:"traffic"`
+	FileSharing   FileSharing    `json:"fileSharing"`
+	ScreenSharing ScreenSharing  `json:"screenSharing"`
+	Hostname      HostnameStatus `json:"hostname"`
 	// Local-only fields for the owner's own panel. The coordinator report is
 	// built by client.TunnelReportFromRuntime, which never copies them.
 	//
@@ -152,15 +172,27 @@ func SanitizeSnapshot(s Status) Status {
 		}
 		_, valid := validQuantumEvidence(peer.QuantumProfile, peer.PQVerifiedAt, peer.PQExpiresAt, now)
 		if peer.PQ != PQProtected || !valid {
+			peer.FileSharing.Available, peer.FileSharing.Address = false, ""
+			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
+			if peer.PQReason == PQReasonPeerLacksProfile {
+				// A device that never carries the profile (a phone) is not a
+				// degraded link; it is not covered. Its link stays unprotected
+				// (the gate never opens for it), and it does not demote the host.
+				peer.PQ = PQUnsupported
+				continue
+			}
 			peer.PQ = PQDegraded
+			if peer.PQReason == "" {
+				peer.PQReason = PQReasonEvidenceStale
+			}
 			if s.PQ == PQProtected {
 				s.PQ = PQDegraded
 			}
-			peer.FileSharing.Available, peer.FileSharing.Address = false, ""
-			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
 			if peer.Lifecycle == LifecycleConnected {
 				peer.Lifecycle = LifecycleDegraded
 			}
+		} else {
+			peer.PQReason = ""
 		}
 	}
 	return s

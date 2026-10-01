@@ -790,6 +790,11 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	// exists" is fine.
 	_, _ = d.run(ctx, t, t.devpod, "provider", "add", "docker")
 	_, _ = d.run(ctx, t, t.devpod, "provider", "use", "docker")
+	// devpod's agent runs `docker` from the provider's DOCKER_PATH (default "docker",
+	// looked up on a PATH launchd leaves without Homebrew). Pin the absolute path and
+	// the runtime's socket so neither depends on the inherited environment.
+	_, _ = d.run(ctx, t, t.devpod, "provider", "set-options", "docker",
+		"--option", "DOCKER_PATH="+t.docker, "--option", "DOCKER_HOST="+t.rt.DockerHost())
 	if out, uerr := d.run(ctx, t, t.devpod, DevPodUpArgs(source, s.Workspace, false)...); uerr != nil {
 		return res, devErr(DevErrDevPodFailed, "devpod up failed: %s", trimOutput([]byte(out)))
 	}

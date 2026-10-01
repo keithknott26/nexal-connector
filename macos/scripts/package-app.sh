@@ -64,6 +64,9 @@ install -m 755 "$BIN/NexalMac" "$CANDIDATE/Contents/MacOS/NexalMac"
 /usr/bin/lipo -create "$STAGE/nexal-arm64" "$STAGE/nexal-amd64" \
     -output "$CANDIDATE/Contents/Helpers/nexal"
 chmod 755 "$CANDIDATE/Contents/Helpers/nexal"
+# The VM runner for throwaway hosts. The connector looks for it next to itself in Contents/Helpers.
+# `swift build` above already produced both slices; it is signed below with the virtualization entitlement.
+install -m 755 "$BIN/nexal-vmhost" "$CANDIDATE/Contents/Helpers/nexal-vmhost"
 # Runtime artifacts must come from the reviewed custom patch build. Never fall
 # back to downloading stock NetBird when a custom artifact is unavailable.
 python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
@@ -77,7 +80,7 @@ test -x "$CANDIDATE/Contents/Helpers/nexal-network"
 # Fail loudly if either slice is missing. Without this a silent fallback to a
 # single-architecture build would ship an Intel-broken DMG that looks fine on
 # the arm64 machine that built it -- exactly the bug this replaces.
-for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network"; do
+for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/Helpers/nexal-vmhost"; do
   ARCHS="$(/usr/bin/lipo -archs "$BINARY")"
   case " $ARCHS " in
     *" arm64 "*) ;;
@@ -98,6 +101,8 @@ fi
 for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/MacOS/NexalMac"; do
   /usr/bin/codesign --force --options runtime --timestamp --sign "$NEXAL_CODE_SIGN_IDENTITY" "$BINARY"
 done
+# Virtualization.framework refuses to start a VM without this entitlement.
+/usr/bin/codesign --force --options runtime --timestamp --entitlements "$ROOT/NexalVMHost.entitlements" --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE/Contents/Helpers/nexal-vmhost"
 /usr/bin/codesign --force --options runtime --timestamp --sign "$NEXAL_CODE_SIGN_IDENTITY" "$CANDIDATE"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$CANDIDATE"
 python3 "$ROOT/scripts/verify-runtime.py" app "$CANDIDATE"

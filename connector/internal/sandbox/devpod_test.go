@@ -134,6 +134,10 @@ func TestDevcontainerFile(t *testing.T) {
 	if s, err = DevcontainerFile(Devcontainer{RepoURL: "https://x/y"}, Size{CPUs: 1}); s != "" || err != nil {
 		t.Fatal("repo source brings its own file")
 	}
+	s, err = DevcontainerFile(Devcontainer{Template: DevboxTemplate}, Size{CPUs: 1, MemoryMB: 512, DiskGB: 4})
+	if err != nil || !strings.Contains(s, DefaultDevboxImage) || !strings.Contains(s, "--memory-swap=512m") || !strings.Contains(s, "--pids-limit=") {
+		t.Fatalf("devbox template: %s %v", s, err)
+	}
 	if _, err = DevcontainerFile(Devcontainer{Template: "cobol"}, Size{}); DevErrorCode(err) != DevErrInvalid {
 		t.Fatalf("%v", err)
 	}
@@ -149,7 +153,8 @@ func TestDevPodArgsAndWorkspaceID(t *testing.T) {
 	}
 	s := strings.Join(SidecarRunArgs("ws1", "cid", "img:1", "/st/ws1/boot", true), " ")
 	for _, want := range []string{"--network container:cid", "--cap-add NET_ADMIN", "--device /dev/net/tun",
-		"--mount type=bind,src=/st/ws1/boot,dst=/run/nexal-boot", "-v nexal-mesh-ws1:/var/lib/nexal", "img:1"} {
+		"--mount type=bind,src=/st/ws1/boot,dst=/run/nexal-boot", "-v nexal-mesh-ws1:/var/lib/nexal", "img:1",
+		"--cpus=0.5", "--memory=128m", "--memory-swap=128m", "--pids-limit=256"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in %s", want, s)
 		}
@@ -185,7 +190,8 @@ func TestDevPodUpJoinsMeshAndCleansSecrets(t *testing.T) {
 	if err != nil || res.MeshIP != "100.64.1.9" || res.HostKeyFingerprint != "" || res.DriveUnavailable != "" {
 		t.Fatalf("%+v %v", res, err)
 	}
-	if !f.saw("devpod up ") || !f.saw("--provider docker") || !f.saw("--network container:cid123") {
+	if !f.saw("devpod up ") || !f.saw("--provider docker") || !f.saw("--network container:cid123") ||
+		!f.saw("docker update --cpus=2 --memory=2048m --memory-swap=2048m --pids-limit=4096 cid123") {
 		t.Fatalf("commands: %v", f.cmds)
 	}
 	for _, c := range f.cmds {
@@ -395,5 +401,49 @@ func TestResolveMeshImage(t *testing.T) {
 	d := NewDevPod(DevConfig{Env: fakeEnv(&fakeRun{}), StateDir: t.TempDir(), MeshImage: ResolveMeshImage(""), Sleep: func(time.Duration) {}})
 	if _, err := d.Up(context.Background(), upSpec()); DevErrorCode(err) == DevErrUnconfigured {
 		t.Fatalf("default image must configure the backend: %v", err)
+	}
+}
+
+func TestDevLimitArgs(t *testing.T) {
+	if got := strings.Join(DevLimitArgs(Size{CPUs: 1, MemoryMB: 512, DiskGB: 4}), " "); got != "--cpus=1 --memory=512m --memory-swap=512m --pids-limit=4096" {
+		t.Fatal(got)
+	}
+	if len(DevLimitArgs(Size{})) != 0 {
+		t.Fatal("no size, no limits")
+	}
+	for _, a := range DevLimitArgs(Size{CPUs: 4, MemoryMB: 2048, DiskGB: 16}) {
+		if strings.Contains(a, "storage-opt") {
+			t.Fatal("disk is not enforceable on the Mac container VMs")
+		}
+	}
+}
+
+func TestDevPodUpLimitsRepoSources(t *testing.T) {
+	f := &fakeRun{logs: "NEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.9\"}\n"}
+	s := upSpec()
+	s.Devcontainer = Devcontainer{RepoURL: "https://github.com/x/y"}
+	s.Size = Size{CPUs: 1, MemoryMB: 512, DiskGB: 4}
+	if _, err := newTestDevPod(f, t.TempDir(), "m").Up(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("docker update --cpus=1 --memory=512m --memory-swap=512m") {
+		t.Fatalf("repo sources get limits via docker update: %v", f.cmds)
+	}
+}
+
+func TestWorkspaceBuiltImages(t *testing.T) {
+	got := WorkspaceBuiltImages("devpod-abc123:latest\nvsc-ws-uid\n" + DefaultDevboxImage + "\ndevpod-abc123:latest\nmcr.microsoft.com/devcontainers/go\n")
+	if strings.Join(got, ",") != "devpod-abc123:latest,vsc-ws-uid" {
+		t.Fatal(got)
+	}
+}
+
+func TestDevPodDeleteRemovesBuiltImages(t *testing.T) {
+	f := &fakeRun{labels: "devpod-1f2e:latest\n"}
+	if err := newTestDevPod(f, t.TempDir(), "m").Delete(context.Background(), "nexal-sb1"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.saw("inspect --format {{.Config.Image}} cid123") || !f.saw("image rm devpod-1f2e:latest") {
+		t.Fatalf("built image must be removed: %v", f.cmds)
 	}
 }

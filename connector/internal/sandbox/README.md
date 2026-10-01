@@ -74,6 +74,24 @@ and secrets. It sits behind the `DevOps` interface; tests use fakes. Error codes
 `no_container_runtime`, `docker_desktop_only`, `devpod_missing`, `devpod_failed`,
 `mesh_sidecar_failed`, `ssh_setup_failed`, `mesh_image_unconfigured`, `invalid_devcontainer`.
 
+- Default image: a dev container with no repository, template or devcontainer.json gets
+  template `devbox` = `DefaultDevboxImage` (`ghcr.io/keithknott26/nexal-devbox:<version>`,
+  built from `connector/devbox` by `.github/workflows/devbox-image.yml` on a `devbox-v*`
+  tag; the package must be public). Debian slim + git, build tools, Go, Python 3, Node LTS
+  and openssh-server (so the SSH setup needs no apt-get at start).
+- Resources: containers use their own (small) sizes from the coordinator, default
+  1 CPU / 512 MB (`devDefaultSize`), and admission counts those numbers. The dev
+  container gets `--cpus`, `--memory` (= `--memory-swap`, no extra swap) and
+  `--pids-limit` as runArgs for template/inline sources, and the same limits via
+  `docker update` after `devpod up` for every source (repos bring their own
+  devcontainer.json). Disk is not enforced per container (`--storage-opt size=` needs
+  overlay2 on XFS with project quotas, which Colima/Lima/OrbStack do not use): the size's
+  disk figure is accounting only. The mesh sidecar is capped at 0.5 CPU / 128 MB / 256 pids.
+- Delete removes the sidecar, the workspace container(s) with their anonymous volumes
+  (`rm -f -v`), `devpod delete`, the sidecar identity volume, images DevPod built for
+  the workspace (`devpod-*`/`vsc-*`, best effort; shared pulled images such as the devbox
+  stay as a cache) and the state directory (DevPod home, generated source, secrets).
+  An ephemeral container found gone after a restart is deleted the same way and re-created.
 - Join secrets: the one-use setup key, hostname, lifecycle and `NEXAL_MESH_URL` (the VM
   seed's name; the sidecar also accepts `NEXAL_MANAGEMENT_URL`) go in a 0600 file in
   `<state>/<workspace>/boot/`, bind-mounted at `/run/nexal-boot` - not `--env-file`/`-e`,

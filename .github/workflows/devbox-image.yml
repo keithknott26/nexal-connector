@@ -1,0 +1,91 @@
+name: Devbox image
+# Builds connector/devbox (the default "neXal devbox" dev container: git, build
+# tools, Go, Python 3, Node LTS, openssh-server) for linux/amd64+arm64 and pushes
+# ghcr.io/<owner>/nexal-devbox:<version>.
+#   release:  git tag devbox-v0.1.0 && git push origin devbox-v0.1.0
+#   manual:   Actions > Devbox image > Run workflow (give a version)
+# The connector's DefaultDevboxImage (connector/internal/sandbox/devpod.go) must
+# name the same version; the tag build fails if it does not. The package must be
+# public so a Mac can pull it anonymously.
+on:
+  push:
+    tags: ["devbox-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image version (the part after devbox-v), e.g. 0.1.0"
+        required: true
+permissions:
+  contents: read
+  packages: write
+env:
+  IMAGE_NAME: nexal-devbox
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Resolve image name and version
+        id: v
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then ver="${INPUT_VERSION}"; else ver="${REF_NAME#devbox-v}"; fi
+          [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]] || { echo "bad version: $ver"; exit 1; }
+          image="ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/${IMAGE_NAME}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+      - name: Connector default must match the tag
+        if: github.event_name == 'push'
+        env:
+          WANT: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+        run: |
+          have=$(sed -n 's/^const DefaultDevboxImage = "\(.*\)"$/\1/p' connector/internal/sandbox/devpod.go)
+          [ "$have" = "$WANT" ] || { echo "DefaultDevboxImage is '$have' but this tag builds '$WANT'; update devpod.go first"; exit 1; }
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Base image digests (pin these in connector/devbox/Dockerfile)
+        run: |
+          set -euo pipefail
+          for a in GO_IMAGE NODE_IMAGE RUNTIME_IMAGE; do
+            ref=$(sed -n "s/^ARG $a=//p" connector/devbox/Dockerfile | head -1)
+            name=${ref%@*}
+            dig=$(docker buildx imagetools inspect "$name" --format '{{json .Manifest}}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["digest"])')
+            echo "$a=$name@$dig" | tee -a "$GITHUB_STEP_SUMMARY"
+            case $ref in *@sha256:*) [ "${ref#*@}" = "$dig" ] || echo "::warning::$a pinned to ${ref#*@} but $name now resolves to $dig" ;;
+                         *) echo "::warning::$a is not pinned by digest; use $name@$dig" ;; esac
+          done
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: connector/devbox
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: true
+          build-args: DEVBOX_VERSION=${{ steps.v.outputs.version }}
+          tags: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+          cache-from: type=gha,scope=devbox
+          cache-to: type=gha,mode=max,scope=devbox
+      - name: Verify the pushed image (amd64 runs natively here)
+        env:
+          IMAGE: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 "$IMAGE" sh -c '
+            set -e
+            go version; node --version; npm --version; python3 --version; python3 -m venv /tmp/v
+            git --version; gcc --version | head -1; command -v sshd ssh-keygen
+            ! ls /etc/ssh/ssh_host_* 2>/dev/null
+            id dev'
+          docker image inspect "$IMAGE" --format '{{index .Config.Labels "devcontainer.metadata"}}' | grep -q '"remoteUser":"dev"'

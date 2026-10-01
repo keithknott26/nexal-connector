@@ -109,3 +109,20 @@ func TestNormalized(t *testing.T) {
 		t.Fatalf("unexpected %+v", c)
 	}
 }
+
+func TestAdmitCapsContainerSizeFitsWhereVMDoesNot(t *testing.T) {
+	// A 2-CPU, 2 GB Mac offers 1 CPU / 1024 MB at the default fractions: the
+	// smallest VM (2 CPUs, 2 GB) is refused, the default container size fits.
+	c := DefaultCaps()
+	c.Enabled, c.AllowOnBattery = true, true
+	h := HostFacts{CPUs: 2, MemoryMB: 2048}
+	if err := AdmitCaps(c, h, Usage{}, Size{CPUs: 2, MemoryMB: 2048, DiskGB: 10}); err == nil {
+		t.Fatal("VM size must not fit")
+	}
+	if err := AdmitCaps(c, h, Usage{}, devDefaultSize); err != nil {
+		t.Fatalf("container default must fit: %v", err)
+	}
+	if devDefaultSize != (Size{CPUs: 1, MemoryMB: 512, DiskGB: 4}) {
+		t.Fatalf("devDefaultSize must match the coordinator's small container preset: %+v", devDefaultSize)
+	}
+}

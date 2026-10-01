@@ -15,7 +15,7 @@ import (
 //	~/Library/Application Support/Nexal/sandbox-hosting.json
 //	{"enabled": true, "maxSandboxes": 5, "placement": "members"}
 //
-// A missing file means "not opted in". An invalid file also means "not opted in"
+// A missing file means "opted in" with the defaults (allow by default). An invalid file also means "not opted in"
 // (fail closed), and is reported through the error from LoadHostingConfig.
 type HostingConfig struct {
 	Enabled      bool   `json:"enabled"`
@@ -76,12 +76,13 @@ func ParseHostingConfig(b []byte) (HostingConfig, error) {
 	return c.Normalize()
 }
 
-// LoadHostingConfig reads the file. A missing file returns the zero (disabled)
+// LoadHostingConfig reads the file. A missing file returns the default (enabled)
 // config and a nil error; an invalid file returns a disabled config and an error.
 func LoadHostingConfig(path string) (HostingConfig, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return HostingConfig{MaxSandboxes: 5, Placement: PlacementMembers}, nil
+		// No file yet: hosting is on by default. The owner turns it off in the Mac app.
+		return HostingConfig{Enabled: true, MaxSandboxes: 5, Placement: PlacementMembers}, nil
 	}
 	if err != nil {
 		return HostingConfig{MaxSandboxes: 5, Placement: PlacementMembers}, err

@@ -32,8 +32,8 @@ func TestLoadHostingConfigFailsClosed(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "sandbox-hosting.json")
 	c, err := LoadHostingConfig(p)
-	if err != nil || c.Enabled {
-		t.Fatalf("missing file must be disabled without error: %+v %v", c, err)
+	if err != nil || !c.Enabled {
+		t.Fatalf("missing file defaults to enabled without error: %+v %v", c, err)
 	}
 	if err := os.WriteFile(p, []byte(`{"enabled":true,"maxSandboxes":99}`), 0o600); err != nil {
 		t.Fatal(err)

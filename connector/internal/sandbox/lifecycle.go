@@ -17,9 +17,11 @@ import (
 //     asks for a fresh mesh key (StateReport.NeedsKey -> rejoin task) when the
 //     mesh peer was probably dropped.
 
-// devDefaultSize is what a dev container counts against the caps when the task
-// carries no resources.
-var devDefaultSize = Size{CPUs: 2, MemoryMB: 2048, DiskGB: 10}
+// devDefaultSize is what a dev container counts against the caps (and is
+// limited to) when the task carries no resources: the coordinator's smallest
+// container preset. Containers share the Mac's kernel and need far less than a
+// VM.
+var devDefaultSize = Size{CPUs: 1, MemoryMB: 512, DiskGB: 4}
 
 // rejoinAfterGap is the sleep length after which the ephemeral mesh peer is
 // assumed gone (the control plane drops offline ephemeral peers after ~10 min).

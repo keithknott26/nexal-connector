@@ -269,19 +269,61 @@ func DevWorkspaceID(sandboxID string) string {
 // through it.
 const workspaceLabel = "dev.containers.id"
 
+// DefaultDevboxImage is the version-pinned "neXal devbox" image: a slim
+// Debian with git, build tools, Go, Python 3 and Node LTS, and the
+// openssh-server package DevSSHDScript expects. It is built from
+// connector/devbox by .github/workflows/devbox-image.yml on a `devbox-v<version>`
+// tag, which pushes ghcr.io/<owner>/nexal-devbox:<version>; the package must be
+// public so a Mac can pull it anonymously. Bump it here whenever a new devbox
+// version is released (the tag build fails if the two differ).
+const DefaultDevboxImage = "ghcr.io/keithknott26/nexal-devbox:0.1.0"
+
+// DevboxTemplate is the template the coordinator sends when the user picked no
+// repository, template or devcontainer.json.
+const DevboxTemplate = "devbox"
+
 // templateImages maps the catalog templates to dev container images.
 var templateImages = map[string]string{
-	"ubuntu": "mcr.microsoft.com/devcontainers/base:ubuntu",
-	"debian": "mcr.microsoft.com/devcontainers/base:debian",
-	"node":   "mcr.microsoft.com/devcontainers/typescript-node",
-	"python": "mcr.microsoft.com/devcontainers/python",
-	"go":     "mcr.microsoft.com/devcontainers/go",
-	"rust":   "mcr.microsoft.com/devcontainers/rust",
+	DevboxTemplate: DefaultDevboxImage,
+	"ubuntu":       "mcr.microsoft.com/devcontainers/base:ubuntu",
+	"debian":       "mcr.microsoft.com/devcontainers/base:debian",
+	"node":         "mcr.microsoft.com/devcontainers/typescript-node",
+	"python":       "mcr.microsoft.com/devcontainers/python",
+	"go":           "mcr.microsoft.com/devcontainers/go",
+	"rust":         "mcr.microsoft.com/devcontainers/rust",
+}
+
+// devPidsLimit caps processes in a dev container (a fork bomb must not take the
+// Mac's container VM down); generous enough for parallel builds.
+const devPidsLimit = 4096
+
+// DevLimitArgs are the docker resource flags for a dev container of size s:
+// CPUs, memory with swap capped at the same value (so --memory is a real
+// ceiling), and a process limit. Disk is NOT limited per container:
+// --storage-opt size= only works on overlay2 over XFS with project quotas, which
+// the Colima/Lima/OrbStack/Podman VMs do not use, and docker refuses to start the
+// container when it is set there. The coordinator's disk figure for a container
+// is therefore an allocation used for account accounting, not an enforced
+// quota. It is pure.
+func DevLimitArgs(s Size) []string {
+	var a []string
+	if s.CPUs > 0 {
+		a = append(a, fmt.Sprintf("--cpus=%d", s.CPUs))
+	}
+	if s.MemoryMB > 0 {
+		a = append(a, fmt.Sprintf("--memory=%dm", s.MemoryMB), fmt.Sprintf("--memory-swap=%dm", s.MemoryMB))
+	}
+	if len(a) > 0 {
+		a = append(a, fmt.Sprintf("--pids-limit=%d", devPidsLimit))
+	}
+	return a
 }
 
 // DevcontainerFile renders the devcontainer.json for a template or inline
-// payload, with the Mac owner's resource limits added as runArgs. Repo sources
-// bring their own file and return "" (DevPod reads it from the checkout).
+// payload, with the Mac owner's resource limits added as runArgs (after any the
+// payload brings, so ours win). Repo sources bring their own file and return ""
+// (DevPod reads it from the checkout); Up applies the limits to those with
+// `docker update` instead.
 func DevcontainerFile(d Devcontainer, size Size) (string, error) {
 	var m map[string]any
 	switch {
@@ -302,11 +344,8 @@ func DevcontainerFile(d Devcontainer, size Size) (string, error) {
 	if old, ok := m["runArgs"].([]any); ok {
 		args = old
 	}
-	if size.CPUs > 0 {
-		args = append(args, fmt.Sprintf("--cpus=%d", size.CPUs))
-	}
-	if size.MemoryMB > 0 {
-		args = append(args, fmt.Sprintf("--memory=%dm", size.MemoryMB))
+	for _, a := range DevLimitArgs(size) {
+		args = append(args, a)
 	}
 	if len(args) > 0 {
 		m["runArgs"] = args
@@ -338,6 +377,13 @@ const (
 	SidecarBootFile  = "mesh.env"
 )
 
+// SidecarLimitArgs keep the mesh sidecar small: it only runs the NetBird client
+// (one Go process, a few tens of MB resident). Half a CPU leaves room for the
+// ML-KEM/rosenpass handshakes and userspace WireGuard when the kernel module is
+// unavailable, so the dev container's own traffic is not throttled; 128 MB with
+// no extra swap is roughly 3x its working set.
+var SidecarLimitArgs = []string{"--cpus=0.5", "--memory=128m", "--memory-swap=128m", "--pids-limit=256"}
+
 // SidecarRunArgs builds the `docker run` arguments for the mesh sidecar. The
 // secrets are in bootDir/SidecarBootFile (0600), bind-mounted at
 // SidecarBootMount: they are on neither the command line nor in the
@@ -349,6 +395,7 @@ func SidecarRunArgs(workspace, containerID, image, bootDir string, persistent bo
 		"--network", "container:" + containerID,
 		"--cap-add", "NET_ADMIN", "--device", "/dev/net/tun",
 		"--mount", "type=bind,src=" + bootDir + ",dst=" + SidecarBootMount}
+	a = append(a, SidecarLimitArgs...)
 	if persistent {
 		a = append(a, "-v", SidecarVolume(workspace)+":/var/lib/nexal")
 	}
@@ -673,6 +720,14 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	if cerr != nil || cid == "" {
 		return res, devErr(DevErrDevPodFailed, "the dev container is not running after devpod up")
 	}
+	// Enforce the size on the running container whatever its source: a repo
+	// brings its own devcontainer.json without our runArgs, and a persistent
+	// workspace may have been created before the limits existed.
+	if lim := DevLimitArgs(s.Size); len(lim) > 0 {
+		if out, lerr := d.run(ctx, t, t.docker, append(append([]string{"update"}, lim...), cid)...); lerr != nil {
+			return res, devErr(DevErrDevPodFailed, "could not apply the resource limits to the dev container: %s", trimOutput([]byte(out)))
+		}
+	}
 	// Replace any previous sidecar (a rejoin brings a new one-use key).
 	_, _ = d.run(ctx, t, t.docker, "rm", "-f", SidecarName(s.Workspace))
 	bootDir := filepath.Join(dir, "boot")
@@ -791,6 +846,9 @@ func (d *DevPod) deleteLocked(ctx context.Context, ws string) error {
 	} else {
 		_, err := d.run(ctx, t, t.docker, "rm", "-f", "-v", SidecarName(ws))
 		note(ignoreMissing(err))
+		// Images DevPod built for this workspace only (features, Dockerfile or
+		// the UID-update layer); found before the containers are gone.
+		built := d.builtImages(ctx, t, ws)
 		if p, ok := d.cfg.Env.FindBinary("devpod"); ok {
 			_, err = d.run(ctx, t, p, "delete", ws, "--force")
 			note(ignoreMissing(err))
@@ -806,9 +864,49 @@ func (d *DevPod) deleteLocked(ctx context.Context, ws string) error {
 		}
 		_, err = d.run(ctx, t, t.docker, "volume", "rm", "-f", SidecarVolume(ws))
 		note(ignoreMissing(err))
+		// Best effort: an image another workspace still uses stays (docker
+		// refuses), and a leftover build image must not block the delete.
+		for _, img := range built {
+			_, _ = d.run(ctx, t, t.docker, "image", "rm", img)
+		}
 	}
 	note(os.RemoveAll(d.wsDir(ws))) // generated source, DEVPOD_HOME, boot/mesh.env
 	return first
+}
+
+// builtImages lists the images of the workspace's containers that DevPod built
+// for it (devpod-* / vsc-*); shared pulled images such as the devbox are kept
+// as a cache.
+func (d *DevPod) builtImages(ctx context.Context, t devTools, ws string) []string {
+	out, err := d.run(ctx, t, t.docker, "ps", "-aq", "--filter", "label="+workspaceLabel+"="+ws)
+	if err != nil {
+		return nil
+	}
+	ids := strings.Fields(out)
+	if len(ids) == 0 {
+		return nil
+	}
+	names, err := d.run(ctx, t, t.docker, append([]string{"inspect", "--format", "{{.Config.Image}}"}, ids...)...)
+	if err != nil {
+		return nil
+	}
+	return WorkspaceBuiltImages(names)
+}
+
+// WorkspaceBuiltImages picks, from `docker inspect --format {{.Config.Image}}`
+// output, the per-workspace images DevPod or the devcontainer CLI built. It is
+// pure.
+func WorkspaceBuiltImages(inspect string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, n := range strings.Fields(inspect) {
+		base := n[strings.LastIndex(n, "/")+1:]
+		if (strings.HasPrefix(base, "devpod-") || strings.HasPrefix(base, "vsc-")) && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // ignoreMissing drops "No such ..." failures: the thing is already gone.

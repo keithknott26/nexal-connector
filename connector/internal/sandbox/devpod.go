@@ -225,6 +225,8 @@ func RuntimeCandidates(e DevEnv) []runtimeCandidate {
 	}
 	c = append(c, runtimeCandidate{RuntimeOrbStack, filepath.Join(e.Home, ".orbstack", "run", "docker.sock")})
 	c = append(c, runtimeCandidate{RuntimeColima, filepath.Join(e.Home, ".colima", "default", "docker.sock")})
+	// Newer Colima releases forward the default profile's socket to ~/.colima/docker.sock.
+	c = append(c, runtimeCandidate{RuntimeColima, filepath.Join(e.Home, ".colima", "docker.sock")})
 	for _, m := range e.Glob(filepath.Join(e.Home, ".colima", "*", "docker.sock")) {
 		c = append(c, runtimeCandidate{RuntimeColima, m})
 	}

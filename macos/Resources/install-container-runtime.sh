@@ -34,7 +34,7 @@ start_colima() {
 serving() {
   command -v docker >/dev/null 2>&1 || return 1
   local sock
-  for sock in "$HOME/.orbstack/run/docker.sock" "$HOME"/.colima/*/docker.sock "$HOME/.lima/docker/sock/docker.sock"; do
+  for sock in "$HOME/.orbstack/run/docker.sock" "$HOME/.colima/docker.sock" "$HOME"/.colima/*/docker.sock "$HOME/.lima/docker/sock/docker.sock"; do
     [ -S "$sock" ] || continue
     if docker --host "unix://$sock" version --format '{{.Server.Version}}' >/dev/null 2>&1; then
       say "Container runtime ready ($sock)."

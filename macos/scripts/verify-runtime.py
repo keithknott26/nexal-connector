@@ -28,13 +28,19 @@ def verify_app(app):
     run('/usr/bin/codesign', '--verify', '--deep', '--strict', app)
     requirement = '=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "' + POLICY['team_id'] + '"'
     run('/usr/bin/codesign', '--verify', '-R', requirement + ' and identifier "' + POLICY['bundle_id'] + '"', app)
-    for relative in ['MacOS/NexalMac', 'Helpers/nexal', 'Helpers/nexal-network']:
+    for relative in ['MacOS/NexalMac', 'Helpers/nexal', 'Helpers/nexal-network', 'Helpers/nexal-vmhost']:
         binary = app / 'Contents' / relative
         if binary.is_symlink():
             raise ValueError('Bundled executables must not be symlinks')
         run('/usr/bin/codesign', '--verify', '--strict', '-R', requirement, binary)
         if set(run('/usr/bin/lipo', '-archs', binary).split()) != {'arm64', 'x86_64'}:
             raise ValueError('Both Mac architectures are required: ' + relative)
+    # Virtualization.framework refuses to start a VM without this entitlement; a bundle that
+    # lacks it (or lacks the helper) would report "nexal-vmhost is not installed" on every Mac.
+    entitlements = subprocess.run(['/usr/bin/codesign', '-d', '--entitlements', ':-', app / 'Contents/Helpers/nexal-vmhost'],
+                                  capture_output=True, text=True).stdout
+    if 'com.apple.security.virtualization' not in entitlements:
+        raise ValueError('nexal-vmhost is missing the virtualization entitlement')
     version = run(app / 'Contents/Helpers/nexal-network', 'version')
     if version != POLICY['version']:
         raise ValueError('Unapproved runtime version: ' + version)

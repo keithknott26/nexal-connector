@@ -20,6 +20,7 @@ import (
 	"nexal/connector/internal/contribution"
 	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/observability"
+	"nexal/connector/internal/sandbox"
 	"nexal/connector/internal/throttle"
 	"nexal/connector/internal/wol"
 )
@@ -159,6 +160,9 @@ type Agent struct {
 	// wakeInfoEvery overrides both wake-info waits when nonzero. Tests only;
 	// production leaves it zero and gets wakeInfoInterval/RetryInterval.
 	wakeInfoEvery time.Duration
+	// sandbox runs throwaway VMs for the coordinator; nil unless WithSandbox.
+	// It has its own lock and never takes a.mu.
+	sandbox *sandbox.Manager
 }
 
 // Option configures optional Agent behaviour. Options exist so observability can
@@ -191,6 +195,12 @@ func WithMeshProvider(p mesh.Provider) Option {
 			a.meshProvider = p
 		}
 	}
+}
+
+// WithSandbox enables the throwaway-host runner: the agent polls the
+// coordinator for sandbox tasks and hands them to m. Without it nothing is polled.
+func WithSandbox(m *sandbox.Manager) Option {
+	return func(a *Agent) { a.sandbox = m }
 }
 
 func New(c config.Config, path string, api client.API, probe Probe, devPull bool, opts ...Option) (*Agent, error) {
@@ -946,6 +956,13 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 		}
 	}()
+	if a.sandbox != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.runSandbox(ctx, hostID)
+		}()
+	}
 	defer func() { a.Cancel(); wg.Wait() }()
 	telemetryTick := time.NewTicker(2 * time.Second)
 	defer telemetryTick.Stop()
@@ -955,6 +972,29 @@ func (a *Agent) Run(ctx context.Context) error {
 			return nil
 		case <-telemetryTick.C:
 			a.Refresh(ctx)
+		}
+	}
+}
+
+// runSandbox polls for throwaway-host tasks. It uses the agent's own
+// authenticated coordinator client when that client implements
+// sandbox.Coordinator; otherwise it does nothing. It is a separate goroutine so
+// a slow image download or coordinator call can never delay a heartbeat or an
+// attempt poll. Running VMs outlive this goroutine on purpose.
+func (a *Agent) runSandbox(ctx context.Context, hostID string) {
+	if c, ok := a.api.(sandbox.Coordinator); ok {
+		a.sandbox.BindCoordinator(c)
+	}
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := a.sandbox.Poll(ctx, hostID); err != nil && !client.IsNotSupported(err) {
+				a.logger.Debug("sandbox poll failed", "error", errorText(err))
+			}
 		}
 	}
 }

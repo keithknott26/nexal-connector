@@ -259,6 +259,14 @@ func DetectRuntime(ctx context.Context, e DevEnv) (RuntimeInfo, error) {
 			return RuntimeInfo{Name: RuntimePodman, Socket: sock}, nil
 		}
 	}
+	// A supported runtime that is installed but not answering is the likelier
+	// story than Docker Desktop, which is often just left installed beside it.
+	if colima, ok := e.FindBinary("colima"); ok {
+		return RuntimeInfo{}, devErr(DevErrNoRuntime, "Colima is installed (%s) but not running for this user; run 'colima start' (not with sudo)", colima)
+	}
+	if e.Exists("/Applications/OrbStack.app") {
+		return RuntimeInfo{}, devErr(DevErrNoRuntime, "OrbStack is installed but not running; open OrbStack")
+	}
 	if e.Exists(filepath.Join(e.Home, ".docker", "run", "docker.sock")) || e.Exists("/Applications/Docker.app") {
 		return RuntimeInfo{}, devErr(DevErrDockerDesktop, "only Docker Desktop was found, which is not supported; start Colima, Lima, Podman or OrbStack")
 	}

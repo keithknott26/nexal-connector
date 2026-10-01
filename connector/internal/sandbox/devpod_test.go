@@ -118,6 +118,11 @@ func TestDetectRuntimeRefusals(t *testing.T) {
 	if DevErrorCode(err) != DevErrDockerDesktop {
 		t.Fatalf("Docker Desktop must be refused: %v", err)
 	}
+	// Colima installed but stopped, Docker Desktop also present: say Colima isn't running.
+	_, err = DetectRuntime(context.Background(), fakeEnv(f, "/h/.docker/run/docker.sock", "/opt/homebrew/bin/colima"))
+	if DevErrorCode(err) != DevErrNoRuntime || !strings.Contains(err.Error(), "colima start") {
+		t.Fatalf("stopped Colima: %v", err)
+	}
 	env := fakeEnv(f)
 	env.LookPath = func(string) (string, error) { return "", errors.New("none") }
 	_, err = DetectRuntime(context.Background(), env)

@@ -127,6 +127,16 @@ jobs:
             --keychain "$SIGNING_KEYCHAIN" --sign "$IDENTITY" "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
 
+      # Fail here, not on a customer's Mac, if the VM helper is missing or unentitled.
+      - name: Verify bundle contents
+        run: |
+          set -euo pipefail
+          APP="macos/build/neXal-Connector.app"
+          ls -l "$APP/Contents/Helpers"
+          test -x "$APP/Contents/Helpers/nexal-vmhost"
+          lipo -archs "$APP/Contents/Helpers/nexal-vmhost"
+          codesign -d --entitlements :- "$APP/Contents/Helpers/nexal-vmhost" 2>&1 | grep -q com.apple.security.virtualization
+
       - name: Build DMG
         id: build
         run: |

@@ -72,7 +72,7 @@ final class NetworkPresentationTests: XCTestCase {
         XCTAssertEqual(indicator, .connectedNotConfirmed(protocolName: "quic"))
         XCTAssertNotEqual(indicator.severity, .good, "an unconfirmed tunnel must not read as success")
         XCTAssertEqual(indicator.severity, .warning)
-        XCTAssertTrue(indicator.title.contains("not confirmed"))
+        XCTAssertTrue(indicator.detail.contains("not been confirmed"))
     }
 
     /// A classical group is not a hybrid one.

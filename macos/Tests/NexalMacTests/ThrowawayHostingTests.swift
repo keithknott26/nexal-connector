@@ -26,6 +26,7 @@ final class ThrowawayHostingTests: XCTestCase {
         XCTAssertNotNil(list[0].expiry)
     }
 
+    @MainActor
     func testValidation() {
         XCTAssertTrue(ThrowawayHosting.validID("abc_1-2"))
         XCTAssertFalse(ThrowawayHosting.validID("../x"))

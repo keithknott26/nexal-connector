@@ -212,7 +212,7 @@ final class PairingPresentationTests: XCTestCase {
                 // would be a production change driven by a test.
                 XCTAssertEqual((error as? ShellError)?.errorDescription,
                                ShellError.invalidPairing.errorDescription)
-                XCTAssertEqual(error.localizedDescription.contains("no code is shown"), true)
+                XCTAssertEqual(error.localizedDescription.contains("cannot show"), true)
             }
         }
         XCTAssertThrowsError(try PairingStatusReport.decode(Data("{}".utf8)))

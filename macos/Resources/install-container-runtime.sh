@@ -13,6 +13,24 @@ export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_H
 
 say() { printf '%s\n' "$*"; }
 
+# Colima run as root puts its socket under /var/root, where the connector (running
+# as the signed-in user) can never reach it, and leaves root-owned Homebrew paths.
+if [ "$(id -u)" -eq 0 ]; then
+  say "Run this as your own user, not with sudo: a root Colima is invisible to the connector."
+  exit 1
+fi
+
+# `brew services start` fails with "Bootstrap failed: 5" when a stale
+# sh.brew.colima job is still loaded; unload it and try once more.
+start_colima() {
+  brew services start colima >/dev/null 2>&1 && return 0
+  launchctl bootout "gui/$(id -u)/sh.brew.colima" >/dev/null 2>&1 || true
+  sleep 1
+  brew services start colima >/dev/null 2>&1 && return 0
+  say "brew services could not start Colima; starting it for this session only."
+  colima start >/dev/null 2>&1
+}
+
 serving() {
   command -v docker >/dev/null 2>&1 || return 1
   local sock
@@ -65,7 +83,7 @@ need_devpod || { say "Installing devpod failed."; exit 1; }
 
 say "Starting Colima (first start downloads a small Linux image)…"
 # brew services keeps Colima running after logout and restart.
-brew services start colima >/dev/null 2>&1 || colima start >/dev/null 2>&1 || true
+start_colima || true
 for _ in $(seq 1 90); do
   if serving >/dev/null; then say "Container runtime ready (Colima)."; exit 0; fi
   sleep 2

@@ -993,6 +993,13 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 		a.sandbox.RunPower(ctx)
 	}()
 	defer func() { <-powerDone }()
+	// Owner kill requests dropped into sandboxes/kill-requests/<id> by the Mac app.
+	killDone := make(chan struct{})
+	go func() {
+		defer close(killDone)
+		a.sandbox.RunKillRequests(ctx)
+	}()
+	defer func() { <-killDone }()
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for {

@@ -28,14 +28,15 @@ type SeedParams struct {
 	SSHCAPublicKey string
 	DriveToken     string
 	Lifecycle      Lifecycle
-	ManagementURL  string
+	ManagementURL  string // rendered as NEXAL_MESH_URL (what nexal-first-boot reads)
+	DriveURL       string // optional shared-drive endpoint, rendered as NEXAL_DRIVE_URL
 }
 
 // First-boot protocol. The guest's first-boot script (shipped in the pre-baked
 // images, and installed by this seed on others) prints one line to the serial
 // console once the mesh has joined and sshd has its host keys:
 //
-//	NEXAL-FIRSTBOOT {"meshIp":"100.x.y.z","hostKeyFingerprint":"SHA256:..."}
+//	NEXAL-FIRSTBOOT {"meshIp":"100.x.y.z","hostKeyFingerprint":"SHA256:...","hostKey":"ssh-ed25519 AAAA..."}
 //
 // or, on failure,
 //
@@ -80,6 +81,9 @@ func ValidateSeed(p SeedParams) error {
 	case "", LifecyclePersistent, LifecycleEphemeral:
 	default:
 		return errors.New("invalid lifecycle")
+	}
+	if p.DriveURL != "" && !validHTTPSURL(p.DriveURL) {
+		return errors.New("invalid drive url")
 	}
 	if p.ManagementURL != "" && validateV2(Task{ManagementURL: p.ManagementURL}) != nil {
 		return errors.New("invalid management url")
@@ -159,7 +163,10 @@ func RenderUserData(p SeedParams) string {
 		w("      NEXAL_SSH_CA='%s'\n", p.SSHCAPublicKey)
 	}
 	if p.ManagementURL != "" {
-		w("      NEXAL_MANAGEMENT_URL=%s\n", p.ManagementURL)
+		w("      NEXAL_MESH_URL=%s\n", p.ManagementURL)
+	}
+	if p.DriveURL != "" {
+		w("      NEXAL_DRIVE_URL=%s\n", p.DriveURL)
 	}
 	b.WriteString("      NEXAL_SSH_MESH_ONLY=1\n")
 	b.WriteString("      NEXAL_VNC_MESH_ONLY=1\n")
@@ -287,4 +294,7 @@ func RemoveSeed(dir, iso string) error {
 type FirstBoot struct {
 	MeshIP             string `json:"meshIp"`
 	HostKeyFingerprint string `json:"hostKeyFingerprint"`
+	// HostKey is the guest's ssh-ed25519 host public key, "ssh-ed25519 AAAA..."
+	// without a comment (contents of ssh_host_ed25519_key.pub, comment stripped).
+	HostKey string `json:"hostKey,omitempty"`
 }

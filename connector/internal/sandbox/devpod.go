@@ -65,6 +65,7 @@ func (s DevUpSpec) String() string { return "sandbox.DevUpSpec{workspace=" + s.W
 type DevUpResult struct {
 	MeshIP             string
 	HostKeyFingerprint string
+	HostKey            string
 }
 
 // Error codes for DevError.
@@ -512,7 +513,7 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	if err != nil {
 		return res, err
 	}
-	return DevUpResult{MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint}, nil
+	return DevUpResult{MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey}, nil
 }
 
 // awaitJoin reads the sidecar's log for the guest's first-boot report.

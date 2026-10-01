@@ -12,6 +12,7 @@ The Mac app writes, the connector only reads (re-read on every poll, no restart 
     ~/Library/Application Support/Nexal/sandbox-hosting.json
     {"enabled": true, "maxSandboxes": 5, "placement": "members"}
 
+- `placement` also accepts the older spellings `any` (= `members`) and `mine` (= `owner`); anything else is refused.
 - `enabled` (bool): the opt-in. Missing file, or an invalid file, means **not opted in**.
 - `maxSandboxes` (1..10, default 5), `placement` (`members` | `owner`, default `members`).
 - Unknown fields are ignored. Write `enabled:false` to opt out; do not delete the file
@@ -69,3 +70,20 @@ container's network namespace, and tears down container, volumes, sidecar, DevPo
 and secrets. It sits behind the `DevOps` interface; tests use fakes. Error codes:
 `no_container_runtime`, `docker_desktop_only`, `devpod_missing`, `devpod_failed`,
 `mesh_sidecar_failed`, `mesh_image_unconfigured`, `invalid_devcontainer`.
+
+## Files shared with the Mac app (`~/Library/Application Support/Nexal/sandboxes/`)
+
+- `state.json` (written on every state change): an array of
+  `{id,name,state,kind,lifecycle,paused,meshIp,expiresAt,persistent,startedAt,...}`. It is also the
+  runner's own record file (extra fields are internal), so the app must ignore unknown keys.
+- `kill-requests/<sandboxId>`: the app creates an empty file; the runner polls every 2 s, calls
+  `Manager.Kill(id)` and deletes it. Busy sandboxes keep the request for up to 10 minutes; unknown ids and
+  non-regular files are dropped.
+
+## Wire notes
+
+- State reports use `ackTaskId` (vnc-password and rejoin acks), `needsKey` and `hostKey`
+  (`ssh-ed25519 AAAA...`, from the guest's first-boot line; the fingerprint is verified against it).
+- First-boot env: the seed renders `NEXAL_MESH_URL` (not `NEXAL_MANAGEMENT_URL`) and optional
+  `NEXAL_DRIVE_URL`; `seed_firstboot_test.go` parses `nexal-first-boot` to keep both in sync.
+- `nexal sandbox --action list|connect --id <id> --kind ssh|vnc|files [--public-key-stdin]` (see CLI-CONTRACT.md).

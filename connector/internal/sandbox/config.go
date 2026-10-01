@@ -48,6 +48,12 @@ func (c HostingConfig) Normalize() (HostingConfig, error) {
 		return HostingConfig{}, fmt.Errorf("maxSandboxes must be 1..10")
 	}
 	switch c.Placement {
+	case "any": // tolerated spelling from older Mac apps
+		c.Placement = PlacementMembers
+	case "mine":
+		c.Placement = PlacementOwner
+	}
+	switch c.Placement {
 	case "":
 		c.Placement = PlacementMembers
 	case PlacementMembers, PlacementOwner:

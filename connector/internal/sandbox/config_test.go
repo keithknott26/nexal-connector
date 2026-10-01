@@ -15,6 +15,12 @@ func TestParseHostingConfig(t *testing.T) {
 	if err != nil || c.MaxSandboxes != 5 || c.Placement != "members" {
 		t.Fatalf("defaults: %+v %v", c, err)
 	}
+	for alias, want := range map[string]string{"any": "members", "mine": "owner"} {
+		c, err = ParseHostingConfig([]byte(`{"enabled":true,"placement":"` + alias + `"}`))
+		if err != nil || c.Placement != want {
+			t.Fatalf("alias %s: %+v %v", alias, c, err)
+		}
+	}
 	for _, bad := range []string{`{`, `{"enabled":true,"maxSandboxes":11}`, `{"maxSandboxes":-1}`, `{"placement":"everyone"}`} {
 		if _, err := ParseHostingConfig([]byte(bad)); err == nil {
 			t.Errorf("%s should be rejected", bad)

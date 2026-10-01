@@ -6,7 +6,7 @@ import SwiftUI
 //
 // Files shared with the Go connector (all under ~/Library/Application Support/Nexal):
 //   sandbox-hosting.json                  written here, read by the connector: {enabled, maxSandboxes, placement}
-//                                         placement is "any" (any network member) or "mine" (only my devices).
+//                                         placement is "members" (any network member) or "owner" (only my devices).
 //   sandboxes/state.json                  written by the connector (sandbox.Manager), read here (JSON array of records).
 //   sandboxes/kill-requests/<sandboxId>   written here to ask the connector to tear a host down now
 //                                         (the connector calls Manager.Kill(id) and deletes the file).
@@ -18,15 +18,15 @@ import SwiftUI
 struct SandboxHostingConfig: Codable, Equatable {
     var enabled = false
     var maxSandboxes = 5
-    var placement = "any"
+    var placement = "members"
 
     static let placements: [(value: String, label: String)] = [
-        ("any", "Any device on my network"), ("mine", "Only my own devices")]
+        ("members", "Any member of my network"), ("owner", "Only my own devices")]
 
     var clamped: SandboxHostingConfig {
         var c = self
         c.maxSandboxes = min(10, max(1, c.maxSandboxes))
-        if !Self.placements.contains(where: { $0.value == c.placement }) { c.placement = "any" }
+        if !Self.placements.contains(where: { $0.value == c.placement }) { c.placement = "members" }
         return c
     }
 }

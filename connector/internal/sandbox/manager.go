@@ -53,8 +53,15 @@ type record struct {
 	Kind           SandboxKind `json:"kind,omitempty"`
 	Lifecycle      Lifecycle   `json:"lifecycle,omitempty"`
 	Boot           *BootInfo   `json:"boot,omitempty"`
-	HostKey        string      `json:"hostKey,omitempty"`
-	Workspace      string      `json:"workspace,omitempty"` // dev container workspace id
+	HostKey        string      `json:"hostKey,omitempty"` // SHA256 fingerprint (historic name)
+	// Fields the Mac app reads from state.json (ThrowawayHosting.swift); they are
+	// derived or maintained here, never trusted on load.
+	Name       string     `json:"name,omitempty"`
+	Paused     bool       `json:"paused"`
+	Persistent bool       `json:"persistent"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	HostKeyPub string     `json:"hostKeyPub,omitempty"` // ssh-ed25519 public key as reported by the guest
+	Workspace  string     `json:"workspace,omitempty"`  // dev container workspace id
 	// AwaitKey: the mesh peer is gone; a rejoin task with a fresh key is needed.
 	AwaitKey bool `json:"awaitKey,omitempty"`
 	busy     bool // an operation goroutine owns this sandbox; not persisted
@@ -229,6 +236,7 @@ func (m *Manager) consoleLog(id string) string {
 func (m *Manager) saveLocked() {
 	recs := make([]*record, 0, len(m.boxes))
 	for _, r := range m.boxes {
+		r.Name, r.Paused, r.Persistent = r.Hostname, r.State == StatePaused, r.Lifecycle == LifecyclePersistent
 		recs = append(recs, r)
 	}
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
@@ -253,6 +261,15 @@ func (m *Manager) setStateLocked(r *record, to State) error {
 	}
 	r.State = to
 	r.UpdatedAt = m.opts.Now()
+	switch to {
+	case StateProvisioning:
+		r.StartedAt = nil
+	case StateRunning:
+		if r.StartedAt == nil {
+			now := r.UpdatedAt
+			r.StartedAt = &now
+		}
+	}
 	m.saveLocked()
 	return nil
 }
@@ -416,7 +433,7 @@ func (m *Manager) startBoot(ctx context.Context, t Task) {
 	}
 	rec.Size, rec.Hostname, rec.ExpiresAt = t.Size, t.Hostname, t.ExpiresAt
 	rec.Kind, rec.Lifecycle, rec.Boot = kindOf(t), lifecycleOf(t), bootInfoFrom(t)
-	rec.AwaitKey, rec.HostKey = false, ""
+	rec.AwaitKey, rec.HostKey, rec.HostKeyPub = false, "", ""
 	if dev {
 		rec.Workspace = DevWorkspaceID(t.SandboxID)
 	}
@@ -488,7 +505,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		Hostname: t.Hostname, SetupKey: t.SetupKey, VNCPassword: t.VNCPassword,
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
 		DriveWritable: driveWritable(t), SSHCAPublicKey: t.SSHCAPublicKey, DriveToken: t.DriveToken,
-		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL}
+		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL, DriveURL: t.DriveURL}
 	if err := WriteSeedDir(m.seedDir(id), seed); err != nil {
 		return err
 	}
@@ -522,7 +539,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		m.mu.Unlock()
 		return errors.New("sandbox vanished during boot")
 	}
-	r.MeshIP, r.HostKey, r.AwaitKey = fb.MeshIP, fb.HostKeyFingerprint, false
+	r.MeshIP, r.HostKey, r.HostKeyPub, r.AwaitKey = fb.MeshIP, fb.HostKeyFingerprint, fb.HostKey, false
 	err = m.setStateLocked(r, StateRunning)
 	m.mu.Unlock()
 	if err != nil {
@@ -532,7 +549,8 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	if err := RemoveSeed(m.seedDir(id), m.seedISO(id)); err != nil {
 		m.opts.Logger.Warn("seed not removed", "sandbox", id, "error", err.Error())
 	}
-	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint})
+	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey,
+		AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
 	return nil
 }
 

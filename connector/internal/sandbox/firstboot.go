@@ -1,6 +1,9 @@
 package sandbox
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"net/netip"
 	"regexp"
@@ -35,7 +38,37 @@ func ParseFirstBootLine(line string) (fb FirstBoot, ok bool, failed bool, reason
 	if fb.HostKeyFingerprint != "" && !fingerprintPattern.MatchString(fb.HostKeyFingerprint) {
 		return FirstBoot{}, false, false, ""
 	}
+	if fb.HostKey != "" {
+		key, fp, ok := normalizeHostKey(fb.HostKey)
+		if !ok || (fb.HostKeyFingerprint != "" && fb.HostKeyFingerprint != fp) {
+			return FirstBoot{}, false, false, ""
+		}
+		fb.HostKey = key
+		if fb.HostKeyFingerprint == "" {
+			fb.HostKeyFingerprint = fp
+		}
+	}
 	return fb, true, false, ""
+}
+
+// normalizeHostKey accepts "ssh-ed25519 AAAA..." (an optional trailing comment is
+// dropped) and returns the comment-free key and its OpenSSH SHA256 fingerprint
+// (unpadded base64). The blob must decode and carry the ssh-ed25519 key type.
+func normalizeHostKey(s string) (key, fingerprint string, ok bool) {
+	f := strings.Fields(s)
+	if len(f) < 2 || f[0] != "ssh-ed25519" || len(f[1]) > 512 {
+		return "", "", false
+	}
+	blob, err := base64.StdEncoding.DecodeString(f[1])
+	if err != nil || len(blob) < 4 {
+		return "", "", false
+	}
+	n := int(binary.BigEndian.Uint32(blob))
+	if n != len("ssh-ed25519") || len(blob) < 4+n || string(blob[4:4+n]) != "ssh-ed25519" {
+		return "", "", false
+	}
+	sum := sha256.Sum256(blob)
+	return f[0] + " " + f[1], "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:]), true
 }
 
 // scanFirstBoot looks through console text (newest line wins) for a report.

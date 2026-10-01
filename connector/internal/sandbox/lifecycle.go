@@ -93,8 +93,9 @@ func rebootTask(b BootInfo, t Task) Task {
 		SetupKey: t.SetupKey, VNCPassword: t.VNCPassword, SSHPublicKeys: b.SSHPublicKeys, Hostname: b.Hostname,
 		Desktop: b.Desktop, ExpiresAt: b.ExpiresAt, Reach: b.Reach, SandboxKind: b.SandboxKind,
 		Lifecycle: b.Lifecycle, Devcontainer: b.Devcontainer, SSHCAPublicKey: b.SSHCAPublicKey,
-		DriveMode: b.DriveMode, DriveToken: t.DriveToken, ManagementURL: t.ManagementURL,
-		keepData: b.SandboxKind == SandboxDevcontainer && b.Lifecycle == LifecyclePersistent}
+		DriveMode: b.DriveMode, DriveToken: t.DriveToken, ManagementURL: t.ManagementURL, DriveURL: t.DriveURL,
+		keepData:  b.SandboxKind == SandboxDevcontainer && b.Lifecycle == LifecyclePersistent,
+		ackRejoin: t.Kind == KindRejoin}
 }
 
 // HostingPublisher is implemented by the coordinator client: PUT sandbox-hosting.
@@ -188,7 +189,7 @@ func (m *Manager) heartbeat() {
 		}
 		if r.State == StateRunning || (r.State == StateProvisioning && r.AwaitKey) {
 			reps = append(reps, StateReport{SandboxID: r.ID, State: r.State, MeshIP: r.MeshIP,
-				HostKeyFingerprint: r.HostKey, NeedsKey: r.AwaitKey})
+				HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub, NeedsKey: r.AwaitKey})
 		}
 	}
 	if len(reps) == 0 {
@@ -254,7 +255,7 @@ func (m *Manager) startVNC(t Task) {
 		return
 	}
 	m.inflight[t.TaskID] = true
-	h, ip, hk := rec.Handle, rec.MeshIP, rec.HostKey
+	h, ip, hk, hpub := rec.Handle, rec.MeshIP, rec.HostKey, rec.HostKeyPub
 	m.mu.Unlock()
 	m.wg.Add(1)
 	go func() {
@@ -270,7 +271,7 @@ func (m *Manager) startVNC(t Task) {
 			return
 		}
 		m.report(StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: ip,
-			HostKeyFingerprint: hk, AckedTask: t.TaskID})
+			HostKeyFingerprint: hk, HostKey: hpub, AckTaskID: t.TaskID})
 	}()
 }
 
@@ -287,7 +288,7 @@ func (m *Manager) markAwaitKey(id, msg string) {
 	}
 	r.AwaitKey = true
 	m.saveLocked()
-	rep := StateReport{SandboxID: id, State: r.State, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey,
+	rep := StateReport{SandboxID: id, State: r.State, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
 		NeedsKey: true, Error: msg}
 	m.mu.Unlock()
 	m.report(rep)
@@ -303,9 +304,23 @@ func (m *Manager) startRejoin(ctx context.Context, t Task) {
 	}
 	m.mu.Lock()
 	rec := m.boxes[t.SandboxID]
-	if rec == nil || rec.busy || !rec.AwaitKey || rec.Boot == nil || m.inflight[t.TaskID] {
+	if rec == nil || rec.busy || m.inflight[t.TaskID] {
 		m.mu.Unlock()
-		return // unknown, busy, or not waiting for a key (a repeat of a task already applied)
+		return // unknown or busy
+	}
+	if !rec.AwaitKey || rec.Boot == nil {
+		// Not waiting for a key: a repeat of a task already applied. Acknowledge it
+		// so the coordinator stops redelivering (the unused one-use key is dropped).
+		var rep *StateReport
+		if rec.State == StateRunning {
+			rep = &StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: rec.MeshIP,
+				HostKeyFingerprint: rec.HostKey, HostKey: rec.HostKeyPub, AckTaskID: t.TaskID}
+		}
+		m.mu.Unlock()
+		if rep != nil {
+			m.report(*rep)
+		}
+		return
 	}
 	kind, lc, h, ws, boot := rec.Kind, rec.Lifecycle, rec.Handle, rec.Workspace, *rec.Boot
 	m.mu.Unlock()
@@ -339,11 +354,11 @@ func (m *Manager) rejoinVM(ctx context.Context, t Task, alive bool) {
 		m.markAwaitKey(id, "rejoin failed: "+err.Error())
 		return
 	}
-	m.markRunning(id, rep.MeshIP)
+	m.markRunning(id, rep.MeshIP, t.TaskID)
 }
 
 // markRunning sets a sandbox running (clearing AwaitKey) and reports it.
-func (m *Manager) markRunning(id, meshIP string) {
+func (m *Manager) markRunning(id, meshIP, ackTask string) {
 	m.mu.Lock()
 	r := m.boxes[id]
 	if r == nil {
@@ -359,7 +374,8 @@ func (m *Manager) markRunning(id, meshIP string) {
 	} else {
 		m.saveLocked()
 	}
-	rep := StateReport{SandboxID: id, State: StateRunning, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey}
+	rep := StateReport{SandboxID: id, State: StateRunning, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
+		AckTaskID: ackTask}
 	m.mu.Unlock()
 	m.report(rep)
 }
@@ -529,7 +545,7 @@ func (m *Manager) onGone(ctx context.Context, id string) {
 		case err != nil:
 			m.markAwaitKey(id, err.Error())
 		case rep.Connected:
-			m.markRunning(id, rep.MeshIP)
+			m.markRunning(id, rep.MeshIP, "")
 		default:
 			m.markAwaitKey(id, "")
 		}
@@ -587,13 +603,14 @@ func (m *Manager) bootDev(ctx context.Context, t Task, reset bool) error {
 		return errors.New("sandbox vanished during boot")
 	}
 	r.Workspace, r.MeshIP, r.HostKey, r.AwaitKey = ws, res.MeshIP, res.HostKeyFingerprint, false
+	r.HostKeyPub = res.HostKey
 	err = m.setStateLocked(r, StateRunning)
 	m.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	m.report(StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: res.MeshIP,
-		HostKeyFingerprint: res.HostKeyFingerprint})
+		HostKeyFingerprint: res.HostKeyFingerprint, HostKey: res.HostKey, AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
 	return nil
 }
 
@@ -709,4 +726,12 @@ func (m *Manager) RunPower(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ackIf returns id when cond holds, else "" (for StateReport.AckTaskID).
+func ackIf(cond bool, id string) string {
+	if cond {
+		return id
+	}
+	return ""
 }

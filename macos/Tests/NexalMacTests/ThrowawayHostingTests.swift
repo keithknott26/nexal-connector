@@ -16,7 +16,7 @@ final class ThrowawayHostingTests: XCTestCase {
     func testConfigClampsAndDefaultsOff() {
         XCTAssertFalse(SandboxHostingConfig().enabled)
         XCTAssertEqual(SandboxHostingConfig(enabled: true, maxSandboxes: 99, placement: "x").clamped,
-                       SandboxHostingConfig(enabled: true, maxSandboxes: 10, placement: "any"))
+                       SandboxHostingConfig(enabled: true, maxSandboxes: 10, placement: "members"))
     }
 
     func testDecodesConnectorState() throws {

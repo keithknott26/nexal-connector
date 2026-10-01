@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -79,5 +80,56 @@ func TestSandboxRunnerRoutes(t *testing.T) {
 	}
 	if _, err := c.SandboxTasks(ctx, "../x"); err == nil {
 		t.Fatal("bad host id")
+	}
+}
+
+func TestSandboxListAndConnect(t *testing.T) {
+	var got []string
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`{"sandboxes":[{"id":"sb1","futureField":1}]}`))
+			return
+		}
+		if strings.Contains(string(b), `"vnc"`) {
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"error":{"code":"sandbox_not_running"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"kind":"ssh","host":"100.64.0.2","certificate":"c"}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	l, err := c.ListSandboxes(ctx, "host1")
+	if err != nil || !strings.Contains(string(l), "futureField") {
+		t.Fatalf("%s %v", l, err)
+	}
+	r, err := c.ConnectSandbox(ctx, "host1", "sb1", "ssh", "ssh-ed25519 AAAA")
+	if err != nil || !strings.Contains(string(r), `"certificate":"c"`) || !strings.Contains(body, `"publicKey":"ssh-ed25519 AAAA"`) {
+		t.Fatalf("%s %v %s", r, err, body)
+	}
+	var se *StatusError
+	if _, err := c.ConnectSandbox(ctx, "host1", "sb1", "vnc", ""); !errors.As(err, &se) || se.Code != "sandbox_not_running" {
+		t.Fatalf("%v", err)
+	}
+	if _, err := c.ConnectSandbox(ctx, "host1", "../x", "vnc", ""); err == nil {
+		t.Fatal("bad id")
+	}
+	if _, err := c.ListSandboxes(ctx, "../x"); err == nil {
+		t.Fatal("bad host id")
+	}
+	if _, err := c.ConnectSandbox(ctx, "", "sb1", "vnc", ""); err == nil {
+		t.Fatal("bad host id")
+	}
+	if strings.Join(got, "|") != "GET /api/v2/hosts/host1/sandboxes|POST /api/v2/hosts/host1/sandboxes/sb1/connect|POST /api/v2/hosts/host1/sandboxes/sb1/connect" {
+		t.Fatalf("%v", got)
 	}
 }

@@ -112,11 +112,15 @@ type Task struct {
 	SSHCAPublicKey string        `json:"sshCaPublicKey,omitempty"`
 	DriveMode      string        `json:"driveMode,omitempty"` // "rw" | "ro"
 	DriveToken     string        `json:"driveToken,omitempty"`
+	DriveURL       string        `json:"-"`                  // optional https endpoint for the shared drive (driveUrl)
 	Password       string        `json:"password,omitempty"` // vnc-password task
 
 	// keepData is set by the runner (never the wire) when a re-create must keep
 	// the persistent workspace's data.
 	keepData bool
+	// ackRejoin is set by the runner when a rejoin task is carried out as a
+	// re-create: the final running report then acknowledges that task.
+	ackRejoin bool
 }
 
 // taskWire is the coordinator's JSON shape (docs/sandboxes/API.md): it differs
@@ -146,6 +150,7 @@ type taskWire struct {
 	SSHCAPublicKey    string        `json:"sshCaPublicKey"`
 	DriveMode         string        `json:"driveMode"`
 	DriveToken        string        `json:"driveToken"`
+	DriveURL          string        `json:"driveUrl"`
 }
 
 type wireRes struct {
@@ -169,7 +174,7 @@ func (t *Task) UnmarshalJSON(b []byte) error {
 	*t = Task{TaskID: w.ID, SandboxID: w.SandboxID, Kind: w.Kind, Image: w.Image, SetupKey: w.SetupKey,
 		VNCPassword: w.VNCPassword, Hostname: w.Hostname, Desktop: w.Desktop, ExpiresAt: w.ExpiresAt,
 		Reach: w.Reach, SandboxKind: w.SandboxKind, Lifecycle: w.Lifecycle, Devcontainer: w.Devcontainer,
-		SSHCAPublicKey: w.SSHCAPublicKey, DriveMode: w.DriveMode, DriveToken: w.DriveToken, Password: w.Password}
+		SSHCAPublicKey: w.SSHCAPublicKey, DriveMode: w.DriveMode, DriveToken: w.DriveToken, DriveURL: w.DriveURL, Password: w.Password}
 	if t.TaskID == "" {
 		t.TaskID = w.TaskID
 	}
@@ -229,11 +234,15 @@ type StateReport struct {
 	// NeedsKey asks the coordinator for a fresh one-use mesh key (a rejoin task):
 	// the peer was dropped while the Mac slept, or the sandbox was re-created.
 	NeedsKey bool `json:"needsKey,omitempty"`
-	// AckedTask names a task (vnc-password) this report acknowledges.
-	AckedTask          string `json:"ackedTask,omitempty"`
+	// AckTaskID names a task (vnc-password) this report acknowledges. The
+	// coordinator's canonical name is ackTaskId (it also accepts ackedTask).
+	AckTaskID          string `json:"ackTaskId,omitempty"`
 	MeshIP             string `json:"meshIp,omitempty"`
 	HostKeyFingerprint string `json:"hostKeyFingerprint,omitempty"`
-	Error              string `json:"error,omitempty"`
+	// HostKey is the guest's ssh-ed25519 host public key ("ssh-ed25519 AAAA...",
+	// no comment); the coordinator pins it for connect responses.
+	HostKey string `json:"hostKey,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
@@ -371,16 +380,23 @@ func validateV2(t Task) error {
 	if t.SSHCAPublicKey != "" && !validCAKey(t.SSHCAPublicKey) {
 		return fmt.Errorf("invalid ssh ca public key")
 	}
-	if t.ManagementURL != "" {
-		u, err := url.Parse(t.ManagementURL)
-		if err != nil || u.Scheme != "https" || u.Host == "" || strings.ContainsAny(t.ManagementURL, " \r\n'\"\\$`") {
-			return fmt.Errorf("invalid management url")
-		}
+	if t.ManagementURL != "" && !validHTTPSURL(t.ManagementURL) {
+		return fmt.Errorf("invalid management url")
+	}
+	if t.DriveURL != "" && !validHTTPSURL(t.DriveURL) {
+		return fmt.Errorf("invalid drive url")
 	}
 	if t.IsDev() {
 		return ValidateDevcontainer(t.Devcontainer)
 	}
 	return nil
+}
+
+// validHTTPSURL accepts an https URL that is also safe inside a quoted env value.
+func validHTTPSURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != "" && len(s) <= 2048 &&
+		!strings.ContainsAny(s, " \t\r\n\x00'\"\\$`")
 }
 
 var tokenPattern = regexp.MustCompile(`^[A-Za-z0-9._~+=/-]+$`)

@@ -451,3 +451,17 @@ assignment. It cannot be combined with `--connect` or `--dry-run`. Normal
 status and setup responses remain redacted. The native app consumes this
 response only for the user-triggered Reveal credentials window; do not log
 or persist it. The coordinator still authorizes the credential request.
+
+### Throwaway hosts on the network (`nexal sandbox`)
+
+- `nexal sandbox --action list` prints `{"sandboxes":[...]}` exactly as `GET /api/v2/hosts/{hostId}/sandboxes` returns it (`hostId` is this computer's enrolled host id).
+- `nexal sandbox --action connect --id <id> --kind ssh|vnc|files [--public-key-stdin]` prints the coordinator's
+  `POST /api/v2/hosts/{hostId}/sandboxes/{id}/connect` response unchanged. `ssh` and `files` require `--public-key-stdin` and
+  read one `ssh-ed25519` public key line from standard input; `vnc` takes none. Output contains one-time secrets.
+- Failure: exit status 1 and `{"error":{"code","message"}}` on stderr. Coordinator codes pass through
+  (`sandbox_not_running`, `sandbox_no_desktop`, `invalid_public_key`, `rate_limited`, ...); local ones are
+  `invalid_arguments`, `public_key_required`, `invalid_public_key`, `sandbox_not_found`, `sandboxes_unavailable`.
+- Authenticates with the enrolled host credential (same as `wake`) and calls only the host routes above, never
+  the member routes. The coordinator acts for the computer's owner, scoped to the network the computer is enrolled
+  in. An unenrolled computer fails locally with `not_enrolled`; coordinator `forbidden` means the host has no
+  active owner/network.

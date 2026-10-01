@@ -167,7 +167,7 @@ func TestRenderUserDataV2(t *testing.T) {
 		"path: /etc/nexal/drive.env",
 		"NEXAL_DRIVE_MODE=rw",
 		"NEXAL_LIFECYCLE=persistent",
-		"NEXAL_MANAGEMENT_URL=https://mesh.example.net:443",
+		"NEXAL_MESH_URL=https://mesh.example.net:443",
 	} {
 		if !strings.Contains(u, want) {
 			t.Errorf("user-data missing %q", want)

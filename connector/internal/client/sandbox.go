@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 
@@ -78,6 +79,45 @@ func (c *Client) ReportSandboxHostingState(ctx context.Context, hostID string, a
 		OnBattery bool `json:"onBattery"`
 	}{awake, onBattery}
 	return c.callLenient(ctx, "POST", p, in, nil)
+}
+
+// ListSandboxes is GET /api/v2/hosts/:hostId/sandboxes: the host-token twin of the
+// member list (the CLI holds only the host credential). The body is returned exactly
+// as the coordinator sent it (a JSON object, {"sandboxes":[...]}), so the Mac app sees
+// every field the coordinator adds.
+func (c *Client) ListSandboxes(ctx context.Context, hostID string) (json.RawMessage, error) {
+	p, err := sandboxPath(hostID, "sandboxes")
+	if err != nil {
+		return nil, err
+	}
+	var out json.RawMessage
+	if err := c.callLenient(ctx, "GET", p, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ConnectSandbox is POST /api/v2/hosts/:hostId/sandboxes/:id/connect for kind
+// ssh|vnc|files; the coordinator acts for the host's owner. publicKey (an ssh-ed25519
+// key) is required for ssh and files. The response carries one-time secrets
+// (certificate, VNC password): it is returned unchanged and never logged here.
+func (c *Client) ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey string) (json.RawMessage, error) {
+	if !ValidID(id) {
+		return nil, errors.New("invalid sandbox id")
+	}
+	p, err := sandboxPath(hostID, "sandboxes/"+url.PathEscape(id)+"/connect")
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]string{"kind": kind}
+	if publicKey != "" {
+		body["publicKey"] = publicKey
+	}
+	var out json.RawMessage
+	if err := c.callLenient(ctx, "POST", p, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 var (

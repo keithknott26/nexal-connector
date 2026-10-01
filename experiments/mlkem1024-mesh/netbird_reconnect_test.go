@@ -3,6 +3,7 @@ package rosenpass
 import (
 	rp "cunicu.li/go-rosenpass"
 	"errors"
+	"net"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"testing"
 )
@@ -46,7 +47,7 @@ func TestNexalReconnectResetsStalePSK(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 0; i < 1; i++ {
-			if err := m.addPeer(pub, "127.0.0.1:2345", "127.0.0.1", remote.PublicKey().String()); err != nil {
+			if err := m.addPeer(pub, net.JoinHostPort(QuantumProfile, "2345"), "127.0.0.1", remote.PublicKey().String()); err != nil {
 				t.Fatal(err)
 			}
 			want, _ := DeterministicSeedKey(local.PublicKey().String(), remote.PublicKey().String())
@@ -60,13 +61,13 @@ func TestNexalReconnectResetsStalePSK(t *testing.T) {
 			pid := rp.PeerIDFromPublicKey(pub)
 			m.rpWgHandler.HandshakeCompleted(pid, rp.Key(account))
 			before := len(iface.calls)
-			if err := m.addPeer(pub, "127.0.0.1:2345", "127.0.0.1", remote.PublicKey().String()); err != nil {
+			if err := m.addPeer(pub, net.JoinHostPort(QuantumProfile, "2345"), "127.0.0.1", remote.PublicKey().String()); err != nil {
 				t.Fatal(err)
 			}
 			if len(iface.calls) != before || !m.rpWgHandler.IsPeerInitialized(pid) {
 				t.Fatal("duplicate endpoint destroyed active exchange")
 			}
-			if err := m.addPeer(pub, "127.0.0.1:2347", "127.0.0.1", remote.PublicKey().String()); err != nil {
+			if err := m.addPeer(pub, net.JoinHostPort(QuantumProfile, "2347"), "127.0.0.1", remote.PublicKey().String()); err != nil {
 				t.Fatal(err)
 			}
 			if iface.calls[len(iface.calls)-1].psk != *want {
@@ -75,7 +76,7 @@ func TestNexalReconnectResetsStalePSK(t *testing.T) {
 
 		}
 		iface.err = errors.New("write failed")
-		if err := m.addPeer(pub, "127.0.0.1:2346", "127.0.0.1", remote.PublicKey().String()); err == nil {
+		if err := m.addPeer(pub, net.JoinHostPort(QuantumProfile, "2346"), "127.0.0.1", remote.PublicKey().String()); err == nil {
 			t.Fatal("failed reset must abort registration")
 		}
 	}

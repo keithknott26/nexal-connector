@@ -197,18 +197,18 @@ func TestNexalEndToEndGatedMLKEM(t *testing.T) {
 	}
 	assertApp()
 	for i := range handlers {
-		profile, _, _ := handlers[i].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1-i]))
+		profile, _, _, _ := handlers[i].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1-i]))
 		if profile != "nexal-mlkem1024-tcp-v2" {
 			t.Fatal("active session evidence missing")
 		}
 	}
 	// Exercise multiple automatic renewals while verifying application traffic.
-	_, previous, _ := handlers[0].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1]))
+	_, previous, _, _ := handlers[0].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1]))
 	for renewal := 0; renewal < 3; renewal++ {
 		deadline := time.Now().Add(30 * time.Second)
 		for {
 			assertApp()
-			profile, installed, _ := handlers[0].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1]))
+			profile, installed, _, _ := handlers[0].QuantumEvidence(rp.PeerIDFromPublicKey(pubs[1]))
 			if profile != "" && installed != previous {
 				previous = installed
 				break

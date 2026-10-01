@@ -40,6 +40,11 @@ subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpa
 # because a Network Extension's own sockets never use its own tunnel. No-op elsewhere.
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'wireguard-inject.patch')], cwd=opts.output / 'wireguard', check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-ios-control.patch')], cwd=opts.output / 'netbird', check=True)
+# Resilience (2026-10-01): per-peer initiation backoff, peer-level lease expiry,
+# direct/relayed delivery budgets, profile-advertisement eligibility and the
+# machine-readable status reason. Applied last; the gate is not relaxed.
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpass-resilience.patch')], cwd=opts.output / 'rosenpass', check=True)
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-resilience.patch')], cwd=opts.output / 'netbird', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'
@@ -59,3 +64,4 @@ shutil.copyfile(root / 'wireguard_quantum_test.go', opts.output / 'wireguard/dev
 print('Prepared isolated experimental sources. No installed runtime or production packaging changed.')
 
 shutil.copyfile(root / "netbird_reconnect_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_reconnect_test.go")
+shutil.copyfile(root / "netbird_resilience_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_resilience_test.go")

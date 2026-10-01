@@ -1,0 +1,435 @@
+--- a/conn_tcp.go
++++ b/conn_tcp.go
+@@ -28,7 +28,53 @@
+ 	done        chan struct{}
+ 	once        sync.Once
+ 	slots       chan struct{}
++	budgets     map[string]TCPBudget
+ }
++
++// TCPBudget bounds one control delivery: the dial, the frame write and the
++// wait for the receiver's EOF receipt. Direct peers get a short budget so an
++// unreachable peer stalls the server briefly; relayed peers get more time.
++type TCPBudget struct {
++	Dial, Write, Receipt time.Duration
++}
++
++var (
++	DirectTCPBudget  = TCPBudget{Dial: 3 * time.Second, Write: 3 * time.Second, Receipt: 3 * time.Second}
++	RelayedTCPBudget = TCPBudget{Dial: 6 * time.Second, Write: 5 * time.Second, Receipt: 6 * time.Second}
++	// acceptHeaderDeadline bounds the unauthenticated part of an inbound
++	// connection (the 8-byte header); a slot is held at most this long by a
++	// connection that never identifies a registered endpoint.
++	acceptHeaderDeadline = 3 * time.Second
++	// acceptFrameDeadline bounds reading the body once the endpoint is authorized.
++	acceptFrameDeadline = 8 * time.Second
++)
++
++func (b TCPBudget) valid() bool { return b.Dial > 0 && b.Write > 0 && b.Receipt > 0 }
++
++// SetBudget sets the delivery budget for one authorized endpoint. A zero
++// budget restores the direct default.
++func (c *TCPConn) SetBudget(addr *net.UDPAddr, b TCPBudget) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if b.valid() {
++		c.budgets[addr.String()] = b
++	} else {
++		delete(c.budgets, addr.String())
++	}
++}
++// BudgetFor returns the delivery budget in effect for an endpoint.
++func (c *TCPConn) BudgetFor(addr *net.UDPAddr) TCPBudget {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if b, ok := c.budgets[addr.String()]; ok && b.valid() {
++		return b
++	}
++	if DirectTCPBudget.valid() {
++		return DirectTCPBudget
++	}
++	return TCPBudget{Dial: 3 * time.Second, Write: 3 * time.Second, Receipt: 3 * time.Second}
++}
++
+ type tcpFrame struct {
+ 	data     []byte
+ 	endpoint *UDPEndpoint
+@@ -37,7 +83,7 @@
+ const tcpFrameLimit = 4096
+ 
+ func NewTCPConn(listen string) *TCPConn {
+-	return &TCPConn{listen: listen, allowed: map[string]bool{}, active: map[net.Conn]bool{}, incoming: make(chan tcpFrame, 64), done: make(chan struct{}), slots: make(chan struct{}, 32)}
++	return &TCPConn{listen: listen, allowed: map[string]bool{}, active: map[net.Conn]bool{}, incoming: make(chan tcpFrame, 64), done: make(chan struct{}), slots: make(chan struct{}, 32), budgets: map[string]TCPBudget{}}
+ }
+ func (c *TCPConn) AuthorizeEndpoint(addr *net.UDPAddr, allowed bool) {
+ 	c.mu.Lock()
+@@ -46,6 +92,7 @@
+ 		c.allowed[addr.String()] = true
+ 	} else {
+ 		delete(c.allowed, addr.String())
++		delete(c.budgets, addr.String())
+ 	}
+ }
+ func (c *TCPConn) authorized(addr *net.UDPAddr) bool {
+@@ -111,7 +158,7 @@
+ 		c.mu.Unlock()
+ 		go func() {
+ 			defer func() { conn.Close(); c.mu.Lock(); delete(c.active, conn); c.mu.Unlock(); <-c.slots }()
+-			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
++			conn.SetReadDeadline(time.Now().Add(acceptHeaderDeadline))
+ 			var header [8]byte
+ 			if _, err := io.ReadFull(conn, header[:]); err != nil {
+ 				return
+@@ -129,6 +176,7 @@
+ 			if !c.authorized(addr) {
+ 				return
+ 			}
++			conn.SetReadDeadline(time.Now().Add(acceptFrameDeadline))
+ 			data := make([]byte, n)
+ 			if _, err := io.ReadFull(conn, data); err != nil {
+ 				return
+@@ -192,14 +240,15 @@
+ 	if dial == nil {
+ 		dial = (&net.Dialer{}).DialContext
+ 	}
+-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	budget := c.BudgetFor((*net.UDPAddr)(addr))
++	ctx, cancel := context.WithTimeout(context.Background(), budget.Dial)
+ 	defer cancel()
+ 	conn, err := dial(ctx, "tcp", addr.String())
+ 	if err != nil {
+ 		return err
+ 	}
+ 	defer conn.Close()
+-	conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
++	conn.SetWriteDeadline(time.Now().Add(budget.Write))
+ 	frame := make([]byte, 8+len(data))
+ 	copy(frame, "NXQ2")
+ 	binary.BigEndian.PutUint16(frame[4:6], uint16(len(data)))
+@@ -228,7 +277,7 @@
+ 	// complete bounded frame. Wait for that EOF before a completion callback
+ 	// can replace the WireGuard PSK and invalidate the transport carrying it.
+ 	// This is delivery ordering, not authentication; envelope checks remain mandatory.
+-	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
++	if err := conn.SetReadDeadline(time.Now().Add(budget.Receipt)); err != nil {
+ 		return err
+ 	}
+ 	var response [1]byte
+--- a/handshake_initiator.go
++++ b/handshake_initiator.go
+@@ -210,8 +210,8 @@
+ func (hs *initiatorHandshake) scheduleRetransmission(pl payload, ep Endpoint, generation uint64) {
+ 	hs.txTimer = time.AfterFunc(hs.retransmitDelay(), func() {
+ 		hs.txMu.Lock()
+-		defer hs.txMu.Unlock()
+ 		if generation != hs.txGeneration {
++			hs.txMu.Unlock()
+ 			return
+ 		}
+ 		hs.txRetryCount++
+@@ -219,8 +219,12 @@
+ 		case *initHello, *initConf:
+ 			hs.scheduleRetransmission(pl, ep, generation)
+ 		}
++		// Never hold txMu across the bounded TCP delivery: stopRetransmission is
++		// called under the server state lock and must not wait for a dial budget.
++		hs.txMu.Unlock()
+ 		if err := hs.server.conn.Send(pl, hs.peer.spkt, ep); err != nil {
+-			hs.peer.logger.Error("Failed to send", slog.Any("error", err))
++			hs.peer.logger.Debug("Retransmission not delivered; aborting attempt", slog.Any("error", err))
++			go hs.server.abortHandshake(hs, err)
+ 		}
+ 	})
+ }
+--- a/nexal_backoff.go
++++ b/nexal_backoff.go
+@@ -0,0 +1,149 @@
++// SPDX-License-Identifier: Apache-2.0
++package rosenpass
++
++import (
++	"crypto/rand"
++	"encoding/binary"
++	"log/slog"
++	"math"
++	"time"
++)
++
++// Per-peer initiation backoff. A failed initiation (the bounded TCP control
++// frame could not be delivered) no longer leaves a handshake retransmitting
++// every few seconds for RejectAfterTime; the attempt is torn down and the next
++// one is scheduled with exponential growth and jitter. Success resets the
++// counter. The WireGuard session gate is untouched: an expired lease still
++// denies application traffic no matter how the retries are paced.
++var (
++	// InitiationBackoffBase is the delay after the first consecutive failure; it
++	// doubles with every further failure.
++	InitiationBackoffBase = 2 * time.Second
++	// InitiationBackoffCap bounds the delay toward a peer without a live lease.
++	InitiationBackoffCap = 5 * time.Minute
++	// RenewalBackoffCap bounds the delay while the current lease is still live,
++	// so a renewal gets many attempts inside the margin before the lease expires.
++	RenewalBackoffCap = 15 * time.Second
++	// InitiationBackoffJitter is the symmetric relative jitter (0.2 = +/-20 %).
++	InitiationBackoffJitter = 0.2
++)
++
++// HandshakeFailedHandler is told when an initiation toward a peer failed and
++// when the next attempt is scheduled. The error is a transport error; nothing
++// about the peer's identity has been verified at that point.
++type HandshakeFailedHandler interface {
++	HandshakeFailed(pid, error, time.Duration)
++}
++
++// backoffDelay returns InitiationBackoffBase * 2^(failures-1), capped at limit,
++// with +/- InitiationBackoffJitter relative jitter.
++func backoffDelay(failures uint, limit time.Duration) time.Duration {
++	if failures == 0 {
++		failures = 1
++	}
++	exp := float64(failures - 1)
++	if exp > 40 {
++		exp = 40
++	}
++	d := float64(InitiationBackoffBase) * math.Pow(2, exp)
++	if d > float64(limit) {
++		d = float64(limit)
++	}
++	var b [8]byte
++	if _, err := rand.Read(b[:]); err == nil {
++		f := float64(binary.BigEndian.Uint64(b[:])>>11) / float64(1<<53) // [0,1)
++		d *= 1 + InitiationBackoffJitter*(2*f-1)
++	}
++	if d < float64(time.Millisecond) {
++		d = float64(time.Millisecond)
++	}
++	return time.Duration(d)
++}
++
++// Called with stateMu held.
++func (s *Server) failInitiationLocked(p *peer, err error) {
++	p.failures++
++	limit := InitiationBackoffCap
++	if time.Now().Before(p.leaseExpires) {
++		limit = RenewalBackoffCap
++	}
++	delay := backoffDelay(p.failures, limit)
++	attrs := []any{slog.Any("error", err), slog.Uint64("failures", uint64(p.failures)), slog.Duration("retry_in", delay)}
++	if p.failures == 1 {
++		p.logger.Warn("Failed to initiate handshake; backing off", attrs...)
++	} else {
++		p.logger.Debug("Failed to initiate handshake; backing off", attrs...)
++	}
++	for _, h := range s.handlers {
++		if h, ok := h.(HandshakeFailedHandler); ok {
++			h.HandshakeFailed(p.PID(), err, delay)
++		}
++	}
++	s.schedulePeerHandshake(p, delay)
++	s.armPeerExpiryLocked(p)
++}
++
++// abortHandshakeLocked tears down the peer's in-flight initiator handshake
++// without reporting it. Called with stateMu held.
++func (s *Server) abortHandshakeLocked(p *peer) {
++	hs := p.current
++	if hs == nil {
++		return
++	}
++	p.current = nil
++	hs.Close()
++	s.removeHandshake(hs)
++}
++
++// abortHandshake is used from retransmission callbacks (which never hold
++// stateMu): the in-flight attempt could not be delivered any more.
++func (s *Server) abortHandshake(hs *initiatorHandshake, err error) {
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
++	p := hs.peer
++	if s.closed || s.peers[p.PID()] != p || p.current != hs {
++		return
++	}
++	s.abortHandshakeLocked(p)
++	s.failInitiationLocked(p, err)
++}
++
++// armPeerExpiryLocked starts the peer-level lease/outage timer if none runs.
++// It fires RejectAfterTime after a completed exchange (the lease end) or after
++// the first failed attempt without a lease, and re-arms itself afterwards, so
++// HandshakeExpired keeps its upstream cadence independently of how often the
++// individual attempts are retried. Called with stateMu held.
++func (s *Server) armPeerExpiryLocked(p *peer) {
++	if p.expiryTimer != nil {
++		return
++	}
++	generation := p.generation
++	p.expiryTimer = time.AfterFunc(RejectAfterTime, func() { s.expirePeer(p, generation) })
++}
++
++func (s *Server) expirePeer(p *peer, generation uint64) {
++	s.stateMu.Lock()
++	defer s.stateMu.Unlock()
++	if s.closed || s.peers[p.PID()] != p {
++		return
++	}
++	p.expiryTimer = nil
++	if generation != p.generation {
++		return
++	}
++	s.abortHandshakeLocked(p)
++	p.leaseExpires = time.Time{}
++	p.logger.Debug("Erasing outdated key from peer")
++	for _, h := range s.handlers {
++		if h, ok := h.(HandshakeExpiredHandler); ok {
++			h.HandshakeExpired(p.PID())
++		}
++	}
++	s.armPeerExpiryLocked(p)
++	if p.endpoint != nil && p.nextAttempt.After(time.Now().Add(RetransmitDelayEnd)) {
++		// Both ends just converged on the replacement key; pull a distant retry
++		// forward. An earlier attempt is kept, and the failure counter is kept
++		// so later failures keep growing.
++		s.schedulePeerHandshake(p, RetransmitDelayEnd)
++	}
++}
+--- a/peer.go
++++ b/peer.go
+@@ -14,6 +14,7 @@
+ var (
+ 	errMissingEndpoint  = errors.New("missing endpoint")
+ 	errMissingPublicKey = errors.New("missing public key")
++	errHandshakeTimeout = errors.New("handshake timed out")
+ )
+ 
+ type PeerConfig struct {
+@@ -34,6 +35,15 @@
+ 
+ 	rekeyTimer *time.Timer
+ 
++	// Resilience state (nexal_backoff.go): consecutive failed initiations, the
++	// end of the current lease, the peer-level expiry timer and the one
++	// in-flight initiator handshake.
++	failures     uint
++	nextAttempt  time.Time
++	leaseExpires time.Time
++	expiryTimer  *time.Timer
++	current      *initiatorHandshake
++
+ 	initialEndpoint Endpoint // The peers's endpoint as configured
+ 	endpoint        Endpoint // The peers's endpoint as learned from its last packet
+ 
+--- a/server.go
++++ b/server.go
+@@ -198,6 +198,11 @@
+ 	if peer.rekeyTimer != nil {
+ 		peer.rekeyTimer.Stop()
+ 	}
++	if peer.expiryTimer != nil {
++		peer.expiryTimer.Stop()
++		peer.expiryTimer = nil
++	}
++	peer.current = nil
+ 	s.handshakesLock.Lock()
+ 	defer s.handshakesLock.Unlock()
+ 
+@@ -346,6 +351,9 @@
+ 		hs.expiryTimer.Stop()
+ 
+ 		s.removeHandshake(hs)
++		if hs.peer.current == hs {
++			hs.peer.current = nil
++		}
+ 		s.completeHandshake(&hs.handshake, from, RekeyAfterTimeInitiator)
+ 
+ 	default:
+@@ -375,20 +383,44 @@
+ 	s.handshakesLock.Unlock()
+ }
+ 
++// Called with stateMu held. One initiator handshake is in flight per peer; a
++// new attempt replaces an older unfinished one. A failed attempt is torn down
++// and retried with per-peer backoff instead of retransmitting for RejectAfterTime.
+ func (s *Server) initiateHandshake(p *peer) {
+-	if _, err := p.initiateHandshake(); err != nil {
+-		if errors.Is(err, errMissingEndpoint) {
+-			p.logger.Debug("Skipping handshake due to missing endpoint")
+-		} else {
+-			p.logger.Error("Failed to initiate handshake for peer", slog.Any("error", err))
++	if p.endpoint == nil {
++		p.logger.Debug("Skipping handshake due to missing endpoint")
++		return
++	}
++	s.abortHandshakeLocked(p)
++	hs, err := p.initiateHandshake()
++	if err != nil {
++		if hs != nil {
++			hs.Close()
++			s.removeHandshake(hs)
+ 		}
+-
++		s.failInitiationLocked(p, err)
++		return
+ 	}
++	p.current = hs
++	s.armPeerExpiryLocked(p)
+ }
+ 
+ func (s *Server) completeHandshake(hs *handshake, ep Endpoint, rekeyAfter time.Duration) {
+ 	hs.peer.generation++
+ 	hs.peer.confirmedReply = nil
++	hs.peer.failures = 0
++	hs.peer.leaseExpires = time.Now().Add(RejectAfterTime)
++	if hs.peer.expiryTimer != nil {
++		hs.peer.expiryTimer.Stop()
++		hs.peer.expiryTimer = nil
++	}
++	s.armPeerExpiryLocked(hs.peer)
++	// A responder-side completion makes our own unanswered InitHello pointless;
++	// the peer holds no state for it before InitConf, so dropping it is safe and
++	// avoids crossed exchanges installing different keys on the two ends.
++	if cur := hs.peer.current; cur != nil && &cur.handshake != hs && cur.nextMsg == msgTypeRespHello {
++		s.abortHandshakeLocked(hs.peer)
++	}
+ 	hs.peer.logger.Debug("Exchanged key with peer")
+ 
+ 	if hs.peer.endpoint == nil || !hs.peer.endpoint.Equal(ep) {
+@@ -412,6 +444,7 @@
+ 	if p.rekeyTimer != nil {
+ 		p.rekeyTimer.Stop()
+ 	}
++	p.nextAttempt = time.Now().Add(after)
+ 
+ 	p.rekeyTimer = time.AfterFunc(after, func() {
+ 		s.stateMu.Lock()
+@@ -422,6 +455,9 @@
+ 	})
+ }
+ 
++// expireHandshake is the per-attempt timeout: the InitHello was delivered but
++// the exchange never finished. Key expiry itself is the peer-level timer in
++// nexal_backoff.go, which fires at the lease end on both ends.
+ func (s *Server) expireHandshake(hs *initiatorHandshake) {
+ 	s.stateMu.Lock()
+ 	defer s.stateMu.Unlock()
+@@ -429,17 +465,10 @@
+ 		return
+ 	}
+ 	hs.stopRetransmission()
+-	hs.peer.logger.Debug("Erasing outdated key from peer")
+-
+ 	s.removeHandshake(hs)
+-	if hs.startedGeneration != hs.peer.generation {
++	if hs.peer.current != hs {
+ 		return
+ 	}
+-
+-	for _, h := range s.handlers {
+-		if h, ok := h.(HandshakeExpiredHandler); ok {
+-			h.HandshakeExpired(hs.peer.PID())
+-		}
+-	}
+-	s.schedulePeerHandshake(hs.peer, RetransmitDelayEnd)
++	hs.peer.current = nil
++	s.failInitiationLocked(hs.peer, errHandshakeTimeout)
+ }

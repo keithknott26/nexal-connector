@@ -82,7 +82,9 @@ Run these in the respective prepared directories:
    -o ../nexal-network-gated ./client
 ```
 
-Legacy Rust interoperability tests intentionally cannot pass for this new profile.
+The resilience tests (`TestNexalBackoff*`, `TestNexalInitiation*`, `TestNexalLease*`,
+`TestNexalEligibility*`, `TestNexalDeliveryBudget*`, `TestNexalReason*`) are matched by the
+patterns above. Legacy Rust interoperability tests intentionally cannot pass for this new profile.
 Legacy manager fixture keys are also incompatible. The full WireGuard device
 suite is run, but this is not a claim that every NetBird upstream test passed.
 
@@ -190,6 +192,20 @@ Connector served local status with mesh `pq: degraded` and zero protected peers.
 Remote peers were not
 upgraded. The bootstrap/expiry traffic gate and MTU-safe transport remain open;
 this update improves local evidence reporting and does not solve those gaps.
+
+### Resilience patches — 2026-10-01 (source only, not installed)
+
+`prepare.py` applies `rosenpass-resilience.patch` and `netbird-resilience.patch` last.
+They add per-peer exponential backoff with jitter for failed initiations (2 s doubling,
+capped at 5 min, or at 15 s while a lease is live; reset on success), a peer-level lease
+expiry timer independent of individual attempts, direct/relayed TCP delivery budgets,
+profile-advertisement eligibility (the signaled Rosenpass address becomes
+`nexal-mlkem1024-tcp-v2:<port>`; peers without the label are never dialled or registered),
+and a machine-readable `quantumReason` next to the evidence (protobuf field 24). The
+session gate is unchanged: nothing is admitted on an expired lease or for a peer that lacks
+the profile. Details, verification and the remaining work are in `RESILIENCE-PLAN.md`.
+A mixed pair (old candidate on one end, this change on the other) performs no exchange at
+all; upgrade both ends together.
 
 ### Status probe network budget
 

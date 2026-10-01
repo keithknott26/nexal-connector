@@ -6,15 +6,67 @@ iPhone peers (`iphone-28-93`, `iphone-150-146`). iPhones do not run this runtime
 ML-KEM TCP listener, so the gateway's handshake to them can never succeed. Likely noise, not the cause
 of Macs losing ML-KEM evidence (see "Diagnose first").
 
+Rule for everything below: Level 5 is never relaxed. Resilience means recovering faster and
+explaining failures, not accepting a weaker session. The WireGuard session gate is unchanged by
+this work: an expired lease denies application traffic, a peer without the profile never gets the
+gate opened, and no path treats a plain WireGuard session as protected.
+
+## Status — implemented in source on 2026-10-01 (not installed anywhere)
+
+Two new patch files, applied last by `prepare.py`: `rosenpass-resilience.patch` and
+`netbird-resilience.patch`. New regression tests: `nexal_backoff_test.go` (library) and
+`netbird_resilience_test.go` (runtime); the existing evidence/status tests were extended.
+Connector source (`connector/internal/mesh`) carries the reason through to local status.
+
+| Plan item | Done | How it was verified |
+|---|---|---|
+| 1. Peer eligibility | yes | The runtime advertises `nexal-mlkem1024-tcp-v2` as the host part of its signaled Rosenpass address (`nexal-mlkem1024-tcp-v2:<port>`); older runtimes read only the port. `addPeer` registers and dials only peers that advertise it. Others are skipped with one debug line per advertised address, are never registered with the exchange server, never get a control endpoint or gate exemption, and report reason `peer-lacks-profile`. `TestNexalEligibilitySkipsPeersWithoutProfile`, `TestNexalAdvertisedAddressCarriesProfile`. |
+| 2. Backoff with jitter | yes | Per-peer consecutive-failure counter in the library: 2 s doubling, +/-20 % jitter, capped at 5 min without a live lease and at 15 s while the lease is live; reset on a completed exchange. A failed attempt is torn down (no handshake left retransmitting for 3 min); first failure logs WARN, later ones DEBUG; `HandshakeFailedHandler` reports each failure and its retry delay. `TestNexalBackoffDelayGrowsAndCaps`, `TestNexalInitiationBackoffOnUnreachablePeer`, `TestNexalTCPHandshake` (recovers in ~5 s instead of ~15 s). |
+| 3. Dial budget | yes | `TCPBudget{Dial, Write, Receipt}` per endpoint: direct 3/3/3 s, relayed 6/5/6 s, chosen from the runtime's own peer state (`Relayed`) at registration and on relay-to-direct updates; the accept side holds an unidentified connection at most 3 s. `TestNexalDeliveryBudgetFollowsPath`. |
+| 4. Renewal margin | yes | Renewal already starts at 90 s / 100 s of a 180 s lease; retries now continue inside that margin every <= 15 s instead of once per attempt. Key expiry became a peer-level timer armed at completion (lease end) and re-armed every `RejectAfterTime` while the peer stays down, so `HandshakeExpired` keeps its cadence on both ends regardless of how attempts are paced; a renewal that fails long enough still expires exactly at the lease end and the gate denies traffic. `TestNexalLeaseExpiryIndependentOfAttempts`, `TestNexalEndToEndGatedMLKEM` (three automatic renewals, expiry denial, recovery through a fresh exchange, real gated WireGuard devices at MTU 1280). |
+| 5. Honest status | yes | New field `quantumReason` (protobuf field 24, JSON `quantumReason`, iOS SDK `QuantumReason`) next to the evidence, empty exactly when evidence is current. Values from the runtime: `exchange-pending`, `peer-unreachable`, `peer-lacks-profile`, `evidence-expired`, `key-install-failed`, `session-pending`. Connector adds `peer-disconnected`, `evidence-stale`, `runtime-not-strict` and exposes `pqReason` on each peer of the local status. `TestNexalReasonFollowsLifecycle`, `TestNexalEvidenceSurvivesStatusRPC`, connector `TestPQReasonSurfacesAndPhoneIsNotCovered`. |
+| 6. Phones | partly | A peer reporting `peer-lacks-profile` is shown by the connector as `pq: unsupported` ("not covered") with its lifecycle untouched instead of `degraded`; it still gets no sharing services and does not demote the host's gateway-link claim. Giving the phone app an initiator role was not done (the phone app does not carry this profile). |
+
+Further fixes from the adversarial review (all in the same patches):
+
+- Retransmission callbacks no longer hold the handshake lock across a TCP delivery; before, a
+  dial toward an unreachable peer could block `stopRetransmission`, which runs under the server
+  state lock, and stall every peer for the dial budget.
+- One initiator handshake per peer: a new attempt replaces an unfinished one, and a responder-side
+  completion drops our own unanswered InitHello (the peer holds no state before InitConf), which
+  shrinks the window for crossed exchanges installing different keys on the two ends.
+- Repeated "expired N times, falling back to the rendezvous key" is WARN for the first two
+  expiries and DEBUG afterwards; the condition is visible through the status reason instead.
+
+Verified offline on Linux arm64 with Go 1.26.8 (clean `prepare.py` run, zero fuzz, then the
+commands from `README.md`): library tests 14/14 (also with `-race`), runtime
+`client/internal/rosenpass` 18/18, `client/status` and `shared/management/client` pass.
+The WireGuard device suite is unchanged by this work; `TestStagePacketsBoundedPerPeer` fails on
+this arm64 host for the pristine (unpatched) fork as well and is unrelated.
+
+Not done or not verifiable here: no live Mac/gateway/iPhone run (the sandbox cannot reach the
+hosts and must not start services), no macOS build, the iOS SDK was compiled only as part of
+`go vet`/`go build` for Linux, the coordinator report and dashboard do not carry the reason yet
+(local status only), and `update-runtime.sh` still builds the old version string
+`0.79.0-nexal-mlkem1024-gated.9-mac` — bump it deliberately before rolling out so the two
+runtimes can be told apart.
+
+Rollout consequence of item 1: a runtime with this change only initiates toward peers that
+advertise the label, and it does not register peers without it, so a mixed pair (one old
+candidate, one new) has **no** ML-KEM exchange at all and the new side reports
+`peer-lacks-profile`. Upgrade the gateway and the Mac together, as the README already requires.
+
 ## Diagnose first (needs the live hosts)
 
-1. On each host that dropped to plain WireGuard: `nexal status` (peer `pq` state, `quantumProfile`,
-   `pqExpiresAt`) and the runtime version. The Mac mini was recorded as incompatible/degraded on
-   2026-09-28 and was never upgraded; it needs the runtime named in `macos/scripts/runtime-policy.json`.
+1. On each host that dropped to plain WireGuard: `nexal status` (peer `pq` state, `pqReason`,
+   `quantumProfile`, `pqExpiresAt`) and the runtime version. The Mac mini was recorded as
+   incompatible/degraded on 2026-09-28 and was never upgraded; it needs the runtime named in
+   `macos/scripts/runtime-policy.json`.
 2. On the gateway: journal lines for the Mac peers' handshakes (not the phones), looking for the first
-   failure after a previously good renewal.
+   failure after a previously good renewal. With this change the first failure is one WARN line
+   (`Failed to initiate handshake; backing off`), later ones are DEBUG.
 
-## Changes to build (each needs `prepare.py` plus the full test suite on a Mac)
+## Original change list (kept for reference)
 
 1. **Peer eligibility.** Only initiate a handshake with peers whose management record advertises the
    ML-KEM runtime profile. Phones and old runtimes are skipped, with one debug line instead of an error every cycle.
@@ -27,6 +79,3 @@ of Macs losing ML-KEM evidence (see "Diagnose first").
    peer lacks profile, evidence expired) so the apps can say why instead of just "WireGuard".
 6. **Phones.** iPhones are covered separately (they never carry this profile). Show them as "not covered" rather
    than degraded, or give the phone app an initiator role so the gateway does not dial in.
-
-Rule for all of the above: Level 5 is never relaxed. Resilience means recovering faster and explaining
-failures, not accepting a weaker session.

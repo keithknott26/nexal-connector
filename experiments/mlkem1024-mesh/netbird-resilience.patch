@@ -1,0 +1,481 @@
+--- a/client/internal/engine.go
++++ b/client/internal/engine.go
+@@ -600,6 +600,11 @@
+ 			return fmt.Errorf("create rosenpass manager: %w", err)
+ 		}
+ 		e.statusRecorder.SetQuantumEvidenceProvider(e.rpManager.QuantumEvidence)
++		statusRecorder := e.statusRecorder
++		e.rpManager.SetRelayResolver(func(peerKey string) bool {
++			state, err := statusRecorder.GetPeer(peerKey)
++			return err == nil && state.Relayed
++		})
+ 		if err := e.rpManager.Run(); err != nil {
+ 			return fmt.Errorf("run rosenpass manager: %w", err)
+ 		}
+@@ -2372,7 +2377,8 @@
+ 
+ func (e *Engine) getRosenpassAddr() string {
+ 	if e.rpManager != nil {
+-		return e.rpManager.GetAddress().String()
++		// Carries the profile label as host; older runtimes only read the port.
++		return e.rpManager.AdvertisedAddress()
+ 	}
+ 	return ""
+ }
+--- a/client/internal/peer/status.go
++++ b/client/internal/peer/status.go
+@@ -73,6 +73,7 @@
+ 	QuantumProfile             string
+ 	QuantumKeyInstalledAt      string
+ 	QuantumKeyExpiresAt        string
++	QuantumReason              string
+ 	SSHHostKey                 []byte
+ 	routes                     map[string]struct{}
+ }
+@@ -195,7 +196,7 @@
+ // every private-service request) don't contend against each other.
+ // Pure read methods take RLock; anything that mutates state takes Lock.
+ type Status struct {
+-	quantumEvidence     func(string) (string, string, string)
++	quantumEvidence     func(string) (string, string, string, string)
+ 	mux                 sync.RWMutex
+ 	muxRelays           sync.RWMutex
+ 	peers               map[string]State
+@@ -1202,7 +1203,7 @@
+ 
+ 	for _, status := range d.peers {
+ 		if d.quantumEvidence != nil && status.ConnStatus == StatusConnected {
+-			status.QuantumProfile, status.QuantumKeyInstalledAt, status.QuantumKeyExpiresAt = d.quantumEvidence(status.PubKey)
++			status.QuantumProfile, status.QuantumKeyInstalledAt, status.QuantumKeyExpiresAt, status.QuantumReason = d.quantumEvidence(status.PubKey)
+ 		}
+ 		fullStatus.Peers = append(fullStatus.Peers, status)
+ 	}
+@@ -1594,6 +1595,7 @@
+ 			QuantumProfile:             peerState.QuantumProfile,
+ 			QuantumKeyInstalledAt:      peerState.QuantumKeyInstalledAt,
+ 			QuantumKeyExpiresAt:        peerState.QuantumKeyExpiresAt,
++			QuantumReason:              peerState.QuantumReason,
+ 			Networks:                   networks,
+ 			Latency:                    durationpb.New(peerState.Latency),
+ 			SshHostKey:                 peerState.SSHHostKey,
+@@ -1640,7 +1642,7 @@
+ 
+ // SetQuantumEvidenceProvider installs a read-only provider; configuration flags
+ // cannot populate exchange evidence. A new engine replaces the old provider.
+-func (d *Status) SetQuantumEvidenceProvider(provider func(string) (string, string, string)) {
++func (d *Status) SetQuantumEvidenceProvider(provider func(string) (string, string, string, string)) {
+ 	d.mux.Lock()
+ 	defer d.mux.Unlock()
+ 	d.quantumEvidence = provider
+--- a/client/internal/rosenpass/manager.go
++++ b/client/internal/rosenpass/manager.go
+@@ -20,8 +20,20 @@
+ const (
+ 	defaultLog         = slog.LevelInfo
+ 	defaultLogLevelVar = "NB_ROSENPASS_LOG_LEVEL"
++	// QuantumProfile names this runtime's experimental ML-KEM-1024 control
++	// profile. It is advertised as the host part of the Rosenpass address in
++	// signaling offers; only peers advertising it are ever dialled.
++	QuantumProfile = "nexal-mlkem1024-tcp-v2"
+ )
+ 
++// AdvertisesQuantumProfile reports whether a peer's signaled Rosenpass address
++// carries this runtime's profile label. Stock and older runtimes advertise a
++// bare ":port"; phones advertise nothing or a bare port.
++func AdvertisesQuantumProfile(rosenpassAddr string) bool {
++	host, _, err := net.SplitHostPort(rosenpassAddr)
++	return err == nil && host == QuantumProfile
++}
++
+ func hashRosenpassKey(key []byte) string {
+ 	hasher := sha256.New()
+ 	hasher.Write(key)
+@@ -53,6 +65,38 @@
+ 	tcpConn          *rp.TCPConn
+ 	control          controlTransport
+ 	controlEndpoints map[string]*net.UDPAddr
++	// skipped records peers (by WireGuard key) that are connected but never
++	// dialled because they did not advertise the profile, with the address they
++	// advertised so the debug line is printed once per change.
++	skipped map[string]string
++	// relayed reports whether the peer link currently runs over a relay, which
++	// selects the longer control delivery budget. Optional.
++	relayed func(wireGuardPubKey string) bool
++}
++
++// SetRelayResolver installs the lookup used to pick the control delivery
++// budget per peer (direct or relayed). Safe to call before Run.
++func (m *Manager) SetRelayResolver(relayed func(wireGuardPubKey string) bool) {
++	m.lock.Lock()
++	defer m.lock.Unlock()
++	m.relayed = relayed
++}
++
++// AdvertisedAddress is the Rosenpass address placed in signaling offers:
++// the profile label as host and the local control port.
++func (m *Manager) AdvertisedAddress() string {
++	return net.JoinHostPort(QuantumProfile, strconv.Itoa(m.port))
++}
++
++func (m *Manager) budgetLocked(wireGuardPubKey string, endpoint *net.UDPAddr) {
++	if m.tcpConn == nil || endpoint == nil {
++		return
++	}
++	budget := rp.DirectTCPBudget
++	if m.relayed != nil && m.relayed(wireGuardPubKey) {
++		budget = rp.RelayedTCPBudget
++	}
++	m.tcpConn.SetBudget(endpoint, budget)
+ }
+ 
+ // NewManager creates a new Rosenpass manager. localWgKey is the local
+@@ -74,6 +118,7 @@
+ 		preSharedKey:     (*[32]byte)(preSharedKey),
+ 		rpPeerIDs:        make(map[string]*rp.PeerID),
+ 		controlEndpoints: make(map[string]*net.UDPAddr),
++		skipped:          make(map[string]string),
+ 		// rpWgHandler is created here (instead of only in generateConfig) so it
+ 		// is never nil between NewManager and Run(). Otherwise an early
+ 		// OnConnected call (race observed on Android, issue #4341) panics on
+@@ -96,6 +141,24 @@
+ 
+ // addPeer adds a new peer to the Rosenpass server
+ func (m *Manager) addPeer(rosenpassPubKey []byte, rosenpassAddr string, wireGuardIP string, wireGuardPubKey string) error {
++	// Eligibility: only peers advertising this profile are registered and
++	// dialled. Others (phones, stock or older runtimes) stay unprotected behind
++	// the closed gate; one debug line per advertised address, never an error
++	// every cycle. This is a skip, not a downgrade.
++	if !AdvertisesQuantumProfile(rosenpassAddr) {
++		if previous, seen := m.skipped[wireGuardPubKey]; !seen || previous != rosenpassAddr {
++			log.Debugf("peer %s does not advertise %s (address %q); not initiating ML-KEM exchange", wireGuardPubKey, QuantumProfile, rosenpassAddr)
++		}
++		m.skipped[wireGuardPubKey] = rosenpassAddr
++		if _, exists := m.rpPeerIDs[wireGuardPubKey]; exists {
++			if err := m.removePeer(wireGuardPubKey); err != nil {
++				return err
++			}
++			delete(m.rpPeerIDs, wireGuardPubKey)
++		}
++		return nil
++	}
++	delete(m.skipped, wireGuardPubKey)
+ 	if err := rp.ValidatePublicKey(rosenpassPubKey); err != nil {
+ 		return fmt.Errorf("neXal ML-KEM-1024 profile: incompatible peer public key: %w", err)
+ 	}
+@@ -114,6 +177,7 @@
+ 	if id, exists := m.rpPeerIDs[wireGuardPubKey]; exists && id != nil && *id == rp.PeerIDFromPublicKey(rosenpassPubKey) {
+ 		_, remotePort, err := net.SplitHostPort(rosenpassAddr)
+ 		if ep := m.controlEndpoints[wireGuardPubKey]; err == nil && ep != nil && ep.String() == net.JoinHostPort(wireGuardIP, remotePort) {
++			m.budgetLocked(wireGuardPubKey, ep)
+ 			return nil
+ 		}
+ 	}
+@@ -188,6 +252,7 @@
+ 		return fmt.Errorf("reset ML-KEM bootstrap key: %w", err)
+ 	}
+ 	m.tcpConn.AuthorizeEndpoint(endpoint, true)
++	m.budgetLocked(wireGuardPubKey, endpoint)
+ 	m.controlEndpoints[wireGuardPubKey] = endpoint
+ 	peerID := rp.PeerIDFromPublicKey(rosenpassPubKey)
+ 	m.rpWgHandler.AddPeer(peerID, m.ifaceName, rp.Key(key))
+@@ -262,6 +327,7 @@
+ func (m *Manager) OnDisconnected(peerKey string) {
+ 	m.lock.Lock()
+ 	defer m.lock.Unlock()
++	delete(m.skipped, peerKey)
+ 
+ 	if _, ok := m.rpPeerIDs[peerKey]; !ok {
+ 		// if we didn't have this peer yet, just skip
+@@ -402,16 +468,21 @@
+ 	return strconv.Atoi(portStr)
+ }
+ 
+-// QuantumEvidence resolves evidence using the WireGuard peer identity.
+-func (m *Manager) QuantumEvidence(key string) (string, string, string) {
++// QuantumEvidence resolves evidence using the WireGuard peer identity. The
++// fourth value is the machine-readable reason while there is no current
++// evidence (empty when evidence is returned).
++func (m *Manager) QuantumEvidence(key string) (string, string, string, string) {
+ 	m.lock.Lock()
+ 	defer m.lock.Unlock()
+ 	if m.server == nil || m.rpWgHandler == nil {
+-		return "", "", ""
++		return "", "", "", ReasonExchangePending
++	}
++	if _, skipped := m.skipped[key]; skipped {
++		return "", "", "", ReasonPeerLacksProfile
+ 	}
+ 	id, ok := m.rpPeerIDs[key]
+ 	if !ok || id == nil {
+-		return "", "", ""
++		return "", "", "", ReasonExchangePending
+ 	}
+ 	return m.rpWgHandler.QuantumEvidence(*id)
+ }
+--- a/client/internal/rosenpass/netbird_handler.go
++++ b/client/internal/rosenpass/netbird_handler.go
+@@ -36,7 +36,35 @@
+ 	chainKey *wgtypes.Key
+ 	// expiries counts failed renewals since the last completed exchange.
+ 	expiries int
+-}
++	// reason is the machine-readable explanation while no current ML-KEM
++	// evidence exists (see Reason* constants); empty once evidence is current.
++	reason string
++}
++
++// Machine-readable reasons why a peer link carries no current ML-KEM-1024
++// evidence. They are reported next to the evidence so applications can explain
++// "not protected" instead of only showing it. None of them relaxes the gate.
++const (
++	// ReasonExchangePending: the peer is registered and an exchange has not
++	// completed yet (first contact or after a reconnection).
++	ReasonExchangePending = "exchange-pending"
++	// ReasonPeerUnreachable: the last initiation toward the peer's control
++	// listener failed at the transport (dial/write timeout); retries back off.
++	ReasonPeerUnreachable = "peer-unreachable"
++	// ReasonPeerLacksProfile: the peer did not advertise this runtime's
++	// ML-KEM profile (phone, stock or older runtime); it is never dialled and
++	// its link stays unprotected rather than downgraded.
++	ReasonPeerLacksProfile = "peer-lacks-profile"
++	// ReasonEvidenceExpired: a key was installed but its lease ended without
++	// renewal; the session gate denies application traffic until a fresh exchange.
++	ReasonEvidenceExpired = "evidence-expired"
++	// ReasonKeyInstallFailed: the exchange completed but the local WireGuard
++	// gate refused the key (for example the interface was replaced).
++	ReasonKeyInstallFailed = "key-install-failed"
++	// ReasonSessionPending: the key is installed and the WireGuard session
++	// bound to it has not been established yet.
++	ReasonSessionPending = "session-pending"
++)
+ 
+ type NetbirdHandler struct {
+ 	mu    sync.Mutex
+@@ -70,6 +98,7 @@
+ 	for _, peer := range h.peers {
+ 		peer.installedAt = time.Time{}
+ 		peer.expiresAt = time.Time{}
++		peer.reason = ReasonExchangePending
+ 	}
+ }
+ 
+@@ -83,12 +112,30 @@
+ 		existing.Interface = intf
+ 		existing.installedAt = time.Time{}
+ 		existing.expiresAt = time.Time{}
++		existing.reason = ReasonExchangePending
+ 		return
+ 	}
+ 	h.peers[pid] = &wireGuardPeer{
+ 		Interface: intf,
+ 		PublicKey: pk,
++		reason:    ReasonExchangePending,
++	}
++}
++
++// HandshakeFailed records that the latest initiation toward the peer could not
++// be delivered. The failure is transport-level; the retry pacing is the
++// library's per-peer backoff.
++func (h *NetbirdHandler) HandshakeFailed(pid rp.PeerID, err error, retryIn time.Duration) {
++	h.mu.Lock()
++	defer h.mu.Unlock()
++	peer, ok := h.peers[pid]
++	if !ok {
++		return
++	}
++	if peer.installedAt.IsZero() || !time.Now().Before(peer.expiresAt) {
++		peer.reason = ReasonPeerUnreachable
+ 	}
++	log.Debugf("ML-KEM exchange with peer %s not started (%v); next attempt in %s", wgtypes.Key(peer.PublicKey), err, retryIn.Round(time.Second))
+ }
+ 
+ func (h *NetbirdHandler) RemovePeer(pid rp.PeerID) {
+@@ -135,15 +182,18 @@
+ 	expires := installed.Add(rp.RejectAfterTime)
+ 	installer, ok := h.iface.(quantumKeyInstaller)
+ 	if !ok {
++		peer.reason = ReasonKeyInstallFailed
+ 		return
+ 	}
+ 	if err := installer.InstallQuantumKey(wgtypes.Key(peer.PublicKey).String(), psk, expires); err != nil {
+ 		log.Errorf("quantum key installation failed: %v", err)
++		peer.reason = ReasonKeyInstallFailed
+ 		return
+ 	}
+ 	peer.initialized = true
+ 	peer.installedAt = installed
+ 	peer.expiresAt = expires
++	peer.reason = ""
+ }
+ 
+ // HandshakeExpired replaces the expired key. The renewal exchange runs over
+@@ -165,6 +215,9 @@
+ 	peer.installedAt = time.Time{}
+ 	peer.expiresAt = time.Time{}
+ 	peer.expiries++
++	if peer.reason != ReasonPeerLacksProfile {
++		peer.reason = ReasonEvidenceExpired
++	}
+ 
+ 	var psk wgtypes.Key
+ 	if peer.chainKey != nil && peer.expiries == 1 {
+@@ -180,7 +233,12 @@
+ 			h.applyRandomKeyLocked(pid)
+ 			return
+ 		}
+-		log.Warnf("rosenpass key for peer %s expired %d times without renewal, falling back to the rendezvous key", wgtypes.Key(peer.PublicKey), peer.expiries)
++		if peer.expiries <= 2 {
++			log.Warnf("rosenpass key for peer %s expired %d times without renewal, falling back to the rendezvous key", wgtypes.Key(peer.PublicKey), peer.expiries)
++		} else {
++			// Repeated outages are reported through the status reason; keep the log quiet.
++			log.Debugf("rosenpass key for peer %s expired %d times without renewal, falling back to the rendezvous key", wgtypes.Key(peer.PublicKey), peer.expiries)
++		}
+ 		psk = rendezvous
+ 		peer.chainKey = nil
+ 		peer.initialized = false
+@@ -239,19 +297,38 @@
+ }
+ 
+ // QuantumEvidence is local key-installation evidence, not remote attestation or
+-// a claim that the entire protocol provides NIST category 5 security.
+-func (h *NetbirdHandler) QuantumEvidence(pid rp.PeerID) (string, string, string) {
++// a claim that the entire protocol provides NIST category 5 security. The
++// fourth value is the machine-readable reason while no evidence is current;
++// it is empty exactly when evidence is returned.
++func (h *NetbirdHandler) QuantumEvidence(pid rp.PeerID) (string, string, string, string) {
+ 	h.mu.Lock()
+ 	defer h.mu.Unlock()
+ 	p, ok := h.peers[pid]
+-	if !ok || p.installedAt.IsZero() || !time.Now().Before(p.expiresAt) {
+-		return "", "", ""
++	if !ok {
++		return "", "", "", ""
++	}
++	if p.installedAt.IsZero() {
++		return "", "", "", reasonOr(p.reason, ReasonExchangePending)
++	}
++	if !time.Now().Before(p.expiresAt) {
++		// The lease ended before the library reported it; the gate is already closed.
++		return "", "", "", ReasonEvidenceExpired
+ 	}
+ 	installer, ok := h.iface.(quantumKeyInstaller)
+-	if !ok || !installer.QuantumSessionReady(wgtypes.Key(p.PublicKey).String()) {
+-		return "", "", ""
++	if !ok {
++		return "", "", "", ReasonKeyInstallFailed
++	}
++	if !installer.QuantumSessionReady(wgtypes.Key(p.PublicKey).String()) {
++		return "", "", "", ReasonSessionPending
++	}
++	return QuantumProfile, p.installedAt.Format(time.RFC3339Nano), p.expiresAt.Format(time.RFC3339Nano), ""
++}
++
++func reasonOr(reason, fallback string) string {
++	if reason == "" {
++		return fallback
+ 	}
+-	return "nexal-mlkem1024-tcp-v2", p.installedAt.Format(time.RFC3339Nano), p.expiresAt.Format(time.RFC3339Nano)
++	return reason
+ }
+ 
+ func (h *NetbirdHandler) revokeQuantumLocked(p *wireGuardPeer) {
+--- a/client/ios/NetBirdSDK/client.go
++++ b/client/ios/NetBirdSDK/client.go
+@@ -384,6 +384,7 @@
+ 			QuantumProfile:             p.QuantumProfile,
+ 			QuantumKeyInstalledAt:      p.QuantumKeyInstalledAt,
+ 			QuantumKeyExpiresAt:        p.QuantumKeyExpiresAt,
++			QuantumReason:              p.QuantumReason,
+ 		}
+ 		peerInfos[n] = pi
+ 	}
+--- a/client/ios/NetBirdSDK/peer_notifier.go
++++ b/client/ios/NetBirdSDK/peer_notifier.go
+@@ -26,6 +26,8 @@
+ 	QuantumProfile        string
+ 	QuantumKeyInstalledAt string
+ 	QuantumKeyExpiresAt   string
++	// QuantumReason explains missing evidence (empty when evidence is present).
++	QuantumReason string
+ }
+ 
+ // GetIPv6 returns the IPv6 address of the peer
+--- a/client/proto/daemon.pb.go
++++ b/client/proto/daemon.pb.go
+@@ -1510,6 +1510,7 @@
+ 	QuantumProfile             string                 `protobuf:"bytes,21,opt,name=quantumProfile,proto3" json:"quantumProfile,omitempty"`
+ 	QuantumKeyInstalledAt      string                 `protobuf:"bytes,22,opt,name=quantumKeyInstalledAt,proto3" json:"quantumKeyInstalledAt,omitempty"`
+ 	QuantumKeyExpiresAt        string                 `protobuf:"bytes,23,opt,name=quantumKeyExpiresAt,proto3" json:"quantumKeyExpiresAt,omitempty"`
++	QuantumReason              string                 `protobuf:"bytes,24,opt,name=quantumReason,proto3" json:"quantumReason,omitempty"`
+ 	unknownFields              protoimpl.UnknownFields
+ 	sizeCache                  protoimpl.SizeCache
+ }
+@@ -1698,6 +1699,13 @@
+ 	return ""
+ }
+ 
++func (x *PeerState) GetQuantumReason() string {
++	if x != nil {
++		return x.QuantumReason
++	}
++	return ""
++}
++
+ // LocalPeerState contains the latest state of the local peer
+ type LocalPeerState struct {
+ 	state               protoimpl.MessageState `protogen:"open.v1"`
+@@ -7264,7 +7272,7 @@
+ 	"\x0esshJWTCacheTTL\x18\x1a \x01(\x05R\x0esshJWTCacheTTL\x12!\n" +
+ 	"\fdisable_ipv6\x18\x1b \x01(\bR\vdisableIpv6\x12,\n" +
+ 	"\x11remoteJobsAllowed\x18\x1d \x01(\bR\x11remoteJobsAllowed\x12*\n" +
+-	"\x10mDMManagedFields\x18\x1c \x03(\tR\x10mDMManagedFields\"\xa2\a\n" +
++	"\x10mDMManagedFields\x18\x1c \x03(\tR\x10mDMManagedFields\"\xc8\a\n" +
+ 	"\tPeerState\x12\x0e\n" +
+ 	"\x02IP\x18\x01 \x01(\tR\x02IP\x12\x16\n" +
+ 	"\x06pubKey\x18\x02 \x01(\tR\x06pubKey\x12\x1e\n" +
+@@ -7292,7 +7300,8 @@
+ 	"\x04ipv6\x18\x14 \x01(\tR\x04ipv6\x12&\n" +
+ 	"\x0equantumProfile\x18\x15 \x01(\tR\x0equantumProfile\x124\n" +
+ 	"\x15quantumKeyInstalledAt\x18\x16 \x01(\tR\x15quantumKeyInstalledAt\x120\n" +
+-	"\x13quantumKeyExpiresAt\x18\x17 \x01(\tR\x13quantumKeyExpiresAt\"\x9c\x02\n" +
++	"\x13quantumKeyExpiresAt\x18\x17 \x01(\tR\x13quantumKeyExpiresAt\x12$\n" +
++	"\rquantumReason\x18\x18 \x01(\tR\rquantumReason\"\x9c\x02\n" +
+ 	"\x0eLocalPeerState\x12\x0e\n" +
+ 	"\x02IP\x18\x01 \x01(\tR\x02IP\x12\x16\n" +
+ 	"\x06pubKey\x18\x02 \x01(\tR\x06pubKey\x12(\n" +
+--- a/client/proto/daemon.proto
++++ b/client/proto/daemon.proto
+@@ -402,6 +402,7 @@
+  string quantumProfile = 21;
+  string quantumKeyInstalledAt = 22;
+  string quantumKeyExpiresAt = 23;
++ string quantumReason = 24;
+ }
+ 
+ // LocalPeerState contains the latest state of the local peer
+--- a/client/status/status.go
++++ b/client/status/status.go
+@@ -68,6 +68,7 @@
+ 	QuantumProfile         string           `json:"quantumProfile,omitempty" yaml:"quantumProfile,omitempty"`
+ 	QuantumKeyInstalledAt  string           `json:"quantumKeyInstalledAt,omitempty" yaml:"quantumKeyInstalledAt,omitempty"`
+ 	QuantumKeyExpiresAt    string           `json:"quantumKeyExpiresAt,omitempty" yaml:"quantumKeyExpiresAt,omitempty"`
++	QuantumReason          string           `json:"quantumReason,omitempty" yaml:"quantumReason,omitempty"`
+ 	FQDN                   string           `json:"fqdn" yaml:"fqdn"`
+ 	IP                     string           `json:"netbirdIp" yaml:"netbirdIp"`
+ 	IPv6                   string           `json:"netbirdIpv6,omitempty" yaml:"netbirdIpv6,omitempty"`
+@@ -373,6 +374,7 @@
+ 			QuantumProfile:         pbPeerState.GetQuantumProfile(),
+ 			QuantumKeyInstalledAt:  pbPeerState.GetQuantumKeyInstalledAt(),
+ 			QuantumKeyExpiresAt:    pbPeerState.GetQuantumKeyExpiresAt(),
++			QuantumReason:          pbPeerState.GetQuantumReason(),
+ 			Networks:               pbPeerState.GetNetworks(),
+ 		}
+ 
+@@ -721,6 +723,7 @@
+ 			QuantumProfile:             peerState.QuantumProfile,
+ 			QuantumKeyInstalledAt:      peerState.QuantumKeyInstalledAt,
+ 			QuantumKeyExpiresAt:        peerState.QuantumKeyExpiresAt,
++			QuantumReason:              peerState.QuantumReason,
+ 			Networks:                   maps.Keys(peerState.GetRoutes()),
+ 			Latency:                    durationpb.New(peerState.Latency),
+ 			SshHostKey:                 peerState.SSHHostKey,

@@ -13,7 +13,8 @@ import (
 func TestNexalEvidenceSurvivesStatusRPC(t *testing.T) {
 	now := time.Now().UTC()
 	fs := peer.FullStatus{Peers: []peer.State{{Mux: &sync.RWMutex{}, PubKey: "peer-one", ConnStatus: peer.StatusConnected,
-		QuantumProfile: "nexal-mlkem1024-experimental-v1", QuantumKeyInstalledAt: now.Format(time.RFC3339Nano), QuantumKeyExpiresAt: now.Add(3 * time.Minute).Format(time.RFC3339Nano)}}}
+		QuantumProfile: "nexal-mlkem1024-experimental-v1", QuantumKeyInstalledAt: now.Format(time.RFC3339Nano), QuantumKeyExpiresAt: now.Add(3 * time.Minute).Format(time.RFC3339Nano)},
+		{Mux: &sync.RWMutex{}, PubKey: "peer-two", ConnStatus: peer.StatusConnected, QuantumReason: "peer-lacks-profile"}}}
 	for _, src := range []*pb.FullStatus{ToProtoFullStatus(fs), fs.ToProto()} {
 		data, err := proto.Marshal(src)
 		if err != nil {
@@ -32,8 +33,14 @@ func TestNexalEvidenceSurvivesStatusRPC(t *testing.T) {
 		if err := json.Unmarshal(data, &output); err != nil {
 			t.Fatal(err)
 		}
-		if len(output) != 1 || output[0]["quantumProfile"] != fs.Peers[0].QuantumProfile || output[0]["quantumKeyInstalledAt"] != fs.Peers[0].QuantumKeyInstalledAt || output[0]["quantumKeyExpiresAt"] != fs.Peers[0].QuantumKeyExpiresAt {
+		if len(output) != 2 || output[0]["quantumProfile"] != fs.Peers[0].QuantumProfile || output[0]["quantumKeyInstalledAt"] != fs.Peers[0].QuantumKeyInstalledAt || output[0]["quantumKeyExpiresAt"] != fs.Peers[0].QuantumKeyExpiresAt {
 			t.Fatal("status lost installation evidence")
+		}
+		if _, present := output[0]["quantumReason"]; present {
+			t.Fatal("protected peer must not carry a failure reason")
+		}
+		if output[1]["quantumReason"] != "peer-lacks-profile" || output[1]["quantumProfile"] != nil {
+			t.Fatal("status lost the machine-readable reason")
 		}
 	}
 }

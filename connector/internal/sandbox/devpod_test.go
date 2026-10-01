@@ -19,6 +19,8 @@ type fakeRun struct {
 	labels   string // docker inspect .Config.Labels
 	sshd     string // output of the DevSSHDScript exec
 	bootSeen string // join file content while the sidecar starts
+	// noNetwork makes `docker network inspect` fail (the tenant network does not exist yet).
+	noNetwork bool
 }
 
 func (f *fakeRun) run(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
@@ -27,6 +29,8 @@ func (f *fakeRun) run(ctx context.Context, env []string, name string, args ...st
 	f.cmds = append(f.cmds, line)
 	f.mu.Unlock()
 	switch {
+	case strings.Contains(line, "network inspect") && f.noNetwork:
+		return []byte("Error: No such network"), errors.New("exit status 1")
 	case strings.Contains(line, "version --format"):
 		return []byte("27.0"), nil
 	case strings.Contains(line, " up ") && strings.Contains(line, "devpod"):

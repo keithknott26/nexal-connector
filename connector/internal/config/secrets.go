@@ -44,8 +44,19 @@ func NewSecrets(path string, c Config) (Secrets, error) {
 	if c.DevSecrets && c.Development {
 		return FileSecrets{Dir: filepath.Join(filepath.Dir(path), "dev-secrets")}, nil
 	}
+	if runtime.GOOS == "linux" {
+		// A Linux server (neXal storage) has no Keychain. Its service manager
+		// provides a private directory (systemd StateDirectory, 0700, owned by the
+		// service user); nothing else is accepted.
+		if dir := os.Getenv(ServerSecretsDirEnv); dir != "" {
+			if err := checkServerSecretsDir(dir); err != nil {
+				return nil, err
+			}
+			return FileSecrets{Dir: dir}, nil
+		}
+	}
 	if runtime.GOOS != "darwin" {
-		return nil, errors.New("production credentials require macOS Keychain; file secrets require explicit nonproduction flags")
+		return nil, errors.New("production credentials require macOS Keychain (or, on a Linux server, " + ServerSecretsDirEnv + "); file secrets require explicit nonproduction flags")
 	}
 	sum := sha256.Sum256([]byte(path))
 	return Keychain{Service: "com.nexal.connector." + hex.EncodeToString(sum[:8])}, nil
@@ -159,6 +170,29 @@ func (k Keychain) Delete(ctx context.Context, name string) error {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 { return nil }
 		return errors.New("Keychain credential removal failed or access denied")
+	}
+	return nil
+}
+
+// ServerSecretsDirEnv names the private credential directory of a Linux server
+// connector (see connector/deploy/nexal-storage/README.md).
+const ServerSecretsDirEnv = "NEXAL_SECRETS_DIR"
+
+// checkServerSecretsDir accepts only an absolute, real (not symlinked) directory
+// owned by this process's user with no group or other permissions.
+func checkServerSecretsDir(dir string) error {
+	if !filepath.IsAbs(dir) {
+		return errors.New(ServerSecretsDirEnv + " must be an absolute path")
+	}
+	fi, err := os.Lstat(dir)
+	if err != nil || !fi.IsDir() {
+		return errors.New(ServerSecretsDirEnv + " must be an existing directory")
+	}
+	if fi.Mode().Perm()&0o077 != 0 {
+		return errors.New(ServerSecretsDirEnv + " must not be accessible to group or others (chmod 700)")
+	}
+	if uid, ok := ownerUID(fi); ok && uid != os.Getuid() {
+		return errors.New(ServerSecretsDirEnv + " must be owned by the connector's user")
 	}
 	return nil
 }

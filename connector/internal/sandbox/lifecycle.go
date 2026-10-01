@@ -44,6 +44,7 @@ type BootInfo struct {
 	Lifecycle      Lifecycle     `json:"lifecycle,omitempty"`
 	Devcontainer   *Devcontainer `json:"devcontainer,omitempty"`
 	ExpiresAt      *time.Time    `json:"expiresAt,omitempty"`
+	Tenant         string        `json:"tenant,omitempty"` // managed host only
 }
 
 func kindOf(t Task) SandboxKind {
@@ -78,7 +79,7 @@ func bootInfoFrom(t Task) *BootInfo {
 	b := &BootInfo{Image: t.Image, Size: t.Size, Hostname: t.Hostname, Desktop: t.Desktop,
 		SSHPublicKeys: append([]string(nil), t.SSHPublicKeys...), SSHCAPublicKey: t.SSHCAPublicKey,
 		DriveMode: driveModeOf(t), Reach: t.Reach, SandboxKind: kindOf(t), Lifecycle: lifecycleOf(t),
-		ExpiresAt: t.ExpiresAt}
+		ExpiresAt: t.ExpiresAt, Tenant: t.Tenant}
 	if t.Devcontainer != nil {
 		d := *t.Devcontainer
 		b.Devcontainer = &d
@@ -95,7 +96,16 @@ func rebootTask(b BootInfo, t Task) Task {
 		Lifecycle: b.Lifecycle, Devcontainer: b.Devcontainer, SSHCAPublicKey: b.SSHCAPublicKey,
 		DriveMode: b.DriveMode, DriveToken: t.DriveToken, ManagementURL: t.ManagementURL, DriveURL: t.DriveURL,
 		keepData:  b.SandboxKind == SandboxDevcontainer && b.Lifecycle == LifecyclePersistent,
-		ackRejoin: t.Kind == KindRejoin}
+		ackRejoin: t.Kind == KindRejoin, Tenant: tenantOf(b, t), Managed: t.Managed}
+}
+
+// tenantOf keeps a managed sandbox in the tenant it was created for: the stored
+// tag wins over whatever a later task says (they are equal unless something is wrong).
+func tenantOf(b BootInfo, t Task) string {
+	if b.Tenant != "" {
+		return b.Tenant
+	}
+	return t.Tenant
 }
 
 // HostingPublisher is implemented by the coordinator client: PUT sandbox-hosting.
@@ -594,7 +604,7 @@ func (m *Manager) bootDev(ctx context.Context, t Task, reset bool) error {
 	}
 	res, err := m.opts.Dev.Up(ctx, DevUpSpec{Workspace: ws, Hostname: t.Hostname, Devcontainer: *t.Devcontainer,
 		Size: t.Size, SetupKey: t.SetupKey, ManagementURL: t.ManagementURL, SSHCAPublicKey: t.SSHCAPublicKey,
-		DriveMode: driveModeOf(t), DriveToken: t.DriveToken, Lifecycle: lifecycleOf(t),
+		DriveMode: driveModeOf(t), DriveToken: t.DriveToken, Lifecycle: lifecycleOf(t), Tenant: t.Tenant,
 		Recreate: reset && !t.keepData, Timeout: m.firstBootTimeout()})
 	if err != nil {
 		return err

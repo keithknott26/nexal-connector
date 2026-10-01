@@ -11,6 +11,9 @@ struct CanaryReply: Decodable {
     let enabled: Bool
     let status: String
     let lastCheckedAt: String?
+    /// Decoys installed on this Mac, and per-instance decoys registered here. Older connectors omit both.
+    let hostWatermarks: Int?
+    let subWatermarks: Int?
 }
 
 /// Explicit local opt-in; opening the panel never installs or arms a decoy.
@@ -37,6 +40,14 @@ struct CanarySettingsView: View {
                         Task { await perform(state.enabled ? "disable" : "enable") }
                     }.disabled(busy)
                 }
+            }
+            if let state, let hosts = state.hostWatermarks {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Host watermarks installed: \(hosts)")
+                    Text("Sub-watermarks out there: \(state.subWatermarks ?? 0)")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
             }
             if let signal = state?.latestSignal {
                 GroupBox("Check this Mac") {

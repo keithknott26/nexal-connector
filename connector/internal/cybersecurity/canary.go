@@ -28,6 +28,10 @@ type CanaryState struct {
 	LastCheckedAt     string             `json:"lastCheckedAt,omitempty"`
 	Status            string             `json:"status"`
 	Pending           *Event             `json:"pending,omitempty"`
+	// Counts for display, computed by Status and never stored: the host decoy
+	// installed on this Mac, and the per-instance decoys registered under sub/.
+	HostWatermarks int `json:"-"`
+	SubWatermarks  int `json:"-"`
 }
 
 const canaryName = "nexal-decoy.txt"
@@ -176,9 +180,40 @@ func (c Canary) Configure(enabled bool) error {
 		return saveCanary(root, s)
 	})
 }
+// countSubWatermarks counts regular files in the private sub/ directory, where
+// per-instance decoys register. Anything else (links, folders) is ignored.
+func countSubWatermarks(root *os.Root) int {
+	dir, err := root.Open("sub")
+	if err != nil {
+		return 0
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			n++
+		}
+	}
+	return n
+}
+
 func (c Canary) Status() (CanaryState, error) {
 	var result CanaryState
-	err := c.locked(func(_ *os.Root, s *CanaryState) error { result = *s; result.Pending = nil; return nil })
+	err := c.locked(func(root *os.Root, s *CanaryState) error {
+		result = *s
+		result.Pending = nil
+		if s.Baseline != "" {
+			if st, err := root.Lstat(canaryName); err == nil && st.Mode().IsRegular() {
+				result.HostWatermarks = 1
+			}
+		}
+		result.SubWatermarks = countSubWatermarks(root)
+		return nil
+	})
 	return result, err
 }
 

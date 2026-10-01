@@ -34,7 +34,7 @@ func canaryCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	return emit(map[string]any{"enabled": state.Enabled, "status": state.Status, "lastCheckedAt": state.LastCheckedAt, "latestSignal": state.LastEvent, "description": "Watches only neXal's own decoy for changes or removal. Does not scan documents, detect reads, or automatically mitigate threats."})
+	return emit(map[string]any{"enabled": state.Enabled, "status": state.Status, "lastCheckedAt": state.LastCheckedAt, "latestSignal": state.LastEvent, "hostWatermarks": state.HostWatermarks, "subWatermarks": state.SubWatermarks, "description": "Watches only neXal's own decoy for changes or removal. Does not scan documents, detect reads, or automatically mitigate threats."})
 }
 func runCanary(ctx context.Context, monitor cybersecurity.Canary, report func(context.Context, cybersecurity.Event) error, reportState ...func(context.Context, cybersecurity.CanaryState) error) {
 	var lastStatus string

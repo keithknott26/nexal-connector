@@ -62,6 +62,10 @@ type record struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	HostKeyPub string     `json:"hostKeyPub,omitempty"` // ssh-ed25519 public key as reported by the guest
 	Workspace  string     `json:"workspace,omitempty"`  // dev container workspace id
+	// DriveUnavailable is why the requested shared drive was not mounted (dev
+	// containers). The coordinator's state report has no field for it yet, so it
+	// is surfaced here (state.json) and in the connector log.
+	DriveUnavailable string `json:"driveUnavailable,omitempty"`
 	// AwaitKey: the mesh peer is gone; a rejoin task with a fresh key is needed.
 	AwaitKey bool `json:"awaitKey,omitempty"`
 	busy     bool // an operation goroutine owns this sandbox; not persisted
@@ -440,7 +444,7 @@ func (m *Manager) startBoot(ctx context.Context, t Task) {
 	}
 	rec.Size, rec.Hostname, rec.ExpiresAt = t.Size, t.Hostname, t.ExpiresAt
 	rec.Kind, rec.Lifecycle, rec.Boot = kindOf(t), lifecycleOf(t), bootInfoFrom(t)
-	rec.AwaitKey, rec.HostKey, rec.HostKeyPub = false, "", ""
+	rec.AwaitKey, rec.HostKey, rec.HostKeyPub, rec.DriveUnavailable = false, "", "", ""
 	if dev {
 		rec.Workspace = DevWorkspaceID(t.SandboxID)
 	}

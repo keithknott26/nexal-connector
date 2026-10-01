@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +27,22 @@ import (
 // Mesh join: after `devpod up`, a sidecar container (DevConfig.MeshImage, the
 // neXal mesh runtime with the first-boot entrypoint) is started in the dev
 // container's network namespace (--network container:<id>, NET_ADMIN, /dev/net/tun).
-// It joins the mesh with the one-use key, prints the same
-// `NEXAL-FIRSTBOOT {...}` line as a VM on its log, and runs the SSH/drive pieces.
+// Its join parameters (one-use setup key included) are in a 0600 file in a
+// per-workspace directory bind-mounted at /run/nexal-boot, never in its
+// environment or on a command line (so `docker inspect` does not show them); the
+// connector deletes that directory as soon as the join is reported. The sidecar
+// prints the same `NEXAL-FIRSTBOOT {"meshIp":...}` line as a VM on its log.
+//
+// SSH: the sidecar runs no sshd. Because the network namespace is shared, the
+// connector then `docker exec`s DevSSHDScript in the DEV container (as root):
+// it installs openssh-server if the image lacks it, creates login `nexal` as an
+// alias of the workspace's remote user (same uid, gid and home), and starts a
+// private sshd bound to the mesh IP, port 22, that trusts only the network's SSH
+// CA (TrustedUserCAKeys, principal nexal), exactly like a VM. Its host key and
+// fingerprint are reported in the same NEXAL-FIRSTBOOT form and returned in
+// DevUpResult, so the coordinator pins them as for a VM.
+//
+// Shared drive: not available in dev containers (see DevDriveUnavailable).
 
 // DevOps is the dev-container backend the Manager drives. Fakes implement it in tests.
 type DevOps interface {
@@ -66,7 +81,19 @@ type DevUpResult struct {
 	MeshIP             string
 	HostKeyFingerprint string
 	HostKey            string
+	// DriveUnavailable is a user-safe reason when the task asked for the shared
+	// drive and it was not mounted ("" when no drive was requested).
+	DriveUnavailable string
 }
+
+// DevDriveUnavailable is why a dev container has no shared drive. The VM path
+// mounts it with the `nexal drive` FUSE helper baked into the guest image; a
+// dev container image does not carry that helper, and mounting FUSE would need
+// /dev/fuse and CAP_SYS_ADMIN on the DEV container itself (the sidecar cannot
+// mount into another container's mount namespace), which repo-sourced
+// devcontainer.json files do not grant. The workspace still runs; the drive
+// token is never handed to the dev container or the sidecar.
+const DevDriveUnavailable = "the shared drive is not available in dev containers yet"
 
 // Error codes for DevError.
 const (
@@ -75,6 +102,7 @@ const (
 	DevErrDevPodMissing = "devpod_missing"
 	DevErrDevPodFailed  = "devpod_failed"
 	DevErrMeshFailed    = "mesh_sidecar_failed"
+	DevErrSSHFailed     = "ssh_setup_failed"
 	DevErrUnconfigured  = "mesh_image_unconfigured"
 	DevErrInvalid       = "invalid_devcontainer"
 	DevErrNotAvailable  = "devcontainer_unavailable"
@@ -304,22 +332,34 @@ func DevPodUpArgs(source, workspace string, recreate bool) []string {
 func SidecarName(workspace string) string   { return "nexal-mesh-" + workspace }
 func SidecarVolume(workspace string) string { return "nexal-mesh-" + workspace }
 
+// SidecarBootMount is where the sidecar finds its join file (SidecarBootFile).
+const (
+	SidecarBootMount = "/run/nexal-boot"
+	SidecarBootFile  = "mesh.env"
+)
+
 // SidecarRunArgs builds the `docker run` arguments for the mesh sidecar. The
-// secrets are in envFile, not on the command line. It is pure.
-func SidecarRunArgs(workspace, containerID, image, envFile string, persistent bool) []string {
+// secrets are in bootDir/SidecarBootFile (0600), bind-mounted at
+// SidecarBootMount: they are on neither the command line nor in the
+// container's environment. bootDir must not contain a comma (--mount syntax);
+// Up checks that. It is pure.
+func SidecarRunArgs(workspace, containerID, image, bootDir string, persistent bool) []string {
 	a := []string{"run", "-d", "--name", SidecarName(workspace),
 		"--label", "nexal.workspace=" + workspace,
 		"--network", "container:" + containerID,
 		"--cap-add", "NET_ADMIN", "--device", "/dev/net/tun",
-		"--env-file", envFile}
+		"--mount", "type=bind,src=" + bootDir + ",dst=" + SidecarBootMount}
 	if persistent {
 		a = append(a, "-v", SidecarVolume(workspace)+":/var/lib/nexal")
 	}
 	return append(a, image)
 }
 
-// SidecarEnv renders the sidecar's env file (KEY=VALUE lines). Values were
-// validated by ValidateBoot; the file is written 0600 and deleted after join.
+// SidecarEnv renders the sidecar's join file (KEY=VALUE lines, parsed by the
+// entrypoint, never sourced). Values were validated by Up; the file is written
+// 0600 and deleted after the join. The management URL uses the VM seed's name,
+// NEXAL_MESH_URL. The SSH CA and the drive token are not the sidecar's business
+// and are not written.
 func SidecarEnv(s DevUpSpec) string {
 	var b strings.Builder
 	w := func(k, v string) { b.WriteString(k + "=" + v + "\n") }
@@ -330,19 +370,124 @@ func SidecarEnv(s DevUpSpec) string {
 		lc = LifecycleEphemeral
 	}
 	w("NEXAL_LIFECYCLE", string(lc))
-	if s.ManagementURL != "" {
-		w("NEXAL_MANAGEMENT_URL", s.ManagementURL)
-	}
-	if s.SSHCAPublicKey != "" {
-		w("NEXAL_SSH_CA", s.SSHCAPublicKey)
-	}
-	if s.DriveMode != "" {
-		w("NEXAL_DRIVE_MODE", s.DriveMode)
-	}
-	if s.DriveToken != "" {
-		w("NEXAL_DRIVE_TOKEN", s.DriveToken)
-	}
+	w("NEXAL_MESH_URL", s.ManagementURL)
 	return b.String()
+}
+
+// devUserPattern is a conservative login name; anything else is ignored.
+var devUserPattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// RemoteUserFromLabels picks the workspace's login user from the dev
+// container's labels (`docker inspect --format '{{json .Config.Labels}}'`): the
+// last remoteUser, else the last containerUser, in the devcontainer.metadata
+// label. "" when unknown (DevSSHDScript then uses the uid-1000 user, else root).
+// It is pure.
+func RemoteUserFromLabels(labelsJSON string) string {
+	var labels map[string]string
+	if json.Unmarshal([]byte(strings.TrimSpace(labelsJSON)), &labels) != nil {
+		return ""
+	}
+	var meta []map[string]any
+	if json.Unmarshal([]byte(labels["devcontainer.metadata"]), &meta) != nil {
+		return ""
+	}
+	pick := func(key string) string {
+		for i := len(meta) - 1; i >= 0; i-- {
+			if u, ok := meta[i][key].(string); ok && devUserPattern.MatchString(u) {
+				return u
+			}
+		}
+		return ""
+	}
+	if u := pick("remoteUser"); u != "" {
+		return u
+	}
+	return pick("containerUser")
+}
+
+// DevSSHDScript runs as root inside the dev container (POSIX sh), with
+// arguments: mesh IP, remote user ("" = guess), SSH CA public key. It prints
+// `NEXAL-FIRSTBOOT {"meshIp":..,"hostKeyFingerprint":..,"hostKey":..}` or
+// `NEXAL-FIRSTBOOT-FAILED <reason>`. The host key lives in /var/lib/nexal-ssh,
+// so a persistent workspace keeps it across restarts; an ephemeral one is a new
+// container (new key) every time. It is re-runnable: a previous nexal sshd is
+// stopped first.
+const DevSSHDScript = `set -u
+umask 022
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MESH_IP=$1 HINT=$2 CA=$3
+fail() { printf 'NEXAL-FIRSTBOOT-FAILED %s
+' "$*"; exit 1; }
+[ "$(id -u)" = 0 ] || fail "ssh setup needs root in the dev container"
+if ! command -v sshd >/dev/null 2>&1 || ! command -v ssh-keygen >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    { DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends openssh-server; } >/dev/null 2>&1
+  elif command -v apk >/dev/null 2>&1; then apk add -q --no-cache openssh-server openssh-keygen >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y -q openssh-server >/dev/null 2>&1
+  elif command -v microdnf >/dev/null 2>&1; then microdnf install -y openssh-server >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then yum install -y -q openssh-server >/dev/null 2>&1
+  elif command -v zypper >/dev/null 2>&1; then zypper -qn install openssh >/dev/null 2>&1
+  elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm --needed openssh >/dev/null 2>&1
+  fi
+fi
+SSHD=$(command -v sshd 2>/dev/null || true)
+[ -n "$SSHD" ] || fail "no sshd in the dev container and openssh-server could not be installed"
+command -v ssh-keygen >/dev/null 2>&1 || fail "no ssh-keygen in the dev container"
+U=$HINT
+if [ -z "$U" ] || ! grep -q "^$U:" /etc/passwd; then U=$(awk -F: '$3==1000{print $1; exit}' /etc/passwd); fi
+[ -n "$U" ] || U=root
+[ "$U" != nexal ] || fail "the workspace user may not be called nexal"
+ENT=$(awk -F: -v u="$U" '$1==u{print $3":"$4":"$6":"$7; exit}' /etc/passwd)
+[ -n "$ENT" ] || fail "workspace user $U not found"
+uid=${ENT%%:*}; r=${ENT#*:}; gid=${r%%:*}; r=${r#*:}; home=${r%%:*}; sh=${r#*:}
+[ -n "$sh" ] && [ -x "$sh" ] || sh=/bin/sh
+# login nexal = the workspace user (same uid/gid/home), so files and sudo rights match
+for f in /etc/passwd /etc/shadow; do
+  [ -f "$f" ] || continue
+  { grep -v '^nexal:' "$f" || true; } >"$f.nexal" && cat "$f.nexal" >"$f"; rm -f "$f.nexal"
+done
+printf 'nexal:x:%s:%s:neXal mesh login:%s:%s
+' "$uid" "$gid" "$home" "$sh" >>/etc/passwd
+[ -f /etc/shadow ] && printf 'nexal:*:19000:0:99999:7:::
+' >>/etc/shadow
+prl=no; [ "$uid" = 0 ] && prl=prohibit-password
+mkdir -p /var/lib/nexal-ssh /etc/nexal /run/sshd
+chmod 0700 /var/lib/nexal-ssh
+K=/var/lib/nexal-ssh/ssh_host_ed25519_key
+[ -s "$K" ] || ssh-keygen -q -t ed25519 -N '' -C '' -f "$K" >/dev/null 2>&1 || fail "host key generation failed"
+[ -s "$K.pub" ] || ssh-keygen -y -f "$K" >"$K.pub" || fail "host public key missing"
+printf '%s
+' "$CA" >/etc/nexal/ssh_user_ca.pub
+chmod 0644 /etc/nexal/ssh_user_ca.pub
+cat >/etc/nexal/sshd_config <<CFG
+ListenAddress $MESH_IP:22
+HostKey $K
+TrustedUserCAKeys /etc/nexal/ssh_user_ca.pub
+AuthorizedKeysFile none
+AllowUsers nexal
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+PermitRootLogin $prl
+PidFile /run/nexal-sshd.pid
+Subsystem sftp internal-sftp
+CFG
+if [ -s /run/nexal-sshd.pid ]; then
+  old=$(cat /run/nexal-sshd.pid)
+  case $(cat /proc/"$old"/comm 2>/dev/null) in sshd*) kill "$old" 2>/dev/null; sleep 1 ;; esac
+fi
+"$SSHD" -t -f /etc/nexal/sshd_config 2>/dev/null || fail "sshd rejected the configuration"
+"$SSHD" -f /etc/nexal/sshd_config || fail "sshd did not start on $MESH_IP:22"
+fp=$(ssh-keygen -lf "$K.pub" -E sha256 | awk '{print $2}')
+hk=$(awk 'NR==1{print $1" "$2}' "$K.pub")
+printf 'NEXAL-FIRSTBOOT {"meshIp":"%s","hostKeyFingerprint":"%s","hostKey":"%s"}
+' "$MESH_IP" "$fp" "$hk"
+`
+
+// DevSSHDExecArgs builds the `docker exec` that runs DevSSHDScript in the dev
+// container. Its arguments are public (mesh IP, user name, CA public key) and
+// were validated by the caller. It is pure.
+func DevSSHDExecArgs(containerID, meshIP, user, caKey string) []string {
+	return []string{"exec", "-u", "0", containerID, "sh", "-c", DevSSHDScript, "nexal-sshd", meshIP, user, caKey}
 }
 
 // MeshImageEnv overrides DefaultMeshImage (a local build, a registry mirror, a
@@ -355,7 +500,7 @@ const MeshImageEnv = "NEXAL_DEV_MESH_IMAGE"
 // pushes ghcr.io/<owner>/nexal-mesh-sidecar:<version>. The package must be
 // public so a Mac can pull it anonymously. Bump the tag here whenever a new
 // sidecar version is released.
-const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.0"
+const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.1"
 
 // ResolveMeshImage returns override (trimmed) or, when empty, DefaultMeshImage.
 func ResolveMeshImage(override string) string {
@@ -469,6 +614,14 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	if !ValidID(s.Workspace) || !ValidHostname(s.Hostname) || !validSecret(s.SetupKey) {
 		return res, devErr(DevErrInvalid, "invalid dev container request")
 	}
+	// The coordinator always sends mesh.managementUrl with a key; without it the
+	// sidecar would silently fall back to upstream NetBird's own server.
+	if s.ManagementURL == "" || !validHTTPSURL(s.ManagementURL) {
+		return res, devErr(DevErrInvalid, "the task carries no valid mesh management URL")
+	}
+	if s.SSHCAPublicKey != "" && !validCAKey(s.SSHCAPublicKey) {
+		return res, devErr(DevErrInvalid, "invalid ssh ca public key")
+	}
 	if err := ValidateDevcontainer(&s.Devcontainer); err != nil {
 		return res, devErr(DevErrInvalid, "%v", err)
 	}
@@ -522,19 +675,45 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	}
 	// Replace any previous sidecar (a rejoin brings a new one-use key).
 	_, _ = d.run(ctx, t, t.docker, "rm", "-f", SidecarName(s.Workspace))
-	envFile := filepath.Join(dir, "mesh.env")
-	if err = os.WriteFile(envFile, []byte(SidecarEnv(s)), 0o600); err != nil {
+	bootDir := filepath.Join(dir, "boot")
+	if strings.Contains(bootDir, ",") {
+		return res, devErr(DevErrMeshFailed, "the dev container state directory path contains a comma")
+	}
+	_ = os.RemoveAll(bootDir)
+	if err = os.Mkdir(bootDir, 0o700); err != nil {
 		return res, err
 	}
-	defer os.Remove(envFile) // the secrets have done their job (or the attempt failed)
-	if out, rerr := d.run(ctx, t, t.docker, SidecarRunArgs(s.Workspace, cid, d.cfg.MeshImage, envFile, s.Lifecycle == LifecyclePersistent)...); rerr != nil {
+	// The secrets have done their job once the join is reported (or the attempt
+	// failed); the sidecar also deletes its copy when the mount is writable.
+	defer os.RemoveAll(bootDir)
+	if err = os.WriteFile(filepath.Join(bootDir, SidecarBootFile), []byte(SidecarEnv(s)), 0o600); err != nil {
+		return res, err
+	}
+	if out, rerr := d.run(ctx, t, t.docker, SidecarRunArgs(s.Workspace, cid, d.cfg.MeshImage, bootDir, s.Lifecycle == LifecyclePersistent)...); rerr != nil {
 		return res, devErr(DevErrMeshFailed, "starting the mesh sidecar failed: %s", trimOutput([]byte(out)))
 	}
 	fb, err := d.awaitJoin(ctx, t, s)
+	_ = os.RemoveAll(bootDir)
 	if err != nil {
 		return res, err
 	}
-	return DevUpResult{MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey}, nil
+	res = DevUpResult{MeshIP: fb.MeshIP}
+	if s.SSHCAPublicKey != "" {
+		labels, _ := d.run(ctx, t, t.docker, "inspect", "--format", "{{json .Config.Labels}}", cid)
+		out, _ := d.run(ctx, t, t.docker, DevSSHDExecArgs(cid, fb.MeshIP, RemoteUserFromLabels(labels), s.SSHCAPublicKey)...)
+		sb, ok, failed, reason := scanFirstBoot(out)
+		switch {
+		case failed:
+			return DevUpResult{}, devErr(DevErrSSHFailed, "ssh in the dev container: %s", reason)
+		case !ok || sb.MeshIP != fb.MeshIP || sb.HostKey == "":
+			return DevUpResult{}, devErr(DevErrSSHFailed, "ssh in the dev container did not report its host key")
+		}
+		res.HostKeyFingerprint, res.HostKey = sb.HostKeyFingerprint, sb.HostKey
+	}
+	if s.DriveToken != "" {
+		res.DriveUnavailable = DevDriveUnavailable
+	}
+	return res, nil
 }
 
 // awaitJoin reads the sidecar's log for the guest's first-boot report.
@@ -628,7 +807,7 @@ func (d *DevPod) deleteLocked(ctx context.Context, ws string) error {
 		_, err = d.run(ctx, t, t.docker, "volume", "rm", "-f", SidecarVolume(ws))
 		note(ignoreMissing(err))
 	}
-	note(os.RemoveAll(d.wsDir(ws))) // generated source, DEVPOD_HOME, mesh.env
+	note(os.RemoveAll(d.wsDir(ws))) // generated source, DEVPOD_HOME, boot/mesh.env
 	return first
 }
 

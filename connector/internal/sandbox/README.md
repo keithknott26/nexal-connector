@@ -72,7 +72,35 @@ private `DEVPOD_HOME`), joins the mesh with a sidecar container that shares the 
 container's network namespace, and tears down container, volumes, sidecar, DevPod state
 and secrets. It sits behind the `DevOps` interface; tests use fakes. Error codes:
 `no_container_runtime`, `docker_desktop_only`, `devpod_missing`, `devpod_failed`,
-`mesh_sidecar_failed`, `mesh_image_unconfigured`, `invalid_devcontainer`.
+`mesh_sidecar_failed`, `ssh_setup_failed`, `mesh_image_unconfigured`, `invalid_devcontainer`.
+
+- Join secrets: the one-use setup key, hostname, lifecycle and `NEXAL_MESH_URL` (the VM
+  seed's name; the sidecar also accepts `NEXAL_MANAGEMENT_URL`) go in a 0600 file in
+  `<state>/<workspace>/boot/`, bind-mounted at `/run/nexal-boot` - not `--env-file`/`-e`,
+  so `docker inspect` shows only the mount. The connector deletes the directory as soon
+  as the sidecar reports `NEXAL-FIRSTBOOT` (or fails). The management URL comes from the
+  task's `mesh.managementUrl`; a dev task without a valid https one is refused
+  (`invalid_devcontainer`) instead of letting NetBird fall back to its public server.
+- SSH: the sidecar runs no sshd. After the join the connector `docker exec`s
+  `DevSSHDScript` as root in the dev container: it installs openssh-server if missing
+  (apt/apk/dnf/microdnf/yum/zypper/pacman), adds login `nexal` as an alias of the
+  workspace's remote user (from the `devcontainer.metadata` label; else the uid-1000 user;
+  else root), and starts an sshd on `<meshIp>:22` with the network CA as
+  `TrustedUserCAKeys` (principal `nexal`, no passwords, no authorized_keys). Its host key
+  (`/var/lib/nexal-ssh`, kept by persistent workspaces) is reported as
+  `hostKey`/`hostKeyFingerprint`, as for a VM. Without `sshCaPublicKey` no sshd is started.
+  The sshd is not supervised: if the dev container restarts outside `Up`, SSH returns
+  with the next `Up` (reconcile/rejoin).
+- Shared drive: not available in dev containers (the VM's FUSE helper is not in dev
+  images, and FUSE would need `/dev/fuse` + `CAP_SYS_ADMIN` on the dev container itself).
+  The drive token is not passed to either container. `DevUpResult.DriveUnavailable` and
+  `driveUnavailable` in `state.json` say so, and the connector logs it. It is not in the
+  coordinator state report yet: `POST sandbox-state` rejects unknown keys, so the
+  coordinator must accept `driveUnavailable` first (TODO in `bootDev`).
+- Sidecar image: `connector/sidecar` (Dockerfile + entrypoint), released as
+  `ghcr.io/keithknott26/nexal-mesh-sidecar:<version>` by `.github/workflows/sidecar-image.yml`
+  on a `sidecar-v<version>` tag; `DefaultMeshImage` must name the same version. Base images
+  are not digest-pinned yet (TODO in the Dockerfile; the workflow prints the digests).
 
 ## Files shared with the Mac app (`~/Library/Application Support/Nexal/sandboxes/`)
 

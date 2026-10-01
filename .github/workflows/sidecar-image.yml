@@ -1,7 +1,7 @@
 name: Mesh sidecar image
 # Builds connector/sidecar (patched NetBird, ML-KEM-1024) for linux/amd64+arm64 and
 # pushes ghcr.io/<owner>/nexal-mesh-sidecar:<version>.
-#   release:  git tag sidecar-v0.1.0 && git push origin sidecar-v0.1.0
+#   release:  git tag sidecar-v0.1.1 && git push origin sidecar-v0.1.1
 #   manual:   Actions > Mesh sidecar image > Run workflow (give a version)
 # The connector's DefaultMeshImage (connector/internal/sandbox/devpod.go) must name
 # the same version; the tag build fails if it does not.
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image version (the part after sidecar-v), e.g. 0.1.0"
+        description: "Image version (the part after sidecar-v), e.g. 0.1.1"
         required: true
 permissions:
   contents: read
@@ -48,6 +48,17 @@ jobs:
           [ "$have" = "$WANT" ] || { echo "DefaultMeshImage is '$have' but this tag builds '$WANT'; update devpod.go first"; exit 1; }
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+      - name: Base image digests (pin these in connector/sidecar/Dockerfile)
+        run: |
+          set -euo pipefail
+          for a in GO_IMAGE RUNTIME_IMAGE; do
+            ref=$(sed -n "s/^ARG $a=//p" connector/sidecar/Dockerfile | head -1)
+            name=${ref%@*}
+            dig=$(docker buildx imagetools inspect "$name" --format '{{json .Manifest}}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["digest"])')
+            echo "$a=$name@$dig" | tee -a "$GITHUB_STEP_SUMMARY"
+            case $ref in *@sha256:*) [ "${ref#*@}" = "$dig" ] || echo "::warning::$a pinned to ${ref#*@} but $name now resolves to $dig" ;;
+                         *) echo "::warning::$a is not pinned by digest; use $name@$dig" ;; esac
+          done
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io

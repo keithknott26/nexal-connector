@@ -2,16 +2,23 @@
 # neXal mesh sidecar entrypoint. Contract: connector/internal/sandbox/devpod.go
 # (SidecarRunArgs / SidecarEnv / awaitJoin) and seed.go (first-boot protocol).
 #
-# Env (from the 0600 --env-file):
-#   NEXAL_HOSTNAME, NEXAL_SETUP_KEY (one-use), NEXAL_LIFECYCLE, NEXAL_MANAGEMENT_URL,
-#   optional NEXAL_SSH_CA, NEXAL_DRIVE_MODE, NEXAL_DRIVE_TOKEN.
+# Input: the 0600 join file $NEXAL_BOOT_FILE (default /run/nexal-boot/mesh.env, a
+# per-workspace directory the connector bind-mounts and deletes after the join),
+# KEY=VALUE lines, parsed (never sourced):
+#   NEXAL_HOSTNAME, NEXAL_SETUP_KEY (one-use), NEXAL_LIFECYCLE,
+#   NEXAL_MESH_URL (the VM seed's name; NEXAL_MANAGEMENT_URL is accepted as an alias)
+# The same keys are also read from the environment (file wins), for manual tests only:
+# a setup key in the environment is visible to `docker inspect`.
 # Prints on stdout, once joined:   NEXAL-FIRSTBOOT {"meshIp":...}
 # or on failure:                   NEXAL-FIRSTBOOT-FAILED <short reason>   (and exits 1)
+# SSH is NOT served here: the connector starts sshd inside the dev container itself
+# (it shares this network namespace), see DevSSHDScript in devpod.go.
 set -uo pipefail
 
 STATE=/var/lib/nexal
 LOG=/var/log/nexal/netbird.log
 KEYFILE=/dev/shm/nexal-setup-key
+BOOT_FILE=${NEXAL_BOOT_FILE:-/run/nexal-boot/mesh.env}
 pids=()
 
 fail() {
@@ -28,13 +35,26 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM INT
 
-[ -n "${NEXAL_SETUP_KEY:-}" ]     || fail "no setup key"
-[ -n "${NEXAL_HOSTNAME:-}" ]      || fail "no hostname"
-[ -n "${NEXAL_MANAGEMENT_URL:-}" ] || fail "no management url"
-[ -c /dev/net/tun ]               || fail "no /dev/net/tun in the sidecar"
+if [ -r "$BOOT_FILE" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in ''|'#'*) continue ;; esac
+    k=${line%%=*}; v=${line#*=}
+    case $k in
+      NEXAL_HOSTNAME|NEXAL_SETUP_KEY|NEXAL_LIFECYCLE|NEXAL_MESH_URL|NEXAL_MANAGEMENT_URL) printf -v "$k" '%s' "$v" ;;
+    esac
+  done <"$BOOT_FILE"
+  # Best effort: the connector deletes the directory anyway (the mount may be read-only).
+  rm -f "$BOOT_FILE" 2>/dev/null || true
+fi
+MESH_URL=${NEXAL_MESH_URL:-${NEXAL_MANAGEMENT_URL:-}}
 
-mkdir -p "$STATE/netbird" "$STATE/ssh" /var/log/nexal
-chmod 0700 "$STATE" "$STATE/netbird" "$STATE/ssh"
+[ -n "${NEXAL_SETUP_KEY:-}" ] || fail "no setup key"
+[ -n "${NEXAL_HOSTNAME:-}" ]  || fail "no hostname"
+[ -n "$MESH_URL" ]            || fail "no management url"
+[ -c /dev/net/tun ]           || fail "no /dev/net/tun in the sidecar"
+
+mkdir -p "$STATE/netbird" /var/log/nexal
+chmod 0700 "$STATE" "$STATE/netbird"
 export NB_STATE_DIR="$STATE/netbird"
 export NB_LAZY_CONN=off   # same as the macOS app: no lazy connections
 
@@ -49,7 +69,7 @@ netbird status --check live >/dev/null 2>&1 || fail "mesh daemon did not start"
 
 # --enable-rosenpass selects the ML-KEM-1024 profile; --disable-dns keeps the
 # dev container's resolver (shared network namespace) untouched.
-timeout 150 netbird up --setup-key-file "$KEYFILE" --management-url "$NEXAL_MANAGEMENT_URL" \
+timeout 150 netbird up --setup-key-file "$KEYFILE" --management-url "$MESH_URL" \
   --enable-rosenpass --disable-dns --hostname "$NEXAL_HOSTNAME" >/dev/null 2>&1 \
   || fail "netbird up failed or timed out"
 shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
@@ -62,34 +82,8 @@ for _ in $(seq 1 60); do
 done
 [ -n "$ip" ] || fail "joined but no mesh address"
 
-hostkey_json=""
-if [ -n "${NEXAL_SSH_CA:-}" ]; then
-  # sshd on the mesh address only; members use CA-signed certificates (principal nexal).
-  # NOTE: this shell is inside the SIDECAR container, not the dev container.
-  [ -f "$STATE/ssh/ssh_host_ed25519_key" ] || ssh-keygen -q -t ed25519 -N '' -C '' -f "$STATE/ssh/ssh_host_ed25519_key"
-  printf '%s\n' "$NEXAL_SSH_CA" > /etc/ssh/nexal_user_ca.pub
-  cat > /etc/ssh/nexal_sshd_config <<CFG
-ListenAddress $ip
-HostKey $STATE/ssh/ssh_host_ed25519_key
-TrustedUserCAKeys /etc/ssh/nexal_user_ca.pub
-AllowUsers nexal
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PermitRootLogin no
-UsePAM no
-PidFile none
-CFG
-  /usr/sbin/sshd -D -e -f /etc/ssh/nexal_sshd_config >/dev/null 2>&1 &
-  pids+=($!)
-  key=$(cut -d' ' -f1,2 "$STATE/ssh/ssh_host_ed25519_key.pub" 2>/dev/null || ssh-keygen -y -f "$STATE/ssh/ssh_host_ed25519_key" | cut -d' ' -f1,2)
-  fp=$(ssh-keygen -lf "$STATE/ssh/ssh_host_ed25519_key.pub" -E sha256 | awk '{print $2}')
-  hostkey_json=$(printf ',"hostKeyFingerprint":"%s","hostKey":"%s"' "$fp" "$key")
-fi
-[ -z "${NEXAL_DRIVE_TOKEN:-}" ] || echo "nexal-sidecar: shared drive is not supported in the sidecar yet; NEXAL_DRIVE_TOKEN ignored" >&2
-unset NEXAL_DRIVE_TOKEN
+printf 'NEXAL-FIRSTBOOT {"meshIp":"%s"}\n' "$ip"
 
-printf 'NEXAL-FIRSTBOOT {"meshIp":"%s"%s}\n' "$ip" "$hostkey_json"
-
-# Supervise: if the mesh daemon (or sshd) dies, exit so Alive() reports it.
+# Supervise: if the mesh daemon dies, exit so Alive() reports it.
 wait -n "${pids[@]}"
 exit $?

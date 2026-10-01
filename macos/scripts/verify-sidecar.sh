@@ -28,7 +28,8 @@ got=$(run netbird version | tr -d '\r\n')
 [ "$(run grep -c -a "$PROFILE" /usr/local/bin/netbird)" -ge 1 ] && ok "ML-KEM profile string $PROFILE present in the binary" || bad "profile $PROFILE not found in the binary"
 run cat /etc/nexal-sidecar-release | sed 's/^/      /'
 run test -x /usr/local/bin/nexal-sidecar-entrypoint && ok "entrypoint present" || bad "entrypoint missing"
-run sh -c 'command -v ip && command -v iptables && command -v sshd' >/dev/null && ok "ip, iptables, sshd present" || bad "runtime tools missing"
+run sh -c 'command -v ip && command -v iptables' >/dev/null && ok "ip, iptables present" || bad "runtime tools missing"
+run sh -c '! command -v sshd' >/dev/null && ok "no sshd in the sidecar (SSH is served in the dev container)" || bad "sshd still present in the sidecar"
 # Contract smoke test: with no key the entrypoint must report a first-boot failure line, not hang.
 out=$(docker run --rm "${plat[@]}" -e NEXAL_HOSTNAME=verify -e NEXAL_MANAGEMENT_URL=https://invalid.example "$IMAGE" 2>&1 || true)
 echo "$out" | grep -q '^NEXAL-FIRSTBOOT-FAILED no setup key' && ok "entrypoint reports NEXAL-FIRSTBOOT-FAILED when misconfigured" || bad "unexpected entrypoint output: $out"

@@ -16,6 +16,9 @@ type fakeRun struct {
 	cmds     []string
 	devpodUp error
 	logs     string
+	labels   string // docker inspect .Config.Labels
+	sshd     string // output of the DevSSHDScript exec
+	bootSeen string // join file content while the sidecar starts
 }
 
 func (f *fakeRun) run(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
@@ -39,6 +42,20 @@ func (f *fakeRun) run(ctx context.Context, env []string, name string, args ...st
 		return []byte("side1\n"), nil
 	case strings.Contains(line, " logs "):
 		return []byte(f.logs), nil
+	case strings.Contains(line, " inspect --format"):
+		return []byte(f.labels), nil
+	case strings.Contains(line, " exec -u 0 "):
+		return []byte(f.sshd), nil
+	case strings.Contains(line, " run -d --name nexal-mesh-"):
+		for i, a := range args {
+			if a == "--mount" && i+1 < len(args) {
+				src := strings.TrimPrefix(strings.Split(args[i+1], ",")[1], "src=")
+				b, _ := os.ReadFile(filepath.Join(src, SidecarBootFile))
+				f.mu.Lock()
+				f.bootSeen = string(b)
+				f.mu.Unlock()
+			}
+		}
 	}
 	return nil, nil
 }
@@ -130,21 +147,27 @@ func TestDevPodArgsAndWorkspaceID(t *testing.T) {
 	if id := DevWorkspaceID("AB_c-9"); id != "nexal-ab-c-9" || !ValidID(id) {
 		t.Fatal(id)
 	}
-	s := strings.Join(SidecarRunArgs("ws1", "cid", "img:1", "/e.env", true), " ")
-	for _, want := range []string{"--network container:cid", "--cap-add NET_ADMIN", "--device /dev/net/tun", "--env-file /e.env",
-		"-v nexal-mesh-ws1:/var/lib/nexal", "img:1"} {
+	s := strings.Join(SidecarRunArgs("ws1", "cid", "img:1", "/st/ws1/boot", true), " ")
+	for _, want := range []string{"--network container:cid", "--cap-add NET_ADMIN", "--device /dev/net/tun",
+		"--mount type=bind,src=/st/ws1/boot,dst=/run/nexal-boot", "-v nexal-mesh-ws1:/var/lib/nexal", "img:1"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in %s", want, s)
 		}
 	}
-	if strings.Contains(strings.Join(SidecarRunArgs("ws1", "cid", "img:1", "/e.env", false), " "), "-v ") {
+	for _, bad := range []string{"--env-file", "-e ", "--privileged", "SYS_ADMIN", "/dev/fuse"} {
+		if strings.Contains(s, bad) {
+			t.Errorf("sidecar must not get %q: %s", bad, s)
+		}
+	}
+	if strings.Contains(strings.Join(SidecarRunArgs("ws1", "cid", "img:1", "/e", false), " "), "-v ") {
 		t.Fatal("ephemeral sidecar keeps no identity volume")
 	}
 }
 
 func upSpec() DevUpSpec {
 	return DevUpSpec{Workspace: "nexal-sb1", Hostname: "sbx-1", Devcontainer: Devcontainer{Template: "go"},
-		Size: Size{CPUs: 2, MemoryMB: 2048, DiskGB: 10}, SetupKey: "KEY-1", Lifecycle: LifecycleEphemeral, Timeout: time.Second}
+		Size: Size{CPUs: 2, MemoryMB: 2048, DiskGB: 10}, SetupKey: "KEY-1", ManagementURL: "https://mesh.example.com",
+		Lifecycle: LifecycleEphemeral, Timeout: time.Second}
 }
 
 func newTestDevPod(f *fakeRun, dir string, image string) *DevPod {
@@ -157,7 +180,9 @@ func TestDevPodUpJoinsMeshAndCleansSecrets(t *testing.T) {
 	f := &fakeRun{logs: "boot...\nNEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.9\",\"hostKeyFingerprint\":\"" + testFP + "\"}\n"}
 	d := newTestDevPod(f, dir, "mesh:1")
 	res, err := d.Up(context.Background(), upSpec())
-	if err != nil || res.MeshIP != "100.64.1.9" || res.HostKeyFingerprint != testFP {
+	// Without an SSH CA there is no sshd, so no host key (the sidecar's own report
+	// carries none; a stray fingerprint there is ignored).
+	if err != nil || res.MeshIP != "100.64.1.9" || res.HostKeyFingerprint != "" || res.DriveUnavailable != "" {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if !f.saw("devpod up ") || !f.saw("--provider docker") || !f.saw("--network container:cid123") {
@@ -168,8 +193,115 @@ func TestDevPodUpJoinsMeshAndCleansSecrets(t *testing.T) {
 			t.Fatalf("setup key leaked on a command line: %s", c)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "nexal-sb1", "mesh.env")); !os.IsNotExist(err) {
-		t.Fatal("mesh.env (secrets) must be removed after join")
+	if _, err := os.Stat(filepath.Join(dir, "nexal-sb1", "boot")); !os.IsNotExist(err) {
+		t.Fatal("the boot dir (secrets) must be removed after join")
+	}
+	for _, want := range []string{"NEXAL_SETUP_KEY=KEY-1\n", "NEXAL_MESH_URL=https://mesh.example.com\n", "NEXAL_HOSTNAME=sbx-1\n"} {
+		if !strings.Contains(f.bootSeen, want) {
+			t.Errorf("join file lacks %q: %q", want, f.bootSeen)
+		}
+	}
+	if strings.Contains(f.bootSeen, "NEXAL_MANAGEMENT_URL") {
+		t.Error("the join file uses the VM name NEXAL_MESH_URL")
+	}
+	if f.saw(" exec ") {
+		t.Error("no ssh setup without an SSH CA")
+	}
+}
+
+const testCA = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBsdX0q6S3yI6lkbDfH5d4gUlPu8uNCw4j3QhW1bM6a5 nexal-ca"
+const devTestHostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID83UXuqzoFyi/uB9YPyWVuvR+SA38DI5HgNO2ELOEd9"
+const devTestHostFP = "SHA256:Q0vUGy+EIBre481MT2ggo+D10IQ7qcimVizOqILqOiQ"
+
+func TestDevPodUpStartsSSHInTheDevContainer(t *testing.T) {
+	f := &fakeRun{logs: "NEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.9\"}\n",
+		labels: `{"devcontainer.metadata":"[{\"remoteUser\":\"root\"},{\"remoteUser\":\"vscode\"}]"}`,
+		sshd:   "noise\nNEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.9\",\"hostKeyFingerprint\":\"" + devTestHostFP + "\",\"hostKey\":\"" + devTestHostKey + "\"}\n"}
+	s := upSpec()
+	s.SSHCAPublicKey, s.DriveToken, s.DriveMode = testCA, "drive-token-123456", "ro"
+	res, err := newTestDevPod(f, t.TempDir(), "mesh:1").Up(context.Background(), s)
+	if err != nil || res.MeshIP != "100.64.1.9" || res.HostKey != devTestHostKey || res.HostKeyFingerprint != devTestHostFP {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if res.DriveUnavailable != DevDriveUnavailable {
+		t.Fatalf("drive requested but not available must be explicit: %+v", res)
+	}
+	if !f.saw("exec -u 0 cid123 sh -c ") || !f.saw(" nexal-sshd 100.64.1.9 vscode "+testCA) {
+		t.Fatalf("sshd must be set up in the dev container: %v", f.cmds)
+	}
+	if strings.Contains(f.bootSeen, "drive-token") || strings.Contains(f.bootSeen, "NEXAL_SSH_CA") {
+		t.Fatalf("the sidecar gets neither the drive token nor the CA: %q", f.bootSeen)
+	}
+	for _, c := range f.cmds {
+		if strings.Contains(c, "drive-token") {
+			t.Fatalf("drive token on a command line: %s", c)
+		}
+	}
+}
+
+func TestDevPodUpSSHFailures(t *testing.T) {
+	for name, out := range map[string]string{
+		"reported": "NEXAL-FIRSTBOOT-FAILED no sshd in the dev container\n",
+		"silent":   "",
+		"other ip": "NEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.10\",\"hostKey\":\"" + devTestHostKey + "\"}\n",
+		"no key":   "NEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.9\"}\n",
+	} {
+		dir := t.TempDir()
+		f := &fakeRun{logs: "NEXAL-FIRSTBOOT {\"meshIp\":\"100.64.1.9\"}\n", sshd: out}
+		s := upSpec()
+		s.SSHCAPublicKey = testCA
+		if _, err := newTestDevPod(f, dir, "m").Up(context.Background(), s); DevErrorCode(err) != DevErrSSHFailed {
+			t.Errorf("%s: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "nexal-sb1")); !os.IsNotExist(err) {
+			t.Errorf("%s: a failed fresh workspace is removed", name)
+		}
+	}
+}
+
+func TestRemoteUserFromLabels(t *testing.T) {
+	for in, want := range map[string]string{
+		`{"devcontainer.metadata":"[{\"remoteUser\":\"node\"}]"}`:                         "node",
+		`{"devcontainer.metadata":"[{\"containerUser\":\"dev\"},{\"remoteUser\":\"\"}]"}`: "dev",
+		`{"devcontainer.metadata":"[{\"remoteUser\":\"x; rm -rf /\"}]"}`:                  "",
+		`{"other":"1"}`: "",
+		`null`:          "",
+		``:              "",
+	} {
+		if got := RemoteUserFromLabels(in); got != want {
+			t.Errorf("%s -> %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestDevPodUpNeedsManagementURL(t *testing.T) {
+	s := upSpec()
+	s.ManagementURL = ""
+	if _, err := newTestDevPod(&fakeRun{}, t.TempDir(), "m").Up(context.Background(), s); DevErrorCode(err) != DevErrInvalid {
+		t.Fatalf("%v", err)
+	}
+	s.ManagementURL = "http://plain.example"
+	if _, err := newTestDevPod(&fakeRun{}, t.TempDir(), "m").Up(context.Background(), s); DevErrorCode(err) != DevErrInvalid {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSidecarEntrypointMatchesConnector(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "sidecar", "entrypoint.sh"))
+	if err != nil {
+		t.Skip(err)
+	}
+	ep := string(b)
+	for _, line := range strings.Split(strings.TrimSpace(SidecarEnv(upSpec())), "\n") {
+		if k := strings.SplitN(line, "=", 2)[0]; !strings.Contains(ep, k) {
+			t.Errorf("entrypoint does not read %s", k)
+		}
+	}
+	if !strings.Contains(ep, SidecarBootMount+"/"+SidecarBootFile) {
+		t.Errorf("entrypoint does not read %s/%s", SidecarBootMount, SidecarBootFile)
+	}
+	if strings.Contains(ep, "/usr/sbin/sshd") || strings.Contains(ep, "sshd -D") {
+		t.Error("the sidecar must not run sshd")
 	}
 }
 
@@ -211,7 +343,10 @@ func TestDevPodDeleteRemovesEverything(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ws, "devpod"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ws, "mesh.env"), []byte("NEXAL_SETUP_KEY=x"), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, ws, "boot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ws, "boot", "mesh.env"), []byte("NEXAL_SETUP_KEY=x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f := &fakeRun{}

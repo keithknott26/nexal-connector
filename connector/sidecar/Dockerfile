@@ -15,6 +15,10 @@
 # prepare.py refuses to patch unless every upstream tree hashes to the value
 # pinned in upstream.json, and this file re-checks the NetBird archive hash.
 
+# TODO(digest-pin): pin both base images by digest (name:tag@sha256:...). The
+# digests could not be fetched when this was written (offline); the sidecar-image
+# workflow prints the resolved digests of every build ("Base image digests" step) -
+# copy them here, e.g. GO_IMAGE=golang:1.26-bookworm@sha256:<index digest>.
 ARG GO_IMAGE=golang:1.26-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
@@ -58,17 +62,18 @@ LABEL org.opencontainers.image.title="nexal-mesh-sidecar" \
       systems.nexal.mesh-runtime="${RUNTIME_VERSION}" \
       systems.nexal.mesh-profile="nexal-mlkem1024-tcp-v2"
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates iproute2 iptables openssh-server \
-    && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
-    && useradd -m -s /bin/bash nexal && usermod -p '*' nexal \
-    && mkdir -p /var/lib/nexal /var/log/nexal /run/sshd
+        ca-certificates iproute2 iptables \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/lib/nexal /var/log/nexal /run/nexal-boot
 COPY --from=build /out/netbird /usr/local/bin/netbird
 COPY entrypoint.sh /usr/local/bin/nexal-sidecar-entrypoint
 RUN chmod 0755 /usr/local/bin/nexal-sidecar-entrypoint \
     && printf 'SIDECAR_VERSION=%s\nNETBIRD_RUNTIME_VERSION=%s\nMESH_PROFILE=nexal-mlkem1024-tcp-v2\n' \
         "${SIDECAR_VERSION}" "${RUNTIME_VERSION}" > /etc/nexal-sidecar-release
-# Runs as root on purpose: it must create the tun interface and (optionally) run
-# sshd, in a network namespace shared with the dev container, with only NET_ADMIN
-# added. devpod.go starts it with --cap-add NET_ADMIN --device /dev/net/tun.
+# Runs as root on purpose: it must create the tun interface in the network
+# namespace it shares with the dev container, with only NET_ADMIN added.
+# devpod.go starts it with --cap-add NET_ADMIN --device /dev/net/tun and the join
+# file bind-mounted at /run/nexal-boot. No sshd here: SSH is served by an sshd
+# the connector starts inside the dev container (DevSSHDScript in devpod.go).
 VOLUME /var/lib/nexal
 ENTRYPOINT ["/usr/local/bin/nexal-sidecar-entrypoint"]

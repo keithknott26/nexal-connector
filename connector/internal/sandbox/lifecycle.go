@@ -606,12 +606,17 @@ func (m *Manager) bootDev(ctx context.Context, t Task, reset bool) error {
 		return errors.New("sandbox vanished during boot")
 	}
 	r.Workspace, r.MeshIP, r.HostKey, r.AwaitKey = ws, res.MeshIP, res.HostKeyFingerprint, false
-	r.HostKeyPub = res.HostKey
+	r.HostKeyPub, r.DriveUnavailable = res.HostKey, res.DriveUnavailable
 	err = m.setStateLocked(r, StateRunning)
 	m.mu.Unlock()
 	if err != nil {
 		return err
 	}
+	if res.DriveUnavailable != "" {
+		m.opts.Logger.Info("dev container has no shared drive", "sandbox", t.SandboxID, "reason", res.DriveUnavailable)
+	}
+	// TODO(coordinator): send res.DriveUnavailable as "driveUnavailable" once
+	// POST sandbox-state accepts that key (it rejects unknown keys today).
 	m.report(StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: res.MeshIP,
 		HostKeyFingerprint: res.HostKeyFingerprint, HostKey: res.HostKey, AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
 	return nil

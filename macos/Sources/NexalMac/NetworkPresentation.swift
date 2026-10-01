@@ -159,7 +159,7 @@ struct NetworkPeer: Equatable, Identifiable {
         switch reachability {
         case .sameNetwork:  return "On this network"
         case .remoteNoRoute:
-            return "Linked, but not reachable from here: no private route to this Mac exists yet."
+            return "Linked, but not reachable from here: no private route to this computer exists yet."
         case .unknown:      return "Address not advertised yet"
         }
     }
@@ -176,12 +176,12 @@ struct NetworkState: Equatable {
     /// explained rather than just empty.
     var unreachableNote: String? {
         guard !peers.isEmpty, connectablePeers.isEmpty else { return nil }
-        return "No Mac on this network right now. Other Macs need a private network route "
+        return "No computer on this network right now. Other computers need a private network route "
              + "before SSH or Screen Sharing can reach them."
     }
 
     var emptyNote: String? {
-        peers.isEmpty ? "No other connections yet. Pair another Mac with neXal@home on your iPhone." : nil
+        peers.isEmpty ? "No other connections yet. Pair another computer with neXal@home on your iPhone." : nil
     }
 }
 
@@ -222,7 +222,7 @@ enum LeavePhase: Equatable {
         case .leaving:
             return "Removing this Mac from neXal and disconnecting it."
         case .left:
-            return "This Mac is no longer on the neXal network. To pair it again, choose \u{201C}Pair a Mac\u{201D} in neXal@home on your iPhone and scan the code below, or enter the manual pairing code."
+            return "This Mac is no longer on the neXal network. To pair it again, choose \u{201C}Pair a computer\u{201D} in neXal@home on your iPhone and scan the code below, or enter the manual pairing code."
         case .failed(let reason):
             return reason
         }

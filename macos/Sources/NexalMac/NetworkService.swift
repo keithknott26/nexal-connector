@@ -100,7 +100,7 @@ enum NetworkService {
                 + "& \"\(wakeForNetworkCommand)\" "
                 + "& firewallCommands "
                 + "& p & \" service start\" "
-                + "with prompt \"neXal needs to install its secure networking service, allow connections from your other Macs in the macOS firewall (turning off Block all incoming connections and stealth mode), and turn on Wake for network access so other Macs can wake this one.\" "
+                + "with prompt \"neXal needs to install its secure networking service, allow connections from your other computers in the macOS firewall (turning off Block all incoming connections and stealth mode), and turn on Wake for network access so other computers can wake this one.\" "
                 + "with administrator privileges",
             "end run",
         ]
@@ -310,9 +310,9 @@ enum NetworkService {
             command += " & p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
                 + "& p & \" service start >/dev/null 2>&1; \""
         }
-        let what = [firewall ? "allow connections from your other Macs in the macOS firewall (turning off Block all incoming connections and stealth mode)" : nil,
-                    lazy ? "keep connections to your other Macs always on" : nil,
-                    wake ? "turn on Wake for network access so other Macs can wake this one" : nil]
+        let what = [firewall ? "allow connections from your other computers in the macOS firewall (turning off Block all incoming connections and stealth mode)" : nil,
+                    lazy ? "keep connections to your other computers always on" : nil,
+                    wake ? "turn on Wake for network access so other computers can wake this one" : nil]
             .compactMap { $0 }.joined(separator: " and ")
         let script = [
             "on run argv",
@@ -356,7 +356,7 @@ enum NetworkService {
         let script = [
             "on run argv",
             "set p to quoted form of (item 1 of argv)",
-            "do shell script p & \" guest remove-guard\" with prompt \"neXal needs to disconnect the previous temporary access before pairing this Mac as one of your own Macs.\" with administrator privileges",
+            "do shell script p & \" guest remove-guard\" with prompt \"neXal needs to disconnect the previous temporary access before pairing this Mac as one of your own computers.\" with administrator privileges",
             "end run",
         ]
         try runAdminScript(script, argument: helper.path)

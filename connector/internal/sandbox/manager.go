@@ -477,6 +477,9 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		return m.bootDev(ctx, t, reset)
 	}
 	id := t.SandboxID
+	progress := throttle(func(step string, pct int) { m.reportProgress(id, step, pct) })
+	ctx = WithProgress(ctx, progress)
+	progress(StepCheck, 2)
 	if reset {
 		// Stop the old VM (ordered), then drop its disk and seed.
 		m.stopVM(ctx, m.handleOf(id))
@@ -495,6 +498,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	if err := m.diskCheck(ctx, uint64(size)); err != nil {
 		return err
 	}
+	progress(StepDisk, 76)
 	if err := os.MkdirAll(m.boxDir(id), 0o700); err != nil {
 		return err
 	}
@@ -506,6 +510,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
 		DriveWritable: driveWritable(t), SSHCAPublicKey: t.SSHCAPublicKey, DriveToken: t.DriveToken,
 		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL, DriveURL: t.DriveURL}
+	progress(StepSeed, 82)
 	if err := WriteSeedDir(m.seedDir(id), seed); err != nil {
 		return err
 	}
@@ -516,6 +521,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	_ = os.RemoveAll(m.seedDir(id))
 	_ = os.Remove(m.consoleLog(id))
 
+	progress(StepBoot, 88)
 	h, err := m.opts.Hypervisor.Start(ctx, Spec{SandboxID: id, Hostname: t.Hostname, CPUs: t.Size.CPUs,
 		MemoryMB: t.Size.MemoryMB, DiskPath: m.diskPath(id), SeedPath: m.seedISO(id),
 		ConsoleLog: m.consoleLog(id), Desktop: t.Desktop, KeepAwake: false})
@@ -529,6 +535,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	}
 	m.mu.Unlock()
 
+	progress(StepJoin, 93)
 	fb, err := m.awaitFirstBoot(ctx, id, h)
 	if err != nil {
 		return err

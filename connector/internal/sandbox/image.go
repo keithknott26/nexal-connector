@@ -273,6 +273,7 @@ func (s *ImageStore) Ensure(ctx context.Context, img Image) (string, int64, erro
 			if s.Convert == nil {
 				return "", 0, errors.New("image is qcow2 and no converter is available")
 			}
+			progressOf(ctx)(StepConvert, 60)
 			part := raw + ".part"
 			_ = os.Remove(part)
 			if err := s.Convert.ToRaw(ctx, src, part); err != nil {
@@ -290,6 +291,22 @@ func (s *ImageStore) Ensure(ctx context.Context, img Image) (string, int64, erro
 		return "", 0, err
 	}
 	return usable, fi.Size(), nil
+}
+
+// countingWriter maps bytes received onto the 5..58 % band of overall progress.
+type countingWriter struct {
+	n, total int64
+	report   ProgressFunc
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	if c.total > 0 {
+		c.report(StepDownload, 5+int(53*c.n/c.total))
+	} else {
+		c.report(StepDownload, 5)
+	}
+	return len(p), nil
 }
 
 func (s *ImageStore) download(ctx context.Context, rawURL, dest string, want ImageDigest) error {
@@ -314,7 +331,9 @@ func (s *ImageStore) download(ctx context.Context, rawURL, dest string, want Ima
 		return err
 	}
 	h := want.newHash()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, MaxImageBytes+1))
+	progress := progressOf(ctx)
+	total := resp.ContentLength
+	n, err := io.Copy(io.MultiWriter(f, h, &countingWriter{total: total, report: progress}), io.LimitReader(resp.Body, MaxImageBytes+1))
 	cerr := f.Close()
 	if err == nil {
 		err = cerr

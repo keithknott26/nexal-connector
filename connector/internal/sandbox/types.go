@@ -246,6 +246,10 @@ type StateReport struct {
 	// no comment); the coordinator pins it for connect responses.
 	HostKey string `json:"hostKey,omitempty"`
 	Error   string `json:"error,omitempty"`
+	// Step and Percent describe provisioning progress (steps: check, download,
+	// convert, disk, seed, boot, join). Only sent while provisioning.
+	Step    string `json:"step,omitempty"`
+	Percent int    `json:"percent,omitempty"`
 }
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)

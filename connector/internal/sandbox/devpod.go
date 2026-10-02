@@ -705,7 +705,65 @@ func (d *DevPod) containerID(ctx context.Context, t devTools, ws string, running
 			return l, nil
 		}
 	}
+	// DevPod may label the container with the workspace's UID rather than its id.
+	// Match either among all dev containers.
+	uid := d.workspaceUID(ws)
+	listArgs := []string{"ps", "-a", "--filter", "label=" + workspaceLabel, "--format", "{{.ID}}\t{{.State}}\t{{.Labels}}"}
+	if out, err = d.run(ctx, t, t.docker, listArgs...); err != nil {
+		return "", err
+	}
+	for _, l := range strings.Split(out, "\n") {
+		parts := strings.SplitN(strings.TrimSpace(l), "\t", 3)
+		if len(parts) != 3 || parts[0] == "" {
+			continue
+		}
+		if runningOnly && parts[1] != "running" {
+			continue
+		}
+		labels := "," + parts[2] + ","
+		if strings.Contains(labels, ","+workspaceLabel+"="+ws+",") ||
+			(uid != "" && strings.Contains(labels, ","+workspaceLabel+"="+uid+",")) {
+			return parts[0], nil
+		}
+	}
 	return "", nil
+}
+
+// tailOutput keeps the last n bytes: DevPod prints the useful lines last.
+func tailOutput(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > n {
+		s = "…" + strings.ToValidUTF8(s[len(s)-n:], "")
+	}
+	return s
+}
+
+// workspaceUID reads the UID DevPod recorded for ws in this private DEVPOD_HOME.
+func (d *DevPod) workspaceUID(ws string) string {
+	b, err := os.ReadFile(filepath.Join(d.wsDir(ws), "devpod", "contexts", "default", "workspaces", ws, "workspace.json"))
+	if err != nil {
+		return ""
+	}
+	var w struct {
+		UID string `json:"uid"`
+	}
+	if json.Unmarshal(b, &w) != nil {
+		return ""
+	}
+	return w.UID
+}
+
+// containerSnapshot is a short `docker ps -a` for error messages, so a failure
+// says what the runtime actually holds before cleanup removes it.
+func (d *DevPod) containerSnapshot(ctx context.Context, t devTools) string {
+	out, err := d.run(ctx, t, t.docker, "ps", "-a", "--format", "{{.ID}} {{.State}} {{.Image}} {{.Label \"dev.containers.id\"}}")
+	if err != nil {
+		return "docker ps failed: " + trimOutput([]byte(out))
+	}
+	if strings.TrimSpace(out) == "" {
+		return "no containers on " + t.rt.DockerHost()
+	}
+	return trimOutput([]byte(out))
 }
 
 // Up implements DevOps.
@@ -795,12 +853,13 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	// the runtime's socket so neither depends on the inherited environment.
 	_, _ = d.run(ctx, t, t.devpod, "provider", "set-options", "docker",
 		"--option", "DOCKER_PATH="+t.docker, "--option", "DOCKER_HOST="+t.rt.DockerHost())
-	if out, uerr := d.run(ctx, t, t.devpod, DevPodUpArgs(source, s.Workspace, false)...); uerr != nil {
-		return res, devErr(DevErrDevPodFailed, "devpod up failed: %s", trimOutput([]byte(out)))
+	upOut, uerr := d.run(ctx, t, t.devpod, DevPodUpArgs(source, s.Workspace, false)...)
+	if uerr != nil {
+		return res, devErr(DevErrDevPodFailed, "devpod up failed: %s", trimOutput([]byte(upOut)))
 	}
 	cid, cerr := d.containerID(ctx, t, s.Workspace, true)
 	if cerr != nil || cid == "" {
-		return res, devErr(DevErrDevPodFailed, "the dev container is not running after devpod up")
+		return res, devErr(DevErrDevPodFailed, "the dev container is not running after devpod up; containers: %s; devpod said: %s", d.containerSnapshot(ctx, t), tailOutput(upOut, 600))
 	}
 	// Enforce the size on the running container whatever its source: a repo
 	// brings its own devcontainer.json without our runArgs, and a persistent

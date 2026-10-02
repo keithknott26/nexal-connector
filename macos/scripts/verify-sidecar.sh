@@ -14,7 +14,8 @@ command -v docker >/dev/null || { echo "docker not found; start Colima/OrbStack/
 PROFILE=$(python3 -c "import json;print(json.load(open('$ROOT/macos/scripts/runtime-policy.json'))['profile'])")
 # Expected NetBird version: the Dockerfile's RUNTIME_VERSION (kept in step with update-runtime.sh).
 WANT=$(sed -n 's/^ARG RUNTIME_VERSION=//p' "$ROOT/connector/sidecar/Dockerfile" | head -1)
-MAC=$(sed -n 's/^VERSION="\(.*\)-mac"$/\1/p' "$ROOT/macos/scripts/update-runtime.sh")
+# Same single source of truth update-runtime.sh reads (see its header comment).
+MAC=$(tr -d '[:space:]' < "$ROOT/experiments/mlkem1024-mesh/RUNTIME_VERSION")
 plat=(); [ -z "$PLATFORM" ] || plat=(--platform "$PLATFORM")
 fail=0; ok() { echo "ok    $*"; }; bad() { echo "FAIL  $*"; fail=1; }
 run() { docker run --rm "${plat[@]}" --entrypoint "$1" "$IMAGE" "${@:2}"; }

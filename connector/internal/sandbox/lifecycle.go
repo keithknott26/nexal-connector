@@ -303,6 +303,7 @@ func (m *Manager) markAwaitKey(id, msg string) {
 	}
 	r.AwaitKey = true
 	m.saveLocked()
+	m.opts.Logger.Debug("sandbox awaiting fresh mesh key", "sandbox", id, "state", string(r.State), "error", msg)
 	rep := StateReport{SandboxID: id, State: r.State, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
 		NeedsKey: true, Error: msg}
 	m.mu.Unlock()
@@ -389,6 +390,7 @@ func (m *Manager) markRunning(id, meshIP, ackTask string) {
 	} else {
 		m.saveLocked()
 	}
+	m.opts.Logger.Debug("sandbox running", "sandbox", id, "meshIp", r.MeshIP, "ackTask", ackTask)
 	rep := StateReport{SandboxID: id, State: StateRunning, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
 		AckTaskID: ackTask}
 	m.mu.Unlock()
@@ -604,13 +606,20 @@ func (m *Manager) bootDev(ctx context.Context, t Task, reset bool) error {
 	if t.Devcontainer == nil {
 		return errors.New("devcontainer payload missing")
 	}
+	upStarted := time.Now()
+	m.opts.Logger.Debug("dev container up starting", "sandbox", t.SandboxID, "workspace", ws, "reset", reset,
+		"recreate", reset && !t.keepData, "driveMode", driveModeOf(t))
 	res, err := m.opts.Dev.Up(ctx, DevUpSpec{Workspace: ws, Hostname: t.Hostname, Devcontainer: *t.Devcontainer,
 		Size: t.Size, SetupKey: t.SetupKey, ManagementURL: t.ManagementURL, SSHCAPublicKey: t.SSHCAPublicKey,
 		DriveMode: driveModeOf(t), DriveToken: t.DriveToken, Lifecycle: lifecycleOf(t), Tenant: t.Tenant,
 		Recreate: reset && !t.keepData, Timeout: m.firstBootTimeout()})
 	if err != nil {
+		m.opts.Logger.Debug("dev container up failed", "sandbox", t.SandboxID, "code", DevErrorCode(err),
+			"durationMs", time.Since(upStarted).Milliseconds())
 		return err
 	}
+	m.opts.Logger.Debug("dev container up", "sandbox", t.SandboxID, "meshIp", res.MeshIP,
+		"durationMs", time.Since(upStarted).Milliseconds())
 	m.mu.Lock()
 	r := m.boxes[t.SandboxID]
 	if r == nil {

@@ -24,6 +24,7 @@ import (
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/cybersecurity"
+	"nexal/connector/internal/diaglog"
 	"nexal/connector/internal/diagnostics"
 	"nexal/connector/internal/discovery"
 	"nexal/connector/internal/mesh"
@@ -78,7 +79,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|security-import|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "exit-route":
@@ -95,6 +96,8 @@ func run(ctx context.Context, args []string) error {
 		return securityImportCommand(ctx, args[1:])
 	case "coordinator-check":
 		return coordinatorCheckCommand(ctx, args[1:])
+	case "diagnostics":
+		return diagnosticsCommand(ctx, args[1:])
 	case "bundle-send", "bundle-receive":
 		return bundleCommand(ctx, args[0], args[1:])
 	case "init":
@@ -462,11 +465,24 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	// Records never include tokens, ciphertext or coordinator URLs.
 	// Development configurations get the high-frequency records (per-poll and
 	// per-retry failures); production keeps to attempt-level and fault records.
+	//
+	// Diagnostic mode (`nexal diagnostics --on`, or the Mac app's Diagnostics
+	// toggle) raises this level to Debug while the agent runs, without a restart,
+	// and mirrors every record into the size-capped diagnostics.log. The agent
+	// re-reads the flag file every few seconds.
 	level := slog.LevelInfo
 	if c.Development {
 		level = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	logDir, logDirErr := diaglog.LogDir()
+	if logDirErr != nil {
+		logDir = ""
+	}
+	diag := diaglog.New(os.Stderr, level, *path, logDir)
+	logger := diag.Logger()
+	go diag.Watch(ctx, diaglog.PollInterval, logger.With("component", "diagnostics"))
+	mesh.SetDiagnosticLogger(logger.With("component", "mesh"))
+	api.SetLogger(logger.With("component", "coordinator"))
 	opts := []agent.Option{agent.WithLogger(logger)}
 	// HARDENING-PLAN §36.4: contribution must be conditional, so the power,
 	// thermal and free-disk probes are installed for every configuration — there
@@ -757,21 +773,35 @@ func policyCommand(ctx context.Context, args []string) error {
 }
 
 func localRequest(ctx context.Context, path, method, command string, body []byte) error {
-	c, err := config.Load(path)
+	b, err := localFetch(ctx, path, method, command, body, 64<<10)
 	if err != nil {
 		return err
+	}
+	var out any
+	if json.NewDecoder(bytes.NewReader(b)).Decode(&out) != nil {
+		return errors.New("invalid local API JSON")
+	}
+	return emit(out)
+}
+
+// localFetch performs one authenticated local API request and returns the raw
+// 200 response body, at most limit bytes.
+func localFetch(ctx context.Context, path, method, command string, body []byte, limit int64) ([]byte, error) {
+	c, err := config.Load(path)
+	if err != nil {
+		return nil, err
 	}
 	secrets, err := config.NewSecrets(path, c)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	token, err := secrets.Get(ctx, "admin")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, method, "http://"+c.Listen+"/v1/"+command, bytes.NewReader(body))
 	if err != nil {
-		return errors.New("cannot construct local command")
+		return nil, errors.New("cannot construct local command")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	if body != nil {
@@ -782,21 +812,17 @@ func localRequest(ctx context.Context, path, method, command string, body []byte
 		CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("local redirect forbidden") }}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return errors.New("connector is not running or local API is unavailable")
+		return nil, errors.New("connector is not running or local API is unavailable")
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
-	if err != nil || len(b) > 64<<10 {
-		return errors.New("invalid local API response")
+	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil || int64(len(b)) > limit {
+		return nil, errors.New("invalid local API response")
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("local command rejected (HTTP %d)", resp.StatusCode)
+		return nil, fmt.Errorf("local command rejected (HTTP %d)", resp.StatusCode)
 	}
-	var out any
-	if json.NewDecoder(bytes.NewReader(b)).Decode(&out) != nil {
-		return errors.New("invalid local API JSON")
-	}
-	return emit(out)
+	return b, nil
 }
 func tunnelCommand(ctx context.Context, args []string) error {
 	f, path, err := flags("tunnel-check")

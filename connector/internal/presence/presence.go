@@ -329,8 +329,10 @@ func (c *Client) setDisconnected(reason string) {
 func (c *Client) session(ctx context.Context) error {
 	conn, err := c.opts.Dial(ctx)
 	if err != nil {
+		c.opts.Logger.Debug("presence stream dial failed", "reason", describe(err))
 		return err
 	}
+	c.opts.Logger.Info("presence stream connected")
 	sessCtx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	defer func() {
@@ -390,7 +392,10 @@ func (c *Client) session(ctx context.Context) error {
 			continue
 		}
 		if c.handle(data) {
-			snapshotOnce.Do(func() { close(snapshotSeen) })
+			snapshotOnce.Do(func() {
+				close(snapshotSeen)
+				c.opts.Logger.Debug("presence snapshot received", "online", len(c.Snapshot().Online))
+			})
 		}
 		if c.isRemoved() {
 			return nil

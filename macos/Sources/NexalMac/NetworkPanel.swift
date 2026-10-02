@@ -313,6 +313,8 @@ struct NetworkPanel: View {
             // Line the details up with the header's text: the disclosure chevron
             // plus the status dot and its spacing.
             .padding(.leading, Self.hostDetailIndent)
+            // The details exist only while expanded, so appearing is the expand.
+            .onAppear { AppDiagnostics.ui("peer expanded", ["peer": peer.name, "lifecycle": peer.lifecycle, "pq": peer.pq]) }
         } label: {
             HStack(alignment: .top, spacing: Self.hostDotSpacing) {
                 Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
@@ -855,6 +857,8 @@ struct NetworkPanel: View {
             let scheme = shown.scheme ?? ""
             let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName,
                                           password: KeychainPassword.lookup(scheme: scheme, host: host), share: share) ?? shown
+            // Never the raw URL: it may carry a Keychain password.
+            AppDiagnostics.ui("service link opened", ["service": scheme, "link": PeerServiceURL.redacted(url)])
             do {
                 switch url.scheme {
                 case "ssh": model.openServiceApplication("com.apple.Terminal", url: url)

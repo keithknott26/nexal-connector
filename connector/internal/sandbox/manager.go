@@ -272,6 +272,7 @@ func (m *Manager) setStateLocked(r *record, to State) error {
 	if !CanTransition(r.State, to) {
 		return fmt.Errorf("illegal sandbox transition %q -> %q", r.State, to)
 	}
+	m.opts.Logger.Debug("sandbox state", "sandbox", r.ID, "kind", string(r.Kind), "from", string(r.State), "to", string(to))
 	r.State = to
 	r.UpdatedAt = m.opts.Now()
 	switch to {
@@ -365,6 +366,7 @@ func (m *Manager) dispatch(ctx context.Context, t Task) {
 		m.opts.Logger.Warn("sandbox task rejected", "task", t, "error", err.Error())
 		return
 	}
+	m.opts.Logger.Debug("sandbox task received", "task", t)
 	switch t.Kind {
 	case KindDelete:
 		m.startTeardown(t.TaskID, t.SandboxID)

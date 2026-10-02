@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -79,6 +80,25 @@ type Client struct {
 	// validator, to relax the https clause that would otherwise make the loopback
 	// profile (and the offline test harness) unable to construct a payload at all.
 	dev bool
+	// logger, when set, records one Debug line per coordinator request: method,
+	// path, status and duration. Never headers, bodies, query strings or origin.
+	logger *slog.Logger
+}
+
+// SetLogger installs the per-request diagnostic logger. Call before the client
+// is shared between goroutines.
+func (c *Client) SetLogger(l *slog.Logger) { c.logger = l }
+
+func (c *Client) logRequest(method, path string, status int, started time.Time, err error) {
+	if c.logger == nil {
+		return
+	}
+	p, _, _ := strings.Cut(path, "?")
+	attrs := []any{"method", method, "path", p, "status", status, "durationMs", time.Since(started).Milliseconds()}
+	if err != nil {
+		attrs = append(attrs, "error", err.Error())
+	}
+	c.logger.Debug("coordinator request", attrs...)
 }
 
 func New(base, token string, dev bool) (*Client, error) {
@@ -190,11 +210,15 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, stric
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
+	started := time.Now()
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return transportError(err)
+		terr := transportError(err)
+		c.logRequest(method, path, 0, started, terr)
+		return terr
 	} // never expose URL or bearer in errors
 	defer resp.Body.Close()
+	c.logRequest(method, path, resp.StatusCode, started, nil)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if path == "/api/hosts/enroll" && resp.StatusCode == http.StatusConflict {
 			return errors.New("coordinator rejected enrollment (HTTP 409): invitation invalid, expired, or already used; generate a fresh enr_ invitation in Hosts > Enroll host, not an owner token")

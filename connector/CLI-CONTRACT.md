@@ -465,3 +465,18 @@ or persist it. The coordinator still authorizes the credential request.
   the member routes. The coordinator acts for the computer's owner, scoped to the network the computer is enrolled
   in. An unenrolled computer fails locally with `not_enrolled`; coordinator `forbidden` means the host has no
   active owner/network.
+
+### Diagnostic mode (`nexal diagnostics`)
+
+- `nexal diagnostics [--on|--off|--status] [--config path]` creates or removes `diagnostics.enabled` next to
+  `config.json` and prints `{"enabled","logDirectory","agentLog","diagnosticsLog","appLog","pollSeconds"}`.
+  A running agent applies the flag within `pollSeconds` (3) without a restart: its log level becomes Debug and
+  every record is also written to `diagnosticsLog` (`~/Library/Logs/Nexal/diagnostics.log`, 5 MiB, one
+  rotation `.1`). Turning it off restores the configured level (Info; Debug for development profiles).
+- `nexal diagnostics --bundle /absolute/path.txt` additionally writes a redacted plain-text bundle (0600) and adds
+  `"bundle"` and `"bundleBytes"` to the output: versions, OS, mesh runtime version and per-peer link/PQ evidence,
+  the agent's `/v1/status` summary (requires the running agent; otherwise "unavailable"), Wake-on-LAN counts
+  (MAC count, LAN-key prefix count, wake-for-network, last report accepted — never the MACs or prefixes), and the
+  tails of `agent.log`, `diagnostics.log` and the Mac app's `app.log`. Tokens, setup keys, passwords, private
+  keys, URL credentials, MAC addresses and long key-like strings are redacted.
+- Neither form contacts the coordinator. Records never carry tokens, setup keys, credentials or private keys.

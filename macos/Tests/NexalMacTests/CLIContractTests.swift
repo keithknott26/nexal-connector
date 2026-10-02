@@ -48,6 +48,17 @@ final class CLIContractTests: XCTestCase {
         XCTAssertFalse(ConnectorProcess.configURL.path.contains("KWK"))
     }
 
+    func testDiagnosticsCommandsMatchGoContract() {
+        let config = URL(fileURLWithPath: "/tmp/nexal/config.json")
+        XCTAssertEqual(CLICommand.diagnostics(.on).arguments(config: config), ["diagnostics", "--on", "--config", config.path])
+        XCTAssertEqual(CLICommand.diagnostics(.off).arguments(config: config), ["diagnostics", "--off", "--config", config.path])
+        XCTAssertEqual(CLICommand.diagnostics(.status).arguments(config: config), ["diagnostics", "--status", "--config", config.path])
+        XCTAssertEqual(CLICommand.diagnostics(.bundle(path: "/tmp/a b.txt")).arguments(config: config),
+                       ["diagnostics", "--bundle", "/tmp/a b.txt", "--config", config.path])
+        XCTAssertEqual(CLICommand.diagnostics(.bundle(path: "/tmp/x.txt")).timeLimit, 60)
+        XCTAssertEqual(CLICommand.diagnostics(.status).timeLimit, 20)
+    }
+
     func testCommandsMatchGoContract() {
         for (command, name) in [(CLICommand.run, "run"), (.status, "status"),
                                 (.pause, "pause"), (.resume, "resume"), (.acceptJobs, "accept-jobs")] {

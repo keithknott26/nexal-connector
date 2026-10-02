@@ -755,6 +755,7 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 	if !rejected.IsZero() && trigger == "interval" && time.Since(rejected) < credentialRetryInterval {
 		return
 	}
+	started := time.Now()
 	err := a.hostHeartbeat(ctx)
 	var status *client.StatusError
 	a.mu.Lock()
@@ -777,7 +778,9 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 			return
 		}
 		a.logger.Warn("host heartbeat failed", "trigger", trigger, "error", errorText(err))
+		return
 	}
+	a.logger.Debug("host heartbeat ok", "trigger", trigger, "durationMs", time.Since(started).Milliseconds())
 }
 
 func (a *Agent) hostHeartbeat(ctx context.Context) error {
@@ -824,6 +827,8 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 			ReportTunnelStatus(context.Context, string, mesh.Status) error
 		}); ok && due {
 			err = reporter.ReportTunnelStatus(ctx, hostID, meshStatus)
+			a.logger.Debug("tunnel status report", "lifecycle", lifecycle, "pq", string(meshStatus.PQ),
+				"peers", len(meshStatus.Peers), "ok", err == nil)
 			if err == nil {
 				a.mu.Lock()
 				a.lastTunnelReport, a.lastTunnelLifecycle = time.Now(), lifecycle

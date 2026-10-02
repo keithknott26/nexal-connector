@@ -50,7 +50,10 @@ final class AppModel: ObservableObject {
     /// Set only through `perform`, so it cannot be left stale after a throw: the
     /// same defer that clears `busy` clears this.
     @Published private(set) var activity: String?
-    @Published private(set) var message: String?
+    @Published private(set) var message: String? {
+        // Every message the panel shows (errors included) is a diagnostic event.
+        didSet { if let message, message != oldValue { AppDiagnostics.event("message", message) } }
+    }
     @Published private(set) var processOwned = false
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var enrollmentPresentation = EnrollmentPresentation()
@@ -314,6 +317,11 @@ final class AppModel: ObservableObject {
 
     func honeypot(action: String) async throws -> HoneypotReply {
         try JSONDecoder().decode(HoneypotReply.self, from: try await invoke(.honeypot(action: action)))
+    }
+
+    /// `nexal diagnostics`: toggle or report diagnostic mode, or export a bundle.
+    func diagnostics(_ action: DiagnosticsAction) async throws -> DiagnosticsReply {
+        try JSONDecoder().decode(DiagnosticsReply.self, from: try await invoke(.diagnostics(action)))
     }
 
     /// Throwaway hosts on the network and Connect, through the connector (this app has no coordinator client).
@@ -671,6 +679,8 @@ final class AppModel: ObservableObject {
         do {
             let reply = try JSONDecoder().decode(Reply.self, from: try await invoke(.wake(tunnelAddress: tunnel)))
             let senders = reply.relays
+            AppDiagnostics.ui("wake result", ["peer": peer.name, "relays": String(senders),
+                                              "targetWakeForNetwork": String(reply.targetWakeForNetwork)])
             guard senders > 0 else {
                 wakeStatus[peer.id] = "No other neXal computer on that computer\u{2019}s local network is awake to send the wake packet."
                 return
@@ -684,6 +694,7 @@ final class AppModel: ObservableObject {
             // ShellError.commandFailed carries the connector's own stderr message
             // (e.g. "too many wake requests; wait a minute"), so this is friendly text.
             wakeStatus[peer.id] = error.localizedDescription
+            AppDiagnostics.error("wake failed", ["peer": peer.name, "error": error.localizedDescription])
         }
     }
 

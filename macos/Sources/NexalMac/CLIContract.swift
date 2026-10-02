@@ -56,6 +56,9 @@ enum CLICommand {
     case honeypot(action: String)
     /// Throwaway hosts: `list`, or `connect` with an id and kind (ssh|vnc|files; ssh/files read a public key on stdin).
     case sandbox(action: String, id: String?, kind: String?)
+    /// Diagnostic mode: switch the agent's Debug logging on or off (no restart),
+    /// report it, or write a redacted bundle to an absolute path.
+    case diagnostics(DiagnosticsAction)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination, which waits for a person to
@@ -65,6 +68,7 @@ enum CLICommand {
         if case .redeemGuestInvitation = self { return 60 }
         if case .activateGuestInvitation = self { return 40 }
         if case .exitRoute = self { return 35 }
+        if case .diagnostics(.bundle(_)) = self { return 60 }
         return 20
     }
 
@@ -123,9 +127,32 @@ enum CLICommand {
             command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):
             command = ["wake", "--tunnel", tunnelAddress]
+        case let .diagnostics(action):
+            switch action {
+            case .on: command = ["diagnostics", "--on"]
+            case .off: command = ["diagnostics", "--off"]
+            case .status: command = ["diagnostics", "--status"]
+            case let .bundle(path): command = ["diagnostics", "--bundle", path]
+            }
         }
         return command + ["--config", config.path]
     }
+}
+
+/// What `nexal diagnostics` should do.
+enum DiagnosticsAction: Equatable {
+    case on, off, status
+    /// Write the redacted .txt bundle to this absolute path.
+    case bundle(path: String)
+}
+
+/// `nexal diagnostics` output: the mode and where its logs are.
+struct DiagnosticsReply: Decodable {
+    let enabled: Bool
+    let agentLog: String?
+    let diagnosticsLog: String?
+    let appLog: String?
+    let bundle: String?
 }
 
 /// The two roles the coordinator and the phone both accept, and nothing else.

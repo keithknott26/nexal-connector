@@ -76,5 +76,6 @@ func probeServices(ip string) []string {
 	serviceMu.Lock()
 	serviceCache[ip] = serviceProbe{at: time.Now(), services: services}
 	serviceMu.Unlock()
+	noteServiceProbe(ip, services)
 	return services
 }

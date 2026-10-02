@@ -280,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             popover.performClose(sender)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            AppDiagnostics.ui("panel opened")
             popover.contentViewController?.view.window?.makeKey()
             NSApp.activate()
         }

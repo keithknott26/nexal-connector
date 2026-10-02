@@ -149,6 +149,9 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
+            GroupBox("Diagnostics") {
+                DiagnosticsSettingsView().padding(8)
+            }
         }
         .toggleStyle(.checkbox)
     }

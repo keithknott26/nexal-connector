@@ -97,9 +97,12 @@ func (p RuntimeProvider) Snapshot() Status {
 	defer cancel()
 	out, err := p.Run(ctx)
 	if err != nil {
+		noteRuntimeFailure(err)
 		return UnavailableProvider{}.Snapshot()
 	}
-	return translateRuntime(out, now())
+	at := now()
+	noteRuntimeStatus(out, at)
+	return translateRuntime(out, at)
 }
 
 func translateRuntime(out []byte, now time.Time) Status {

@@ -1,8 +1,13 @@
 # neXal storage: managed dev-container runner
 
-This turns K's Linux storage server into **neXal storage**, the location members can pick in the
+This turns a Linux server into **neXal storage**, a location members can pick in the
 Create-instance picker (iOS and dashboard) for dev containers, persistent or not. VMs on it are later
 work (Linux QEMU/KVM, ticket 5 in `nexal-platform/docs/NEXAL-CLOUD-HOSTS.md`).
+
+Any member can run one, on either of two workspace storage backends with the same managed-host
+capabilities either way: **local disk** on their own box, or **S3 via JuiceFS** (own bucket, own
+keys) for an operator who would rather pay for cheap object storage than find local disk -- see
+"Storage backend" below.
 
 What runs: the ordinary `nexal` connector, enrolled as a host in the **operator's** account and flagged
 as a managed host on the coordinator. It polls its own task queue with its own host token. Tasks come
@@ -16,6 +21,7 @@ a one-use key made for that sandbox.
 |---|---|
 | Coordinator | Each task names an opaque tenant tag (first 16 hex of SHA-256 of `nexal-tenant:<tenantId>`). Per-tenant caps (instances, CPU, memory, disk) are enforced when a sandbox is created. |
 | Network | One docker bridge per tenant (`nexal-t-<tag>`, bridge `nx-<12 hex>`). Docker isolates bridges from each other; `nexal-storage-firewall.sh` also stops containers reaching this server, the LAN and private ranges. Mesh access is per sandbox (the member's network policy). |
+| Storage | Every workspace lands under `/var/lib/nexal/devcontainers/<workspace>/src`, on whichever backend this host chose (see "Storage backend"); JuiceFS does not itself separate tenants, so the Coordinator/Resources/Definitions/Labels layers above still carry the isolation. |
 | Resources | `--cpus`, `--memory` (= swap limit), `--pids-limit` per container; all of a tenant's containers in `nexal-tenants-<tag>.slice`, all tenants in `nexal-tenants.slice` (cap it so storage keeps headroom). Optional disk quota with `NEXAL_MANAGED_STORAGE_OPT=1`. |
 | Definitions | Every devcontainer.json (template, inline, or the repository's own, which the connector clones itself with hooks, submodules and symlinks off) is rewritten through an allowlist: no `mounts`, `runArgs`, `privileged`, `capAdd`, `securityOpt`, `workspaceMount`, `appPort`, `initializeCommand` (it would run on this server), build `options`; Docker Compose refused; only official `ghcr.io/devcontainers/features/*` features minus the docker ones. A persistent workspace's definition is re-sanitized on every restart. |
 | Labels | `nexal.tenant`, `nexal.workspace`, `nexal.managed=1` on containers, sidecars and networks: `docker ps --filter label=nexal.tenant=<tag>`. |
@@ -25,6 +31,25 @@ Residual risk: containers run under the rootful Docker Engine; a kernel or runti
 stopped by the above. Before opening this to members other than K, consider rootless Docker
 (`NEXAL_DOCKER_SOCKET=/run/user/<uid>/docker.sock`) or `"userns-remap": "default"` in
 `/etc/docker/daemon.json` (test DevPod against it first), and keep the kernel patched.
+
+## Storage backend
+
+Pick one when you set the server up (`setup-storage-backend.sh`, step 3 below); either way every
+other step and every managed-host capability is identical.
+
+| | Local disk | S3 via JuiceFS |
+|---|---|---|
+| Workspace data | `/var/lib/nexal/devcontainers` on this box's own disk | same path, FUSE-mounted from your own S3-compatible bucket |
+| Capacity | whatever this box has free | whatever your bucket can hold, for the price of object storage |
+| Per-tenant disk quota (`NEXAL_MANAGED_STORAGE_OPT=1`) | works (overlay2 on xfs + pquota) | not wired up yet -- same gap the Time Machine gateway already documents; fine for a few members, not yet a public offering |
+| Setup | `setup-storage-backend.sh local` | `setup-storage-backend.sh s3` (prompts for bucket URL + access/secret key, never on argv) |
+| Durability | as durable as this box | as durable as the bucket; JuiceFS's own metadata (`/var/lib/nexal/jfs.db`) is backed up into the bucket hourly, and its RSA key (`/etc/nexal/jfs-rsa.pem`) must be kept separately -- lose it and the backed-up metadata can't be decrypted |
+
+Docker's own image/container storage (`/var/lib/docker`) is never affected by this choice and always
+stays on local disk -- that's the container runtime's hot path, and FUSE/object-storage latency
+there would make every container slow to boot. Only workspace source trees (git checkouts, project
+files) move to JuiceFS; that is exactly the access pattern it is already proven on for Time Machine
+storage (`nexal-platform`'s `self-hosted-config/gateway/`).
 
 ## Server prerequisites
 
@@ -52,7 +77,8 @@ stopped by the above. Before opening this to members other than K, consider root
        install -m 0755 /tmp/nexal /usr/local/bin/nexal
        useradd --system --home-dir /var/lib/nexal --shell /usr/sbin/nologin nexal
        usermod -aG docker nexal
-       install -d -o nexal -g nexal -m 0700 /var/lib/nexal /var/lib/nexal/secrets /etc/nexal
+       install -d -o nexal -g nexal -m 0700 /var/lib/nexal/secrets /etc/nexal
+       ./setup-storage-backend.sh local            # or: ./setup-storage-backend.sh s3 (prompts for bucket + keys)
        install -o nexal -g nexal -m 0600 sandbox-hosting.json /etc/nexal/sandbox-hosting.json
        install -m 0644 nexal-storage.service nexal-tenants.slice /etc/systemd/system/
        install -m 0755 nexal-storage-firewall.sh /usr/local/sbin/

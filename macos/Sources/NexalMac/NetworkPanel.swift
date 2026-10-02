@@ -790,7 +790,7 @@ struct NetworkPanel: View {
                             share: String? = nil) -> some View {
         detailRow(title) {
             if let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName, share: share) {
-                linkButton("Open", symbol, url.absoluteString)
+                linkButton("Open", symbol, url, host: host, share: share)
             } else {
                 Text("Unavailable").foregroundStyle(.secondary)
             }
@@ -823,9 +823,13 @@ struct NetworkPanel: View {
         }
     }
 
-    private func linkButton(_ title: String, _ symbol: String, _ link: String) -> some View {
+    private func linkButton(_ title: String, _ symbol: String, _ shown: URL, host: String, share: String?) -> some View {
         Button {
-            if let url = URL(string: link) {
+            // Credentials are read from Keychain only now, at click, and never displayed.
+            let scheme = shown.scheme ?? ""
+            let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName,
+                                          password: KeychainPassword.lookup(scheme: scheme, host: host), share: share) ?? shown
+            do {
                 switch url.scheme {
                 case "ssh": model.openServiceApplication("com.apple.Terminal", url: url)
                 case "vnc": model.openServiceApplication("com.apple.ScreenSharing", url: url)
@@ -837,7 +841,7 @@ struct NetworkPanel: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .help("\(title): \(link)")
+        .help("\(title): \(PeerServiceURL.redacted(shown))")
     }
 
     private var activityGraphs: some View {

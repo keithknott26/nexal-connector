@@ -165,8 +165,8 @@
 +	// InitiationBackoffBase is the delay after the first consecutive failure; it
 +	// doubles with every further failure.
 +	InitiationBackoffBase = 2 * time.Second
-+	// InitiationBackoffCap bounds the delay toward a peer without a live lease.
-+	InitiationBackoffCap = 5 * time.Minute
++	// InitiationBackoffCap bounds the delay toward a peer without a live lease (30 s: recover soon after a path comes back).
++	InitiationBackoffCap = 30 * time.Second
 +	// RenewalBackoffCap bounds the delay while the current lease is still live,
 +	// so a renewal gets many attempts inside the margin before the lease expires.
 +	RenewalBackoffCap = 15 * time.Second

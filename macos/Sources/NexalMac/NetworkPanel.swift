@@ -437,19 +437,37 @@ struct NetworkPanel: View {
             .padding(.leading, Self.hostDetailIndent)
             .task { localServices = await LocalServiceProbe.run() }
         } label: {
+            let details = thisMacDetails()
+            let publicIP = details?.publicIp ?? model.ownNetInfo.publicAddress
+            let privateIP = details?.lanAddress
+            let location = details?.location ?? model.ownNetInfo.location
             HStack(alignment: .top, spacing: Self.hostDotSpacing) {
                 Circle().fill(mesh.lifecycle == "connected" ? Color.green : Color.orange)
                     .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
+                // An empty placeholder the same size as a peer row's refresh button, so
+                // this Mac's name and detail text line up in the same columns as every
+                // other row's -- there is nothing of its own for this row to refresh.
+                Color.clear.frame(width: 16, height: 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("\(model.hostName) (this Mac)").font(.body.weight(.semibold))
+                    HStack(spacing: 5) {
+                        Text("\(model.hostName) (this Mac)").font(.subheadline.weight(.semibold))
                         if protected { Text("· 🔐").help("Quantum-safe link to neXal storage") }
                     }
-                    Text(lifecycleText(mesh.lifecycle)).font(.caption).foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
+                    Text([publicIP, privateIP, location].compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .help("Public IP · Private IP · Location")
                 }
+                .textSelection(.enabled)
             }
         }
         .accessibilityIdentifier("this-mac")
+    }
+
+    /// This Mac's own self-reported details, the same presence list a peer's are read from.
+    private func thisMacDetails() -> ConnectorStatus.HostDetails? {
+        guard let hostId = model.status?.hostId else { return nil }
+        return model.status?.presence?.hosts?.first { $0.hostId == hostId }?.info
     }
 
     private func serviceState(_ on: Bool?) -> some View {

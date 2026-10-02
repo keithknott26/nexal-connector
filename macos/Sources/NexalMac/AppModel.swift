@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var wakeStatus: [String: String] = [:]
     /// Public IP and location per mesh peer id, filled in after each status poll.
     @Published private(set) var peerNetInfo: [String: PeerNetInfo] = [:]
+    /// This Mac's own public IP and location, shown the same way as a peer's.
+    @Published private(set) var ownNetInfo = PeerNetInfo()
     /// The exit route this Mac sends all internet traffic through, or nil.
     /// Remembered across launches and re-applied when the service restarts.
     @Published private(set) var exitRoute: String?
@@ -809,6 +811,9 @@ final class AppModel: ObservableObject {
                                                          directIsPrivate: peer.directIsPrivate ?? false)
         }
         if next != peerNetInfo { peerNetInfo = next }
+        let mine = await PeerLocator.shared.ownPublicIP()
+        let mineInfo = PeerNetInfo(publicAddress: mine.ip, location: mine.location)
+        if mineInfo != ownNetInfo { ownNetInfo = mineInfo }
     }
 
     private func updatePeers() async {

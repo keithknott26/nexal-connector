@@ -251,7 +251,15 @@ struct NetworkPanel: View {
                     if let loss = peer.packetLossPercent {
                         detailRow("Packet loss") { Text(loss.formatted(.number.precision(.fractionLength(1))) + "%") }
                     }
-                    detailRow("Traffic") { Text("↑ \(bytes(peer.traffic.sentBytes)) sent · ↓ \(bytes(peer.traffic.receivedBytes)) received") }
+                    detailRow("Traffic") {
+                        let points = model.history.trafficPoints(forPeer: peer.id)
+                        let outRate = points.last(where: { $0.series == "Out" })?.value ?? 0
+                        let inRate = points.last(where: { $0.series == "In" })?.value ?? 0
+                        HStack(spacing: 14) {
+                            trafficGauge("Sent", symbol: "arrow.up", kbps: outRate, total: peer.traffic.sentBytes)
+                            trafficGauge("Received", symbol: "arrow.down", kbps: inRate, total: peer.traffic.receivedBytes)
+                        }
+                    }
                     if let hostname = peer.hostname?.hostname { detailRow("neXal address") { Text(hostname) } }
                 }
                 detailSection("Latency") {
@@ -980,6 +988,22 @@ struct NetworkPanel: View {
         case "failed": "Failed"
         default: "Unavailable"
         }
+    }
+
+    /// Speedometer for one direction: live KB/s on a log scale up to 1 Gbit/s.
+    private func trafficGauge(_ title: String, symbol: String, kbps: Double, total: UInt64) -> some View {
+        let fraction = min(max(log10(1 + kbps * 1_000) / log10(1 + 125_000_000), 0), 1)
+        let reading = kbps >= 1_000 ? String(format: "%.1fM", kbps / 1_000) : String(format: "%.0fK", kbps)
+        return VStack(spacing: 2) {
+            Gauge(value: fraction) { Text(title) } currentValueLabel: { Text(reading).font(.caption2.monospacedDigit()) }
+                .gaugeStyle(.accessoryCircular)
+                .tint(Gradient(colors: [.green, .yellow, .orange]))
+            Label(title, systemImage: symbol).font(.caption2.weight(.semibold)).labelStyle(.titleAndIcon)
+            Text("\(bytes(total)) total").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(reading) per second, \(bytes(total)) total")
     }
 
     private func bytes(_ value: UInt64) -> String {

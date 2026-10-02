@@ -246,3 +246,29 @@ Currently in use:
 		}
 	}
 }
+
+func TestPrefixKeysShareAnyPrefix(t *testing.T) {
+	home := PrefixKeys([]string{"192.168.1.0/24"})
+	multi := PrefixKeys([]string{"10.0.4.0/22", "192.168.1.0/24", "192.168.1.0/24"})
+	if len(home) != 1 || len(multi) != 2 {
+		t.Fatalf("PrefixKeys sizes = %d, %d", len(home), len(multi))
+	}
+	shared := false
+	for _, k := range multi {
+		if k == home[0] {
+			shared = true
+		}
+		if len(k) != 64 {
+			t.Fatalf("key %q is not a hex sha256", k)
+		}
+	}
+	if !shared {
+		t.Fatal("a Mac with an extra prefix must still share the home prefix key")
+	}
+	if PrefixKeys(nil) == nil || len(PrefixKeys(nil)) != 0 {
+		t.Fatal("PrefixKeys(nil) must be an empty, non-nil slice")
+	}
+	if home[0] == LANKey([]string{"192.168.1.0/24"}) {
+		t.Fatal("prefix keys must be domain-separated from LANKey")
+	}
+}

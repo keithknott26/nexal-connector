@@ -163,11 +163,12 @@ func (a *Agent) runWakeInfo(ctx context.Context) {
 		// observes on the PUT. See wol.LANKey.
 		f := collect(ctx)
 		info := client.WakeInfo{MACs: f.MACs, LANKey: f.LANKey, WakeForNetwork: f.WakeForNetwork == wol.WakeEnabled,
-			TunnelAddress: a.selfTunnelAddress()}
+			TunnelAddress: a.selfTunnelAddress(), LANPrefixes: f.PrefixKeys}
 		// Re-report periodically even when nothing local changed: the coordinator
 		// binds lanKey to the public address it observes, which can change
 		// (new ISP lease) without any local fact changing.
 		changed := !lastOK || !slices.Equal(info.MACs, last.MACs) || info.LANKey != last.LANKey ||
+			!slices.Equal(info.LANPrefixes, last.LANPrefixes) ||
 			info.WakeForNetwork != last.WakeForNetwork || info.TunnelAddress != last.TunnelAddress ||
 			time.Since(lastAt) >= wakeInfoRefresh
 		a.mu.Lock()
@@ -177,7 +178,22 @@ func (a *Agent) runWakeInfo(ctx context.Context) {
 			a.wake.Reported = false
 		}
 		a.mu.Unlock()
+		a.logger.Debug("wake facts collected", "macs", len(f.MACs), "lan_prefixes", len(f.Prefixes),
+			"lan_key_present", f.LANKey != "", "wake_for_network", f.WakeForNetwork,
+			"tunnel", info.TunnelAddress != "", "changed", changed)
 		wait := wakeInfoInterval
+		if !(reporter != nil && changed && len(info.MACs) > 0 && info.LANKey != "") {
+			reason := "unchanged"
+			switch {
+			case reporter == nil:
+				reason = "no reporter"
+			case len(info.MACs) == 0:
+				reason = "no physical MAC"
+			case info.LANKey == "":
+				reason = "no LAN prefix"
+			}
+			a.logger.Debug("wake info not reported", "reason", reason)
+		}
 		if reporter != nil && changed && len(info.MACs) > 0 && info.LANKey != "" {
 			reqCtx, stop := boundedRequest(ctx, time.Time{})
 			err := reporter.ReportWakeInfo(reqCtx, info)

@@ -31,6 +31,10 @@ type Facts struct {
 	// LANKey identifies "the same LAN" without revealing its addressing; see
 	// LANKey. Empty when this Mac has no usable IPv4 network right now.
 	LANKey string
+	// PrefixKeys are per-prefix fingerprints (see PrefixKeys), so the
+	// coordinator can match two Macs that share one LAN even when their full
+	// LANKey or public address differs.
+	PrefixKeys []string
 	// WakeForNetwork is the macOS "Wake for network access" setting (pmset
 	// womp): WakeEnabled, WakeDisabled, or WakeUnknown off macOS or when pmset
 	// cannot be read.
@@ -57,6 +61,32 @@ type Facts struct {
 // A multi-homed Mac whose interfaces straddle two LANs puts all its prefixes in
 // one key, so it matches neither LAN's single-homed Macs; that is a known,
 // accepted limitation.
+// PrefixKeys returns hex(sha256("nexal-lan-prefix|" + prefix)) for each
+// distinct prefix, sorted. Unlike LANKey these match on ANY shared prefix, which
+// survives a Mac with an extra physical network or one whose coordinator traffic
+// leaves through a different public address (a neXal exit, IPv6, a VPN). The
+// coordinator only compares them within one tenant.
+func PrefixKeys(prefixes []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, p := range prefixes {
+		sum := sha256.Sum256([]byte("nexal-lan-prefix|" + p))
+		k := hex.EncodeToString(sum[:])
+		if !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	if len(out) > MaxPrefixKeys {
+		out = out[:MaxPrefixKeys]
+	}
+	return out
+}
+
+// MaxPrefixKeys is the coordinator's limit on reported prefix fingerprints.
+const MaxPrefixKeys = 16
+
 func LANKey(prefixes []string) string {
 	if len(prefixes) == 0 {
 		return ""
@@ -105,6 +135,7 @@ func CollectLocal(ctx context.Context) Facts {
 	}
 	sort.Strings(f.Prefixes)
 	f.LANKey = LANKey(f.Prefixes)
+	f.PrefixKeys = PrefixKeys(f.Prefixes)
 	return f
 }
 

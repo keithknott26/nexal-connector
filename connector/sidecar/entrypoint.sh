@@ -69,9 +69,17 @@ netbird status --check live >/dev/null 2>&1 || fail "mesh daemon did not start"
 
 # --enable-rosenpass selects the ML-KEM-1024 profile; --disable-dns keeps the
 # dev container's resolver (shared network namespace) untouched.
-timeout 150 netbird up --setup-key-file "$KEYFILE" --management-url "$MESH_URL" \
-  --enable-rosenpass --disable-dns --hostname "$NEXAL_HOSTNAME" >/dev/null 2>&1 \
-  || fail "netbird up failed or timed out"
+up_out=$(timeout 150 netbird up --setup-key-file "$KEYFILE" --management-url "$MESH_URL" \
+  --enable-rosenpass --disable-dns --hostname "$NEXAL_HOSTNAME" 2>&1)
+up_rc=$?
+if [ $up_rc -ne 0 ]; then
+  # Surface netbird's own reason (bad key, management url unreachable, relay/TLS
+  # failure, ...) on stderr so it rides along in the sidecar log tail the
+  # connector already reads (devpod.go's sidecarLogTail) -- without this, only
+  # the generic "failed or timed out" text below ever reaches the user.
+  [ -n "$up_out" ] && printf '%s\n' "$up_out" | tail -n 10 >&2
+  fail "netbird up failed or timed out"
+fi
 shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
 
 ip=""

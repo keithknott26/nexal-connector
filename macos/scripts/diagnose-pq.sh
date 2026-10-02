@@ -15,7 +15,7 @@ EXPECTED=$(tr -d '[:space:]' < "$ROOT/experiments/mlkem1024-mesh/RUNTIME_VERSION
 
 PEERS='import json,sys
 d=json.load(sys.stdin)
-for p in d.get("peers",{}).get("details",[]):
+for p in ((d.get("peers") or {}).get("details") or []):  # empty while the service is still starting
     print("  %-34s %-10s %-7s profile=%s installed=%s expires=%s reason=%s" % (
         (p.get("fqdn") or "?").split(".")[0], p.get("status"), p.get("connectionType") or "-",
         p.get("quantumProfile") or "-", p.get("quantumKeyInstalledAt") or "-",

@@ -789,7 +789,7 @@ struct NetworkPanel: View {
     private func serviceRow(_ title: String, symbol: String, scheme: String, host: String,
                             share: String? = nil) -> some View {
         detailRow(title) {
-            if let url = PeerServiceURL.make(scheme: scheme, host: host, share: share) {
+            if let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName, share: share) {
                 linkButton("Open", symbol, url.absoluteString)
             } else {
                 Text("Unavailable").foregroundStyle(.secondary)

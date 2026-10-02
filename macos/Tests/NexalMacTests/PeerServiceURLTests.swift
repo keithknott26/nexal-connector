@@ -7,6 +7,10 @@ final class PeerServiceURLTests: XCTestCase {
         XCTAssertEqual(PeerServiceURL.make(scheme: "vnc", host: "fd00::1")?.absoluteString, "vnc://[fd00::1]")
         XCTAssertEqual(PeerServiceURL.make(scheme: "smb", host: "storage.mesh.nexal.systems", share: "Backup #1")?.absoluteString, "smb://storage.mesh.nexal.systems/Backup%20%231")
     }
+    func testUsernamePrefilledWithoutPassword() {
+        XCTAssertEqual(PeerServiceURL.make(scheme: "vnc", host: "peer.mesh.nexal.systems", user: "keith")?.absoluteString, "vnc://keith@peer.mesh.nexal.systems")
+        XCTAssertEqual(PeerServiceURL.make(scheme: "smb", host: "h", user: "a:b@c", share: "S")?.absoluteString, "smb://a%3Ab%40c@h/S")
+    }
     func testRejectsInjectedDestinations() {
         for host in ["user@host", "host/path", "host?query", "host#fragment", "bad host", ""] {
             XCTAssertNil(PeerServiceURL.make(scheme: "smb", host: host))

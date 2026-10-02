@@ -26,7 +26,7 @@ FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 ARG TARGETOS=linux
 ARG TARGETARCH
 # Keep in step with macos/scripts/update-runtime.sh (same number, "-linux" suffix).
-ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.9-linux
+ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.10-linux
 ENV GOFLAGS= GOWORK=off GOTOOLCHAIN=local CGO_ENABLED=0
 RUN export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends patch python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -46,6 +46,8 @@ RUN --mount=type=cache,target=/go/pkg/mod set -eu; \
         --rosenpass-source "$RP" --wireguard-source "$WG" --output /work/candidate
 # Tests are run by the macOS runtime build and CI; the image build only compiles.
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build set -eu; \
+    grep -q 'nexal: empty batch' /work/candidate/wireguard/conn/bind_std.go; \
+    grep -q 'nexal: empty batch' /work/candidate/netbird/client/iface/bind/ice_bind.go; \
     cd /work/candidate/netbird; \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=mod -trimpath \
         -ldflags="-s -w -X github.com/netbirdio/netbird/version.version=${RUNTIME_VERSION}" \
@@ -53,7 +55,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     grep -qa 'nexal-mlkem1024-tcp-v2' /out/netbird
 
 FROM ${RUNTIME_IMAGE}
-ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.9-linux
+ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.10-linux
 ARG SIDECAR_VERSION=dev
 LABEL org.opencontainers.image.title="nexal-mesh-sidecar" \
       org.opencontainers.image.description="neXal dev-container mesh sidecar (patched NetBird, ML-KEM-1024)" \

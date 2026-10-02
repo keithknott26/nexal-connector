@@ -84,6 +84,34 @@ done
 
 printf 'NEXAL-FIRSTBOOT {"meshIp":"%s"}\n' "$ip"
 
-# Supervise: if the mesh daemon dies, exit so Alive() reports it.
-wait -n "${pids[@]}"
-exit $?
+# Supervise. A daemon crash (seen: an x/net sendmmsg panic on Linux) must not
+# strand the dev container off the network: restart the daemon and rejoin. The
+# peer identity stays in $NB_STATE_DIR, so `netbird up` needs no setup key (the
+# one-use key is already gone). More than 5 restarts in 10 minutes means
+# something is persistently wrong: exit, so the connector's Alive() reports it.
+restarts=()
+while true; do
+  wait -n "${pids[@]}"
+  rc=$?
+  now=$(date +%s)
+  recent=()
+  for at in "${restarts[@]}"; do
+    [ $((now - at)) -lt 600 ] && recent+=("$at")
+  done
+  restarts=("${recent[@]}" "$now")
+  if [ "${#restarts[@]}" -gt 5 ]; then
+    tail -n 20 "$LOG" >&2 2>/dev/null
+    echo "NEXAL-MESH-DOWN daemon exited ($rc) more than 5 times in 10 minutes"
+    exit "$rc"
+  fi
+  echo "NEXAL-MESH-RESTART daemon exited ($rc); restart ${#restarts[@]}/5"
+  tail -n 5 "$LOG" >&2 2>/dev/null
+  sleep 2
+  pids=()
+  netbird service run --log-file "$LOG" >/dev/null 2>&1 &
+  pids+=($!)
+  for _ in $(seq 1 30); do netbird status --check live >/dev/null 2>&1 && break; sleep 1; done
+  timeout 120 netbird up --management-url "$MESH_URL" --enable-rosenpass --disable-dns \
+    --hostname "$NEXAL_HOSTNAME" >/dev/null 2>&1 \
+    || echo "NEXAL-MESH-RESTART rejoin did not complete; the daemon keeps retrying"
+done

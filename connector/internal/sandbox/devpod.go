@@ -598,7 +598,7 @@ const MeshImageEnv = "NEXAL_DEV_MESH_IMAGE"
 // pushes ghcr.io/<owner>/nexal-mesh-sidecar:<version>. The package must be
 // public so a Mac can pull it anonymously. Bump the tag here whenever a new
 // sidecar version is released.
-const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.1"
+const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.2"
 
 // ResolveMeshImage returns override (trimmed) or, when empty, DefaultMeshImage.
 func ResolveMeshImage(override string) string {

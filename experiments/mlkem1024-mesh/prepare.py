@@ -78,6 +78,7 @@ std_sig = _re.compile(r'(func \(s \*StdNetBind\) Send\(bufs \[\]\[\]byte, \w+ En
 if len(std_sig.findall(std_src)) != 1:
     raise SystemExit('StdNetBind.Send signature was not found exactly once; update the empty-batch guard')
 std.write_text(std_sig.sub(r'\1\tif len(bufs) == 0 {\n\t\treturn nil // nexal: empty batch; x/net sendmmsg panics on zero messages\n\t}\n', std_src, count=1))
+shutil.copyfile(root / 'wireguard_emptybatch_test.go', opts.output / 'wireguard/conn/nexal_emptybatch_test.go')
 print('Prepared isolated experimental sources. No installed runtime or production packaging changed.')
 
 shutil.copyfile(root / "netbird_reconnect_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_reconnect_test.go")

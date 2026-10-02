@@ -79,3 +79,38 @@ candidate, one new) has **no** ML-KEM exchange at all and the new side reports
    peer lacks profile, evidence expired) so the apps can say why instead of just "WireGuard".
 6. **Phones.** iPhones are covered separately (they never carry this profile). Show them as "not covered" rather
    than degraded, or give the phone app an initiator role so the gateway does not dial in.
+
+## Hardening — 2026-10-02 (source only, not installed)
+
+Observed live on the storage gateway: the NetBird daemon panicked in
+`golang.org/x/net/internal/socket.sendmmsg` ("index out of range [0] with length 0") when
+WireGuard handed the bind an empty batch, and `rosenpass key ... expired 399 times` repeated at
+WARN. The WARN level and the stock WireGuard frames in the trace show the gateway was **not**
+running this candidate: it was built from nexal-platform's own copy of the bundle, which lacked
+both resilience patches. The Mac (`gated-experimental.7-recovery`), gateway (`gated.8-retry`) and
+sidecar (`gated.9-linux`) were three different patch levels, so the eligibility rule correctly
+refused exchanges between them and every lease expired.
+
+| Change | Where |
+|---|---|
+| Empty-batch guard in `ICEBind.Send` and `StdNetBind.Send`; the build fails if either signature moves | `prepare.py` |
+| Regression test `TestNexalSendEmptyBatch` (wireguard `./conn`) | `wireguard_emptybatch_test.go`, run by `update-runtime.sh` and the gateway build |
+| One version for every build: `RUNTIME_VERSION` (`-mac`, `-linux` suffixes) | this directory; `update-runtime.sh`, sidecar `Dockerfile`, nexal-platform `upgrade.py` |
+| Connector test `TestMeshRuntimeBuildsAligned`: sidecar/Mac versions, every patch and test used, guard present | `connector/internal/sandbox/runtime_alignment_test.go` |
+| Gateway bundle is a synced copy: `sync-mlkem1024.py` (+ `--check`), every bundle file must be in `SHA256SUMS`, test fails on drift | nexal-platform `self-hosted/netbird` |
+| Gateway unit: `Restart=always`, `RestartSec=2`, `StartLimitIntervalSec=0` | nexal-platform `upgrade.py` drop-in |
+| Sidecar supervises the daemon: restart and rejoin (no setup key needed), give up after 5 restarts in 10 min | `connector/sidecar/entrypoint.sh`; image `0.1.2` |
+| Sidecar image build verifies the guard is present | `connector/sidecar/Dockerfile` |
+
+The gate is unchanged: no path admits application traffic without a current ML-KEM lease.
+
+**Rollout rule (unchanged, now enforceable):** every peer must run the same `RUNTIME_VERSION`.
+A peer on another patch level is refused (`peer-lacks-profile`) and gets **no** application
+traffic through the gate. Upgrade gateway, Macs and sidecar image together:
+
+1. nexal-platform: `python3 self-hosted/netbird/sync-mlkem1024.py`, commit, then on the gateway
+   `sudo python3 upgrade.py ...` (builds and runs the suites, then activates with rollback armed).
+2. Each Mac: `bash macos/scripts/update-runtime.sh`; then update `runtime-policy.json` for packaging.
+3. Sidecar: tag `sidecar-v0.1.2` (the connector now defaults to it).
+4. Verify: `self-hosted/netbird/diagnose-pq.sh` — every version line must end in the same
+   `gated.N`, and every peer must show `profile=nexal-mlkem1024-tcp-v2`.

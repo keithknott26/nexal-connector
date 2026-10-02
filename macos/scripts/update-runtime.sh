@@ -7,7 +7,8 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 PATCHES="$ROOT/experiments/mlkem1024-mesh"
 APP=${APP:-/Applications/neXal-Connector.app}
-VERSION="0.79.0-nexal-mlkem1024-gated.9-mac"
+# One version for every build (Mac, gateway, sidecar): experiments/mlkem1024-mesh/RUNTIME_VERSION.
+VERSION="$(tr -d '[:space:]' < "$PATCHES/RUNTIME_VERSION")-mac"
 IDENTITY=${1:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}
 [ -n "$IDENTITY" ] || { echo "No Developer ID identity found; pass it as the first argument."; exit 1; }
 [ -x "$APP/Contents/Helpers/nexal-network" ] || { echo "$APP has no Contents/Helpers/nexal-network"; exit 1; }
@@ -31,6 +32,7 @@ python3 "$PATCHES/prepare.py" --netbird-source "$(ls -d "$WORK"/pristine/netbird
 echo "== test"
 (cd "$WORK/candidate/rosenpass" && go test -run 'TestNexal|TestMessages' -count=1 -timeout 180s .)
 (cd "$WORK/candidate/netbird" && go test -mod=mod ./client/internal/rosenpass -run 'TestNexal|TestHandshake' -count=1 -timeout 180s)
+(cd "$WORK/candidate/wireguard" && go test ./conn -run 'TestNexal' -count=1 -timeout 60s)
 
 echo "== build"
 for arch in arm64 amd64; do

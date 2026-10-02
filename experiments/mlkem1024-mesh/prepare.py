@@ -68,13 +68,13 @@ shutil.copyfile(root / 'wireguard_quantum_test.go', opts.output / 'wireguard/dev
 import re as _re
 ice = opts.output / 'netbird' / 'client' / 'iface' / 'bind' / 'ice_bind.go'
 ice_src = ice.read_text()
-ice_sig = _re.compile(r'(func \(s \*ICEBind\) Send\(bufs \[\]\[\]byte, \w+ [\w.]+\) error \{\n)')
+ice_sig = _re.compile(r'(func \(\w+ \*ICEBind\) Send\(bufs \[\]\[\]byte, \w+ [\w.]+\) error \{\n)')
 if len(ice_sig.findall(ice_src)) != 1:
     raise SystemExit('ICEBind.Send signature was not found exactly once; update the empty-batch guard')
 ice.write_text(ice_sig.sub(r'\1\tif len(bufs) == 0 {\n\t\treturn nil // nexal: empty batch; x/net sendmmsg panics on zero messages\n\t}\n', ice_src, count=1))
 std = opts.output / 'wireguard' / 'conn' / 'bind_std.go'
 std_src = std.read_text()
-std_sig = _re.compile(r'(func \(s \*StdNetBind\) Send\(bufs \[\]\[\]byte, \w+ Endpoint\) error \{\n)')
+std_sig = _re.compile(r'(func \(\w+ \*StdNetBind\) Send\(bufs \[\]\[\]byte, \w+ Endpoint\) error \{\n)')
 if len(std_sig.findall(std_src)) != 1:
     raise SystemExit('StdNetBind.Send signature was not found exactly once; update the empty-batch guard')
 std.write_text(std_sig.sub(r'\1\tif len(bufs) == 0 {\n\t\treturn nil // nexal: empty batch; x/net sendmmsg panics on zero messages\n\t}\n', std_src, count=1))

@@ -1,0 +1,20 @@
+# Encrypted JuiceFS volume backing neXal storage's dev-container workspaces: an
+# S3-backed alternative to local disk, so an operator with no spare disk can still
+# run neXal storage with the same managed-host capabilities (see README.md, "Storage
+# backend"). Config: /etc/nexal/juicefs.env. Installed and enabled by
+# setup-storage-backend.sh s3; not present (and not needed) on a local-disk host.
+[Unit]
+Description=JuiceFS volume for neXal storage workspaces
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/nexal/juicefs.env
+ExecStart=/usr/local/bin/juicefs mount ${JFS_META} /var/lib/nexal/devcontainers --enable-xattr -o allow_other --cache-dir /var/cache/juicefs/nexal-storage --cache-size ${JFS_CACHE_MB} --backup-meta 1h --no-usage-report
+ExecStop=/usr/local/bin/juicefs umount /var/lib/nexal/devcontainers
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

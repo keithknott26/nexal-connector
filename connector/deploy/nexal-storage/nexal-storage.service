@@ -2,8 +2,11 @@
 # Install as /etc/systemd/system/nexal-storage.service.
 [Unit]
 Description=neXal storage managed dev-container runner
-After=network-online.target docker.service
+# juicefs-nexal-storage is only installed on the S3-backed workspace backend; a missing
+# unit in Wants/After is simply ignored, so this line is harmless on a local-disk host.
+After=network-online.target docker.service juicefs-nexal-storage.service
 Wants=network-online.target
+Wants=juicefs-nexal-storage.service
 Requires=docker.service
 
 [Service]
@@ -20,7 +23,9 @@ Environment=NEXAL_MANAGED_HOSTING=/etc/nexal/sandbox-hosting.json
 Environment=NEXAL_SECRETS_DIR=/var/lib/nexal/secrets
 # Per-tenant slices go under nexal-tenants.slice (see nexal-tenants.slice).
 Environment=NEXAL_MANAGED_SLICE=nexal-tenants
-# Set to 1 only if /var/lib/docker is overlay2 on xfs mounted with pquota.
+# Set to 1 only if /var/lib/docker is overlay2 on xfs mounted with pquota, and only
+# on the local-disk workspace backend -- it has no effect over JuiceFS (see
+# setup-storage-backend.sh and README.md, "Storage backend").
 Environment=NEXAL_MANAGED_STORAGE_OPT=0
 ExecStart=/usr/local/bin/nexal run --config /etc/nexal/config.json
 Restart=on-failure

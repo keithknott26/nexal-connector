@@ -73,6 +73,10 @@ func TestMeshRuntimeBuildsAligned(t *testing.T) {
 	if strings.Count(src, "nexal: empty batch") < 2 {
 		t.Error("prepare.py lost the empty-batch send guard (ICEBind.Send and StdNetBind.Send)")
 	}
+	// The staged-packet race fix (pinned fork 8bf8fa9) must stay in the build.
+	if !strings.Contains(src, "nexal: count before the send") {
+		t.Error("prepare.py lost the StagePackets race fix")
+	}
 	if !strings.Contains(string(dockerfile), "nexal: empty batch") {
 		t.Error("the sidecar image build no longer verifies the empty-batch guard")
 	}

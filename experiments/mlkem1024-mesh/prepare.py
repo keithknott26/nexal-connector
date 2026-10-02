@@ -78,6 +78,27 @@ std_sig = _re.compile(r'(func \(\w+ \*StdNetBind\) Send\(bufs \[\]\[\]byte, \w+ 
 if len(std_sig.findall(std_src)) != 1:
     raise SystemExit('StdNetBind.Send signature was not found exactly once; update the empty-batch guard')
 std.write_text(std_sig.sub(r'\1\tif len(bufs) == 0 {\n\t\treturn nil // nexal: empty batch; x/net sendmmsg panics on zero messages\n\t}\n', std_src, count=1))
+# Data race fix (2026-10-02): the pinned fork (8bf8fa9, "bound staged packets per
+# peer") read len(elems.elems) after handing the batch to the staged channel,
+# where sendStagedPackets already owns and truncates it. go test -race fails
+# TestConcurrencySafety on it. Count before the send. Must match exactly once.
+send = opts.output / 'wireguard' / 'device' / 'send.go'
+send_src = send.read_text()
+stage_old = (
+    "\tfor {\n\t\tselect {\n\t\tcase peer.queue.staged <- elems:\n"
+    "\t\t\tpeer.queue.stagedPackets.Add(int32(len(elems.elems)))\n\t\t\treturn\n"
+)
+stage_new = (
+    "\t// nexal: count before the send. Once elems is in the channel the receiver\n"
+    "\t// owns it (sendStagedPackets truncates elems), so reading len afterwards was\n"
+    "\t// a data race (go test -race, TestConcurrencySafety). Counting first also\n"
+    "\t// keeps the counter from dipping below zero when the receiver is quick.\n"
+    "\tpeer.queue.stagedPackets.Add(int32(len(elems.elems)))\n"
+    "\tfor {\n\t\tselect {\n\t\tcase peer.queue.staged <- elems:\n\t\t\treturn\n"
+)
+if send_src.count(stage_old) != 1:
+    raise SystemExit('StagePackets send/count block was not found exactly once; update the race fix')
+send.write_text(send_src.replace(stage_old, stage_new, 1))
 shutil.copyfile(root / 'wireguard_emptybatch_test.go', opts.output / 'wireguard/conn/nexal_emptybatch_test.go')
 print('Prepared isolated experimental sources. No installed runtime or production packaging changed.')
 

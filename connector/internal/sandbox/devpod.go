@@ -916,6 +916,27 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	return res, nil
 }
 
+// sidecarLogTail returns the last n non-empty log lines before the FAILED
+// marker, joined on " | " and bounded. Setup keys are never logged by the
+// entrypoint (it reads them from a 0600 file and passes a file path).
+func sidecarLogTail(out string, n int) string {
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" || strings.HasPrefix(l, "NEXAL-FIRSTBOOT") {
+			continue
+		}
+		lines = append(lines, l)
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	if len(lines) == 0 {
+		return "(empty)"
+	}
+	return tailOutput(strings.Join(lines, " | "), 700)
+}
+
 // awaitJoin reads the sidecar's log for the guest's first-boot report.
 func (d *DevPod) awaitJoin(ctx context.Context, t devTools, s DevUpSpec) (FirstBoot, error) {
 	to := s.Timeout
@@ -928,7 +949,9 @@ func (d *DevPod) awaitJoin(ctx context.Context, t devTools, s DevUpSpec) (FirstB
 		if fb, ok, failed, reason := scanFirstBoot(out); ok {
 			return fb, nil
 		} else if failed {
-			return FirstBoot{}, devErr(DevErrMeshFailed, "mesh join failed: %s", reason)
+			// The entrypoint prints the NetBird log tail before the FAILED line; keep
+			// the last few lines so the reason (DNS, TLS, key rejected) is visible.
+			return FirstBoot{}, devErr(DevErrMeshFailed, "mesh join failed: %s; sidecar log: %s", reason, sidecarLogTail(out, 6))
 		}
 		if alive, _ := d.run(ctx, t, t.docker, "ps", "-q", "--filter", "name="+SidecarName(s.Workspace), "--filter", "status=running"); strings.TrimSpace(alive) == "" {
 			return FirstBoot{}, devErr(DevErrMeshFailed, "the mesh sidecar exited before joining")

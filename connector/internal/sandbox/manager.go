@@ -527,7 +527,8 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		Hostname: t.Hostname, SetupKey: t.SetupKey, VNCPassword: t.VNCPassword,
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
 		DriveWritable: driveWritable(t), SSHCAPublicKey: t.SSHCAPublicKey, DriveToken: t.DriveToken,
-		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL, DriveURL: t.DriveURL}
+		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL, DriveURL: t.DriveURL,
+		AppProfile: t.Image.AppProfile}
 	progress(StepSeed, 82)
 	if err := WriteSeedDir(m.seedDir(id), seed); err != nil {
 		return err

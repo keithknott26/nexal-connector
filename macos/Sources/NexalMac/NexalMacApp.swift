@@ -34,6 +34,26 @@ struct NexalMacApp: App {
 enum MenuBarBadge {
     @MainActor private static var cache: [String: NSImage] = [:]
 
+    /// The mark inside the status ring: an infinity sign with a centre node.
+    enum Glyph {
+        static func draw(color: NSColor) {
+            color.setStroke(); color.setFill()
+            let fit = AffineTransform(translationByX: 9, byY: 9).scaledBy(0.74).translatedBy(x: -9, y: -9)
+            let l = NSBezierPath()
+            l.move(to: NSPoint(x: 9, y: 9))
+            l.curve(to: NSPoint(x: 14.6, y: 9), controlPoint1: NSPoint(x: 10.6, y: 12.2), controlPoint2: NSPoint(x: 14.6, y: 12.2))
+            l.curve(to: NSPoint(x: 9, y: 9), controlPoint1: NSPoint(x: 14.6, y: 5.8), controlPoint2: NSPoint(x: 10.6, y: 5.8))
+            l.curve(to: NSPoint(x: 3.4, y: 9), controlPoint1: NSPoint(x: 7.4, y: 12.2), controlPoint2: NSPoint(x: 3.4, y: 12.2))
+            l.curve(to: NSPoint(x: 9, y: 9), controlPoint1: NSPoint(x: 3.4, y: 5.8), controlPoint2: NSPoint(x: 7.4, y: 5.8))
+            l.transform(using: fit)
+            l.lineWidth = 1.8 * 0.74; l.lineCapStyle = .round; l.lineJoinStyle = .round
+            l.stroke()
+            let r: CGFloat = 1.3
+            let c = NSBezierPath(ovalIn: NSRect(x: 9 - r, y: 9 - r, width: 2 * r, height: 2 * r))
+            c.transform(using: fit); c.fill()
+        }
+    }
+
     @MainActor static func image(_ severity: IndicatorSeverity, visible: Bool) -> NSImage {
         let key = "\(severity)-\(visible)"
         if let cached = cache[key] { return cached }
@@ -60,12 +80,15 @@ enum MenuBarBadge {
         let ring = NSBezierPath(ovalIn: NSRect(origin: .zero, size: size).insetBy(dx: 1.5, dy: 1.5))
         ring.lineWidth = 1.6
         ring.stroke()
-        let text = severity == .bad && visible ? "!" : "@"
-        let style = NSMutableParagraphStyle(); style.alignment = .center
-        let attrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: color.withAlphaComponent(visible ? 1 : 0.28),
-            .font: NSFont.systemFont(ofSize: 11, weight: .bold), .paragraphStyle: style]
-        text.draw(in: NSRect(x: 0, y: 2.2, width: 18, height: 13), withAttributes: attrs)
+        let tint = color.withAlphaComponent(visible ? 1 : 0.28)
+        if severity == .bad && visible {
+            let style = NSMutableParagraphStyle(); style.alignment = .center
+            let attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: tint, .font: NSFont.systemFont(ofSize: 11, weight: .bold), .paragraphStyle: style]
+            "!".draw(in: NSRect(x: 0, y: 2.2, width: 18, height: 13), withAttributes: attrs)
+        } else {
+            Glyph.draw(color: tint)
+        }
         NSGraphicsContext.restoreGraphicsState()
         let image = NSImage(size: size)
         image.addRepresentation(rep)

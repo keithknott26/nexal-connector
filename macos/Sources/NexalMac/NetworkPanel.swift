@@ -141,10 +141,9 @@ struct NetworkPanel: View {
                 }
                 .accessibilityIdentifier("credential-rejected")
             } else {
-                Label("Connected to the neXal@home network", systemImage: "checkmark.circle.fill")
-                    .font(.title3.weight(.semibold)).foregroundStyle(.green)
+                connectedHero
             }
-            Divider()
+            VStack(alignment: .leading, spacing: 12) {
             Text("Your connections").font(.subheadline.weight(.semibold))
             if let mesh = model.status?.mesh { thisMac(mesh) }
             if let peers = model.status?.mesh?.peers, !peers.isEmpty {
@@ -164,12 +163,15 @@ struct NetworkPanel: View {
                     }
                 }
             }
-            ThrowawayHostsSection()
-            Divider()
-            activityGraphs
+            if let peers = model.status?.mesh?.peers, !peers.isEmpty {
+                MacNetworkTopologyView(hostName: model.hostNameDisplay, peers: peers)
+            }
+            }
+            .panelCard()
+            ThrowawayHostsSection().panelCard()
+            activityGraphs.panelCard()
 			if let report = model.timeMachine, report.timeMachine.enabled {
-				Divider()
-				timeMachine(report)
+				timeMachine(report).panelCard()
 			}
             if model.hasUnfinishedEnrollment {
                 Divider()
@@ -186,6 +188,25 @@ struct NetworkPanel: View {
                     .accessibilityIdentifier("leave-network")
             }
         }
+    }
+
+    /// SVG status banner: connection state, plus peers online, average latency and quantum label.
+    private var connectedHero: some View {
+        let peers = model.status?.mesh?.peers ?? []
+        let online = peers.filter { $0.lifecycle == "connected" }
+        let lat = online.compactMap { $0.latencyMs }
+        let avg = lat.isEmpty ? "—" : "\(Int((lat.reduce(0, +) / Double(lat.count)).rounded())) ms"
+        let quantum = MeshQuantumPresentation.label(peers: peers)
+        let degraded = model.status?.mesh.map { $0.lifecycle != "connected" } ?? false
+        return PanelHeroView(spec: PanelHeroSpec(
+            tone: degraded ? .notice : .good,
+            title: degraded ? "Connecting…" : "Connected",
+            subtitle: "neXal@home network · \(model.hostNameDisplay)",
+            stats: [("Peers online", "\(online.count) of \(peers.count)"), ("Avg latency", avg),
+                    ("Quantum", quantum == "Not reported" ? "Encrypted" : quantum)]))
+            .frame(height: 126)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Connected to the neXal@home network. \(online.count) of \(peers.count) computers online.")
     }
 
     /// Inline instead of a dialog: MenuBarExtra windows do not reliably present one.
@@ -244,32 +265,9 @@ struct NetworkPanel: View {
         let storage = isStorageGateway(peer)
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
-                detailSection("Connection") {
-                    detailRow("Status") { Text("\(lifecycleEmoji(peer.lifecycle)) \(lifecycleText(peer.lifecycle))") }
-                    detailRow("Path") { routeText(peer) }
-                    if let step = peer.authenticationStep, !step.isEmpty { detailRow("Current step") { Text(humanized(step)) } }
-                    if let loss = peer.packetLossPercent {
-                        detailRow("Packet loss") { Text(loss.formatted(.number.precision(.fractionLength(1))) + "%") }
-                    }
-                    detailRow("Traffic") {
-                        let points = model.history.trafficPoints(forPeer: peer.id)
-                        let outRate = points.last(where: { $0.series == "Out" })?.value ?? 0
-                        let inRate = points.last(where: { $0.series == "In" })?.value ?? 0
-                        HStack(spacing: 14) {
-                            trafficGauge("Sent", symbol: "arrow.up", kbps: outRate, total: peer.traffic.sentBytes)
-                            trafficGauge("Received", symbol: "arrow.down", kbps: inRate, total: peer.traffic.receivedBytes)
-                        }
-                    }
-                    if let hostname = peer.hostname?.hostname { detailRow("neXal address") { Text(hostname) } }
-                }
-                detailSection("Latency") {
-                    HStack(alignment: .center, spacing: 14) {
-                        // Only a live connection has a current round-trip time.
-                        LatencyGauge(latencyMs: peer.lifecycle == "connected" ? peer.latencyMs : nil)
-                        latencySummary(peer)
-                    }
-                }
-                detailSection("Security") {
+                peerConnectionCard(peer)
+                peerTrafficGraph(peer)
+                peerCard("Security") {
                     detailRow("Post-quantum protection") { pqText(effectivePQ(peer.pq, peers: [peer])) }
                     detailRow("Quantum type") { quantumType([peer]) }
                     if let verified = lastVerified(peer) {
@@ -278,27 +276,19 @@ struct NetworkPanel: View {
                         }
                     }
                 }
-                // This connection's own traffic, same chart style as Activity graphs.
-                let peerTraffic = windowed(model.history.trafficPoints(forPeer: peer.id))
-                ChartCard(title: "Traffic in / out (KB/s)",
-                          caption: "Data received from (in) and sent to (out) this connection.",
-                          isEmpty: peerTraffic.isEmpty,
-                          emptyMessage: "No traffic data yet for this connection.") {
-                    SeriesChart(points: peerTraffic, unit: "KB/s")
-                }
-                detailSection("Services") {
+                peerCard("Services") {
                     advertisedServices(peer)
 
                 }
                 // A phone has no Mac services to act on and no Mac system details to show.
                 if !isMobileDevice(peer) {
-                    detailSection("Actions") {
+                    peerCard("Actions") {
                         VStack(alignment: .leading, spacing: 6) {
                             peerActions(peer)
                             exitNodeCheckbox(peer)
                         }
                     }
-                    collapsibleSection("System") {
+                    peerCard("System", expanded: false) {
                         if storage {
                             Text("Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your computers.")
                                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -372,6 +362,96 @@ struct NetworkPanel: View {
         .accessibilityIdentifier("host-\(peer.id)")
     }
 
+    /// Connection overview: latency dial (labelled) beside two status lines, with min/avg/max below.
+    private func peerConnectionCard(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        let connected = peer.lifecycle == "connected"
+        let stats = model.history.latencyStats(forPeer: peer.id)
+        var extras: [String] = []
+        if let loss = peer.packetLossPercent { extras.append("Packet loss " + loss.formatted(.number.precision(.fractionLength(1))) + "%") }
+        if let step = peer.authenticationStep, !step.isEmpty { extras.append(humanized(step)) }
+        if let hostname = peer.hostname?.hostname { extras.append(hostname) }
+        return CollapsibleCard(title: "Connection") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(spacing: 0) {
+                        LatencyGauge(latencyMs: connected ? peer.latencyMs.map { ($0 * 2).rounded() / 2 } : nil)
+                        Text("LATENCY").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(lifecycleEmoji(peer.lifecycle)) \(lifecycleText(peer.lifecycle))")
+                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                        routeSummary(peer).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(spacing: 8) {
+                    statTile("MIN", stats.map { milliseconds($0.min) })
+                    statTile("AVG", stats.map { milliseconds($0.avg) })
+                    statTile("MAX", stats.map { milliseconds($0.max) })
+                    Text("last 5 min").font(.caption2).foregroundStyle(.secondary)
+                }
+                if !extras.isEmpty {
+                    Text(extras.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    /// "Direct - local network" on one line; other routes use their usual label.
+    @ViewBuilder
+    private func routeSummary(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        if peer.path == "direct" {
+            let how: String = {
+                switch peer.directVia {
+                case "lan": return " - local network"
+                case "nat": return " - via router"
+                default: return ""
+                }
+            }()
+            Text("Direct" + how).foregroundStyle(.green).fontWeight(.medium)
+                .help(peer.directAddress.map { "Direct address: \($0)" } ?? "")
+        } else {
+            Text(routeLabel(peer)).foregroundStyle(peer.path == "relay" ? .orange : .secondary)
+        }
+    }
+
+    /// Compact label/value row for the connection card, narrower than the shared detail column.
+    private func connRow<Value: View>(_ label: String, @ViewBuilder _ value: () -> Value) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary).frame(width: 78, alignment: .leading)
+            value()
+        }
+    }
+
+    private func statTile(_ label: String, _ value: String?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 8, weight: .semibold)).tracking(0.6).foregroundStyle(.secondary)
+            Text(value ?? "—").font(.system(.caption, design: .rounded).weight(.semibold)).monospacedDigit()
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// In and out rates as a small SVG line graph over the selected chart window.
+    private func peerTrafficGraph(_ peer: ConnectorStatus.MeshPeer) -> some View {
+        let pts = windowed(model.history.trafficPoints(forPeer: peer.id))
+        func series(_ name: String) -> [TrafficGraphSpec.Point] {
+            pts.filter { $0.series == name }.map { .init(t: $0.at.timeIntervalSince1970, v: $0.value.rounded()) }
+        }
+        let spec = TrafficGraphSpec(received: series("In"), sent: series("Out"),
+                                    receivedTotal: bytes(peer.traffic.receivedBytes), sentTotal: bytes(peer.traffic.sentBytes))
+        return CollapsibleCard(title: "Traffic") {
+            TrafficGraphView(spec: spec)
+                .frame(height: 132)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Traffic")
+                .accessibilityValue("Received \(bytes(peer.traffic.receivedBytes)) total, sent \(bytes(peer.traffic.sentBytes)) total")
+        }
+    }
+
     /// Chart points inside the selected time range.
     private func windowed(_ points: [ConnectorHistory.SeriesPoint]) -> [ConnectorHistory.SeriesPoint] {
         let since = Date().addingTimeInterval(-Double(preferences.chartWindowMinutes) * 60)
@@ -397,6 +477,15 @@ struct NetworkPanel: View {
 
     private func milliseconds(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(0))) + " ms"
+    }
+
+    /// A collapsible card holding aligned label/value rows (or any rows) inside a host's details.
+    private func peerCard<Content: View>(_ title: String, expanded: Bool = true, @ViewBuilder _ content: @escaping () -> Content) -> some View {
+        CollapsibleCard(title: title, expanded: expanded) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+                content()
+            }
+        }
     }
 
     /// A titled group of aligned label/value rows inside a host's details.
@@ -1037,10 +1126,13 @@ struct NetworkPanel: View {
     private func trafficGauge(_ title: String, symbol: String, kbps: Double, total: UInt64) -> some View {
         let fraction = min(max(log10(1 + kbps * 1_000) / log10(1 + 125_000_000), 0), 1)
         let reading = kbps >= 1_000 ? String(format: "%.1fM", kbps / 1_000) : String(format: "%.0fK", kbps)
+        let unit = kbps >= 1_000 ? "MB/s" : "KB/s"
+        let number = kbps >= 1_000 ? String(format: "%.1f", kbps / 1_000) : String(format: "%.0f", kbps)
         return VStack(spacing: 2) {
-            Gauge(value: fraction) { Text(title) } currentValueLabel: { Text(reading).font(.caption2.monospacedDigit()) }
-                .gaugeStyle(.accessoryCircular)
-                .tint(Gradient(colors: [.green, .yellow, .orange]))
+            SVGGaugeView(spec: SVGGaugeSpec(fraction: fraction, valueText: number, unit: unit,
+                                            minLabel: "0", midLabel: "1M", maxLabel: "1G",
+                                            colors: SVGGaugeSpec.trafficColors))
+                .frame(width: 96, height: 86)
             Label(title, systemImage: symbol).font(.caption2.weight(.semibold)).labelStyle(.titleAndIcon)
             Text("\(bytes(total)) total").font(.caption2).foregroundStyle(.secondary).monospacedDigit()
         }

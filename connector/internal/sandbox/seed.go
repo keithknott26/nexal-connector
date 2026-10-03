@@ -30,6 +30,9 @@ type SeedParams struct {
 	Lifecycle      Lifecycle
 	ManagementURL  string // rendered as NEXAL_MESH_URL (what nexal-first-boot reads)
 	DriveURL       string // optional shared-drive endpoint, rendered as NEXAL_DRIVE_URL
+	// AppProfile installs one application on first boot ("" or "none" for a plain
+	// image); see renderAppProfile.
+	AppProfile string
 }
 
 // First-boot protocol. The guest's first-boot script (shipped in the pre-baked
@@ -87,6 +90,9 @@ func ValidateSeed(p SeedParams) error {
 	}
 	if p.ManagementURL != "" && validateV2(Task{ManagementURL: p.ManagementURL}) != nil {
 		return errors.New("invalid management url")
+	}
+	if !KnownAppProfile(p.AppProfile) {
+		return errors.New("unknown app profile")
 	}
 	return nil
 }
@@ -159,6 +165,9 @@ func RenderUserData(p SeedParams) string {
 		lc = LifecycleEphemeral
 	}
 	w("      NEXAL_LIFECYCLE=%s\n", string(lc))
+	if ap := p.AppProfile; ap != "" && ap != AppProfileNone {
+		w("      NEXAL_APP_PROFILE=%s\n", ap)
+	}
 	if p.SSHCAPublicKey != "" {
 		w("      NEXAL_SSH_CA='%s'\n", p.SSHCAPublicKey)
 	}
@@ -197,6 +206,7 @@ func RenderUserData(p SeedParams) string {
 		b.WriteString("    content: |\n")
 		w("      NEXAL_DRIVE_TOKEN=%s\n", p.DriveToken)
 	}
+	renderAppProfile(&b, p.AppProfile)
 	b.WriteString("  - path: /etc/systemd/system/nexal-drive.service\n")
 	b.WriteString("    owner: root:root\n")
 	b.WriteString("    permissions: \"0644\"\n")
@@ -226,7 +236,137 @@ func RenderUserData(p SeedParams) string {
 	// and VNC to the mesh interface, enables nexal-drive, prints the
 	// NEXAL-FIRSTBOOT line, then shreds first-boot.env).
 	b.WriteString("  - [ sh, -c, \"if [ -x /usr/local/sbin/nexal-first-boot ]; then /usr/local/sbin/nexal-first-boot > /dev/console 2>&1; else echo 'NEXAL-FIRSTBOOT-FAILED no first-boot script in image' > /dev/console; fi\" ]\n")
+	if p.AppProfile != "" && p.AppProfile != AppProfileNone {
+		// Started after the first-boot script so the mesh address already exists, and
+		// --no-block so a slow install never holds up cloud-init (or the boot).
+		b.WriteString("  - [ systemctl, enable, nexal-app.service ]\n")
+		b.WriteString("  - [ systemctl, start, --no-block, nexal-app.service ]\n")
+	}
 	return b.String()
+}
+
+// appSetupScript is the first-boot installer for an app profile. It is POSIX sh,
+// idempotent (a done-file short-circuits a reset or reboot), retries the network
+// steps, and binds the application to the mesh address only - the same rule the
+// first-boot script applies to sshd and VNC. Progress goes to the console, which
+// the runner already reads.
+const appSetupScript = `#!/bin/sh
+set -eu
+STATE_DIR=/var/lib/nexal
+. /etc/nexal/app.env
+DONE="$STATE_DIR/app-$NEXAL_APP_PROFILE.done"
+if [ -f "$DONE" ]; then
+  exit 0
+fi
+
+log() { echo "NEXAL-APP $*" > /dev/console 2>/dev/null || true; }
+fail() { echo "NEXAL-APP-FAILED $*" > /dev/console 2>/dev/null || true; exit 1; }
+# Every "[ x ] && y" here is written as an if: under set -e a false test is a
+# failed command and would end the script.
+retry() {
+  n=0
+  until "$@"; do
+    n=$((n + 1))
+    if [ "$n" -ge 5 ]; then
+      return 1
+    fi
+    sleep 10
+  done
+  return 0
+}
+
+# The mesh address (CGNAT 100.64.0.0/10) is the only address the app is published on.
+mesh_ip() {
+  ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 |
+    awk -F. '$1 == 100 && $2 >= 64 && $2 <= 127 { print; exit }'
+}
+IP=""
+tries=0
+while [ -z "$IP" ]; do
+  IP=$(mesh_ip || true)
+  if [ -n "$IP" ]; then
+    break
+  fi
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then
+    fail "no mesh address after 5 minutes"
+  fi
+  sleep 5
+done
+
+case "$NEXAL_APP_PROFILE" in
+home-assistant)
+  DATA=/var/lib/nexal-homeassistant
+  IMAGE=ghcr.io/home-assistant/home-assistant:stable
+  log "installing Home Assistant"
+  export DEBIAN_FRONTEND=noninteractive
+  retry apt-get update -qq || fail "apt-get update"
+  retry apt-get install -y -qq --no-install-recommends docker.io || fail "installing docker"
+  systemctl enable --now docker || fail "starting docker"
+  retry docker pull "$IMAGE" || fail "pulling the Home Assistant image"
+  mkdir -p "$DATA"
+  docker rm -f homeassistant >/dev/null 2>&1 || true
+  docker run -d --name homeassistant --restart unless-stopped     -p "$IP:8123:8123" -v "$DATA:/config" -v /etc/localtime:/etc/localtime:ro     "$IMAGE" || fail "starting Home Assistant"
+  log "home-assistant ready http://$IP:8123"
+  ;;
+*)
+  fail "unknown app profile"
+  ;;
+esac
+
+mkdir -p "$STATE_DIR"
+: > "$DONE"
+`
+
+// appUnit runs appSetupScript once per sandbox. docker.service does not exist until
+// the script installs it; an After= on a missing unit is simply ignored.
+const appUnit = `[Unit]
+Description=neXal app setup
+Wants=network-online.target
+After=network-online.target nexal-mesh.service docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/nexal/app.env
+ExecStart=/usr/local/sbin/nexal-app-setup
+TimeoutStartSec=1800
+[Install]
+WantedBy=multi-user.target
+`
+
+// writeIndented writes a cloud-init block scalar body: every line of text at six
+// spaces, blank lines left empty so the block is not closed early.
+func writeIndented(b *strings.Builder, text string) {
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if line == "" {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString("      " + line + "\n")
+	}
+}
+
+// renderAppProfile adds the app-profile env file, installer and unit to write_files.
+// It renders nothing for a plain image.
+func renderAppProfile(b *strings.Builder, profile string) {
+	if profile == "" || profile == AppProfileNone {
+		return
+	}
+	b.WriteString("  - path: /etc/nexal/app.env\n")
+	b.WriteString("    owner: root:root\n")
+	b.WriteString("    permissions: \"0644\"\n")
+	b.WriteString("    content: |\n")
+	b.WriteString("      NEXAL_APP_PROFILE=" + profile + "\n")
+	b.WriteString("  - path: /usr/local/sbin/nexal-app-setup\n")
+	b.WriteString("    owner: root:root\n")
+	b.WriteString("    permissions: \"0755\"\n")
+	b.WriteString("    content: |\n")
+	writeIndented(b, appSetupScript)
+	b.WriteString("  - path: /etc/systemd/system/nexal-app.service\n")
+	b.WriteString("    owner: root:root\n")
+	b.WriteString("    permissions: \"0644\"\n")
+	b.WriteString("    content: |\n")
+	writeIndented(b, appUnit)
 }
 
 func driveMode(writable bool) string {

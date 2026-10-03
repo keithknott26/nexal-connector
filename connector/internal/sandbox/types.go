@@ -81,6 +81,27 @@ type Image struct {
 	CloudInit bool   `json:"cloudInit"`
 	// CloudInitFlavor is the coordinator's spelling ("nocloud"); it implies CloudInit.
 	CloudInitFlavor string `json:"cloudInitFlavor,omitempty"`
+	// AppProfile is an application the seed installs on first boot ("" or "none"
+	// for a plain image). An unknown profile is refused rather than booted
+	// without its application: the coordinator may be ahead of this runner.
+	AppProfile string `json:"appProfile,omitempty"`
+}
+
+// App profiles the seed can install. Adding one here is what lets the
+// coordinator's catalog (migration 0086) offer it.
+const (
+	AppProfileNone          = "none"
+	AppProfileHomeAssistant = "home-assistant"
+)
+
+// KnownAppProfile reports whether the profile is one this runner can install.
+// The empty string means a plain image, as does "none".
+func KnownAppProfile(p string) bool {
+	switch p {
+	case "", AppProfileNone, AppProfileHomeAssistant:
+		return true
+	}
+	return false
 }
 
 // Size is the requested virtual hardware.
@@ -403,6 +424,9 @@ func validateV2(t Task) error {
 	}
 	if t.Tenant != "" && !ValidTenantTag(t.Tenant) {
 		return fmt.Errorf("invalid tenant tag")
+	}
+	if !KnownAppProfile(t.Image.AppProfile) {
+		return fmt.Errorf("unknown app profile")
 	}
 	if t.IsDev() {
 		return ValidateDevcontainer(t.Devcontainer)

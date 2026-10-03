@@ -47,30 +47,16 @@ struct LatencyGauge: View {
     }
 
     var body: some View {
-        let radius = Self.dial / 2
-        let centre = CGPoint(x: Self.width / 2, y: radius + 12)
-        // Lower ends of the arc, 30° below the horizontal on either side.
-        let endDrop = radius * 0.5
-        let endReach = radius * 0.866
-        ZStack {
-            dialFace
-                .frame(width: Self.dial, height: Self.dial)
-                .position(centre)
-            scaleLabel("0")
-                .position(x: centre.x - endReach, y: centre.y + endDrop + 12)
-            scaleLabel(Self.formatted(maxMs / 2))
-                .position(x: centre.x, y: centre.y - radius - 6)
-            scaleLabel(Self.formatted(maxMs) + "+")
-                .position(x: centre.x + endReach, y: centre.y + endDrop + 12)
-            Text(value.map { Self.formatted($0) + " ms" } ?? "—")
-                .font(.caption.weight(.semibold).monospacedDigit())
-                .foregroundStyle(value == nil ? Color.secondary : Color.primary)
-                .position(x: centre.x, y: centre.y + endDrop + 2)
-        }
-        .frame(width: Self.width, height: Self.height)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Latency")
-        .accessibilityValue(value.map { Self.formatted($0) + " milliseconds" } ?? "Unknown")
+        SVGGaugeView(spec: SVGGaugeSpec(
+            fraction: value == nil ? nil : fraction,
+            valueText: value.map { Self.formatted($0) } ?? "—",
+            unit: value == nil ? "no reading" : "ms",
+            minLabel: "0", midLabel: Self.formatted(maxMs / 2), maxLabel: Self.formatted(maxMs) + "+",
+            colors: SVGGaugeSpec.latencyColors, animated: !reduceMotion))
+            .frame(width: Self.width, height: Self.height)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Latency")
+            .accessibilityValue(value.map { Self.formatted($0) + " milliseconds" } ?? "Unknown")
     }
 
     /// Coloured zones, needle and hub, drawn in a square the size of the dial.

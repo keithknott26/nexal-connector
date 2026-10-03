@@ -109,10 +109,11 @@ func (f *fakeUDP) Close() error { return nil }
 
 func withFakes(t *testing.T, ifaces []ifaceV4, raw []net.Interface, udp *fakeUDP) {
 	t.Helper()
-	oldIf, oldUDP := systemInterfaces, openUDP
+	oldIf, oldUDP, oldBind := systemInterfaces, openUDP, bindPerInterface
+	bindPerInterface = false
 	systemInterfaces = func() ([]ifaceV4, []net.Interface, error) { return ifaces, raw, nil }
 	openUDP = func() (udpSender, error) { return udp, nil }
-	t.Cleanup(func() { systemInterfaces, openUDP = oldIf, oldUDP })
+	t.Cleanup(func() { systemInterfaces, openUDP, bindPerInterface = oldIf, oldUDP, oldBind })
 }
 
 func TestSend(t *testing.T) {

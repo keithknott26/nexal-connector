@@ -558,6 +558,7 @@ func cleanInfo(info sysinfo.Info) sysinfo.Info {
 // (MAC count, strict parsing, de-duplication and a rate limit).
 func (c *Client) relayWake(e event) {
 	log := c.opts.Logger
+	log.Info("wake request received", "request", e.RequestID, "target", e.TargetHostID, "macs", len(e.MACs), "relayEnabled", c.opts.Wake != nil)
 	if c.opts.Wake == nil {
 		return
 	}

@@ -131,25 +131,53 @@ func directedBroadcasts(ifaces []ifaceV4) []netip.Addr {
 	var out []netip.Addr
 	seen := map[netip.Addr]bool{}
 	for _, in := range ifaces {
-		if in.Flags&net.FlagUp == 0 || in.Flags&net.FlagBroadcast == 0 ||
-			in.Flags&net.FlagLoopback != 0 || in.Flags&net.FlagPointToPoint != 0 || isVirtual(in.Name) {
+		if skipReason(in) != "" {
 			continue
 		}
-		a := in.Prefix.Addr()
-		if !a.Is4() || a.IsLoopback() || a.IsLinkLocalUnicast() || in.Prefix.Bits() < 0 || in.Prefix.Bits() > 30 {
-			continue
-		}
-		b := a.As4()
-		host := uint32(0xFFFFFFFF) >> uint(in.Prefix.Bits())
-		v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
-		v |= host
-		bc := netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
+		bc := broadcastOf(in.Prefix)
 		if !seen[bc] {
 			seen[bc] = true
 			out = append(out, bc)
 		}
 	}
 	return out
+}
+
+// skipReason says why an interface is not used for Wake-on-LAN, or "" when it is.
+func skipReason(in ifaceV4) string {
+	switch {
+	case in.Flags&net.FlagUp == 0:
+		return "interface down"
+	case in.Flags&net.FlagBroadcast == 0:
+		return "not broadcast-capable"
+	case in.Flags&net.FlagLoopback != 0:
+		return "loopback"
+	case in.Flags&net.FlagPointToPoint != 0:
+		return "point-to-point"
+	case isVirtual(in.Name):
+		return "virtual interface (tunnel, bridge or similar)"
+	}
+	a := in.Prefix.Addr()
+	switch {
+	case !a.Is4():
+		return "not IPv4"
+	case a.IsLoopback():
+		return "loopback address"
+	case a.IsLinkLocalUnicast():
+		return "link-local address"
+	case in.Prefix.Bits() < 0 || in.Prefix.Bits() > 30:
+		return fmt.Sprintf("/%d has no broadcast address", in.Prefix.Bits())
+	}
+	return ""
+}
+
+// broadcastOf is the directed broadcast address of p's subnet.
+func broadcastOf(p netip.Prefix) netip.Addr {
+	b := p.Addr().As4()
+	host := uint32(0xFFFFFFFF) >> uint(p.Bits())
+	v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	v |= host
+	return netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
 }
 
 // isVirtual names the macOS interface families that are never the physical
@@ -228,56 +256,11 @@ var openUDP = func() (udpSender, error) {
 	return net.ListenUDP("udp4", nil)
 }
 
-// Send broadcasts a magic packet for each MAC to UDP port 9 on the directed
-// broadcast address of every usable IPv4 interface, and to the limited
-// broadcast 255.255.255.255 (which macOS sends out of the primary interface
-// only; the directed broadcasts are what reach the other segments this Mac is
-// attached to).
-//
-// It returns how many interfaces at least one packet was sent through. Zero
-// with a nil error means only the limited broadcast went out. An error is
-// returned only when nothing at all could be sent.
+// Send broadcasts a magic packet for each MAC; see SendDetailed. It returns how many
+// interfaces at least one directed packet was sent through. Zero with a nil error means
+// only the limited broadcast went out. An error is returned only when nothing at all
+// could be sent.
 func Send(macs []net.HardwareAddr) (int, error) {
-	if len(macs) == 0 || len(macs) > MaxMACs {
-		return 0, fmt.Errorf("wake needs 1 to %d MAC addresses", MaxMACs)
-	}
-	packets := make([][]byte, 0, len(macs))
-	for _, m := range macs {
-		p, err := BuildMagicPacket(m)
-		if err != nil {
-			return 0, err
-		}
-		packets = append(packets, p)
-	}
-	ifaces, _, err := systemInterfaces()
-	if err != nil {
-		return 0, errors.New("cannot enumerate network interfaces")
-	}
-	conn, err := openUDP()
-	if err != nil {
-		return 0, errors.New("cannot open a UDP socket for Wake-on-LAN")
-	}
-	defer conn.Close()
-	interfaces := 0
-	for _, bc := range directedBroadcasts(ifaces) {
-		ok := false
-		for _, p := range packets {
-			if _, err := conn.WriteToUDPAddrPort(p, netip.AddrPortFrom(bc, Port)); err == nil {
-				ok = true
-			}
-		}
-		if ok {
-			interfaces++
-		}
-	}
-	limited := false
-	for _, p := range packets {
-		if _, err := conn.WriteToUDPAddrPort(p, netip.AddrPortFrom(netip.AddrFrom4([4]byte{255, 255, 255, 255}), Port)); err == nil {
-			limited = true
-		}
-	}
-	if interfaces == 0 && !limited {
-		return 0, errors.New("no network interface could send the Wake-on-LAN packet")
-	}
-	return interfaces, nil
+	rep, err := SendDetailed(macs)
+	return rep.Interfaces(), err
 }

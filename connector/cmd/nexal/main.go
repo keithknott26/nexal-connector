@@ -547,6 +547,26 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	// every REST call. A coordinator without these routes answers 404 and both
 	// loops back off quietly; neither affects admission or heartbeats. A relayed
 	// wake.request is sent with wol.Send; the online set authorizes nothing.
+	// Every magic packet this Mac sends is logged with the interface, source and
+	// destination, so a wake that "did nothing" can be traced to the wire.
+	wolLog := logger.With("component", "wol")
+	wol.SetTrace(func(r wol.Report) {
+		for _, a := range r.Attempts {
+			level := slog.LevelInfo
+			if a.Packets == 0 {
+				level = slog.LevelWarn
+			}
+			wolLog.Log(context.Background(), level, "wake packet", "interface", a.Interface, "source", a.Source,
+				"destination", a.Destination, "bound", a.Bound, "limited", a.Limited, "packets", a.Packets,
+				"targets", strings.Join(r.MACs, ","), "error", a.Error)
+		}
+		for _, s := range r.Skipped {
+			wolLog.Debug("wake interface skipped", "interface", s.Interface, "address", s.Address, "reason", s.Reason)
+		}
+		if len(r.Attempts) == 0 {
+			wolLog.Warn("wake had no usable interface", "targets", strings.Join(r.MACs, ","), "skipped", len(r.Skipped))
+		}
+	})
 	pres, err := presence.New(presence.Options{HostID: c.HostID, Wake: wol.Send,
 		Logger: logger.With("component", "presence"),
 		Info: func(ctx context.Context) sysinfo.Info {

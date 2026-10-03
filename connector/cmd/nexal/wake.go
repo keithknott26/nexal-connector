@@ -70,11 +70,12 @@ func wakeCommand(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		n, err := wol.Send([]net.HardwareAddr{hw})
+		rep, err := wol.SendDetailed([]net.HardwareAddr{hw})
 		if err != nil {
+			_ = emit(map[string]any{"sent": false, "attempts": rep.Attempts, "skipped": rep.Skipped})
 			return err
 		}
-		return emit(map[string]any{"sent": true, "interfaces": n})
+		return emit(map[string]any{"sent": true, "interfaces": rep.Interfaces(), "attempts": rep.Attempts, "skipped": rep.Skipped})
 	}
 	if *host != "" && !client.ValidID(*host) {
 		return errors.New("invalid host id")

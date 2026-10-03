@@ -47,7 +47,11 @@ final class VMRunner: NSObject, VZVirtualMachineDelegate {
             case "status":
                 return state.phase
             case "stop":
-                DispatchQueue.main.async { Task { @MainActor in self?.requestStop() } }
+                // Bind the weak capture before the concurrent closure: referencing the
+                // captured `self` var from inside one is an error in Swift 6. The Task
+                // already hops to the main actor, so no extra dispatch is needed.
+                guard let runner = self else { return "ok" }
+                Task { @MainActor in runner.requestStop() }
                 return "ok"
             default:
                 return "error: unknown command"

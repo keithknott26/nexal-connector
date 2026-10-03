@@ -61,10 +61,11 @@ enum CLICommand {
     case diagnostics(DiagnosticsAction)
 
     /// How long one invocation may run. Everything answers within 20 seconds
-    /// except adding the Time Machine destination, which waits for a person to
-    /// approve the macOS administrator dialog (the CLI itself gives up at 3 min).
+    /// except adding the Time Machine destination: it may wait up to 90 s for the
+    /// backup share to be prepared, then for a person to approve the macOS
+    /// administrator dialog (the CLI itself gives up on that at 3 min).
     var timeLimit: TimeInterval {
-        if case .timeMachineConnect = self { return 200 }
+        if case .timeMachineConnect = self { return 300 }
         if case .redeemGuestInvitation = self { return 60 }
         if case .activateGuestInvitation = self { return 40 }
         if case .exitRoute = self { return 35 }

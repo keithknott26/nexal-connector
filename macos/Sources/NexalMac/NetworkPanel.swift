@@ -816,18 +816,16 @@ struct NetworkPanel: View {
                         .buttonStyle(.bordered).controlSize(.small)
                         .help("Backing up to neXal Storage. Open Time Machine settings")
                     } else {
+                        // One click does all of it: turns backup on for this Mac, prepares
+                        // its share and credentials on neXal Storage, adds the disk to Time
+                        // Machine, then opens Time Machine settings.
                         Button("Set up") {
                             AppDiagnostics.ui("time machine setup started from storage peer", ["state": state ?? "unknown"])
-                            Task {
-                                if state == "ready_to_connect" { await model.setUpTimeMachine() }
-                                else { await model.updateTimeMachine(force: true) }
-                            }
+                            Task { await model.setUpTimeMachine() }
                         }
                         .buttonStyle(.borderedProminent).controlSize(.small)
-                        .disabled(model.busy)
-                        .help(state == "ready_to_connect"
-                              ? "Add neXal Storage as this Mac's Time Machine backup disk"
-                              : "Check whether this Mac's backup disk on neXal Storage is ready")
+                        .disabled(model.timeMachineSetupRunning)
+                        .help("Prepare a backup disk on neXal Storage and add it to Time Machine on this Mac")
                     }
                 }
             }

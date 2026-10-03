@@ -894,10 +894,19 @@ final class AppModel: ObservableObject {
         }
     }
 
+	/// True from the "Set up" click until setup finishes, including while it waits
+	/// for a status refresh to end. Keeps the button from re-arming mid-setup.
+	@Published private(set) var timeMachineSetupRunning = false
+
 	func setUpTimeMachine() async {
-		guard !busy else { return }
+		guard !timeMachineSetupRunning else { return }
+		timeMachineSetupRunning = true
+		defer { timeMachineSetupRunning = false }
+		// A periodic refresh briefly sets `busy`. Wait it out instead of dropping the click.
+		for _ in 0..<40 where busy { try? await Task.sleep(for: .milliseconds(250)) }
+		guard !busy else { message = "neXal is busy. Try Set up again in a moment."; return }
 		TimeMachineSetupWindow.shared.begin()
-		busy = true; activity = "Checking Time Machine access before administrator approval…"
+		busy = true; activity = "Preparing your backup disk on neXal Storage…"
 		defer { busy = false; activity = nil }
 		do {
             let result = try await invoke(.timeMachineConnect)
@@ -911,6 +920,9 @@ final class AppModel: ObservableObject {
             }
 			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, where you can review the backup schedule."
 			TimeMachineSetupWindow.shared.finish(error: nil)
+			if let url = URL(string: "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") {
+				NSWorkspace.shared.open(url)
+			}
 		} catch {
 			message = error.localizedDescription
             TimeMachineSetupWindow.shared.finish(error: error.localizedDescription)

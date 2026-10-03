@@ -423,3 +423,63 @@ func TestTimeMachineCredentialRevealRequiresEnabledAssignment(t *testing.T) {
 		t.Fatal("disabled assignment minted credentials")
 	}
 }
+
+func TestTimeMachineConnectEnrollsThenWaitsForDestination(t *testing.T) {
+	const share = "tm44444444444444448444"
+	dest := map[string]any{"protocol": "smb", "host": "tm-gw-1.netbird.cloud", "port": 445, "share": share, "username": share}
+	doc := func(enabled bool) map[string]any {
+		d := map[string]any{"enabled": enabled, "role": "client", "serviceState": "provisioning", "computerId": "c1", "networkId": "n1",
+			"destination": nil, "credentialEndpoint": "/api/v2/devices/host1/time-machine/credentials", "credentialsIncluded": false,
+			"quotaBytes": 1 << 40, "refreshAfterSeconds": 60}
+		if enabled {
+			d["destination"] = dest
+		}
+		return d
+	}
+	enrolls, reads := 0, 0
+	plan := "paid"
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v2/devices/host1/time-machine/enroll":
+			if r.Method != http.MethodPost {
+				http.Error(w, "method", http.StatusMethodNotAllowed)
+				return
+			}
+			if plan != "paid" {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":{"code":"paid_plan_required","message":"x"}}`))
+				return
+			}
+			enrolls++
+			_ = json.NewEncoder(w).Encode(doc(false)) // gateway share still provisioning
+		case "/api/v2/devices/host1/time-machine/config":
+			reads++
+			_ = json.NewEncoder(w).Encode(doc(reads >= 2))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer s.Close()
+	p := writeTimeMachineTestConfig(t, s.URL)
+	oldLookup, oldConfigured, oldPoll := meshLookup, destinationConfigured, enrollPoll
+	meshLookup = func(string) ([]string, error) { return []string{"100.101.2.3"}, nil }
+	destinationConfigured = func(string, string) bool { return true } // stop before tmutil
+	enrollPoll = time.Millisecond
+	defer func() { meshLookup, destinationConfigured, enrollPoll = oldLookup, oldConfigured, oldPoll }()
+
+	if err := timeMachineCommand(context.Background(), []string{"-config", p, "-connect"}); err != nil {
+		t.Fatal(err)
+	}
+	if enrolls != 1 || reads != 2 {
+		t.Fatalf("want one enrollment then polling until the destination appears; enrolls=%d reads=%d", enrolls, reads)
+	}
+	// A plain status check never enrolls.
+	if err := timeMachineCommand(context.Background(), []string{"-config", p}); err != nil || enrolls != 1 {
+		t.Fatalf("status check must not enroll: %v enrolls=%d", err, enrolls)
+	}
+	plan = "free"
+	err := timeMachineCommand(context.Background(), []string{"-config", p, "-connect"})
+	if err == nil || !strings.Contains(err.Error(), "subscription") {
+		t.Fatalf("unpaid enrollment must explain the subscription requirement: %v", err)
+	}
+}

@@ -88,6 +88,27 @@ func (c *Client) TimeMachineClientConfig(ctx context.Context, hostID string) (ti
 	if err := c.call(ctx, "GET", "/api/v2/devices/"+url.PathEscape(hostID)+"/time-machine/config", nil, &probe); err != nil {
 		return out, err
 	}
+	return clientConfigFrom(probe)
+}
+
+// EnrollTimeMachine asks the coordinator to back up THIS computer: it turns the
+// network's Time Machine service on if needed (same plan gates as the owner's
+// switch) and marks this computer for backup. It returns the same document as
+// TimeMachineClientConfig; the destination may still be provisioning.
+func (c *Client) EnrollTimeMachine(ctx context.Context, hostID string) (timemachine.ClientConfig, error) {
+	var out timemachine.ClientConfig
+	if !ValidID(hostID) {
+		return out, errors.New("invalid host id")
+	}
+	var probe map[string]json.RawMessage
+	if err := c.call(ctx, "POST", "/api/v2/devices/"+url.PathEscape(hostID)+"/time-machine/enroll", struct{}{}, &probe); err != nil {
+		return out, err
+	}
+	return clientConfigFrom(probe)
+}
+
+func clientConfigFrom(probe map[string]json.RawMessage) (timemachine.ClientConfig, error) {
+	var out timemachine.ClientConfig
 	var role string
 	if raw, ok := probe["role"]; !ok || json.Unmarshal(raw, &role) != nil || role != timemachine.RoleClient {
 		return out, nil // legacy/server document: Role stays empty

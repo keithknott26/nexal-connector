@@ -448,7 +448,12 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	clientCfg, err := api.TimeMachineClientConfig(ctx, cfg.HostID)
+	var clientCfg timemachine.ClientConfig
+	if *connect && !*dryRun {
+		clientCfg, err = enrollTimeMachine(ctx, api, cfg.HostID)
+	} else {
+		clientCfg, err = api.TimeMachineClientConfig(ctx, cfg.HostID)
+	}
 	if err != nil {
 		return err
 	}
@@ -490,6 +495,53 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	return emit(map[string]any{"timeMachine": status, "action": "Configure a tenant-scoped JuiceFS metadata service and signed privileged helper before enabling this host."})
+}
+
+// How long -connect waits for a freshly enabled service to publish this
+// computer's destination. Replaceable in tests.
+var (
+	enrollWait = 90 * time.Second
+	enrollPoll = 3 * time.Second
+)
+
+// enrollTimeMachine is the "Set up" path: it asks the coordinator to turn backup
+// on for this computer (provisioning the gateway share and its SMB account ahead
+// of tmutil), then waits, bounded, until the destination is published. A
+// coordinator that predates enrollment falls back to the plain config read.
+func enrollTimeMachine(ctx context.Context, api *client.Client, hostID string) (timemachine.ClientConfig, error) {
+	c, err := api.EnrollTimeMachine(ctx, hostID)
+	if err != nil {
+		var status *client.StatusError
+		if !errors.As(err, &status) {
+			return c, err
+		}
+		switch status.Code {
+		case "paid_plan_required":
+			return c, errors.New("Time Machine backup needs an active neXal subscription")
+		case "feature_disabled":
+			return c, errors.New("Time Machine backup is not available on this neXal server yet")
+		case "time_machine_not_configured":
+			return c, errors.New("pair this Mac to your neXal network before setting up Time Machine")
+		}
+		if c, err = api.TimeMachineClientConfig(ctx, hostID); err != nil {
+			return c, err
+		}
+	}
+	deadline := time.Now().Add(enrollWait)
+	for c.Role == timemachine.RoleClient && (!c.Enabled || c.Destination == nil) && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return c, ctx.Err()
+		case <-time.After(enrollPoll):
+		}
+		if c, err = api.TimeMachineClientConfig(ctx, hostID); err != nil {
+			return c, err
+		}
+	}
+	if c.Role == timemachine.RoleClient && (!c.Enabled || c.Destination == nil) {
+		return c, errors.New("neXal is still preparing your backup storage; try Set up again in a minute")
+	}
+	return c, nil
 }
 
 func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c timemachine.ClientConfig, connect, dryRun bool) error {

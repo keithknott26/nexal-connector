@@ -98,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// reading, so an already-paired Mac does not chime at launch.
     private var wasLinked: Bool?
 
-    static let splashSeconds: TimeInterval = 2
+    static let splashSeconds: TimeInterval = NexalSplashView.duration
     private static let hintShownKey = "menuBarHintShown"
     static let panelSize = NSSize(width: 460, height: 700)
 
@@ -180,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: Splash
 
     private func showSplash(then next: @escaping () -> Void) {
-        let size = NSSize(width: 360, height: 230)
+        let size = SplashView.size
         let splash = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         let hosting = NSHostingController(rootView: SplashView())
@@ -367,22 +367,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
-/// The launch splash: the neXal wordmark on the brand gradient.
+/// The launch splash window's content: the animated neXal splash, clipped to
+/// the window's rounded corners.
 private struct SplashView: View {
+    static let size = NSSize(width: 300, height: 480)
+
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [.black, Color(red: 0.04, green: 0.12, blue: 0.20)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-            VStack(spacing: -2) {
-                Text("neXal").font(.system(size: 40, weight: .semibold, design: .rounded))
-                Text("systems").font(.system(size: 17, weight: .medium, design: .rounded)).tracking(5)
-            }
-            .foregroundStyle(.white)
-        }
-        .frame(width: 360, height: 230)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("neXal systems")
+        NexalSplashView()
+            .frame(width: Self.size.width, height: Self.size.height)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

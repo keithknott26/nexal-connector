@@ -803,9 +803,32 @@ struct NetworkPanel: View {
                 HStack(spacing: 8) {
                     Text("Time Machine backup").foregroundStyle(.secondary)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    Button("Open") { model.openServiceApplication("com.apple.MigrateAssistant") }
+                    // Set up this Mac to back up to neXal Storage (adds the SMB share as a
+                    // Time Machine destination); once connected, open Time Machine settings.
+                    let state = model.timeMachine?.timeMachine.state
+                    if state == "connected" {
+                        Button("Open") {
+                            AppDiagnostics.ui("time machine settings opened from storage peer")
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
                         .buttonStyle(.bordered).controlSize(.small)
-                        .help("Open Migration Assistant to browse available backup sources")
+                        .help("Backing up to neXal Storage. Open Time Machine settings")
+                    } else {
+                        Button("Set up") {
+                            AppDiagnostics.ui("time machine setup started from storage peer", ["state": state ?? "unknown"])
+                            Task {
+                                if state == "ready_to_connect" { await model.setUpTimeMachine() }
+                                else { await model.updateTimeMachine(force: true) }
+                            }
+                        }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .disabled(model.busy)
+                        .help(state == "ready_to_connect"
+                              ? "Add neXal Storage as this Mac's Time Machine backup disk"
+                              : "Check whether this Mac's backup disk on neXal Storage is ready")
+                    }
                 }
             }
             if ssh == nil && vnc == nil && files == nil && !storage {

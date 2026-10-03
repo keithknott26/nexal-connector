@@ -106,14 +106,19 @@ func CollectLocal(ctx context.Context) Facts {
 	if err != nil {
 		return f
 	}
-	physical := map[string]bool{}
+	// lanPort: a real network port (en*), even one using a private (locally
+	// administered) Wi-Fi address. Its prefix identifies the LAN, so this Mac can
+	// RELAY wakes; only a globally unique MAC can be a wake TARGET.
+	lanPort := map[string]bool{}
 	macSet := map[string]bool{}
 	for _, in := range ifs {
-		if in.Flags&net.FlagLoopback != 0 || isVirtual(in.Name) || !physicalMAC(in.HardwareAddr) {
+		if in.Flags&net.FlagLoopback != 0 || isVirtual(in.Name) || len(in.HardwareAddr) != 6 {
 			continue
 		}
-		physical[in.Name] = true
-		macSet[strings.ToLower(in.HardwareAddr.String())] = true
+		lanPort[in.Name] = true
+		if physicalMAC(in.HardwareAddr) {
+			macSet[strings.ToLower(in.HardwareAddr.String())] = true
+		}
 	}
 	for m := range macSet {
 		f.MACs = append(f.MACs, m)
@@ -125,7 +130,7 @@ func CollectLocal(ctx context.Context) Facts {
 	prefixSet := map[string]bool{}
 	for _, in := range v4 {
 		a := in.Prefix.Addr()
-		if !physical[in.Name] || in.Flags&net.FlagUp == 0 || !a.Is4() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+		if !lanPort[in.Name] || in.Flags&net.FlagUp == 0 || !a.Is4() || a.IsLoopback() || a.IsLinkLocalUnicast() {
 			continue
 		}
 		prefixSet[in.Prefix.Masked().String()] = true

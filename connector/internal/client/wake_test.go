@@ -39,7 +39,6 @@ func TestReportWakeInfo(t *testing.T) {
 		t.Fatalf("body = %v", got)
 	}
 	for _, bad := range []WakeInfo{
-		{MACs: nil, LANKey: wakeTestKey},
 		{MACs: []string{"ff:ff:ff:ff:ff:ff"}, LANKey: wakeTestKey},
 		{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: "short"},
 		{MACs: []string{"3c:22:fb:01:02:03"}, LANKey: strings.ToUpper(wakeTestKey)},

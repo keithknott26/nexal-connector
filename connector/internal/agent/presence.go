@@ -182,19 +182,22 @@ func (a *Agent) runWakeInfo(ctx context.Context) {
 			"lan_key_present", f.LANKey != "", "wake_for_network", f.WakeForNetwork,
 			"tunnel", info.TunnelAddress != "", "changed", changed)
 		wait := wakeInfoInterval
-		if !(reporter != nil && changed && len(info.MACs) > 0 && info.LANKey != "") {
+		// A Mac with no globally unique MAC (private Wi-Fi address) still reports:
+		// it cannot be woken, but it can relay wakes for the others on its LAN.
+		if !(reporter != nil && changed && info.LANKey != "") {
 			reason := "unchanged"
 			switch {
 			case reporter == nil:
 				reason = "no reporter"
-			case len(info.MACs) == 0:
-				reason = "no physical MAC"
 			case info.LANKey == "":
 				reason = "no LAN prefix"
 			}
 			a.logger.Debug("wake info not reported", "reason", reason)
 		}
-		if reporter != nil && changed && len(info.MACs) > 0 && info.LANKey != "" {
+		if len(info.MACs) == 0 {
+			a.logger.Debug("no wakeable hardware address: this Mac can relay wakes but not be woken")
+		}
+		if reporter != nil && changed && info.LANKey != "" {
 			reqCtx, stop := boundedRequest(ctx, time.Time{})
 			err := reporter.ReportWakeInfo(reqCtx, info)
 			stop()

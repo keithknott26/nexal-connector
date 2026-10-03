@@ -177,7 +177,7 @@ func TestCollectLocal(t *testing.T) {
 	v4 := []ifaceV4{
 		{Name: "en0", Flags: up, Prefix: netip.MustParsePrefix("192.168.1.23/24")},
 		{Name: "en1", Flags: up, Prefix: netip.MustParsePrefix("10.0.4.5/22")},
-		{Name: "en2", Flags: up, Prefix: netip.MustParsePrefix("172.20.0.5/16")}, // not physical MAC
+		{Name: "en2", Flags: up, Prefix: netip.MustParsePrefix("172.20.0.5/16")}, // private MAC: LAN yes, wake target no
 		{Name: "bridge0", Flags: up, Prefix: netip.MustParsePrefix("192.168.2.1/24")},
 		{Name: "en0", Flags: up, Prefix: netip.MustParsePrefix("169.254.3.3/16")}, // link-local
 	}
@@ -192,10 +192,10 @@ func TestCollectLocal(t *testing.T) {
 			t.Fatalf("MACs = %v, want %v", f.MACs, wantMACs)
 		}
 	}
-	if len(f.Prefixes) != 2 || f.Prefixes[0] != "10.0.4.0/22" || f.Prefixes[1] != "192.168.1.0/24" {
+	if len(f.Prefixes) != 3 || f.Prefixes[0] != "10.0.4.0/22" || f.Prefixes[1] != "172.20.0.0/16" || f.Prefixes[2] != "192.168.1.0/24" {
 		t.Fatalf("Prefixes = %v", f.Prefixes)
 	}
-	if f.LANKey != LANKey([]string{"192.168.1.0/24", "10.0.4.0/22"}) || len(f.LANKey) != 64 {
+	if f.LANKey != LANKey([]string{"192.168.1.0/24", "10.0.4.0/22", "172.20.0.0/16"}) || len(f.LANKey) != 64 {
 		t.Fatalf("LANKey = %q", f.LANKey)
 	}
 	if f.WakeForNetwork == "" {

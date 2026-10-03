@@ -107,7 +107,7 @@ func ValidTunnelAddress(s string) bool {
 // ReportWakeInfo publishes this host's wake facts. It is a full replacement,
 // so repeating it is idempotent. The response body is not interpreted.
 func (c *Client) ReportWakeInfo(ctx context.Context, w WakeInfo) error {
-	if len(w.MACs) < 1 || len(w.MACs) > wol.MaxMACs || !validDigest(w.LANKey) {
+	if len(w.MACs) > wol.MaxMACs || !validDigest(w.LANKey) {
 		return errors.New("invalid wake info")
 	}
 	macs := make([]string, 0, len(w.MACs))

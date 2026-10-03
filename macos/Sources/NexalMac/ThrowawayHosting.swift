@@ -139,6 +139,10 @@ final class ThrowawayHosting: ObservableObject {
         self.root = root
         reloadConfig()
         reloadLocal()
+        // Keep the runtime present and running on a Mac that hosts throwaway hosts
+        // (after an update, a reboot, or a first install that had no Homebrew).
+        // The installer exits at once when a runtime already answers.
+        if config.enabled { installContainerRuntime() }
     }
 
     var configURL: URL { root.appendingPathComponent("sandbox-hosting.json") }
@@ -180,9 +184,10 @@ final class ThrowawayHosting: ObservableObject {
     @Published private(set) var runtimeStatus: String?
     @Published private(set) var installingRuntime = false
 
-    /// Runs the bundled installer (Colima plus the docker and devpod tools, via
-    /// Homebrew). The connector refuses Docker Desktop (`docker_desktop_only`), so
-    /// dev containers need Colima, Lima, Podman or OrbStack. Idempotent.
+    /// Runs the bundled installer: Colima, Lima, docker and devpod, from Homebrew when
+    /// it is installed and otherwise downloaded by neXal (checksum-verified) into
+    /// ~/Library/Application Support/Nexal/runtime. The connector refuses Docker
+    /// Desktop (`docker_desktop_only`). Idempotent.
     func installContainerRuntime() {
         guard !installingRuntime else { return }
         guard let script = Bundle.main.url(forResource: "install-container-runtime", withExtension: "sh") else {
@@ -428,7 +433,7 @@ struct ThrowawayHostingSettingsView: View {
                     .disabled(hosting.installingRuntime)
                     if hosting.installingRuntime { ProgressView().controlSize(.small) }
                 }
-                Text(hosting.runtimeStatus ?? "Dev containers need Colima or OrbStack (Docker Desktop is not supported). Setup installs Colima, docker and devpod with Homebrew.")
+                Text(hosting.runtimeStatus ?? "Dev containers need a container runtime (Docker Desktop is not supported). neXal@home installs Colima, docker and devpod for you; no Homebrew needed.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let message = hosting.message { Text(message).font(.caption).foregroundStyle(.orange) }

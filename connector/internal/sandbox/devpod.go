@@ -190,13 +190,19 @@ func SystemDevEnv() DevEnv {
 	}
 }
 
-// FindBinary looks for name on PATH, then in the usual Homebrew locations (a
-// launchd-started connector has a minimal PATH).
+// ManagedRuntimeBin is where neXal@home installs Colima, Lima, docker and devpod
+// on a Mac without Homebrew (macos/Resources/install-container-runtime.sh).
+func ManagedRuntimeBin(home string) string {
+	return filepath.Join(home, "Library", "Application Support", "Nexal", "runtime", "bin")
+}
+
+// FindBinary looks for name on PATH, then in neXal's managed runtime and the
+// usual Homebrew locations (a launchd-started connector has a minimal PATH).
 func (e DevEnv) FindBinary(name string) (string, bool) {
 	if p, err := e.LookPath(name); err == nil && p != "" {
 		return p, true
 	}
-	for _, d := range []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(e.Home, ".local", "bin")} {
+	for _, d := range []string{ManagedRuntimeBin(e.Home), "/opt/homebrew/bin", "/usr/local/bin", filepath.Join(e.Home, ".local", "bin")} {
 		p := filepath.Join(d, name)
 		if e.Exists(p) {
 			return p, true
@@ -212,7 +218,7 @@ func devPath(e DevEnv, docker string) string {
 	if docker != "" {
 		dirs = append(dirs, filepath.Dir(docker))
 	}
-	dirs = append(dirs, "/opt/homebrew/bin", "/usr/local/bin", filepath.Join(e.Home, ".local", "bin"),
+	dirs = append(dirs, ManagedRuntimeBin(e.Home), "/opt/homebrew/bin", "/usr/local/bin", filepath.Join(e.Home, ".local", "bin"),
 		"/usr/bin", "/bin", "/usr/sbin", "/sbin")
 	seen := map[string]bool{}
 	out := dirs[:0]
@@ -260,7 +266,7 @@ func RuntimeCandidates(e DevEnv) []runtimeCandidate {
 func DetectRuntime(ctx context.Context, e DevEnv) (RuntimeInfo, error) {
 	docker, ok := e.FindBinary("docker")
 	if !ok {
-		return RuntimeInfo{}, devErr(DevErrNoRuntime, "the docker command-line client was not found; install Colima, Lima, Podman or OrbStack")
+		return RuntimeInfo{}, devErr(DevErrNoRuntime, "no container runtime is installed; in neXal@home open Settings › Throwaway hosts and choose Set up dev-container runtime")
 	}
 	works := func(sock string) bool {
 		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -292,7 +298,7 @@ func DetectRuntime(ctx context.Context, e DevEnv) (RuntimeInfo, error) {
 	if e.Exists(filepath.Join(e.Home, ".docker", "run", "docker.sock")) || e.Exists("/Applications/Docker.app") {
 		return RuntimeInfo{}, devErr(DevErrDockerDesktop, "only Docker Desktop was found, which is not supported; start Colima, Lima, Podman or OrbStack")
 	}
-	return RuntimeInfo{}, devErr(DevErrNoRuntime, "no running Colima, Lima, Podman or OrbStack was found")
+	return RuntimeInfo{}, devErr(DevErrNoRuntime, "no running Colima, Lima, Podman or OrbStack was found; in neXal@home open Settings › Throwaway hosts and choose Set up dev-container runtime")
 }
 
 // DevWorkspaceID derives a DevPod workspace id (lowercase, digits, dashes) from a

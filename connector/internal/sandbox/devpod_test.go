@@ -463,3 +463,20 @@ func TestDevPathPutsDockerFirst(t *testing.T) {
 		t.Fatalf("%s", got)
 	}
 }
+
+// A Mac without Homebrew gets Colima, docker and devpod from neXal's managed
+// runtime; a launchd-started connector must find them there.
+func TestFindBinaryUsesManagedRuntime(t *testing.T) {
+	managed := "/h/Library/Application Support/Nexal/runtime/bin"
+	if ManagedRuntimeBin("/h") != managed {
+		t.Fatal(ManagedRuntimeBin("/h"))
+	}
+	e := fakeEnv(&fakeRun{}, managed+"/colima", "/opt/homebrew/bin/colima")
+	e.LookPath = func(string) (string, error) { return "", errors.New("not found") }
+	if p, ok := e.FindBinary("colima"); !ok || p != managed+"/colima" {
+		t.Fatalf("managed runtime must win over Homebrew: %q %v", p, ok)
+	}
+	if !strings.Contains(devPath(e, ""), managed+":") {
+		t.Fatal("child processes (devpod -> docker) need the managed runtime on PATH")
+	}
+}

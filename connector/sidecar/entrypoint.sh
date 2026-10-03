@@ -24,7 +24,12 @@ pids=()
 fail() {
   local r="${1:-unknown}"
   r=$(printf '%s' "$r" | tr -d '\r\n' | cut -c1-180)
-  if [ -s "$LOG" ]; then tail -n 20 "$LOG" >&2; fi
+  # The daemon log first (its newest lines are routine INFO), then the reason lines
+  # last: the connector keeps only the final few lines, and the reason is what matters.
+  if [ -s "$LOG" ]; then
+    tail -n 200 "$LOG" | grep -Ei 'warn|error|fail|denied|refused|timeout|timed out|unreachable|invalid|reject|certificate|x509|no such host' | tail -n 8 >&2
+  fi
+  [ -n "${UP_REASON:-}" ] && printf '%s\n' "$UP_REASON" >&2
   echo "NEXAL-FIRSTBOOT-FAILED $r"
   exit 1
 }
@@ -77,8 +82,11 @@ if [ $up_rc -ne 0 ]; then
   # failure, ...) on stderr so it rides along in the sidecar log tail the
   # connector already reads (devpod.go's sidecarLogTail) -- without this, only
   # the generic "failed or timed out" text below ever reaches the user.
-  [ -n "$up_out" ] && printf '%s\n' "$up_out" | tail -n 10 >&2
-  fail "netbird up failed or timed out"
+  UP_REASON=$(printf '%s\n' "$up_out" | grep -v '^[[:space:]]*$' | tail -n 3 | tr '\n' ' ' | cut -c1-300)
+  if [ $up_rc -eq 124 ]; then
+    fail "netbird up timed out after 150s (management host $(printf '%s' "$MESH_URL" | sed -E 's#^[a-z]+://##; s#[/:].*##'))"
+  fi
+  fail "netbird up failed (exit $up_rc)"
 fi
 shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
 

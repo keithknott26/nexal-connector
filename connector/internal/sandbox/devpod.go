@@ -926,13 +926,24 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 // marker, joined on " | " and bounded. Setup keys are never logged by the
 // entrypoint (it reads them from a 0600 file and passes a file path).
 func sidecarLogTail(out string, n int) string {
-	var lines []string
+	var lines, notable []string
 	for _, l := range strings.Split(out, "\n") {
 		l = strings.TrimSpace(l)
 		if l == "" || strings.HasPrefix(l, "NEXAL-FIRSTBOOT") {
 			continue
 		}
 		lines = append(lines, l)
+		low := strings.ToLower(l)
+		for _, w := range []string{"error", "warn", "fail", "denied", "refused", "timeout", "timed out", "unreachable", "invalid", "reject", "x509", "no such host"} {
+			if strings.Contains(low, w) {
+				notable = append(notable, l)
+				break
+			}
+		}
+	}
+	// Prefer the lines that explain a failure over routine INFO, newest last.
+	if len(notable) > 0 {
+		lines = notable
 	}
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
@@ -940,7 +951,7 @@ func sidecarLogTail(out string, n int) string {
 	if len(lines) == 0 {
 		return "(empty)"
 	}
-	return tailOutput(strings.Join(lines, " | "), 700)
+	return tailOutput(strings.Join(lines, " | "), 900)
 }
 
 // awaitJoin reads the sidecar's log for the guest's first-boot report.

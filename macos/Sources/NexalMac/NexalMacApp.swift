@@ -34,23 +34,23 @@ struct NexalMacApp: App {
 enum MenuBarBadge {
     @MainActor private static var cache: [String: NSImage] = [:]
 
-    /// The mark inside the status ring: an infinity sign with a centre node.
+    /// The mark inside the status ring: a node triad (three linked nodes with a centre node).
     enum Glyph {
         static func draw(color: NSColor) {
             color.setStroke(); color.setFill()
-            let fit = AffineTransform(translationByX: 9, byY: 9).scaledBy(0.74).translatedBy(x: -9, y: -9)
-            let l = NSBezierPath()
-            l.move(to: NSPoint(x: 9, y: 9))
-            l.curve(to: NSPoint(x: 14.6, y: 9), controlPoint1: NSPoint(x: 10.6, y: 12.2), controlPoint2: NSPoint(x: 14.6, y: 12.2))
-            l.curve(to: NSPoint(x: 9, y: 9), controlPoint1: NSPoint(x: 14.6, y: 5.8), controlPoint2: NSPoint(x: 10.6, y: 5.8))
-            l.curve(to: NSPoint(x: 3.4, y: 9), controlPoint1: NSPoint(x: 7.4, y: 12.2), controlPoint2: NSPoint(x: 3.4, y: 12.2))
-            l.curve(to: NSPoint(x: 9, y: 9), controlPoint1: NSPoint(x: 3.4, y: 5.8), controlPoint2: NSPoint(x: 7.4, y: 5.8))
-            l.transform(using: fit)
-            l.lineWidth = 1.8 * 0.74; l.lineCapStyle = .round; l.lineJoinStyle = .round
-            l.stroke()
-            let r: CGFloat = 1.3
-            let c = NSBezierPath(ovalIn: NSRect(x: 9 - r, y: 9 - r, width: 2 * r, height: 2 * r))
-            c.transform(using: fit); c.fill()
+            // Scale about the centre (9, 9) of the 18-point icon.
+            let scale: CGFloat = 0.74
+            let fit = AffineTransform(m11: scale, m12: 0, m21: 0, m22: scale, tX: 9 - 9 * scale, tY: 9 - 9 * scale)
+            let t = NSBezierPath()
+            t.move(to: NSPoint(x: 9, y: 14)); t.line(to: NSPoint(x: 4, y: 5)); t.line(to: NSPoint(x: 14, y: 5)); t.close()
+            t.transform(using: fit)
+            t.lineWidth = 1.3 * 0.74; t.lineCapStyle = .round; t.lineJoinStyle = .round
+            t.stroke()
+            let nodes: [(CGFloat, CGFloat, CGFloat)] = [(9, 14, 2), (4, 5, 2), (14, 5, 2), (9, 8, 1.2)]
+            for (x, y, r) in nodes {
+                let c = NSBezierPath(ovalIn: NSRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r))
+                c.transform(using: fit); c.fill()
+            }
         }
     }
 

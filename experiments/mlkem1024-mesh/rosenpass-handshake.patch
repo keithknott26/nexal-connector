@@ -1,0 +1,243 @@
+--- a/conn_tcp.go
++++ b/conn_tcp.go
+@@ -181,6 +181,12 @@
+ 			if _, err := io.ReadFull(conn, data); err != nil {
+ 				return
+ 			}
++			// Refuse (one byte instead of EOF) rather than acknowledge a frame
++			// that would be dropped: the sender then fails and retries.
++			if len(c.incoming) >= cap(c.incoming)-cap(c.slots) {
++				conn.Write([]byte{1})
++				return
++			}
+ 			// Finish the delivery exchange before dispatch can install a new PSK.
+ 			// Half-close sends EOF to Send, whose deferred Close acknowledges it.
+ 			// Waiting for that peer EOF prevents a key switch from stranding our FIN.
+--- a/handshake.go
++++ b/handshake.go
+@@ -123,5 +123,11 @@
+ func (hs *handshake) send(pl payload, ep Endpoint) error {
+ 	hs.peer.logger.Debug("Sending message", "type", msgTypeFromPayload(pl))
+ 
++	if ob := hs.server.outbox; ob != nil {
++		// Inside Server.handle: deliver after stateMu is released.
++		ob.sends = append(ob.sends, queuedSend{pl: pl, key: hs.peer.spkt, ep: ep})
++		return nil
++	}
++
+ 	return hs.server.conn.Send(pl, hs.peer.spkt, ep)
+ }
+--- a/handshake_initiator.go
++++ b/handshake_initiator.go
+@@ -18,6 +18,7 @@
+ 	handshake
+ 
+ 	startedGeneration uint64
++	startedAt         time.Time
+ 	nextMsg           msgType // The type of the next expected message
+ 
+ 	eski esk // The initiator’s ephemeral secret key
+@@ -88,6 +89,7 @@
+ 	hs.nextMsg = msgTypeRespHello
+ 
+ 	hs.startedGeneration = hs.peer.generation
++	hs.startedAt = time.Now()
+ 	hs.expiryTimer = time.AfterFunc(RejectAfterTime, func() { hs.server.expireHandshake(hs) })
+ 	hs.server.addHandshake(hs)
+ 	return hs.send(&initHello{
+@@ -223,6 +225,14 @@
+ 		// called under the server state lock and must not wait for a dial budget.
+ 		hs.txMu.Unlock()
+ 		if err := hs.server.conn.Send(pl, hs.peer.spkt, ep); err != nil {
++			if _, confirm := pl.(*initConf); confirm {
++				// The responder may already have installed the new key from an
++				// earlier InitConf whose reply was lost. Abandoning the attempt
++				// here would leave the two ends on different keys; keep
++				// retransmitting until the attempt expires.
++				hs.peer.logger.Debug("InitConf retransmission not delivered; retrying", slog.Any("error", err))
++				return
++			}
+ 			hs.peer.logger.Debug("Retransmission not delivered; aborting attempt", slog.Any("error", err))
+ 			go hs.server.abortHandshake(hs, err)
+ 		}
+@@ -238,7 +248,21 @@
+ 	ep := hs.peer.endpoint
+ 	hs.scheduleRetransmission(pl, ep, hs.txGeneration)
+ 	hs.txMu.Unlock()
+-	return hs.handshake.send(pl, ep)
++	if hs.server.outbox != nil {
++		return hs.handshake.send(pl, ep) // delivered after handle() released stateMu
++	}
++	// Called with stateMu held from Run/AddPeer/rekey timers: deliver in the
++	// background. A failed delivery tears the attempt down exactly like a failed
++	// retransmission does (abortHandshake backs off and reschedules).
++	hs.peer.logger.Debug("Sending message", "type", msgTypeFromPayload(pl))
++	key := hs.peer.spkt
++	go func() {
++		if err := hs.server.conn.Send(pl, key, ep); err != nil {
++			hs.peer.logger.Debug("Initial delivery failed; aborting attempt", slog.Any("error", err))
++			hs.server.abortHandshake(hs, err)
++		}
++	}()
++	return nil
+ }
+ 
+ // Helpers
+--- a/nexal_retry.go
++++ b/nexal_retry.go
+@@ -43,11 +43,22 @@
+ 	if err := cached.handshake.sendEmptyData(from); err != nil {
+ 		return err
+ 	}
+-	if !cached.completed {
++	// The new key is installed only once the reply was delivered, and only if
++	// nothing superseded this exchange while stateMu was released for the send.
++	finish := func() {
++		p := cached.handshake.peer
++		if cached.completed || s.peers[p.PID()] != p || cached.generation != p.generation || !time.Now().Before(cached.deadline) {
++			return
++		}
+ 		s.completeHandshake(&cached.handshake.handshake, from, RekeyAfterTimeResponder)
+ 		cached.completed = true
+-		cached.generation = cached.handshake.peer.generation
+-		cached.handshake.peer.confirmedReply = cached
++		cached.generation = p.generation
++		p.confirmedReply = cached
+ 	}
++	if s.outbox != nil {
++		s.outbox.post = finish
++		return nil
++	}
++	finish()
+ 	return nil
+ }
+--- a/server.go
++++ b/server.go
+@@ -4,6 +4,7 @@
+ package rosenpass
+ 
+ import (
++	"bytes"
+ 	"errors"
+ 	"fmt"
+ 	"log/slog"
+@@ -33,6 +34,10 @@
+ 	conn      Conn
+ 	closeConn bool
+ 
++	// outbox collects the sends made while handle() holds stateMu; they are
++	// delivered after it is released. Only touched with stateMu held.
++	outbox *outbox
++
+ 	logger *slog.Logger
+ }
+ 
+@@ -274,12 +279,53 @@
+ 	return nil
+ }
+ 
+-func (s *Server) handle(pl payload, from Endpoint) (err error) {
++// outbox holds what a handled message wants to send and an optional step to
++// run (under stateMu) once every send was delivered.
++type outbox struct {
++	sends []queuedSend
++	post  func()
++}
++
++type queuedSend struct {
++	pl  payload
++	key spk
++	ep  Endpoint
++}
++
++// handle processes one received message. Network delivery of the reply (up to
++// a dial + write + receipt budget) happens with stateMu released, so timers,
++// AddPeer/RemovePeer and the status paths are never stalled behind a slow peer.
++func (s *Server) handle(pl payload, from Endpoint) error {
+ 	s.stateMu.Lock()
+-	defer s.stateMu.Unlock()
+ 	if s.closed {
++		s.stateMu.Unlock()
+ 		return net.ErrClosed
+ 	}
++	ob := &outbox{}
++	s.outbox = ob
++	err := s.handleLocked(pl, from)
++	s.outbox = nil
++	s.stateMu.Unlock()
++	if err != nil {
++		return err
++	}
++	for _, q := range ob.sends {
++		if err := s.conn.Send(q.pl, q.key, q.ep); err != nil {
++			return err
++		}
++	}
++	if ob.post != nil {
++		s.stateMu.Lock()
++		defer s.stateMu.Unlock()
++		if !s.closed {
++			ob.post()
++		}
++	}
++	return nil
++}
++
++// handleLocked runs with stateMu held.
++func (s *Server) handleLocked(pl payload, from Endpoint) (err error) {
+ 	defer func() {
+ 		if r := recover(); r != nil {
+ 			err = fmt.Errorf("recovered from panic: %v", r)
+@@ -303,6 +349,11 @@
+ 			return err
+ 		}
+ 
++		if !s.yieldToPeerInitiationLocked(hs.peer) {
++			s.logger.Debug("Ignoring InitHello: own initiation wins the tie-break", "pid", hs.peer.PID())
++			return nil
++		}
++
+ 		if err = hs.sendRespHello(from); err != nil {
+ 			return err
+ 		}
+@@ -472,3 +523,40 @@
+ 	hs.peer.current = nil
+ 	s.failInitiationLocked(hs.peer, errHandshakeTimeout)
+ }
++
++// tieBreakWindow bounds how long a winning initiator ignores the peer's
++// crossing InitHello: past it the attempt is considered stalled and the peer's
++// exchange is served instead.
++var tieBreakWindow = 10 * time.Second
++
++// yieldToPeerInitiationLocked decides what to do with a peer's InitHello when
++// we have an initiator exchange of our own in flight (both ends started at the
++// same time). Two complete exchanges would install two different keys in
++// opposite orders on the two ends, so exactly one may complete: the end with
++// the lower peer ID is the initiator of record. It returns true if the
++// InitHello should be answered. Called with stateMu held.
++func (s *Server) yieldToPeerInitiationLocked(p *peer) bool {
++	cur := p.current
++	if cur == nil {
++		return true
++	}
++	local := s.PID()
++	if bytes.Compare(local[:], func() []byte { id := p.PID(); return id[:] }()) < 0 {
++		// We win: keep our exchange unless it has stalled before the peer
++		// answered; an exchange past RespHello is about to complete and cannot
++		// be abandoned without stranding the peer.
++		if cur.nextMsg == msgTypeRespHello && time.Since(cur.startedAt) > tieBreakWindow {
++			s.abortHandshakeLocked(p)
++			return true
++		}
++		return false
++	}
++	// We lose: drop our unanswered InitHello and serve the peer's. If ours is
++	// already past RespHello it completes (the peer answered it); the peer's
++	// crossing exchange is dropped and aborts when ours completes there.
++	if cur.nextMsg == msgTypeRespHello {
++		s.abortHandshakeLocked(p)
++		return true
++	}
++	return false
++}

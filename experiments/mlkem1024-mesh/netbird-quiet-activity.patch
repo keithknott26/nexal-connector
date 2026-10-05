@@ -1,0 +1,13 @@
+--- a/client/iface/bind/activity.go
++++ b/client/iface/bind/activity.go
+@@ -82,7 +82,9 @@
+ 	record, ok := r.addrToPeer[address]
+ 	r.mu.RUnlock()
+ 	if !ok {
+-		log.Warnf("could not find record for address %s", address)
++		// Packets from endpoints the activity monitor does not track (lazy connections
++		// off, or the relay-to-ICE switch) are normal; one WARN per packet floods the log.
++		log.Debugf("could not find record for address %s", address)
+ 		return
+ 	}
+ 

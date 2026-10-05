@@ -44,7 +44,9 @@ subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird
 # direct/relayed delivery budgets, profile-advertisement eligibility and the
 # machine-readable status reason. Applied last; the gate is not relaxed.
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpass-resilience.patch')], cwd=opts.output / 'rosenpass', check=True)
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpass-handshake.patch')], cwd=opts.output / 'rosenpass', check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-resilience.patch')], cwd=opts.output / 'netbird', check=True)
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-quiet-activity.patch')], cwd=opts.output / 'netbird', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'

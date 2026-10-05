@@ -122,3 +122,17 @@ watchdog reconnected at 01:58:21, but the exchange only completed at 02:02:33, a
 because retries without a live lease had backed off toward the 5-minute cap. That cap dates from
 phones that could never answer; eligibility now skips them, so `InitiationBackoffCap` is 30 s.
 The gate is unchanged (traffic stayed blocked throughout, as designed); only time-to-recovery shrinks.
+
+### gated.12/13 — 2026-10-04
+
+`rosenpass-handshake.patch` (applied last by `prepare.py`):
+- Simultaneous initiation: both ends starting at once completed two exchanges in opposite order and
+  ended on different keys (40/40 test rounds). The lower peer ID is now the initiator of record.
+- A failed InitConf retransmission no longer aborts the attempt (the peer may already hold the key).
+- No network I/O under `stateMu`: replies and first sends go out after the lock is released; a key is
+  installed only after its reply was delivered and nothing superseded the exchange.
+- The TCP receiver refuses (one byte) a frame it cannot queue instead of acknowledging and dropping it.
+Tests: `nexal_simultaneous_test.go`, `nexal_nonblocking_test.go`. Every peer must move to gated.12 together.
+
+gated.13 adds `netbird-quiet-activity.patch`: the activity recorder logged one WARN per packet from an
+untracked endpoint (lazy connections off); it is now a Debug line. No protocol change.

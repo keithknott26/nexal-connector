@@ -4,13 +4,21 @@ import SwiftUI
 struct MeshStatusView: View {
     let mesh: ConnectorStatus.MeshStatus
 
+    /// Level 5 is claimed only with fresh evidence on a neXal Storage (gw-) link,
+    /// never from peer-to-peer evidence or the aggregate flag alone.
+    private var level5: Bool {
+        mesh.pq == "protected"
+            && mesh.peers.contains { $0.name.lowercased().hasPrefix("gw-") }
+            && MeshQuantumPresentation.label(peers: mesh.peers) != "Not reported"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: PanelMetrics.tightSpacing) {
-            Label(mesh.lifecycle == "connected" ? "Connected" : "Not connected", systemImage: mesh.pq == "protected" ? "lock.shield.fill" : "network")
+            Label(mesh.lifecycle == "connected" ? "Connected" : "Not connected", systemImage: level5 ? "lock.shield.fill" : "network")
                 .font(.subheadline.weight(.semibold))
             if let step = mesh.authenticationStep { Text(step).font(.caption).foregroundStyle(.secondary) }
-            Text(mesh.pq == "protected" ? "Level 5 · quantum-safe link to neXal Storage" : mesh.lifecycle == "connected" ? "Encrypted" : "Waiting to connect")
-                .font(.caption).foregroundStyle(mesh.pq == "protected" ? Color.green : Color.secondary)
+            Text(level5 ? "Level 5 · quantum-safe link to neXal Storage" : mesh.lifecycle == "connected" ? "Encrypted" : "Waiting to connect")
+                .font(.caption).foregroundStyle(level5 ? Color.green : Color.secondary)
             LabeledContent("Quantum type", value: MeshQuantumPresentation.label(peers: mesh.peers))
                 .font(.caption)
             Divider()

@@ -45,12 +45,14 @@ private struct MacNetworkTopologySheet: View {
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
             summary(topo.summary)
-            TopologyWebView(svg: topo.svg(animated: play))
-                .frame(width: MacNetworkTopology.width, height: topo.height)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundRectangleBorder())
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Network map. \(topo.summary.online) of \(topo.summary.total) computers online, \(topo.summary.lan) on the local network, \(topo.summary.direct) direct over the internet, \(topo.summary.relayed) relayed, \(topo.summary.offline) offline.")
+            ScrollView(.vertical, showsIndicators: true) {
+                TopologyWebView(svg: topo.svg(animated: play))
+                    .frame(width: MacNetworkTopology.width, height: topo.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundRectangleBorder())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Network map. \(topo.summary.online) of \(topo.summary.total) computers online, \(topo.summary.lan) on the local network, \(topo.summary.direct) direct over the internet, \(topo.summary.relayed) relayed, \(topo.summary.offline) offline.")
+            }
         }
         .padding(20)
         .frame(width: MacNetworkTopology.width + 40, height: min(topo.height + 110, 780))
@@ -85,13 +87,19 @@ private struct MacNetworkTopologySheet: View {
     }
 }
 
+/// A WKWebView keeps scroll-wheel events for itself; the map has nothing to scroll, so hand them
+/// to the enclosing SwiftUI ScrollView instead of trapping the pointer.
+private final class PassthroughWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
+}
+
 private struct TopologyWebView: NSViewRepresentable {
     let svg: String
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        let view = PassthroughWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.setValue(false, forKey: "drawsBackground")
         return view
     }

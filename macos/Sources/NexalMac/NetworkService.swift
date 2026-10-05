@@ -156,10 +156,9 @@ enum NetworkService {
     // MARK: - Exit node
 
     /// Route id of the neXal Storage exit route; another peer's is
-    /// "nexal-exit-<peer name>". Both are created by the coordinator with
+    /// "nx-exit-<32 hex>". Both are created by the coordinator with
     /// auto-apply off, so nothing is routed until this Mac selects one.
     static let storageExitRoute = "nexal-exit"
-    static func exitRoute(forPeerNamed name: String) -> String { "nexal-exit-\(name.lowercased())" }
 
     /// Runs the bundled runtime unprivileged (it talks to the service over its
     /// socket, exactly like `status`). Returns (exit status, stdout+stderr).

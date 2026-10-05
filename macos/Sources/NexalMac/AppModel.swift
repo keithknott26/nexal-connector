@@ -717,7 +717,11 @@ final class AppModel: ObservableObject {
         }
         UserDefaults.standard.set(pendingExitTeardown, forKey: "pendingExitTeardown")
         guard let state = await Task.detached(operation: { NetworkService.exitRoutes() }).value else {
-            availableExitRoutes = []; exitRoute = nil; return
+            // A slow or failed read while the service is still running says nothing about the route: keep
+            // the last known state, or the checkbox vanishes while the default route is still active and
+            // the user cannot turn it off. Clear only when the service itself is gone.
+            if !NetworkService.isRunning { availableExitRoutes = []; exitRoute = nil }
+            return
         }
         availableExitRoutes = state.available
         exitRoute = state.selected.sorted().first

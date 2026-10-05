@@ -163,12 +163,12 @@ func (a *Agent) runWakeInfo(ctx context.Context) {
 		// observes on the PUT. See wol.LANKey.
 		f := collect(ctx)
 		info := client.WakeInfo{MACs: f.MACs, LANKey: f.LANKey, WakeForNetwork: f.WakeForNetwork == wol.WakeEnabled,
-			TunnelAddress: a.selfTunnelAddress(), LANPrefixes: f.PrefixKeys}
+			TunnelAddress: a.selfTunnelAddress(), LANPrefixes: f.PrefixKeys, LANAddresses: f.Addresses}
 		// Re-report periodically even when nothing local changed: the coordinator
 		// binds lanKey to the public address it observes, which can change
 		// (new ISP lease) without any local fact changing.
 		changed := !lastOK || !slices.Equal(info.MACs, last.MACs) || info.LANKey != last.LANKey ||
-			!slices.Equal(info.LANPrefixes, last.LANPrefixes) ||
+			!slices.Equal(info.LANPrefixes, last.LANPrefixes) || !slices.Equal(info.LANAddresses, last.LANAddresses) ||
 			info.WakeForNetwork != last.WakeForNetwork || info.TunnelAddress != last.TunnelAddress ||
 			time.Since(lastAt) >= wakeInfoRefresh
 		a.mu.Lock()

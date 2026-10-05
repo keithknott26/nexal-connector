@@ -96,6 +96,9 @@ type WakeInfo struct {
 	// LANPrefixes are per-prefix LAN fingerprints (wol.PrefixKeys). Omitted when
 	// empty, and dropped automatically for a coordinator that predates them.
 	LANPrefixes []string `json:"lanPrefixes,omitempty"`
+	// LANAddresses are this host's private IPv4 addresses, for the owner's phone to
+	// prefer on the same Wi-Fi. Omitted when empty; dropped for an older coordinator.
+	LANAddresses []string `json:"lanAddresses,omitempty"`
 }
 
 // ValidTunnelAddress reports whether s is a canonical IPv4 in 100.64.0.0/10.
@@ -130,10 +133,22 @@ func (c *Client) ReportWakeInfo(ctx context.Context, w WakeInfo) error {
 			return errors.New("invalid wake info")
 		}
 	}
+	if len(w.LANAddresses) > wol.MaxLANAddresses {
+		return errors.New("invalid wake info")
+	}
+	for _, s := range w.LANAddresses {
+		if a, err := netip.ParseAddr(s); err != nil || !a.Is4() || !a.IsPrivate() || a.String() != s {
+			return errors.New("invalid wake info")
+		}
+	}
 	err := c.callLenient(ctx, "PUT", "/api/v2/hosts/wake-info", w, nil)
-	// An older coordinator refuses the unknown field with 400 invalid_schema:
-	// report again without it rather than stop reporting at all.
+	// An older coordinator refuses an unknown field with 400 invalid_schema:
+	// report again without the newer fields rather than stop reporting at all.
 	var status *StatusError
+	if errors.As(err, &status) && status.Status == 400 && len(w.LANAddresses) > 0 {
+		w.LANAddresses = nil
+		err = c.callLenient(ctx, "PUT", "/api/v2/hosts/wake-info", w, nil)
+	}
 	if len(w.LANPrefixes) > 0 && errors.As(err, &status) && status.Status == 400 {
 		w.LANPrefixes = nil
 		return c.callLenient(ctx, "PUT", "/api/v2/hosts/wake-info", w, nil)

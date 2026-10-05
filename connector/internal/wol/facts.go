@@ -35,6 +35,10 @@ type Facts struct {
 	// coordinator can match two Macs that share one LAN even when their full
 	// LANKey or public address differs.
 	PrefixKeys []string
+	// Addresses are this Mac's own private (RFC 1918) IPv4 addresses on those
+	// interfaces, sorted. Reported so the owner's phone on the same Wi-Fi can dial
+	// 192.168.x directly before falling back to the mesh address.
+	Addresses []string
 	// WakeForNetwork is the macOS "Wake for network access" setting (pmset
 	// womp): WakeEnabled, WakeDisabled, or WakeUnknown off macOS or when pmset
 	// cannot be read.
@@ -83,6 +87,9 @@ func PrefixKeys(prefixes []string) []string {
 	}
 	return out
 }
+
+// MaxLANAddresses is the coordinator's limit on reported private LAN addresses.
+const MaxLANAddresses = 8
 
 // MaxPrefixKeys is the coordinator's limit on reported prefix fingerprints.
 const MaxPrefixKeys = 16
@@ -134,7 +141,11 @@ func CollectLocal(ctx context.Context) Facts {
 			continue
 		}
 		prefixSet[in.Prefix.Masked().String()] = true
+		if a.IsPrivate() && len(f.Addresses) < MaxLANAddresses {
+			f.Addresses = append(f.Addresses, a.String())
+		}
 	}
+	sort.Strings(f.Addresses)
 	for p := range prefixSet {
 		f.Prefixes = append(f.Prefixes, p)
 	}

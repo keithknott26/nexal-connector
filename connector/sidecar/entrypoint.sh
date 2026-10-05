@@ -62,6 +62,26 @@ mkdir -p "$STATE/netbird" /var/log/nexal
 chmod 0700 "$STATE" "$STATE/netbird"
 export NB_STATE_DIR="$STATE/netbird"
 export NB_LAZY_CONN=off   # same as the macOS app: no lazy connections
+# Keep the Go heap well inside the container's memory limit (devpod.go
+# SidecarLimitArgs), so the daemon collects garbage instead of being OOM-killed
+# mid-join -- which used to surface only as "netbird up failed".
+export GOMEMLIMIT=${GOMEMLIMIT:-320MiB}
+
+echo "nexal-sidecar: $(cat /etc/nexal-sidecar-release 2>/dev/null | tr '\n' ' ')" >&2
+
+# Preflight: the management host must resolve and accept TCP 443 from this
+# network namespace (the dev container's). Name the exact failure.
+MGMT_HOST=$(printf '%s' "$MESH_URL" | sed -E 's#^[a-z]+://##; s#[/:].*##')
+MGMT_PORT=$(printf '%s' "$MESH_URL" | sed -nE 's#^[a-z]+://[^/:]+:([0-9]+).*#\1#p'); MGMT_PORT=${MGMT_PORT:-443}
+getent hosts "$MGMT_HOST" >/dev/null 2>&1 || fail "cannot resolve $MGMT_HOST from the dev container (DNS)"
+timeout 10 bash -c "exec 3<>/dev/tcp/$MGMT_HOST/$MGMT_PORT" 2>/dev/null || fail "cannot reach $MGMT_HOST:$MGMT_PORT from the dev container (firewall or proxy)"
+
+# Out-of-memory kills inside this container so far (cgroup v2, then v1).
+oom_kills() {
+  { grep -h '^oom_kill ' /sys/fs/cgroup/memory.events 2>/dev/null | awk '{print $2}'; \
+    cat /sys/fs/cgroup/memory/memory.oom_control 2>/dev/null | awk '/oom_kill /{print $2}'; } | head -n1
+}
+OOM_BEFORE=$(oom_kills); OOM_BEFORE=${OOM_BEFORE:-0}
 
 umask 077
 printf '%s' "$NEXAL_SETUP_KEY" > "$KEYFILE"
@@ -78,6 +98,11 @@ up_out=$(timeout 150 netbird up --setup-key-file "$KEYFILE" --management-url "$M
   --enable-rosenpass --disable-dns --hostname "$NEXAL_HOSTNAME" 2>&1)
 up_rc=$?
 if [ $up_rc -ne 0 ]; then
+  OOM_AFTER=$(oom_kills); OOM_AFTER=${OOM_AFTER:-0}
+  if [ "$OOM_AFTER" -gt "$OOM_BEFORE" ] 2>/dev/null; then
+    fail "mesh daemon was killed for using too much memory during the join (raise the sidecar memory limit)"
+  fi
+  kill -0 "${pids[0]}" 2>/dev/null || fail "mesh daemon exited during the join (exit code of netbird up: $up_rc)"
   # Surface netbird's own reason (bad key, management url unreachable, relay/TLS
   # failure, ...) on stderr so it rides along in the sidecar log tail the
   # connector already reads (devpod.go's sidecarLogTail) -- without this, only
@@ -86,7 +111,7 @@ if [ $up_rc -ne 0 ]; then
   if [ $up_rc -eq 124 ]; then
     fail "netbird up timed out after 150s (management host $(printf '%s' "$MESH_URL" | sed -E 's#^[a-z]+://##; s#[/:].*##'))"
   fi
-  fail "netbird up failed (exit $up_rc)"
+  fail "netbird up failed (exit $up_rc): ${UP_REASON:-no output}"
 fi
 shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
 

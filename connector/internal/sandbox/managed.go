@@ -97,7 +97,7 @@ func ManagedRunArgs(c ManagedConfig, tenant, workspace string, size Size) []stri
 // tenant's network already). It is pure.
 func ManagedSidecarArgs(c ManagedConfig, tenant string) []string {
 	a := []string{"--label", "nexal.tenant=" + tenant, "--label", "nexal.managed=1",
-		"--memory=256m", "--pids-limit=256"}
+		"--memory=384m", "--memory-swap=384m", "--pids-limit=512"}
 	if c.SlicePrefix != "" {
 		a = append(a, "--cgroup-parent="+ManagedSliceName(c.SlicePrefix, tenant))
 	}

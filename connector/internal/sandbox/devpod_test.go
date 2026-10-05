@@ -163,7 +163,7 @@ func TestDevPodArgsAndWorkspaceID(t *testing.T) {
 	s := strings.Join(SidecarRunArgs("ws1", "cid", "img:1", "/st/ws1/boot", true), " ")
 	for _, want := range []string{"--network container:cid", "--cap-add NET_ADMIN", "--device /dev/net/tun",
 		"--mount type=bind,src=/st/ws1/boot,dst=/run/nexal-boot", "-v nexal-mesh-ws1:/var/lib/nexal", "img:1",
-		"--cpus=0.5", "--memory=128m", "--memory-swap=128m", "--pids-limit=256"} {
+		"--cpus=1", "--memory=384m", "--memory-swap=384m", "--pids-limit=512"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in %s", want, s)
 		}

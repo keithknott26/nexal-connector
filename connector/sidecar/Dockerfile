@@ -26,11 +26,15 @@ FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 ARG TARGETOS=linux
 ARG TARGETARCH
 # Keep in step with macos/scripts/update-runtime.sh (same number, "-linux" suffix).
-ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.11-linux
+ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.13-linux
 ENV GOFLAGS= GOWORK=off GOTOOLCHAIN=local CGO_ENABLED=0
 RUN export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get install -y --no-install-recommends patch python3 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=patches / /patches
+# The sidecar must run the exact runtime every other peer runs: a mismatched
+# version is refused by the PQ gate (peer-lacks-profile), so fail the build instead.
+RUN want="$(tr -d '[:space:]' </patches/RUNTIME_VERSION)-linux"; \
+    [ "$RUNTIME_VERSION" = "$want" ] || { echo "RUNTIME_VERSION is $RUNTIME_VERSION but experiments/mlkem1024-mesh/RUNTIME_VERSION says $want"; exit 1; }
 WORKDIR /work
 RUN set -eu; \
     manifest() { python3 -c "import json;print(json.load(open('/patches/upstream.json'))$1)"; }; \
@@ -55,7 +59,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
     grep -qa 'nexal-mlkem1024-tcp-v2' /out/netbird
 
 FROM ${RUNTIME_IMAGE}
-ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.11-linux
+ARG RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.13-linux
 ARG SIDECAR_VERSION=dev
 LABEL org.opencontainers.image.title="nexal-mesh-sidecar" \
       org.opencontainers.image.description="neXal dev-container mesh sidecar (patched NetBird, ML-KEM-1024)" \

@@ -438,7 +438,11 @@ const (
 // ML-KEM/rosenpass handshakes and userspace WireGuard when the kernel module is
 // unavailable, so the dev container's own traffic is not throttled; 128 MB with
 // no extra swap is roughly 3x its working set.
-var SidecarLimitArgs = []string{"--cpus=0.5", "--memory=128m", "--memory-swap=128m", "--pids-limit=256"}
+// 384 MiB: the patched NetBird daemon (ICE, relay, Rosenpass with ML-KEM-1024) plus
+// the `netbird up` CLI peak well above the old 128 MiB cap, and an OOM kill during the
+// join only ever surfaced as "netbird up failed". The entrypoint sets GOMEMLIMIT
+// below this. One full CPU keeps the handshake inside its timers.
+var SidecarLimitArgs = []string{"--cpus=1", "--memory=384m", "--memory-swap=384m", "--pids-limit=512"}
 
 // SidecarRunArgs builds the `docker run` arguments for the mesh sidecar. The
 // secrets are in bootDir/SidecarBootFile (0600), bind-mounted at
@@ -604,7 +608,7 @@ const MeshImageEnv = "NEXAL_DEV_MESH_IMAGE"
 // pushes ghcr.io/<owner>/nexal-mesh-sidecar:<version>. The package must be
 // public so a Mac can pull it anonymously. Bump the tag here whenever a new
 // sidecar version is released.
-const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.3"
+const DefaultMeshImage = "ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.4"
 
 // ResolveMeshImage returns override (trimmed) or, when empty, DefaultMeshImage.
 func ResolveMeshImage(override string) string {

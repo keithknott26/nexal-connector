@@ -297,8 +297,10 @@ func (m *Manager) report(r StateReport) {
 	if coord == nil || hostID == "" {
 		return
 	}
-	if len(r.Error) > 200 {
-		r.Error = strings.ToValidUTF8(r.Error[:200], "")
+	// 600: a dev container failure carries the sidecar's own reason and log tail;
+	// 200 used to cut it off right after the generic prefix.
+	if len(r.Error) > 600 {
+		r.Error = strings.ToValidUTF8(r.Error[:600], "")
 	}
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {

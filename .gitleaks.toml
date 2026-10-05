@@ -17,3 +17,9 @@ description = "Obvious fixed test fixtures (sequential hex / alphabet), never re
 targetRules = ["generic-api-key"]
 regexTarget = "secret"
 regexes = ['''^(?:0123456789abcdef){4}$''', '''^abcdefghijklmnopqrstuvwx-_12$''']
+
+[[allowlists]]
+description = "Redaction tests: fake setup keys the diagnostics redactor must scrub (exact literals only)"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^A1B2C3D4-E5F6-4711-9ABC-DEF012345678$''', '''^0E4F2A6B-1C3D-4E5F-8A9B-0C1D2E3F4A5B$''']

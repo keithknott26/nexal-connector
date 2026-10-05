@@ -89,12 +89,13 @@ unset NEXAL_SETUP_KEY
 
 netbird service run --log-file "$LOG" >/dev/null 2>&1 &
 pids+=($!)
-for _ in $(seq 1 30); do netbird status --check live >/dev/null 2>&1 && break; sleep 1; done
-netbird status --check live >/dev/null 2>&1 || fail "mesh daemon did not start"
+# Generous waits: a Mac under heavy load (Colima VM, CPU-starved) is slow, not broken.
+for _ in $(seq 1 90); do netbird status --check live >/dev/null 2>&1 && break; sleep 1; done
+netbird status --check live >/dev/null 2>&1 || fail "mesh daemon did not start within 90s"
 
 # --enable-rosenpass selects the ML-KEM-1024 profile; --disable-dns keeps the
 # dev container's resolver (shared network namespace) untouched.
-up_out=$(timeout 150 netbird up --setup-key-file "$KEYFILE" --management-url "$MESH_URL" \
+up_out=$(timeout 300 netbird up --setup-key-file "$KEYFILE" --management-url "$MESH_URL" \
   --enable-rosenpass --disable-dns --hostname "$NEXAL_HOSTNAME" 2>&1)
 up_rc=$?
 if [ $up_rc -ne 0 ]; then
@@ -109,7 +110,7 @@ if [ $up_rc -ne 0 ]; then
   # the generic "failed or timed out" text below ever reaches the user.
   UP_REASON=$(printf '%s\n' "$up_out" | grep -v '^[[:space:]]*$' | tail -n 3 | tr '\n' ' ' | cut -c1-300)
   if [ $up_rc -eq 124 ]; then
-    fail "netbird up timed out after 150s (management host $(printf '%s' "$MESH_URL" | sed -E 's#^[a-z]+://##; s#[/:].*##'))"
+    fail "netbird up timed out after 300s (management host $(printf '%s' "$MESH_URL" | sed -E 's#^[a-z]+://##; s#[/:].*##'))"
   fi
   fail "netbird up failed (exit $up_rc): ${UP_REASON:-no output}"
 fi

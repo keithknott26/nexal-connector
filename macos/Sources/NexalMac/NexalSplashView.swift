@@ -13,12 +13,14 @@ struct NexalSplashView: View {
     /// Seconds from first frame to the end of the hold on the lock.
     static let duration: TimeInterval = 4.3
 
+    /// false shows the finished frame (the lock) without animating: the cover used while the app is in the app switcher.
+    var animated = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var start = Date()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion)) { timeline in
-            let t = reduceMotion ? Self.duration : timeline.date.timeIntervalSince(start)
+        TimelineView(.animation(minimumInterval: nil, paused: reduceMotion || !animated)) { timeline in
+            let t = (reduceMotion || !animated) ? Self.duration : timeline.date.timeIntervalSince(start)
             Canvas { context, size in
                 var ctx = context
                 Self.draw(at: t, in: &ctx, size: size)

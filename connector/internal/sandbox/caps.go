@@ -37,7 +37,7 @@ func DefaultCaps() Caps {
 		MaxMemFraction:   0.5,
 		DiskMarginBytes:  10 << 30,
 		StopGrace:        30 * time.Second,
-		FirstBootTimeout: 6 * time.Minute,
+		FirstBootTimeout: 9 * time.Minute, // fits the sidecar's 90 s daemon + 300 s join + 60 s address waits on a loaded Mac
 	}
 }
 

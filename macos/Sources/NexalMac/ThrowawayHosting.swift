@@ -59,12 +59,44 @@ struct NetworkSandbox: Decodable, Identifiable, Equatable {
     var meshIp: String?
     var expiresAt: String?
     var hostName: String?
+    var failure: String?
 
     var title: String { name ?? hostname ?? id }
     var canConnect: Bool { state == "running" }
 }
 
 private struct NetworkSandboxList: Decodable { let sandboxes: [NetworkSandbox]? }
+
+struct SandboxImage: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let version: String?
+    let level: String
+    let minDiskGb: Int?
+    let checksumPending: Bool?
+}
+struct SandboxImageCatalog: Decodable {
+    struct Runner: Decodable { let id: String; let name: String; let hostingEnabled: Bool? }
+    let runner: Runner
+    let images: [SandboxImage]
+}
+struct SandboxCreateRequest: Encodable {
+    let imageId: String
+    let runnerHostId: String
+    let size: String
+    let kind: String
+    let lifecycle: String
+    let lifetimeHours: Int?
+    let reach: String
+    enum CodingKeys: String, CodingKey { case imageId, runnerHostId, size, kind, lifecycle, lifetimeHours, reach }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(imageId, forKey: .imageId); try c.encode(runnerHostId, forKey: .runnerHostId)
+        try c.encode(size, forKey: .size); try c.encode(kind, forKey: .kind); try c.encode(lifecycle, forKey: .lifecycle)
+        try c.encode(reach, forKey: .reach)
+        if lifecycle != "persistent", let lifetimeHours { try c.encode(lifetimeHours, forKey: .lifetimeHours) }
+    }
+}
 
 /// Reply of `nexal sandbox --action connect` (the coordinator's connect response, passed through).
 struct SandboxConnectReply: Decodable {
@@ -260,7 +292,36 @@ final class ThrowawayHosting: ObservableObject {
         // An older connector without the `sandbox` command simply yields no list.
         guard let data = try? await model.sandbox(action: "list", id: nil, kind: nil),
               let list = try? JSONDecoder().decode(NetworkSandboxList.self, from: data) else { return }
-        network = (list.sandboxes ?? []).filter { $0.state != "deleted" && $0.state != "failed" }
+        let all = list.sandboxes ?? []
+        network = all.filter { $0.state != "deleted" && $0.state != "failed" }
+        failed = Array(all.filter { $0.state == "failed" }.prefix(3))
+    }
+
+    // MARK: Create (VM or dev container, on this Mac)
+
+    @Published private(set) var failed: [NetworkSandbox] = []
+    @Published var showingCreate = false
+    @Published private(set) var creating = false
+
+    /// The image catalog for this Mac (the connector asks for its own host by default).
+    func loadImages(_ model: AppModel) async throws -> SandboxImageCatalog {
+        let data = try await model.sandbox(action: "images", id: nil, kind: nil)
+        return try JSONDecoder().decode(SandboxImageCatalog.self, from: data)
+    }
+
+    func create(_ request: SandboxCreateRequest, model: AppModel) async -> Bool {
+        guard !creating else { return false }
+        creating = true; message = nil
+        defer { creating = false }
+        do {
+            let body = try JSONEncoder().encode(request)
+            _ = try await model.sandbox(action: "create", id: nil, kind: nil, input: body)
+            await refreshNetwork(model, force: true)
+            return true
+        } catch {
+            message = "Could not create the instance: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func connect(_ box: NetworkSandbox, kind: String, model: AppModel) async {
@@ -449,7 +510,7 @@ struct ThrowawayHostsSection: View {
     @ObservedObject private var hosting = ThrowawayHosting.shared
     @EnvironmentObject private var model: AppModel
 
-    private var visible: Bool { hosting.config.enabled || !hosting.local.isEmpty || !hosting.network.isEmpty }
+    private var visible: Bool { true }
 
     var body: some View {
         Group {
@@ -471,16 +532,30 @@ struct ThrowawayHostsSection: View {
                             Text("Hosts pause when this Mac sleeps and resume when it wakes.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
+                        if !hosting.failed.isEmpty {
+                            Text("RECENT FAILURES").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+                            ForEach(hosting.failed) { box in
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(box.title).font(.caption.weight(.medium))
+                                    Text(box.failure ?? "Failed").font(.caption2).foregroundStyle(.red).textSelection(.enabled).lineLimit(4)
+                                }
+                            }
+                        }
                         if let message = hosting.message {
                             Text(message).font(.caption2).foregroundStyle(.orange)
                         }
+                        Button { hosting.showingCreate = true } label: {
+                            Label("New virtual machine or dev container…", systemImage: "plus.circle.fill")
+                        }
+                        .disabled(hosting.creating)
                     }.padding(.top, 4)
                 } label: {
-                    Text(hosting.runningHere.isEmpty ? "Throwaway hosts" : "Throwaway hosts · \(hosting.runningLine)")
+                    Text(hosting.runningHere.isEmpty ? "Virtual machines & dev containers" : "Virtual machines & dev containers · \(hosting.runningLine)")
                         .font(.subheadline.weight(.semibold))
                 }
             }
         }
+        .sheet(isPresented: $hosting.showingCreate) { NewSandboxSheet().environmentObject(model) }
         .task {
             while !Task.isCancelled {
                 hosting.reloadLocal()
@@ -541,5 +616,96 @@ struct ThrowawayHostsSection: View {
                 .fixedSize()
             }
         }
+    }
+}
+
+
+// MARK: - Create sheet
+
+struct NewSandboxSheet: View {
+    @ObservedObject private var hosting = ThrowawayHosting.shared
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind = "devcontainer"
+    @State private var size = "small"
+    @State private var lifecycle = "ephemeral"
+    @State private var lifetime = 24
+    @State private var reach = "network"
+    @State private var catalog: SandboxImageCatalog?
+    @State private var imageId = ""
+    @State private var loadError: String?
+
+    private var images: [SandboxImage] { (catalog?.images ?? []).filter { kind == "devcontainer" || $0.checksumPending != true } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("New virtual machine or dev container").font(.headline)
+            Form {
+                Picker("Type", selection: $kind) {
+                    Text("Dev container").tag("devcontainer")
+                    Text("Virtual machine").tag("vm")
+                }.pickerStyle(.segmented)
+                Picker("Image", selection: $imageId) {
+                    ForEach(images) { Text($0.version.map { v in "\($0.name) \(v)" } ?? $0.name).tag($0.id) }
+                }.disabled(images.isEmpty)
+                Picker("Size", selection: $size) {
+                    Text("Small · 2 CPU, 2 GB").tag("small")
+                    Text("Medium · 4 CPU, 8 GB").tag("medium")
+                    Text("Large · 8 CPU, 16 GB").tag("large")
+                }
+                Picker("Keep", selection: $lifecycle) {
+                    Text("Temporary").tag("ephemeral")
+                    Text("Persistent").tag("persistent")
+                }
+                if lifecycle == "ephemeral" {
+                    Picker("Delete after", selection: $lifetime) {
+                        Text("1 hour").tag(1); Text("4 hours").tag(4); Text("1 day").tag(24)
+                        Text("3 days").tag(72); Text("1 week").tag(168)
+                    }
+                }
+                Picker("Can reach", selection: $reach) {
+                    Text("My computers").tag("network")
+                    Text("Nothing (isolated)").tag("isolated")
+                }
+            }
+            .formStyle(.grouped)
+            if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
+            if catalog?.runner.hostingEnabled == false {
+                Text("This Mac isn't set up to host instances. Turn on hosting in Settings › Throwaway hosts.").font(.caption).foregroundStyle(.orange)
+            }
+            Text(kind == "devcontainer"
+                 ? "Runs in Colima on this Mac and joins your private network. The first one downloads the runtime and can take a few minutes."
+                 : "A full Linux VM on this Mac that joins your private network.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(hosting.creating ? "Creating…" : "Create") { Task { await create() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(hosting.creating || imageId.isEmpty || catalog == nil)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .task { await load() }
+        .onChange(of: kind) { _, _ in if !images.contains(where: { $0.id == imageId }) { imageId = images.first?.id ?? "" } }
+    }
+
+    private func load() async {
+        do {
+            let c = try await hosting.loadImages(model)
+            catalog = c
+            imageId = images.first?.id ?? ""
+            if c.images.isEmpty { loadError = "No compatible images for this Mac yet." }
+        } catch {
+            loadError = "Could not load images: \(error.localizedDescription)"
+        }
+    }
+
+    private func create() async {
+        guard let catalog else { return }
+        let request = SandboxCreateRequest(imageId: imageId, runnerHostId: catalog.runner.id, size: size, kind: kind,
+                                           lifecycle: lifecycle, lifetimeHours: lifecycle == "ephemeral" ? lifetime : nil, reach: reach)
+        if await hosting.create(request, model: model) { dismiss() }
     }
 }

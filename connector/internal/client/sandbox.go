@@ -121,6 +121,44 @@ func (c *Client) ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey
 	return out, nil
 }
 
+// CreateSandbox is POST /api/v2/hosts/:hostId/sandboxes: start a VM or dev container
+// as the host's owner. body is the member create request (imageId, runnerHostId, kind,
+// size, lifecycle, lifetimeHours, devcontainer, ...), passed through unchanged.
+func (c *Client) CreateSandbox(ctx context.Context, hostID string, body json.RawMessage) (json.RawMessage, error) {
+	p, err := sandboxPath(hostID, "sandboxes")
+	if err != nil {
+		return nil, err
+	}
+	if !json.Valid(body) {
+		return nil, errors.New("invalid create request")
+	}
+	var out json.RawMessage
+	if err := c.callLenient(ctx, "POST", p, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SandboxImages is GET /api/v2/hosts/:hostId/sandbox-images[?runner=]: the image
+// catalog for a runner computer (this host when runner is empty).
+func (c *Client) SandboxImages(ctx context.Context, hostID, runner string) (json.RawMessage, error) {
+	p, err := sandboxPath(hostID, "sandbox-images")
+	if err != nil {
+		return nil, err
+	}
+	if runner != "" {
+		if !ValidID(runner) {
+			return nil, errors.New("invalid runner id")
+		}
+		p += "?runner=" + url.QueryEscape(runner)
+	}
+	var out json.RawMessage
+	if err := c.callLenient(ctx, "GET", p, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 var (
 	_ sandbox.Coordinator          = (*Client)(nil)
 	_ sandbox.HostingPublisher     = (*Client)(nil)

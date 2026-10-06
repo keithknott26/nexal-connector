@@ -18,6 +18,8 @@ import (
 type sandboxAPI interface {
 	ListSandboxes(ctx context.Context, hostID string) (json.RawMessage, error)
 	ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey string) (json.RawMessage, error)
+	CreateSandbox(ctx context.Context, hostID string, body json.RawMessage) (json.RawMessage, error)
+	SandboxImages(ctx context.Context, hostID, runner string) (json.RawMessage, error)
 }
 
 // sandboxCommand is the Mac app's seam to throwaway hosts on the network:
@@ -27,6 +29,11 @@ type sandboxAPI interface {
 //	nexal sandbox --action connect --id <id> --kind ssh|vnc|files [--public-key-stdin]
 //	    prints the coordinator's connect response unchanged; for ssh and files the
 //	    ssh-ed25519 public key to certify is read from stdin (one line)
+//	nexal sandbox --action images [--id <runner host id>]
+//	    prints the image catalog for that computer (default: this one)
+//	nexal sandbox --action create
+//	    reads the create request JSON object from stdin (imageId, runnerHostId, kind, ...)
+//	    and prints the coordinator's 202 response unchanged
 //
 // On failure it exits non-zero with {"error":{"code","message"}} on stderr (the
 // coordinator's error code is passed through, e.g. sandbox_not_running).
@@ -35,7 +42,7 @@ func sandboxCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	action := f.String("action", "", "list | connect")
+	action := f.String("action", "", "list | connect | images | create")
 	id := f.String("id", "", "sandbox id (connect)")
 	kind := f.String("kind", "", "ssh | vnc | files (connect)")
 	stdin := f.Bool("public-key-stdin", false, "read the ssh-ed25519 public key from standard input")
@@ -75,6 +82,14 @@ func checkSandboxArgs(action, id, kind string, stdin bool) error {
 		if id != "" || kind != "" || stdin {
 			return &codedError{code: "invalid_arguments", err: errors.New("sandbox list takes no --id, --kind or --public-key-stdin")}
 		}
+	case "images":
+		if (id != "" && !client.ValidID(id)) || kind != "" || stdin {
+			return &codedError{code: "invalid_arguments", err: errors.New("sandbox images takes only an optional --id <runner host id>")}
+		}
+	case "create":
+		if id != "" || kind != "" || stdin {
+			return &codedError{code: "invalid_arguments", err: errors.New("sandbox create reads its request from stdin and takes no other flags")}
+		}
 	case "connect":
 		if !client.ValidID(id) {
 			return &codedError{code: "invalid_arguments", err: errors.New("--id must be a sandbox id")}
@@ -92,7 +107,7 @@ func checkSandboxArgs(action, id, kind string, stdin bool) error {
 			return &codedError{code: "invalid_arguments", err: errors.New("--kind must be ssh, vnc or files")}
 		}
 	default:
-		return &codedError{code: "invalid_arguments", err: errors.New("usage: nexal sandbox --action list|connect --id <id> --kind ssh|vnc|files [--public-key-stdin]")}
+		return &codedError{code: "invalid_arguments", err: errors.New("usage: nexal sandbox --action list|images|create|connect [--id <id>] [--kind ssh|vnc|files] [--public-key-stdin]")}
 	}
 	return nil
 }
@@ -103,9 +118,19 @@ func runSandbox(ctx context.Context, api sandboxAPI, hostID, action, id, kind st
 	}
 	var body json.RawMessage
 	var err error
-	if action == "list" {
+	switch action {
+	case "list":
 		body, err = api.ListSandboxes(ctx, hostID)
-	} else {
+	case "images":
+		body, err = api.SandboxImages(ctx, hostID, id)
+	case "create":
+		raw, rerr := io.ReadAll(io.LimitReader(in, 16<<10+1))
+		trimmed := strings.TrimSpace(string(raw))
+		if rerr != nil || len(raw) > 16<<10 || !strings.HasPrefix(trimmed, "{") || !json.Valid([]byte(trimmed)) {
+			return &codedError{code: "invalid_request", err: errors.New("expected one JSON object (at most 16 KiB) on stdin")}
+		}
+		body, err = api.CreateSandbox(ctx, hostID, json.RawMessage(trimmed))
+	default:
 		key := ""
 		if readKey {
 			if key, err = readPublicKey(in); err != nil {

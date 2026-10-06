@@ -11,6 +11,18 @@ final class ThrowawayHostingTests: XCTestCase {
                        ["sandbox", "--action", "connect", "--id", "sb1", "--kind", "vnc", "--config", config.path])
         XCTAssertEqual(CLICommand.sandbox(action: "connect", id: "sb1", kind: "ssh").arguments(config: config),
                        ["sandbox", "--action", "connect", "--id", "sb1", "--kind", "ssh", "--public-key-stdin", "--config", config.path])
+        XCTAssertEqual(CLICommand.sandbox(action: "create", id: nil, kind: nil).arguments(config: config),
+                       ["sandbox", "--action", "create", "--config", config.path])
+        XCTAssertEqual(CLICommand.sandbox(action: "images", id: "host_a", kind: nil).arguments(config: config),
+                       ["sandbox", "--action", "images", "--id", "host_a", "--config", config.path])
+    }
+
+    func testCreateRequestOmitsLifetimeWhenPersistent() throws {
+        let persistent = SandboxCreateRequest(imageId: "i", runnerHostId: "h", size: "small", kind: "vm", lifecycle: "persistent", lifetimeHours: 24, reach: "network")
+        let json = String(decoding: try JSONEncoder().encode(persistent), as: UTF8.self)
+        XCTAssertFalse(json.contains("lifetimeHours"))
+        let temp = SandboxCreateRequest(imageId: "i", runnerHostId: "h", size: "small", kind: "devcontainer", lifecycle: "ephemeral", lifetimeHours: 4, reach: "network")
+        XCTAssertTrue(String(decoding: try JSONEncoder().encode(temp), as: UTF8.self).contains("\"lifetimeHours\":4"))
     }
 
     func testConfigClampsAndDefaultsOff() {

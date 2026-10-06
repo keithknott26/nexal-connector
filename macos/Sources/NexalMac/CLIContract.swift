@@ -123,7 +123,7 @@ enum CLICommand {
             command = ["honeypot", "--action", action]
         case let .sandbox(action, id, kind):
             command = ["sandbox", "--action", action] + (id.map { ["--id", $0] } ?? [])
-                + (kind.map { ["--kind", $0] } ?? []) + (kind == "vnc" || id == nil ? [] : ["--public-key-stdin"])
+                + (kind.map { ["--kind", $0] } ?? []) + (action != "connect" || kind == "vnc" ? [] : ["--public-key-stdin"])
         case let .exitRoute(tunnelAddress, enabled, targetDeviceID):
             command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):

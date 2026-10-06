@@ -27,6 +27,36 @@ func (f *fakeSandboxAPI) ConnectSandbox(_ context.Context, hostID, id, kind, key
 	return json.RawMessage(`{"kind":"` + kind + `","host":"100.64.0.2","pending":false}`), f.connErr
 }
 
+func (f *fakeSandboxAPI) CreateSandbox(_ context.Context, hostID string, body json.RawMessage) (json.RawMessage, error) {
+	f.gotHost, f.gotKey = hostID, string(body)
+	return json.RawMessage(`{"id":"sb2","state":"requested"}`), nil
+}
+func (f *fakeSandboxAPI) SandboxImages(_ context.Context, hostID, runner string) (json.RawMessage, error) {
+	f.gotHost, f.gotID = hostID, runner
+	return json.RawMessage(`{"images":[]}`), nil
+}
+
+func TestSandboxCLICreateAndImages(t *testing.T) {
+	ctx := context.Background()
+	api := &fakeSandboxAPI{}
+	var out bytes.Buffer
+	req := `{"imageId":"ubuntu-24.04-arm64","runnerHostId":"host1","kind":"devcontainer"}`
+	if err := runSandbox(ctx, api, "host1", "create", "", "", false, strings.NewReader(req+"\n"), &out); err != nil ||
+		api.gotKey != req || !strings.Contains(out.String(), `"sb2"`) {
+		t.Fatalf("create: %q %v", out.String(), err)
+	}
+	if err := runSandbox(ctx, api, "host1", "create", "", "", false, strings.NewReader("not json"), &out); err == nil {
+		t.Fatal("create accepted a non-JSON body")
+	}
+	out.Reset()
+	if err := runSandbox(ctx, api, "host1", "images", "", "", false, strings.NewReader(""), &out); err != nil || api.gotID != "" || out.String() != `{"images":[]}`+"\n" {
+		t.Fatalf("images: %q %v", out.String(), err)
+	}
+	if err := runSandbox(ctx, api, "host1", "images", "", "ssh", false, strings.NewReader(""), &out); err == nil {
+		t.Fatal("images accepted --kind")
+	}
+}
+
 func TestSandboxCLI(t *testing.T) {
 	ctx := context.Background()
 	api := &fakeSandboxAPI{}

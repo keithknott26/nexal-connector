@@ -1038,7 +1038,7 @@ final class AppModel: ObservableObject {
         do {
             _ = try await invoke(.shareWhileActive(on))
             try await updateStatus()
-            message = on ? "This Mac now takes work even while you are using it." : "This Mac now takes work only while you are away."
+            message = on ? "This Mac now accepts distributed network tasks while you use it." : "This Mac now accepts distributed network tasks only while it is idle."
         } catch {
             message = error.localizedDescription
         }

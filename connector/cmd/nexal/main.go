@@ -300,7 +300,8 @@ func initCommand(ctx context.Context, args []string) error {
 	//
 	// --paused remains available for a machine that should join without contributing.
 	c := config.Config{Version: 1, Coordinator: strings.TrimRight(*base, "/"), Name: *name, Listen: *listen,
-		Development: *dev, DevSecrets: *devSecrets, Paused: *paused, MemoryLimitBytes: *memory << 20, ReserveMemoryBytes: *reserve << 20, IdleSeconds: 300}
+		Development: *dev, DevSecrets: *devSecrets, Paused: *paused, MemoryLimitBytes: *memory << 20, ReserveMemoryBytes: *reserve << 20, IdleSeconds: 300,
+		ShareWhileActive: true}
 	if err := c.Validate(); err != nil {
 		return err
 	}

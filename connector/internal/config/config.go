@@ -42,8 +42,10 @@ type Config struct {
 	IdleSeconds        uint64 `json:"idleSeconds"`
 	// ShareWhileActive is the owner's standing choice to take work even while
 	// they are using this Mac. Memory, disk, battery and thermal limits still
-	// apply; only the "owner is active" gate is lifted. Absent means off.
-	ShareWhileActive bool `json:"shareWhileActive,omitempty"`
+	// apply; only the "owner is active" gate is lifted. On by default: a saved
+	// configuration without the field loads as on (see Load), and it is always
+	// written explicitly so turning it off sticks.
+	ShareWhileActive bool `json:"shareWhileActive"`
 	// Upload throttling (HARDENING-PLAN §16, rate half only). Absent means auto:
 	// these fields are omitempty so a config written before they existed is not
 	// rewritten with empty strings, and NormalizeUploadMode reads the absence as
@@ -290,10 +292,13 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(b, &fields); err != nil {
 		return c, errors.New("invalid configuration JSON")
 	}
-	hasPause := false
+	hasPause, hasShareWhileActive := false, false
 	for key, value := range fields {
 		if strings.EqualFold(key, "paused") {
 			hasPause = true
+		}
+		if strings.EqualFold(key, "shareWhileActive") {
+			hasShareWhileActive = true
 		}
 		if strings.EqualFold(key, "tunnel") || strings.EqualFold(key, "discovery") || strings.EqualFold(key, "enrollment") {
 			continue
@@ -312,6 +317,9 @@ func Load(path string) (Config, error) {
 	}
 	if err = d.Decode(new(any)); err != io.EOF {
 		return c, errors.New("trailing configuration data")
+	}
+	if !hasShareWhileActive {
+		c.ShareWhileActive = true // the default until the owner turns it off
 	}
 	return c, c.Validate()
 }

@@ -164,13 +164,13 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
-            GroupBox("Shared computing") {
+            GroupBox("Distributed network tasks") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Take work while I'm using this Mac", isOn: Binding(
+                    Toggle("Accept distributed network tasks while I'm using my computer", isOn: Binding(
                         get: { model.status?.shareWhileActive == true },
                         set: { on in Task { await model.setShareWhileActive(on) } }))
                     .disabled(model.status == nil || model.busy)
-                    Text("Off: shared jobs and capability tests run only when this Mac has been idle. On: they also run while you work. Memory, disk, battery and temperature limits still apply, so your apps keep priority.")
+                    Text("On (default): tasks from your network, including capability tests, also run while you work. Off: they run only after this Mac has been idle for a while. Memory, disk, battery and temperature limits always apply, so your own apps keep priority.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

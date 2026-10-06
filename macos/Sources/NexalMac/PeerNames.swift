@@ -32,21 +32,12 @@ final class PeerNames: ObservableObject {
         names = Dictionary((reply.names ?? []).map { ($0.address, $0.name) }, uniquingKeysWith: { _, last in last })
     }
 
-    /// Asks for a new name and saves it. An empty name goes back to the peer's own.
-    func rename(address: String?, current: String, model: AppModel) {
-        guard let address, Self.validAddress(address) else {
-            Self.report("Cannot rename yet", "This peer has no secure-network address yet; try again once it is connected.")
-            return
-        }
-        guard let entered = Self.prompt(current: current) else { return }
-        Task { await save(address: address, name: entered, model: model) }
-    }
-
     func save(address: String, name: String, model: AppModel) async {
         let clean = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxLength))
         do {
             _ = try await model.peerNames(action: "set", address: address, input: Data((clean + "\n").utf8))
             if clean.isEmpty { names[address] = nil } else { names[address] = clean }
+            await refresh(model, force: true) // what the coordinator stored, for every peer
             await ThrowawayHosting.shared.refreshNetwork(model, force: true)
         } catch {
             Self.report("Could not rename", error.localizedDescription)
@@ -67,39 +58,76 @@ final class PeerNames: ObservableObject {
         return parts.count == 4 && parts.allSatisfy { (0...255).contains($0) } && parts[0] == 100 && (64...127).contains(parts[1])
     }
 
-    /// A small modal prompt. NSAlert works from the menu-bar panel, where SwiftUI alerts are unreliable.
-    static func prompt(current: String) -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Rename “\(current)”"
-        alert.informativeText = "Shown on your Macs and iPhone. Leave empty to use its own name again."
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.stringValue = current
-        field.placeholderString = "Name"
-        alert.accessoryView = field
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = field
-        alert.window.level = .floating
-        alert.layout()
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        return field.stringValue
-    }
 }
 
-/// Right-click › Rename…, or double-click the name.
+/// Double-click the name to edit it in place (Return saves, Esc cancels), or right-click › Rename….
+/// The name is saved by the coordinator, which also renames the peer on the network (its DNS
+/// name), so the change shows on every Mac and iPhone.
 struct RenameOnInteraction: ViewModifier {
     let address: String?
     let current: String
     @EnvironmentObject private var model: AppModel
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var saving = false
+    @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
-        content
-            .onTapGesture(count: 2) { PeerNames.shared.rename(address: address, current: current, model: model) }
-            .contextMenu {
-                Button("Rename…") { PeerNames.shared.rename(address: address, current: current, model: model) }
+        Group {
+            if editing {
+                HStack(spacing: 4) {
+                    TextField("Name", text: $draft)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.callout)
+                        .frame(minWidth: 140, maxWidth: 240)
+                        .focused($focused)
+                        .onSubmit { commit() }
+                        .onExitCommand { editing = false }
+                        .onChange(of: focused) { _, isFocused in if !isFocused && !saving { editing = false } }
+                        .onChange(of: draft) { _, value in
+                            if value.count > PeerNames.maxLength { draft = String(value.prefix(PeerNames.maxLength)) }
+                        }
+                    if saving { ProgressView().controlSize(.mini) }
+                }
+            } else {
+                content
+                    .onTapGesture(count: 2) { begin() }
+                    .help("Double-click to rename")
             }
-            .help("Double-click or right-click to rename")
+        }
+        .contextMenu {
+            Button("Rename…") { begin() }
+            if address != nil, PeerNames.shared.name(for: address) != nil {
+                Button("Use Original Name") { save("") }
+            }
+        }
+    }
+
+    private func begin() {
+        guard let address, PeerNames.validAddress(address) else {
+            PeerNames.report("Cannot rename yet", "This peer has no secure-network address yet; try again once it is connected.")
+            return
+        }
+        draft = current
+        editing = true
+        DispatchQueue.main.async { focused = true }
+    }
+
+    private func commit() {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != current else { editing = false; return } // nothing to change: no request at all
+        save(name)
+    }
+
+    private func save(_ name: String) {
+        guard let address else { return }
+        saving = true
+        Task {
+            await PeerNames.shared.save(address: address, name: name, model: model)
+            await model.refresh()
+            saving = false
+            editing = false
+        }
     }
 }
 

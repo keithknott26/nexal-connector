@@ -15,7 +15,7 @@ var servicePorts = []struct {
 }{{"ssh", "22"}, {"vnc", "5900"}, {"smb", "445"}}
 
 const (
-	serviceProbeTimeout = 400 * time.Millisecond
+	serviceProbeTimeout = 1500 * time.Millisecond // relayed and PQ-rekeying links answer well after 400 ms
 	serviceProbeTTL     = 60 * time.Second
 )
 

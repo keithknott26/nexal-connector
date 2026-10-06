@@ -506,7 +506,7 @@ struct NetworkPanel: View {
         let protected = mesh.pq == "protected"
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
-                detailSection("Connection") {
+                peerCard("Connection") {
                     detailRow("Status") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(lifecycleText(mesh.lifecycle))") }
                     detailRow("Path") { Text(pathSummary(mesh.peers)) }
                     if let step = mesh.authenticationStep, !step.isEmpty {
@@ -516,7 +516,7 @@ struct NetworkPanel: View {
                         detailRow("Updated") { Text(friendlyTime(updated)) }
                     }
                 }
-                detailSection("Security") {
+                peerCard("Security") {
                     detailRow("Post-quantum protection") { pqText(effectivePQ(mesh.pq, peers: mesh.peers)) }
                     detailRow("Quantum type") { quantumType(mesh.peers) }
                     if let gateway, let verified = lastVerified(gateway) {
@@ -525,7 +525,7 @@ struct NetworkPanel: View {
                     Text("Based on this Mac's link to neXal storage.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-                detailSection("Services") {
+                peerCard("Services") {
                     detailRow("Remote Login (SSH)") { serviceState(localServices?.remoteLogin) }
                     detailRow("Screen Sharing") { serviceState(localServices?.screenSharing) }
                     detailRow("File Sharing") { serviceState(localServices?.fileSharing) }
@@ -569,10 +569,17 @@ struct NetworkPanel: View {
         return model.status?.presence?.hosts?.first { $0.hostId == hostId }?.info
     }
 
-    private func serviceState(_ on: Bool?) -> some View {
-        Text(on == nil ? "Checking…" : on == true ? "On" : "Off")
-            .foregroundStyle(on == true ? .primary : .secondary)
+    /// A small LED: green on, red off, grey while checking.
+    private func serviceLED(_ on: Bool?) -> some View {
+        Circle()
+            .fill(on == nil ? Color.secondary.opacity(0.5) : on == true ? Color.green : Color.red)
+            .frame(width: 8, height: 8)
+            .overlay(Circle().stroke(.black.opacity(0.15), lineWidth: 0.5))
+            .help(on == nil ? "Checking…" : on == true ? "On" : "Off")
+            .accessibilityLabel(on == nil ? "Checking" : on == true ? "On" : "Off")
     }
+
+    private func serviceState(_ on: Bool?) -> some View { serviceLED(on) }
 
     /// Like `detailSection`, but collapsed until the owner opens it.
     private func collapsibleSection<Content: View>(_ title: String, @ViewBuilder _ content: @escaping () -> Content) -> some View {
@@ -872,20 +879,20 @@ struct NetworkPanel: View {
     @ViewBuilder
     private func advertisedServices(_ peer: ConnectorStatus.MeshPeer) -> some View {
         let services = Set(peer.services ?? [])
-        let features = model.status?.features ?? ConnectorFeatures()
         let storage = isStorageGateway(peer)
-        let ssh = !storage && features.remoteSSH && services.contains("ssh") ? peer.tunnelAddress : nil
-        let vnc = !storage && features.remoteVNC
-            ? (peer.screenSharing?.authorized == true && peer.screenSharing?.available == true
-                ? peer.screenSharing?.address : (services.contains("vnc") ? peer.tunnelAddress : nil)) : nil
-        let files = !storage && features.networkFiles
-            ? (peer.fileSharing?.authorized == true && peer.fileSharing?.available == true
-                ? peer.fileSharing?.address : (services.contains("smb") ? peer.tunnelAddress : nil)) : nil
+        // Every service is listed with an LED (green = shared by that computer, red = off) and a
+        // Connect button when it is on. Turning a service on in the Mac's System Settings is what
+        // opens it on the private network, so no account-wide feature flag gates the row any more.
+        let sshOn = services.contains("ssh")
+        let vncOn = peer.screenSharing?.available == true || services.contains("vnc")
+        let smbOn = peer.fileSharing?.available == true || services.contains("smb")
+        let vncHost = peer.screenSharing?.available == true ? (peer.screenSharing?.address ?? peer.tunnelAddress) : peer.tunnelAddress
+        let smbHost = peer.fileSharing?.available == true ? (peer.fileSharing?.address ?? peer.tunnelAddress) : peer.tunnelAddress
         VStack(alignment: .leading, spacing: 6) {
-            if let host = ssh { serviceRow("SSH", symbol: "terminal", scheme: "ssh", host: host) }
-            if let host = vnc { serviceRow("VNC", symbol: "display", scheme: "vnc", host: host) }
-            if let host = files {
-                serviceRow("File Sharing", symbol: "folder", scheme: "smb", host: host,
+            if !storage {
+                serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress)
+                serviceRow("Screen Sharing", on: vncOn, symbol: "display", scheme: "vnc", host: vncHost)
+                serviceRow("File Sharing", on: smbOn, symbol: "folder", scheme: "smb", host: smbHost,
                            share: peer.fileSharing?.shareName)
             }
             if storage {
@@ -918,19 +925,19 @@ struct NetworkPanel: View {
                     }
                 }
             }
-            if ssh == nil && vnc == nil && files == nil && !storage {
-                Text("No services available").foregroundStyle(.secondary)
-            }
         }
     }
 
-    private func serviceRow(_ title: String, symbol: String, scheme: String, host: String,
+    private func serviceRow(_ title: String, on: Bool, symbol: String, scheme: String, host: String?,
                             share: String? = nil) -> some View {
         detailRow(title) {
-            if let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName, share: share) {
-                linkButton("Open", symbol, url, host: host, share: share)
-            } else {
-                Text("Unavailable").foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                serviceLED(on)
+                if on, let host, let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName, share: share) {
+                    linkButton("Connect", symbol, url, host: host, share: share)
+                } else if on {
+                    Text("Waiting for its address").foregroundStyle(.secondary)
+                }
             }
         }
     }

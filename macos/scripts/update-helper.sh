@@ -18,6 +18,9 @@ for arch in arm64 amd64; do
 done
 lipo -create "$OUT/nexal-arm64" "$OUT/nexal-amd64" -output "$OUT/nexal"
 (cd "$ROOT/macos" && swift build --scratch-path "$OUT/swift" -c release --arch arm64 --arch x86_64)
+# The VM helper (Virtualization.framework, Apple Silicon only) for virtual machines.
+(cd "$ROOT/macos" && swift build --scratch-path "$OUT/vmhost" -c release --product nexal-vmhost)
+VMHOST="$(cd "$ROOT/macos" && swift build --scratch-path "$OUT/vmhost" -c release --product nexal-vmhost --show-bin-path)/nexal-vmhost"
 echo "== install (backup: $OUT/nexal.previous)"
 # Quit the app and stop its connector agent: a running process keeps the old code
 # in memory even after the file on disk is replaced.
@@ -34,6 +37,7 @@ cp "$APP/Contents/Helpers/nexal" "$OUT/nexal.previous"
 cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
 sudo install -m 755 "$OUT/nexal" "$APP/Contents/Helpers/nexal"
 sudo install -m 755 "$OUT/swift/out/Products/Release/NexalMac" "$APP/Contents/MacOS/NexalMac"
+sudo install -m 755 "$VMHOST" "$APP/Contents/Helpers/nexal-vmhost"
 # Official OS logos (macos/Resources/os-logos/os-*.png), shown on VM and dev container rows.
 for logo in "$ROOT"/macos/Resources/os-logos/os-*.png; do
   [ -f "$logo" ] && sudo install -m 644 "$logo" "$APP/Contents/Resources/$(basename "$logo")"
@@ -46,6 +50,10 @@ sudo chown -R "$(id -un)" "$APP"
 case "$IDENTITY" in "Developer ID Application:"*) TS=--timestamp ;; *) TS=--timestamp=none ;; esac
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
+# nexal-vmhost needs the virtualization entitlement, or macOS refuses to start a VM.
+codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmhost"
+codesign -d --entitlements :- "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | grep -q com.apple.security.virtualization \
+  || { echo "nexal-vmhost is missing the virtualization entitlement"; exit 1; }
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 if [ -f "$SUPPORT_BIN" ]; then

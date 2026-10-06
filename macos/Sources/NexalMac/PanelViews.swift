@@ -186,7 +186,7 @@ struct SeriesChart: View {
             )
             .foregroundStyle(by: .value("Series", point.series))
             .opacity(0.18)
-            .interpolationMethod(.catmullRom)
+            .interpolationMethod(.monotone)
             LineMark(
                 x: .value("Time", point.at),
                 y: .value(unit, point.value),
@@ -194,7 +194,7 @@ struct SeriesChart: View {
             )
             .foregroundStyle(by: .value("Series", point.series))
             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-            .interpolationMethod(.catmullRom)
+            .interpolationMethod(.monotone)
         }
         .chartYScale(domain: 0...upperBound)
         .chartYAxis {

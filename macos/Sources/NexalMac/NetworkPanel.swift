@@ -456,7 +456,7 @@ struct NetworkPanel: View {
                                     receivedTotal: bytes(peer.traffic.receivedBytes), sentTotal: bytes(peer.traffic.sentBytes))
         return CollapsibleCard(title: "Traffic") {
             TrafficGraphView(spec: spec)
-                .frame(height: 132)
+                .frame(height: 92)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Traffic")
                 .accessibilityValue("Received \(bytes(peer.traffic.receivedBytes)) total, sent \(bytes(peer.traffic.sentBytes)) total")

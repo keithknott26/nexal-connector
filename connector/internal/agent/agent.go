@@ -830,8 +830,11 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	// why", so the reason is visible locally (status/UI per §26) but the
 	// coordinator cannot distinguish a busy owner from a hot machine.
 	withholding := a.contributionLocked().Withholding
-	// With "take work while I'm using this Mac" on, owner activity alone does not withhold.
-	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || (a.telemetry.OwnerActive && !a.ownerOverrideLocked()) || withholding,
+	// With the standing "take work while I'm using this Mac" setting, owner activity alone does
+	// not withhold. The temporary accept-jobs override keeps reporting the raw owner state and
+	// sends its own deadline (AcceptJobsUntil) for the coordinator to judge.
+	shareWhileActive := a.cfg.ShareWhileActive && !a.cfg.Paused
+	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || (a.telemetry.OwnerActive && !shareWhileActive) || withholding,
 		PQ: a.pq, Version: config.Version}
 	if a.manualActiveLocked() {
 		h.AcceptJobsUntil = a.manualUntil.UTC().Format("2006-01-02T15:04:05.000Z")

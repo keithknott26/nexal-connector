@@ -92,10 +92,10 @@ struct ConnectorSettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    GroupBox("Virtual machines & dev containers") {
+                    GroupBox("Virtual Machines & Development Containers") {
                         ThrowawayHostingSettingsView().padding(8)
                     }
-                    Text("Start new ones from the neXal panel › Virtual machines & dev containers › New…")
+                    Text("Start new ones from the neXal panel › Virtual Machines & Development Containers › New…")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -292,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 menu.addItem(.separator())
                 let info = menu.addItem(withTitle: hosting.runningLine, action: nil, keyEquivalent: "")
                 info.isEnabled = false
-                menu.addItem(withTitle: "Stop virtual machines & dev containers", action: #selector(stopThrowawayHosts), keyEquivalent: "").target = self
+                menu.addItem(withTitle: "Stop Virtual Machines & Development Containers", action: #selector(stopThrowawayHosts), keyEquivalent: "").target = self
             }
             menu.addItem(.separator())
             menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q").target = NSApp

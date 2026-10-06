@@ -294,7 +294,25 @@ final class ThrowawayHosting: ObservableObject {
               let list = try? JSONDecoder().decode(NetworkSandboxList.self, from: data) else { return }
         let all = list.sandboxes ?? []
         network = all.filter { $0.state != "deleted" && $0.state != "failed" }
-        failed = Array(all.filter { $0.state == "failed" }.prefix(3))
+        allFailed = all.filter { $0.state == "failed" }
+        applyDismissedFailures()
+    }
+
+    // Failures stay on the coordinator (a failed host holds no resources); Clear hides them
+    // in this app. Remembered by id so they stay hidden after a relaunch.
+    private static let dismissedKey = "dismissedSandboxFailures"
+    private var allFailed: [NetworkSandbox] = []
+    private var dismissedFailures: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: Self.dismissedKey) ?? []) }
+        set { UserDefaults.standard.set(Array(newValue.suffix(200)), forKey: Self.dismissedKey) }
+    }
+    private func applyDismissedFailures() {
+        let hidden = dismissedFailures
+        failed = Array(allFailed.filter { !hidden.contains($0.id) }.prefix(3))
+    }
+    func clearFailures() {
+        dismissedFailures = dismissedFailures.union(allFailed.map(\.id))
+        applyDismissedFailures()
     }
 
     // MARK: Create (VM or dev container, on this Mac)
@@ -547,7 +565,13 @@ struct ThrowawayHostsSection: View {
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                         if !hosting.failed.isEmpty {
-                            Text("RECENT FAILURES").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+                            HStack {
+                                Text("RECENT FAILURES").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Clear") { hosting.clearFailures() }
+                                    .buttonStyle(.borderless).controlSize(.small).font(.caption2)
+                                    .help("Remove these failures from the list")
+                            }
                             ForEach(hosting.failed) { box in
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(box.title).font(.caption.weight(.medium))
@@ -564,7 +588,7 @@ struct ThrowawayHostsSection: View {
                         .disabled(hosting.creating)
                     }.padding(.top, 4)
                 } label: {
-                    Text(hosting.runningHere.isEmpty ? "Virtual machines & dev containers" : "Virtual machines & dev containers · \(hosting.runningLine)")
+                    Text(hosting.runningHere.isEmpty ? "Virtual Machines & Development Containers" : "Virtual Machines & Development Containers · \(hosting.runningLine)")
                         .font(.subheadline.weight(.semibold))
                 }
             }

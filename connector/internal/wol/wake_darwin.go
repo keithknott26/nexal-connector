@@ -40,3 +40,21 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	}
 	return b.Buffer.Write(p)
 }
+
+// hardwarePortMACs reads the built-in (burned-in) addresses of the Mac's Ethernet, Wi-Fi and
+// Thunderbolt Ethernet ports from `networksetup -listallhardwareports`. They are globally unique
+// even when Wi-Fi joins networks with a private address, and Ethernet is the port that wakes
+// most reliably.
+func hardwarePortMACs(ctx context.Context) []string {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/usr/sbin/networksetup", "-listallhardwareports")
+	cmd.WaitDelay = time.Second
+	out := &boundedBuffer{max: 256 << 10}
+	cmd.Stdout = out
+	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LANG=C", "LC_ALL=C"}
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	return ParseHardwarePorts(out.Bytes())
+}

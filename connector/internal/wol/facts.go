@@ -118,14 +118,28 @@ func CollectLocal(ctx context.Context) Facts {
 	// RELAY wakes; only a globally unique MAC can be a wake TARGET.
 	lanPort := map[string]bool{}
 	macSet := map[string]bool{}
+	// Ports that currently hold a private IPv4: the LAN knows them by their current address.
+	onLAN := map[string]bool{}
+	for _, in := range v4 {
+		if a := in.Prefix.Addr(); in.Flags&net.FlagUp != 0 && a.Is4() && a.IsPrivate() {
+			onLAN[in.Name] = true
+		}
+	}
 	for _, in := range ifs {
 		if in.Flags&net.FlagLoopback != 0 || isVirtual(in.Name) || len(in.HardwareAddr) != 6 {
 			continue
 		}
 		lanPort[in.Name] = true
-		if physicalMAC(in.HardwareAddr) {
+		// A globally unique address, or the private (locally administered) Wi-Fi address the Mac
+		// is using on this network right now: macOS keeps it fixed per network, and it is the
+		// address a sleeping Mac's Wi-Fi answers to. (A private address on a port that is not on
+		// the LAN is never reported: it may rotate and wakes nothing.)
+		if physicalMAC(in.HardwareAddr) || (onLAN[in.Name] && checkUnicast(in.HardwareAddr) == nil) {
 			macSet[strings.ToLower(in.HardwareAddr.String())] = true
 		}
+	}
+	for _, m := range systemHardwarePorts(ctx) {
+		macSet[m] = true
 	}
 	for m := range macSet {
 		f.MACs = append(f.MACs, m)
@@ -173,4 +187,26 @@ func ParseWomp(b []byte) string {
 		return WakeEnabled
 	}
 	return WakeDisabled
+}
+
+// systemHardwarePorts is a variable so tests can substitute a fixed list.
+var systemHardwarePorts = hardwarePortMACs
+
+var hwAddrRE = regexp.MustCompile(`(?m)^Ethernet Address:\s*([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\s*$`)
+
+// ParseHardwarePorts extracts the globally unique addresses from `networksetup
+// -listallhardwareports` ("Ethernet Address: aa:bb:cc:dd:ee:ff" under each port).
+func ParseHardwarePorts(b []byte) []string {
+	if len(b) > 256<<10 {
+		return nil
+	}
+	var out []string
+	for _, m := range hwAddrRE.FindAllSubmatch(b, -1) {
+		hw, err := net.ParseMAC(string(m[1]))
+		if err != nil || !physicalMAC(hw) {
+			continue
+		}
+		out = append(out, strings.ToLower(hw.String()))
+	}
+	return out
 }

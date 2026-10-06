@@ -109,11 +109,12 @@ func (f *fakeUDP) Close() error { return nil }
 
 func withFakes(t *testing.T, ifaces []ifaceV4, raw []net.Interface, udp *fakeUDP) {
 	t.Helper()
-	oldIf, oldUDP, oldBind := systemInterfaces, openUDP, bindPerInterface
+	oldIf, oldUDP, oldBind, oldPorts := systemInterfaces, openUDP, bindPerInterface, systemHardwarePorts
 	bindPerInterface = false
+	systemHardwarePorts = func(context.Context) []string { return nil }
 	systemInterfaces = func() ([]ifaceV4, []net.Interface, error) { return ifaces, raw, nil }
 	openUDP = func() (udpSender, error) { return udp, nil }
-	t.Cleanup(func() { systemInterfaces, openUDP, bindPerInterface = oldIf, oldUDP, oldBind })
+	t.Cleanup(func() { systemInterfaces, openUDP, bindPerInterface, systemHardwarePorts = oldIf, oldUDP, oldBind, oldPorts })
 }
 
 func TestSend(t *testing.T) {
@@ -178,13 +179,13 @@ func TestCollectLocal(t *testing.T) {
 	v4 := []ifaceV4{
 		{Name: "en0", Flags: up, Prefix: netip.MustParsePrefix("192.168.1.23/24")},
 		{Name: "en1", Flags: up, Prefix: netip.MustParsePrefix("10.0.4.5/22")},
-		{Name: "en2", Flags: up, Prefix: netip.MustParsePrefix("172.20.0.5/16")}, // private MAC: LAN yes, wake target no
+		{Name: "en2", Flags: up, Prefix: netip.MustParsePrefix("172.20.0.5/16")}, // private Wi-Fi MAC in use on this LAN: a wake target
 		{Name: "bridge0", Flags: up, Prefix: netip.MustParsePrefix("192.168.2.1/24")},
 		{Name: "en0", Flags: up, Prefix: netip.MustParsePrefix("169.254.3.3/16")}, // link-local
 	}
 	withFakes(t, v4, raw, &fakeUDP{})
 	f := CollectLocal(context.Background())
-	wantMACs := []string{"3c:22:fb:01:02:03", "3c:22:fb:01:02:04", "3c:22:fb:01:02:05"}
+	wantMACs := []string{"3c:22:fb:01:02:03", "3c:22:fb:01:02:04", "3c:22:fb:01:02:05", "3e:22:fb:01:02:06"}
 	if len(f.MACs) != len(wantMACs) {
 		t.Fatalf("MACs = %v, want %v", f.MACs, wantMACs)
 	}
@@ -271,5 +272,13 @@ func TestPrefixKeysShareAnyPrefix(t *testing.T) {
 	}
 	if home[0] == LANKey([]string{"192.168.1.0/24"}) {
 		t.Fatal("prefix keys must be domain-separated from LANKey")
+	}
+}
+
+func TestParseHardwarePorts(t *testing.T) {
+	out := []byte("\nHardware Port: Ethernet\nDevice: en0\nEthernet Address: 3C:22:FB:0A:0B:0C\n\nHardware Port: Wi-Fi\nDevice: en1\nEthernet Address: 3c:22:fb:0a:0b:0d\n\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: 36:00:00:00:00:01\n\nVLAN Configurations\n===================\n")
+	got := ParseHardwarePorts(out)
+	if len(got) != 2 || got[0] != "3c:22:fb:0a:0b:0c" || got[1] != "3c:22:fb:0a:0b:0d" {
+		t.Fatalf("got %v", got)
 	}
 }

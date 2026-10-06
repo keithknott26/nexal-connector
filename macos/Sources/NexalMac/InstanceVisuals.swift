@@ -91,6 +91,9 @@ struct InstanceProgress: View {
     let state: String?
     let step: String?
     let percent: Int?
+    var appTitle: String? = nil
+    var runnerName: String? = nil
+    var runnerOnline: Bool? = nil
 
     private var noun: String { kind == "devcontainer" ? "development container" : "VM" }
 
@@ -107,21 +110,33 @@ struct InstanceProgress: View {
     }
 
     private var fraction: Double? {
-        guard state != "stopping", let percent else { return nil }
+        guard state != "stopping", step != "app-failed", let percent else { return nil }
         return min(max(Double(percent) / 100, 0.02), 1)
     }
 
     var text: String {
         if state == "stopping" { return "Shutting down and removing the \(noun) from the network…" }
-        if state == "requested" && step == nil { return "Waiting for the computer to start it…" }
+        if state == "requested" && step == nil {
+            let who = runnerName ?? "the computer"
+            if runnerOnline == false { return "Queued: waiting for \(who), which is offline or asleep. It starts when \(who) is back." }
+            return "Queued: waiting for \(who) to start it…"
+        }
+        let app = appTitle ?? "the app"
+        switch step {
+        case "app-packages": return "Installing \(app): system packages (\(percent ?? 0)%)…"
+        case "app-download": return "Installing \(app): downloading \(app) (\(percent ?? 0)%)…"
+        case "app-start": return "Installing \(app): starting it (\(percent ?? 0)%)…"
+        case "app-failed": return "\(app) setup failed inside the VM. Connect with Terminal to check, or delete and create it again."
+        default: break
+        }
         switch step {
         case "check": return "Checking the computer…"
-        case "download": return "Downloading the image…"
+        case "download": return "Downloading the system image (\(percent ?? 0)%)…"
         case "convert": return "Preparing the image…"
         case "disk": return "Creating the disk…"
         case "seed": return "Preparing the first boot…"
         case "boot": return kind == "devcontainer" ? "Starting the container… (the first one can take a few minutes)" : "Starting the VM…"
-        case "join": return "Adding the \(noun) to the network…"
+        case "join": return "Adding the \(noun) to the network (setting up secure networking)…"
         default: return "Starting…"
         }
     }

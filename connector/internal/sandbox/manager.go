@@ -579,6 +579,9 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	}
 	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey,
 		AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
+	if ap := t.Image.AppProfile; ap != "" && ap != AppProfileNone {
+		go m.watchAppSetup(id) // the app installs after the mesh join; follow and report it
+	}
 	return nil
 }
 

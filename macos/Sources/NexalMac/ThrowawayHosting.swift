@@ -65,6 +65,7 @@ struct NetworkSandbox: Decodable, Identifiable, Equatable {
     var imageVersion: String?
     var appProfile: String?
     var runnerName: String?
+    var runnerOnline: Bool?
     var devcontainer: DevcontainerInfo?
     var progress: Progress?
 
@@ -712,7 +713,8 @@ struct ThrowawayHostsSection: View {
             kind: box.kind, state: state,
             details: [Self.imageText(entry), ThrowawayFormat.kindLabel(box.kind), box.meshIp].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : box.expiry,
-            progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent
+            progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent,
+            appTitle: InstanceApp(profile: entry?.appProfile)?.title, runnerName: nil, runnerOnline: true
         ) {
             if let entry, entry.canConnect || box.state == "running" { connectMenu(entry) }
             if box.isActive {
@@ -732,7 +734,8 @@ struct ThrowawayHostsSection: View {
             title: title, address: box.meshIp, family: box.family, kind: box.kind, state: box.state,
             details: [Self.imageText(box), box.runnerName.map { "on \($0)" }, box.meshIp].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : ThrowawayFormat.date(box.expiresAt),
-            progressStep: box.progress?.step, progressPercent: box.progress?.percent
+            progressStep: box.progress?.step, progressPercent: box.progress?.percent,
+            appTitle: InstanceApp(profile: box.appProfile)?.title, runnerName: box.runnerName, runnerOnline: box.runnerOnline
         ) {
             if box.canConnect { connectMenu(box) }
         }
@@ -796,6 +799,9 @@ struct InstanceCard<Actions: View>: View {
     let expiry: Date?
     let progressStep: String?
     let progressPercent: Int?
+    var appTitle: String? = nil
+    var runnerName: String? = nil
+    var runnerOnline: Bool? = nil
     @ViewBuilder let actions: () -> Actions
 
     var body: some View {
@@ -821,8 +827,9 @@ struct InstanceCard<Actions: View>: View {
                 Spacer(minLength: 6)
                 HStack(spacing: 8) { actions() }
             }
-            if InstanceProgress.shows(state) {
-                InstanceProgress(kind: kind, state: state, step: progressStep, percent: progressPercent)
+            if InstanceProgress.shows(state) || progressStep?.hasPrefix("app-") == true {
+                InstanceProgress(kind: kind, state: state, step: progressStep, percent: progressPercent,
+                                 appTitle: appTitle, runnerName: runnerName, runnerOnline: runnerOnline)
             }
         }
         .padding(10)

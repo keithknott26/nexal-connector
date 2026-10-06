@@ -38,6 +38,9 @@ cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
 sudo install -m 755 "$OUT/nexal" "$APP/Contents/Helpers/nexal"
 sudo install -m 755 "$OUT/swift/out/Products/Release/NexalMac" "$APP/Contents/MacOS/NexalMac"
 sudo install -m 755 "$VMHOST" "$APP/Contents/Helpers/nexal-vmhost"
+# The container-runtime installer behind Settings › Virtual Machine Hosting › Set up (Colima,
+# docker, devpod). package-app.sh ships it; this update path must too.
+sudo install -m 755 "$ROOT/macos/Resources/install-container-runtime.sh" "$APP/Contents/Resources/install-container-runtime.sh"
 # Official OS logos (macos/Resources/os-logos/os-*.png), shown on VM and dev container rows.
 for logo in "$ROOT"/macos/Resources/os-logos/os-*.png; do
   [ -f "$logo" ] && sudo install -m 644 "$logo" "$APP/Contents/Resources/$(basename "$logo")"

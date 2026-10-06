@@ -255,11 +255,15 @@ set -eu
 STATE_DIR=/var/lib/nexal
 . /etc/nexal/app.env
 DONE="$STATE_DIR/app-$NEXAL_APP_PROFILE.done"
+log() { echo "NEXAL-APP $*" > /dev/console 2>/dev/null || true; }
+# Progress the runner forwards to the apps: "NEXAL-APP-STEP <step> <percent>".
+step() { echo "NEXAL-APP-STEP $1 $2" > /dev/console 2>/dev/null || true; }
+ready() { echo "NEXAL-APP-READY $NEXAL_APP_PROFILE" > /dev/console 2>/dev/null || true; }
 if [ -f "$DONE" ]; then
+  ready
   exit 0
 fi
 
-log() { echo "NEXAL-APP $*" > /dev/console 2>/dev/null || true; }
 fail() { echo "NEXAL-APP-FAILED $*" > /dev/console 2>/dev/null || true; exit 1; }
 # Every "[ x ] && y" here is written as an if: under set -e a false test is a
 # failed command and would end the script.
@@ -300,10 +304,14 @@ home-assistant)
   IMAGE=ghcr.io/home-assistant/home-assistant:stable
   log "installing Home Assistant"
   export DEBIAN_FRONTEND=noninteractive
+  step app-packages 10
   retry apt-get update -qq || fail "apt-get update"
+  step app-packages 25
   retry apt-get install -y -qq --no-install-recommends docker.io || fail "installing docker"
   systemctl enable --now docker || fail "starting docker"
+  step app-download 40
   retry docker pull "$IMAGE" || fail "pulling the Home Assistant image"
+  step app-start 85
   mkdir -p "$DATA"
   docker rm -f homeassistant >/dev/null 2>&1 || true
   docker run -d --name homeassistant --restart unless-stopped     -p "$IP:8123:8123" -v "$DATA:/config" -v /etc/localtime:/etc/localtime:ro     "$IMAGE" || fail "starting Home Assistant"
@@ -319,10 +327,14 @@ jellyfin)
   IMAGE=docker.io/jellyfin/jellyfin:latest
   log "installing Jellyfin"
   export DEBIAN_FRONTEND=noninteractive
+  step app-packages 10
   retry apt-get update -qq || fail "apt-get update"
+  step app-packages 25
   retry apt-get install -y -qq --no-install-recommends docker.io wakeonlan etherwake || fail "installing docker"
   systemctl enable --now docker || fail "starting docker"
+  step app-download 40
   retry docker pull "$IMAGE" || fail "pulling the Jellyfin image"
+  step app-start 85
   mkdir -p "$DATA/config" "$DATA/cache" "$DATA/media" /mnt/nexal-drive
   docker rm -f jellyfin >/dev/null 2>&1 || true
   docker run -d --name jellyfin --restart unless-stopped \
@@ -340,6 +352,7 @@ esac
 
 mkdir -p "$STATE_DIR"
 : > "$DONE"
+ready
 `
 
 // appUnit runs appSetupScript once per sandbox. docker.service does not exist until

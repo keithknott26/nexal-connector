@@ -277,7 +277,8 @@ type StateReport struct {
 	HostKey string `json:"hostKey,omitempty"`
 	Error   string `json:"error,omitempty"`
 	// Step and Percent describe provisioning progress (steps: check, download,
-	// convert, disk, seed, boot, join). Only sent while provisioning.
+	// convert, disk, seed, boot, join), and app setup on a running host
+	// (app-packages, app-download, app-start, app-failed).
 	Step    string `json:"step,omitempty"`
 	Percent int    `json:"percent,omitempty"`
 }

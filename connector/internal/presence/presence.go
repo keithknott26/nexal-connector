@@ -126,6 +126,12 @@ type Options struct {
 	Dial   Dialer
 	// Wake is nil to disable relaying.
 	Wake WakeSender
+	// SelfTest is called when the coordinator nudges this host that its owner's
+	// queued capability self-test (distributed-compute, from "Distribute compute
+	// test" on the phone) is ready to be picked up now, rather than waiting for
+	// the next poll. Nil disables the nudge; the agent still polls on its own
+	// interval either way.
+	SelfTest func()
 	// Info returns this Mac's details for the host.info frame; nil disables it.
 	Info func(ctx context.Context) sysinfo.Info
 	// InfoEvery overrides InfoCheckInterval (tests).
@@ -424,6 +430,7 @@ type event struct {
 	RequestID    string   `json:"requestId"`
 	TargetHostID string   `json:"targetHostId"`
 	MACs         []string `json:"macs"`
+	JobID        string   `json:"jobId"`
 	// Info is one host's details (host.info); Infos is the snapshot's map.
 	Info  *sysinfo.Info           `json:"info"`
 	Infos map[string]sysinfo.Info `json:"infos"`
@@ -495,6 +502,10 @@ func (c *Client) handle(data []byte) bool {
 		c.mu.Unlock()
 	case "wake.request":
 		c.relayWake(e)
+	case "selftest.request":
+		if client.ValidID(e.TargetHostID) && e.TargetHostID == c.opts.HostID && c.opts.SelfTest != nil {
+			c.opts.SelfTest()
+		}
 	default:
 		// A newer coordinator's event type; not an error.
 	}

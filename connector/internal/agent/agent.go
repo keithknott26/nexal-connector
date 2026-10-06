@@ -104,6 +104,11 @@ type Agent struct {
 	credentialRejectedAt time.Time
 
 	heartbeatWake chan struct{}
+	// selfTestWake nudges runSelfTest to poll immediately: set by the presence
+	// relay when a selftest.request frame arrives, so the owner's "distribute
+	// compute test" from their phone is picked up right away rather than
+	// waiting out the poll interval.
+	selfTestWake chan struct{}
 	// Tunnel status rides the heartbeat but is only sent once a minute, or at once when
 	// the tunnel's lifecycle changes. The coordinator treats a report as fresh for two
 	// minutes and samples traffic per minute, so sending it on every 15 s beat only
@@ -214,7 +219,7 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 	if probe == nil {
 		return nil, errors.New("telemetry probe required")
 	}
-	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1), meshProvider: mesh.UnavailableProvider{},
+	a := &Agent{cfg: c, path: path, api: api, probe: probe, devPull: devPull, records: map[string]Record{}, telemetry: Telemetry{OwnerActive: true}, heartbeatWake: make(chan struct{}, 1), selfTestWake: make(chan struct{}, 1), meshProvider: mesh.UnavailableProvider{},
 		logger: slog.New(slog.DiscardHandler), wakeFacts: wol.CollectLocal,
 		wake: WakeStatus{MACs: []string{}, WakeForNetwork: wol.WakeUnknown}}
 	for _, opt := range opts {
@@ -268,7 +273,7 @@ func (a *Agent) Snapshot() Status {
 		until = a.manualUntil.UTC().Format("2006-01-02T15:04:05.000Z")
 	}
 	blocker := ""
-	if err := a.admitLocked(true); err != nil {
+	if err := a.admitLocked(true, false); err != nil {
 		blocker = err.Error()
 	}
 	return Status{ManualAcceptanceSupported: a.cfg.Development, AcceptJobsUntil: until,
@@ -466,12 +471,12 @@ func (a *Agent) Refresh(ctx context.Context) {
 	a.telemetry = t
 	// Freshness starts when sampling started, not when a stalled probe returns.
 	a.telemetryAt = started
-	if a.admitLocked(false) != nil && a.cancel != nil {
+	if a.admitLocked(false, false) != nil && a.cancel != nil {
 		a.cancel()
 	}
 }
-func (a *Agent) admitLocked(checkBusy bool) error {
-	if !a.devPull || !a.cfg.Development {
+func (a *Agent) admitLocked(checkBusy bool, bypassOwner bool) error {
+	if !bypassOwner && (!a.devPull || !a.cfg.Development) {
 		return errors.New("production job execution gated pending verified tunnel dispatch")
 	}
 	if a.manualEnabledPull && !a.manualActiveLocked() {
@@ -501,7 +506,7 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	if !a.telemetry.Known || time.Since(a.telemetryAt) > 10*time.Second {
 		return errors.New("fresh resource and owner telemetry required")
 	}
-	if a.telemetry.OwnerActive && !a.ownerOverrideLocked() {
+	if a.telemetry.OwnerActive && !bypassOwner && !a.ownerOverrideLocked() {
 		return errors.New("owner priority blocks execution")
 	}
 	if a.telemetry.AvailableMemoryBytes > a.telemetry.TotalMemoryBytes ||
@@ -515,6 +520,56 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	}
 	return nil
 }
+
+// WakeSelfTest nudges runSelfTest to poll right away. Safe to call from any
+// goroutine (e.g. the presence relay on a selftest.request frame).
+func (a *Agent) WakeSelfTest() {
+	select {
+	case a.selfTestWake <- struct{}{}:
+	default:
+	}
+}
+
+// runSelfTest polls the coordinator for the owner's queued capability self-test
+// and runs it the moment this host is otherwise eligible, independent of the
+// production admission gate and of owner activity (see execute's bypassOwner).
+// It is deliberately a separate, tight loop rather than reusing the main attempt
+// poll: that loop backs off to hostHeartbeatIntervalLocked while idle (today
+// every production Mac, per admitLocked), which would leave an owner-triggered
+// test waiting up to 5 minutes for no reason the owner can see.
+func (a *Agent) runSelfTest(ctx context.Context, hostID string) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-a.selfTestWake:
+		}
+		a.mu.Lock()
+		busy := a.active != "" || a.runtimeMemory != 0
+		generation := a.stateGeneration
+		a.mu.Unlock()
+		if busy {
+			continue
+		}
+		reqCtx, stop := boundedRequest(ctx, time.Time{})
+		pending, at, err := a.api.SelfTest(reqCtx, hostID)
+		stop()
+		if err != nil || !pending || at == nil {
+			if err != nil {
+				a.logger.Debug("self-test poll failed", "error", errorText(err))
+			}
+			continue
+		}
+		a.logger.Info("self-test attempt accepted", "attempt", at.ID, "job", at.JobID)
+		if err := a.execute(ctx, *at, &generation, true); err != nil {
+			a.logger.Warn("self-test attempt did not complete", "attempt", at.ID, "error", errorText(err))
+		}
+	}
+}
+
 func fingerprint(at client.Attempt) string {
 	// Lease can renew, but the immutable identity/workload cannot change.
 	at.LeaseExpiresAt = time.Time{}
@@ -538,10 +593,15 @@ func (a *Agent) finish(id, state string, r *client.Result, usage float64, expiry
 // Execute validates and journals before starting, and rejects stale/conflicting
 // duplicate attempts. No caller can enable a production path.
 func (a *Agent) Execute(ctx context.Context, at client.Attempt) error {
-	return a.execute(ctx, at, nil)
+	return a.execute(ctx, at, nil, false)
 }
 
-func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint64) (executionError error) {
+// execute runs one attempt. bypassOwner is set only for an owner-triggered capability
+// self-test (see runSelfTest): a private, zero-cost job the owner explicitly queued
+// from their phone, pinned to this host by the coordinator (selfTestJobSql), which
+// should run whether or not the owner is actively using this Mac. Every other
+// admission gate (pause, memory, PQ readiness, one-attempt-at-a-time) still applies.
+func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint64, bypassOwner bool) (executionError error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -563,11 +623,11 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 		// Unknown outcome is deliberately not automatically re-executed.
 		return nil
 	}
-	if err := a.admitLocked(true); err != nil {
+	if err := a.admitLocked(true, bypassOwner); err != nil {
 		a.mu.Unlock()
 		return err
 	}
-	if a.manualActiveLocked() && (at.Execution != "private" || at.MaxCostCents != 0) {
+	if !bypassOwner && a.manualActiveLocked() && (at.Execution != "private" || at.MaxCostCents != 0) {
 		a.mu.Unlock()
 		return errors.New("manual acceptance requires an explicitly private zero-cost attempt")
 	}
@@ -610,7 +670,7 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 				return
 			case <-tick.C:
 				a.mu.Lock()
-				allowed := a.admitLocked(false) == nil
+				allowed := a.admitLocked(false, bypassOwner) == nil
 				a.mu.Unlock()
 				if !allowed || !time.Now().Before(deadline()) {
 					cancel()
@@ -661,7 +721,7 @@ func (a *Agent) execute(ctx context.Context, at client.Attempt, generation *uint
 	stopRenewal()
 	renewWG.Wait()
 	a.mu.Lock()
-	allowed := a.admitLocked(false) == nil
+	allowed := a.admitLocked(false, bypassOwner) == nil
 	a.mu.Unlock()
 	if err != nil || workCtx.Err() != nil || !allowed || !time.Now().Before(deadline()) {
 		// Which of the four reasons applied is the whole diagnostic value here:
@@ -901,7 +961,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.Refresh(ctx)
 	a.RefreshConditions(ctx)
 	var wg sync.WaitGroup
-	wg.Add(6)
+	wg.Add(7)
 	// Live presence and wake-info reporting are their own goroutines for the
 	// same reason discovery is: a stalled WebSocket, a slow pmset or a slow
 	// coordinator write must never delay a heartbeat or an attempt poll.
@@ -937,6 +997,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		defer wg.Done()
 		a.runDiscovery(ctx)
 	}()
+	go func() {
+		defer wg.Done()
+		a.runSelfTest(ctx, hostID)
+	}()
 	// Host network I/O must not block the owner/telemetry monitor.
 	go func() {
 		defer wg.Done()
@@ -964,7 +1028,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				return
 			case <-t.C:
 				a.mu.Lock()
-				allowed := a.admitLocked(true) == nil
+				allowed := a.admitLocked(true, false) == nil
 				generation := a.stateGeneration
 				a.mu.Unlock()
 				if !allowed {
@@ -986,7 +1050,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				a.logger.Info("attempt accepted", "attempt", at.ID, "job", at.JobID,
 					"template", at.Template, "samples", at.Samples,
 					"lease_expires_at", at.LeaseExpiresAt.UTC().Format(time.RFC3339))
-				if err := a.execute(ctx, *at, &generation); err != nil {
+				if err := a.execute(ctx, *at, &generation, false); err != nil {
 					// execute logs the specific abandonment or settlement reason;
 					// this records that the attempt ended unsuccessfully at all,
 					// including the admission refusals that return before any of

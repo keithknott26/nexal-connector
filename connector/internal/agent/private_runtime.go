@@ -24,7 +24,7 @@ func (a *Agent) ReservePrivateRuntime(parent context.Context, memoryBytes uint64
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if err := a.admitLocked(true); err != nil {
+	if err := a.admitLocked(true, false); err != nil {
 		return nil, nil, err
 	}
 	if memoryBytes > a.cfg.MemoryLimitBytes || memoryBytes > a.telemetry.AvailableMemoryBytes-a.cfg.ReserveMemoryBytes {
@@ -44,7 +44,7 @@ func (a *Agent) ReservePrivateRuntime(parent context.Context, memoryBytes uint64
 				return
 			case <-ticker.C:
 				a.mu.Lock()
-				allowed := a.admitLocked(false) == nil
+				allowed := a.admitLocked(false, false) == nil
 				a.mu.Unlock()
 				if !allowed {
 					cancel()

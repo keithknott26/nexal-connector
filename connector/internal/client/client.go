@@ -68,6 +68,7 @@ type Identity struct {
 type API interface {
 	Heartbeat(context.Context, string, Heartbeat) error
 	Next(context.Context, string) (*Attempt, error)
+	SelfTest(context.Context, string) (bool, *Attempt, error)
 	Renew(context.Context, string) (Renewal, error)
 	Complete(context.Context, string, Result, float64) (bool, error)
 }
@@ -289,6 +290,23 @@ func (c *Client) Next(ctx context.Context, host string) (*Attempt, error) {
 	}
 	err := c.call(ctx, "GET", "/api/hosts/"+url.PathEscape(host)+"/next", nil, &out)
 	return out.Attempt, err
+}
+
+// SelfTest polls GET /api/hosts/:id/self-test: the owner's queued capability
+// self-test for this host, if any. It is a separate, cheap poll from Next so a
+// connector can check for it on a tight cadence without affecting the ordinary
+// (gated) job-admission poll, and the coordinator additionally nudges this host
+// over the presence socket (selftest.request) the moment one is queued.
+func (c *Client) SelfTest(ctx context.Context, host string) (pending bool, attempt *Attempt, err error) {
+	if !ValidID(host) {
+		return false, nil, errors.New("invalid host id")
+	}
+	var out struct {
+		Pending bool     `json:"pending"`
+		Attempt *Attempt `json:"attempt"`
+	}
+	err = c.call(ctx, "GET", "/api/hosts/"+url.PathEscape(host)+"/self-test", nil, &out)
+	return out.Pending, out.Attempt, err
 }
 func (c *Client) Renew(ctx context.Context, id string) (Renewal, error) {
 	var out Renewal

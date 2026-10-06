@@ -576,7 +576,17 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 			wolLog.Warn("wake had no usable interface", "targets", strings.Join(r.MACs, ","), "skipped", len(r.Skipped))
 		}
 	})
+	// agentRef lets the presence client nudge the agent's self-test poll the
+	// moment the coordinator relays one; presence.New runs before agent.New
+	// returns, so this is set just after and is only ever read afterward (the
+	// presence client does not start reading events until agent.Run).
+	var agentRef *agent.Agent
 	pres, err := presence.New(presence.Options{HostID: c.HostID, Wake: wol.Send,
+		SelfTest: func() {
+			if agentRef != nil {
+				agentRef.WakeSelfTest()
+			}
+		},
 		Logger: logger.With("component", "presence"),
 		Info: func(ctx context.Context) sysinfo.Info {
 			info := hostInfo.Collect(ctx)
@@ -620,6 +630,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	if err != nil {
 		return err
 	}
+	agentRef = a
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	results := make(chan error, 3)

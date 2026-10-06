@@ -23,6 +23,9 @@ type fakeAPI struct {
 
 func (f *fakeAPI) Heartbeat(context.Context, string, client.Heartbeat) error { return nil }
 func (f *fakeAPI) Next(context.Context, string) (*client.Attempt, error)     { return nil, nil }
+func (f *fakeAPI) SelfTest(context.Context, string) (bool, *client.Attempt, error) {
+	return false, nil, nil
+}
 func (f *fakeAPI) Renew(context.Context, string) (client.Renewal, error) {
 	return client.Renewal{OK: true, CancelRequested: f.renewCancel, LeaseExpiresAt: time.Now().Add(time.Minute)}, nil
 }

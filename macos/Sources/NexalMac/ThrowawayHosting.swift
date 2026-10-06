@@ -604,7 +604,7 @@ struct ThrowawayHostingSettingsView: View {
                              : hosting.runtimeReady == false ? (hosting.runtimeStatus ?? "Dev-container runtime needs attention")
                              : "Dev-container runtime: not checked yet")
                             .font(.caption)
-                            .foregroundStyle(hosting.runtimeReady == true ? .secondary : hosting.runtimeReady == false ? .red : .secondary)
+                            .foregroundStyle(hosting.runtimeReady == true ? Color.secondary : hosting.runtimeReady == false ? Color.red : Color.secondary)
                         Spacer()
                         Button(hosting.runtimeReady == true ? "Recheck" : "Set up") {
                             hosting.installContainerRuntime()

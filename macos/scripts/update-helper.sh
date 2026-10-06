@@ -34,6 +34,10 @@ cp "$APP/Contents/Helpers/nexal" "$OUT/nexal.previous"
 cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
 sudo install -m 755 "$OUT/nexal" "$APP/Contents/Helpers/nexal"
 sudo install -m 755 "$OUT/swift/out/Products/Release/NexalMac" "$APP/Contents/MacOS/NexalMac"
+# Official OS logos (macos/Resources/os-logos/os-*.png), shown on VM and dev container rows.
+for logo in "$ROOT"/macos/Resources/os-logos/os-*.png; do
+  [ -f "$logo" ] && sudo install -m 644 "$logo" "$APP/Contents/Resources/$(basename "$logo")"
+done
 # Sign as the current user: root cannot reach the login keychain's private key
 # (codesign fails with errSecInternalComponent under sudo).
 sudo chown -R "$(id -un)" "$APP"

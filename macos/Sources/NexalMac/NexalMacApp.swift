@@ -13,10 +13,11 @@ struct NexalMacApp: App {
     /// (100% CPU, no icon, no window). The status item is updated only when the
     /// indicator actually changes. This scene exists only because an App needs one.
     var body: some Scene {
+        // The real Settings window is AppDelegate.settingsWindow (one instance, opened from the
+        // panel, the status menu and ⌘,). If macOS opens this scene's own window as well, it closes
+        // itself and hands over, so Settings never appears twice.
         Settings {
-            ConnectorSettingsView(loginItem: appDelegate.loginItem)
-                .environmentObject(appDelegate.preferences)
-                .environmentObject(appDelegate.model)
+            SettingsSceneRedirect { appDelegate.showSettings() }
         }
             .commands {
                 CommandGroup(replacing: .appSettings) {
@@ -460,4 +461,21 @@ private struct MenuBarHintView: View {
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.quaternary))
         .accessibilityElement(children: .contain)
     }
+}
+
+
+/// Content of the SwiftUI Settings scene: closes the scene's window as soon as it exists and opens
+/// the app's single Settings window instead.
+private struct SettingsSceneRedirect: NSViewRepresentable {
+    let open: () -> Void
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            view.window?.orderOut(nil)
+            view.window?.close()
+            open()
+        }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

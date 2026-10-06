@@ -89,9 +89,39 @@ struct ConnectorSettingsView: View {
             }
             .tabItem { Label("Security", systemImage: "shield") }
             .tag(1)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    GroupBox("Virtual machines & dev containers") {
+                        ThrowawayHostingSettingsView().padding(8)
+                    }
+                    Text("Start new ones from the neXal panel › Virtual machines & dev containers › New…")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+                .toggleStyle(.checkbox)
+            }
+            .tabItem { Label("Virtual Machine Hosting", systemImage: "server.rack") }
+            .tag(2)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    GroupBox("Sharing on this Mac") {
+                        SharingServicesSettingsView().padding(8)
+                    }
+                    Text("Remote Login (SSH), Screen Sharing and File Sharing turned on here are opened automatically to your other computers and your iPhone on the private network. On the same Wi-Fi, your iPhone connects to this Mac's local address first.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+                .toggleStyle(.checkbox)
+            }
+            .tabItem { Label("Remote Access", systemImage: "terminal") }
+            .tag(3)
         }
         .padding(12)
-        .frame(width: 540, height: 530)
+        .frame(width: 620, height: 560)
         .onAppear { loginItem.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginItem.refresh()
@@ -134,9 +164,6 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
-            GroupBox("Virtual Machine Hosting") {
-                ThrowawayHostingSettingsView().padding(8)
-            }
             GroupBox("Activity") {
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Graph time range", selection: $preferences.chartWindowMinutes) {
@@ -148,9 +175,6 @@ struct ConnectorSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
-            }
-            GroupBox("Remote access") {
-                SharingServicesSettingsView().padding(8)
             }
             GroupBox("Diagnostics") {
                 DiagnosticsSettingsView().padding(8)

@@ -83,6 +83,18 @@ oom_kills() {
 }
 OOM_BEFORE=$(oom_kills); OOM_BEFORE=${OOM_BEFORE:-0}
 
+# The mesh address once management is connected, else nothing.
+connected_ip() {
+  local j; j=$(netbird status --json 2>/dev/null | tr -d ' \n\t')
+  printf '%s' "$j" | grep -q '"management":{[^}]*"connected":true' || return 0
+  own_ip "$j"
+}
+# This peer's own mesh address. `netbird status --json` lists other peers (each with a
+# netbirdIp) before "management", and this peer's netbirdIp after it.
+own_ip() {
+  printf '%s' "$1" | tr -d ' \n\t' | sed 's/.*"management"://' | grep -o '"netbirdIp":"[0-9.]*' | head -n1 | grep -o '[0-9.]*$'
+}
+
 umask 077
 printf '%s' "$NEXAL_SETUP_KEY" > "$KEYFILE"
 unset NEXAL_SETUP_KEY
@@ -98,6 +110,19 @@ netbird status --check live >/dev/null 2>&1 || fail "mesh daemon did not start w
 up_out=$(timeout 300 netbird up --setup-key-file "$KEYFILE" --management-url "$MESH_URL" \
   --enable-rosenpass --disable-dns --hostname "$NEXAL_HOSTNAME" 2>&1)
 up_rc=$?
+# `netbird up` returns DeadlineExceeded after the daemon's fixed 50s wait for the engine,
+# but the daemon keeps joining in the background. On a CPU-starved Colima VM the
+# ML-KEM handshake routinely needs longer, so the peer shows up a little later. When the
+# daemon is still alive, wait (up to 5 more minutes) for a real connection before failing.
+if [ $up_rc -ne 0 ] && [ $up_rc -ne 124 ] && kill -0 "${pids[0]}" 2>/dev/null; then
+  for _ in $(seq 1 100); do
+    if [ -n "$(connected_ip)" ]; then
+      echo "netbird up returned $up_rc but the daemon finished joining; continuing" >&2
+      up_rc=0; break
+    fi
+    sleep 3
+  done
+fi
 if [ $up_rc -ne 0 ]; then
   OOM_AFTER=$(oom_kills); OOM_AFTER=${OOM_AFTER:-0}
   if [ "$OOM_AFTER" -gt "$OOM_BEFORE" ] 2>/dev/null; then
@@ -118,7 +143,7 @@ shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
 
 ip=""
 for _ in $(seq 1 60); do
-  ip=$(netbird status --json 2>/dev/null | grep -o '"netbirdIp": *"[0-9.]*' | head -n1 | grep -o '[0-9.]*$')
+  ip=$(own_ip "$(netbird status --json 2>/dev/null)")
   [ -n "$ip" ] && break
   sleep 1
 done

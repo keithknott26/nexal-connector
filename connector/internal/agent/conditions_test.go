@@ -75,14 +75,14 @@ func TestConditionsGateAdmissionForReal(t *testing.T) {
 		{"disk", func(s *contribution.Signals) { s.FreeDiskBytes = 1 << 30 }},
 	} {
 		a, f := conditionAgent(t)
-		if err := a.admitLocked(true); err != nil {
+		if err := a.admitLocked(true, false); err != nil {
 			t.Fatalf("%s: clear conditions already blocked admission: %v", c.name, err)
 		}
 		s := clearSignals()
 		c.mutate(&s)
 		f.set(s)
 		a.RefreshConditions(context.Background())
-		err := a.admitLocked(true)
+		err := a.admitLocked(true, false)
 		if err == nil {
 			t.Fatalf("%s: admission allowed while withholding", c.name)
 		}
@@ -173,7 +173,7 @@ func TestEachPauseSurvivesTheOther(t *testing.T) {
 	if !a.Snapshot().Contribution.Withholding {
 		t.Fatal("an owner resume cleared an automatic thermal condition")
 	}
-	if a.admitLocked(true) == nil {
+	if a.admitLocked(true, false) == nil {
 		t.Fatal("resume overrode a live thermal condition")
 	}
 }
@@ -183,7 +183,7 @@ func TestEachPauseSurvivesTheOther(t *testing.T) {
 // returns nothing, must both keep working with the reason visible.
 func TestUnknownConditionsKeepTheHostContributing(t *testing.T) {
 	bare, _ := testAgent(t)
-	if err := bare.admitLocked(true); err != nil {
+	if err := bare.admitLocked(true, false); err != nil {
 		t.Fatalf("an agent with no condition probe was blocked: %v", err)
 	}
 	st := bare.Snapshot()
@@ -196,7 +196,7 @@ func TestUnknownConditionsKeepTheHostContributing(t *testing.T) {
 	a, f := conditionAgent(t)
 	f.set(contribution.Signals{At: time.Now(), BatteryPercent: -1})
 	a.RefreshConditions(context.Background())
-	if a.admitLocked(true) != nil || a.Snapshot().Contribution.Withholding {
+	if a.admitLocked(true, false) != nil || a.Snapshot().Contribution.Withholding {
 		t.Fatal("an all-unknown probe stopped the host")
 	}
 	for _, name := range []string{"power", "thermal", "free disk"} {

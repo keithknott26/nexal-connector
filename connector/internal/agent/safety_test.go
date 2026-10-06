@@ -58,7 +58,7 @@ func TestLateProbeDoesNotRefreshOldObservations(t *testing.T) {
 		}
 		a.Refresh(context.Background())
 		a.mu.Lock()
-		err := a.admitLocked(false)
+		err := a.admitLocked(false, false)
 		a.mu.Unlock()
 		if err == nil {
 			t.Fatal("delayed telemetry became fresh on completion")
@@ -99,7 +99,7 @@ func TestConsentChangeFencesPendingPullEvenAfterFreshObservations(t *testing.T) 
 			if err := a.hostHeartbeat(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if err := a.execute(context.Background(), attempt(), &generation); err == nil || f.count() != 0 {
+			if err := a.execute(context.Background(), attempt(), &generation, false); err == nil || f.count() != 0 {
 				t.Fatal("old pull admitted under a new consent generation")
 			}
 			if err := a.Execute(context.Background(), attempt()); err != nil {

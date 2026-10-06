@@ -149,9 +149,10 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 			completed++
 			mu.Unlock()
 			respond(map[string]bool{"accepted": true})
-		case "/api/v2/hosts/events", "/api/v2/hosts/wake-info", "/api/hosts/host1/watermark-state":
-			// `run` now opens the live presence stream and reports wake info.
-			// This fake coordinator predates both, which is exactly the older
+		case "/api/v2/hosts/events", "/api/v2/hosts/wake-info", "/api/hosts/host1/watermark-state", "/api/hosts/host1/self-test":
+			// `run` now opens the live presence stream, reports wake info, and
+			// polls for an owner-triggered capability self-test. This fake
+			// coordinator predates all of them, which is exactly the older
 			// coordinator the agent must tolerate quietly: 404, and carry on.
 			w.WriteHeader(404)
 		default:

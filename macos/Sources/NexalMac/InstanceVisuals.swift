@@ -21,18 +21,35 @@ struct InstanceIcon: View {
     let family: String
     var size: CGFloat = 16
 
+    private var corner: CGFloat { size * 0.24 }
+
     var body: some View {
-        if let logo = NSImage(named: "os-\(family)") {
-            Image(nsImage: logo).resizable().interpolation(.high).scaledToFit()
-                .frame(width: size, height: size).accessibilityLabel(Self.label(family))
-        } else {
-            Image(systemName: Self.symbol(family))
-                .font(.system(size: size * 0.62, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(Circle().fill(Self.tint(family)))
-                .accessibilityLabel(Self.label(family))
+        Group {
+            if let logo = NSImage(named: "os-\(family)") {
+                // Official logos sit on a light tile so every mark (including thin ones) reads at small sizes.
+                Image(nsImage: logo).resizable().interpolation(.high).scaledToFit()
+                    .padding(size * 0.14)
+                    .frame(width: size, height: size)
+                    .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Color.white))
+            } else {
+                Image(systemName: Self.symbol(family))
+                    .font(.system(size: size * 0.5, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: size, height: size)
+                    .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(Self.tint(family).gradient))
+            }
         }
+        .overlay(RoundedRectangle(cornerRadius: corner, style: .continuous).strokeBorder(.black.opacity(0.08)))
+        .accessibilityLabel(Self.label(family))
+    }
+
+    /// A 16 pt image for menus and pickers: the official logo when bundled, else the symbol.
+    static func menuImage(_ family: String) -> Image {
+        if let logo = NSImage(named: "os-\(family)")?.copy() as? NSImage {
+            logo.size = NSSize(width: 16, height: 16)
+            return Image(nsImage: logo)
+        }
+        return Image(systemName: symbol(family))
     }
 
     static func symbol(_ family: String) -> String {

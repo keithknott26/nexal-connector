@@ -62,6 +62,7 @@ struct NetworkSandbox: Decodable, Identifiable, Equatable {
     var failure: String?
     var imageId: String?
     var imageName: String?
+    var imageVersion: String?
     var appProfile: String?
     var runnerName: String?
     var devcontainer: DevcontainerInfo?
@@ -158,13 +159,14 @@ enum ThrowawayFormat {
 
     static func countdown(to date: Date, now: Date = Date()) -> String {
         let s = Int(date.timeIntervalSince(now))
-        if s <= 0 { return "expiring" }
-        if s >= 3600 { return "\(s / 3600) h \((s % 3600) / 60) min left" }
-        if s >= 60 { return "\(s / 60) min left" }
-        return "\(s) s left"
+        if s <= 0 { return "Being deleted" }
+        if s >= 86_400 { return "Deleted in \(s / 86_400) d \((s % 86_400) / 3600) h" }
+        if s >= 3600 { return "Deleted in \(s / 3600) h \((s % 3600) / 60) min" }
+        if s >= 60 { return "Deleted in \(s / 60) min" }
+        return "Deleted in \(s) s"
     }
 
-    static func kindLabel(_ kind: String?) -> String { kind == "devcontainer" ? "Dev container" : "Virtual machine" }
+    static func kindLabel(_ kind: String?) -> String { kind == "devcontainer" ? "Development container" : "Virtual machine" }
     static func lifecycleLabel(_ l: String?) -> String { l == "persistent" ? "Persistent" : "Temporary" }
 
     static func stateLabel(_ s: LocalSandbox) -> String {
@@ -262,7 +264,7 @@ final class ThrowawayHosting: ObservableObject {
             return
         }
         installingRuntime = true
-        runtimeStatus = "Setting up a container runtime for dev containers…"
+        runtimeStatus = "Setting up a container runtime for development containers…"
         Task { @MainActor in
             let status = await Task.detached { ThrowawayHosting.runInstaller(script) }.value
             self.installingRuntime = false
@@ -311,9 +313,9 @@ final class ThrowawayHosting: ObservableObject {
             try FileManager.default.createDirectory(at: killDir, withIntermediateDirectories: true)
             let file = killDir.appendingPathComponent(id)
             try Data().write(to: file, options: .atomic)
-            message = "Stopping \(id)… The disk is erased once it has shut down."
+            message = nil
         } catch {
-            message = "Could not ask neXal@home to stop this host: \(error.localizedDescription)"
+            message = "Could not stop it: \(error.localizedDescription)"
         }
     }
 
@@ -549,7 +551,7 @@ struct ThrowawayHostingSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Allow this Mac to host virtual machines and dev containers", isOn: Binding(
+            Toggle("Allow this Mac to host virtual machines and development containers", isOn: Binding(
                 get: { hosting.config.enabled },
                 set: { on in
                     hosting.update { $0.enabled = on }
@@ -557,7 +559,7 @@ struct ThrowawayHostingSettingsView: View {
                 }))
                 .disabled(!model.isLinked)
             Text(model.isLinked
-                 ? "Virtual machines and dev containers are disposable Linux machines that you or members of your network start. Only you, as this Mac's owner, can turn this on. Off by default."
+                 ? "Virtual machines and development containers are Linux machines that you or members of your network start. Only you, as this Mac's owner, can turn this on. Off by default."
                  : "Connect this Mac to neXal first. Only its owner can turn this on.")
                 .font(.caption).foregroundStyle(.secondary)
             if hosting.config.enabled {
@@ -598,54 +600,52 @@ struct ThrowawayHostsSection: View {
     @ObservedObject private var peerNames = PeerNames.shared
     @EnvironmentObject private var model: AppModel
 
-    private var visible: Bool { true }
-
     var body: some View {
         Group {
-            if visible {
-                Divider()
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !hosting.local.isEmpty {
-                            Text("ON THIS MAC").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
-                            ForEach(hosting.local) { localRow($0) }
-                        } else if hosting.config.enabled {
-                            Text("No virtual machines or dev containers are running on this Mac.").font(.caption).foregroundStyle(.secondary)
-                        }
-                        if !hosting.networkElsewhere.isEmpty {
-                            Text("ON YOUR NETWORK").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
-                            ForEach(hosting.networkElsewhere) { networkRow($0) }
-                        }
-                        if hosting.config.enabled {
-                            Text("Hosts pause when this Mac sleeps and resume when it wakes.")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        if !hosting.failed.isEmpty {
-                            HStack {
-                                Text("RECENT FAILURES").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
-                                Spacer()
-                                Button("Clear") { hosting.clearFailures() }
-                                    .buttonStyle(.borderless).controlSize(.small).font(.caption2)
-                                    .help("Remove these failures from the list")
-                            }
-                            ForEach(hosting.failed) { box in
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(box.title).font(.caption.weight(.medium))
-                                    Text(box.failure ?? "Failed").font(.caption2).foregroundStyle(.red).textSelection(.enabled).lineLimit(4)
-                                }
-                            }
-                        }
-                        if let message = hosting.message {
-                            Text(message).font(.caption2).foregroundStyle(.orange)
-                        }
+            Divider()
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    if hosting.local.isEmpty && hosting.networkElsewhere.isEmpty {
+                        emptyState
+                    }
+                    if !hosting.local.isEmpty {
+                        sectionLabel("On this Mac")
+                        ForEach(hosting.local) { box in localCard(box) }
+                    }
+                    if !hosting.networkElsewhere.isEmpty {
+                        sectionLabel("On your other computers")
+                        ForEach(hosting.networkElsewhere) { box in networkCard(box) }
+                    }
+                    if !hosting.failed.isEmpty { failures }
+                    if let message = hosting.message {
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+                    }
+                    HStack {
                         Button { hosting.showingCreate = true } label: {
-                            Label("New virtual machine or dev container…", systemImage: "plus.circle.fill")
+                            Label("New…", systemImage: "plus")
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                         .disabled(hosting.creating)
-                    }.padding(.top, 4)
-                } label: {
-                    Text(hosting.runningHere.isEmpty ? "Virtual Machines & Development Containers" : "Virtual Machines & Development Containers · \(hosting.runningLine)")
-                        .font(.subheadline.weight(.semibold))
+                        .help("Create a virtual machine or development container")
+                        Spacer()
+                        if hosting.config.enabled {
+                            Text("Paused while this Mac sleeps").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .padding(.top, 6)
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Virtual Machines & Development Containers").font(.subheadline.weight(.semibold))
+                    if !hosting.runningHere.isEmpty {
+                        Text("\(hosting.runningHere.count)")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.2), in: Capsule())
+                            .help(hosting.runningLine)
+                    }
                 }
             }
         }
@@ -654,81 +654,214 @@ struct ThrowawayHostsSection: View {
             while !Task.isCancelled {
                 hosting.reloadLocal()
                 await hosting.refreshNetwork(model)
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }
     }
 
-    private func badge(_ text: String) -> some View {
-        Text(text).font(.caption2)
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(.secondary.opacity(0.15), in: Capsule())
+    // MARK: Pieces
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased()).font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
     }
 
-    private func localRow(_ box: LocalSandbox) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                let entry = hosting.networkEntry(for: box)
-                let title = PeerNames.shared.name(for: box.meshIp) ?? entry?.name ?? box.hostname ?? box.id
-                InstanceIcon(family: entry?.family ?? (box.kind == "devcontainer" ? "devcontainer" : "linux"))
-                Text(title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
-                    .renamable(address: box.meshIp, current: title)
-                badge(ThrowawayFormat.kindLabel(box.kind))
-                Spacer()
-                if let entry = hosting.networkEntry(for: box), entry.canConnect || box.state == "running" {
-                    connectMenu(entry)
-                }
-                if box.isActive {
-                    Button(box.state == "stopping" ? "Stopping…" : "Stop", role: .destructive) { hosting.stop(box.id) }
-                        .disabled(box.state == "stopping")
-                }
-            }
-            HStack(spacing: 8) {
-                Text(ThrowawayFormat.stateLabel(box)).foregroundStyle(.secondary)
-                if let expiry = box.expiry, box.lifecycle != "persistent" {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text(ThrowawayFormat.countdown(to: expiry, now: context.date)).foregroundStyle(.secondary)
-                    }
-                }
-                if let ip = box.meshIp { Text(ip).foregroundStyle(.secondary).textSelection(.enabled) }
-            }.font(.caption)
-            if box.state == "provisioning" || box.state == "stopping" {
-                let entry = hosting.networkEntry(for: box)
-                InstanceProgress(kind: box.kind, state: box.state, step: entry?.progress?.step, percent: entry?.progress?.percent)
-            }
-        }
-    }
-
-    private func networkRow(_ box: NetworkSandbox) -> some View {
-        HStack(spacing: 6) {
+    private var emptyState: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.stack.3d.up").font(.title3).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    let title = PeerNames.shared.name(for: box.meshIp) ?? box.title
-                    InstanceIcon(family: box.family)
-                    Text(title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
-                        .renamable(address: box.meshIp, current: title)
-                    badge(ThrowawayFormat.kindLabel(box.kind))
-                }
-                Text([(box.state ?? "").capitalized, box.runnerName.map { "on \($0)" }].compactMap { $0 }.joined(separator: " ")).font(.caption).foregroundStyle(.secondary)
-                if InstanceProgress.shows(box.state) {
-                    InstanceProgress(kind: box.kind, state: box.state, step: box.progress?.step, percent: box.progress?.percent)
+                Text("Nothing running").font(.callout.weight(.medium))
+                Text(hosting.config.enabled
+                     ? "Create a Linux VM or a development container that joins your private network."
+                     : "Turn on hosting in Settings › Virtual Machine Hosting to run them on this Mac, or create one on another computer.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.35)))
+    }
+
+    private var failures: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Recent failures", systemImage: "exclamationmark.octagon.fill")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.red)
+                Spacer()
+                Button("Clear") { hosting.clearFailures() }
+                    .buttonStyle(.borderless).controlSize(.small)
+                    .help("Remove these failures from the list")
+            }
+            ForEach(hosting.failed) { box in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(PeerNames.shared.name(for: box.meshIp) ?? box.title).font(.caption.weight(.medium))
+                    Text(box.failure ?? "Failed").font(.caption2).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4)
                 }
             }
-            Spacer()
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.red.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.red.opacity(0.25)))
+    }
+
+    private func localCard(_ box: LocalSandbox) -> some View {
+        let entry = hosting.networkEntry(for: box)
+        let title = PeerNames.shared.name(for: box.meshIp) ?? entry?.name ?? box.hostname ?? box.id
+        let state = box.paused == true ? "paused" : box.state
+        return InstanceCard(
+            title: title, address: box.meshIp,
+            family: entry?.family ?? (box.kind == "devcontainer" ? "devcontainer" : "linux"),
+            kind: box.kind, state: state,
+            details: [Self.imageText(entry), ThrowawayFormat.kindLabel(box.kind), box.meshIp].compactMap { $0 },
+            expiry: box.lifecycle == "persistent" ? nil : box.expiry,
+            progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent
+        ) {
+            if let entry, entry.canConnect || box.state == "running" { connectMenu(entry) }
+            if box.isActive {
+                Button { confirmStop(id: box.id, title: title, kind: box.kind) } label: {
+                    Image(systemName: "stop.circle")
+                }
+                .buttonStyle(.borderless)
+                .disabled(box.state == "stopping")
+                .help(box.kind == "devcontainer" ? "Stop and delete" : "Shut down and remove")
+            }
+        }
+    }
+
+    private func networkCard(_ box: NetworkSandbox) -> some View {
+        let title = PeerNames.shared.name(for: box.meshIp) ?? box.title
+        return InstanceCard(
+            title: title, address: box.meshIp, family: box.family, kind: box.kind, state: box.state,
+            details: [Self.imageText(box), box.runnerName.map { "on \($0)" }, box.meshIp].compactMap { $0 },
+            expiry: box.lifecycle == "persistent" ? nil : ThrowawayFormat.date(box.expiresAt),
+            progressStep: box.progress?.step, progressPercent: box.progress?.percent
+        ) {
             if box.canConnect { connectMenu(box) }
         }
     }
+
+    private static func imageText(_ box: NetworkSandbox?) -> String? {
+        guard let box else { return nil }
+        if box.kind == "devcontainer", let template = box.devcontainer?.template, !template.isEmpty {
+            return template.prefix(1).uppercased() + template.dropFirst()
+        }
+        guard let name = box.imageName else { return nil }
+        return [name, box.imageVersion].compactMap { $0 }.joined(separator: " ")
+    }
+
+    private func confirmStop(id: String, title: String, kind: String?) {
+        let alert = NSAlert()
+        let container = kind == "devcontainer"
+        alert.messageText = container ? "Stop and delete “\(title)”?" : "Shut down and remove “\(title)”?"
+        alert.informativeText = container
+            ? "The development container and everything in it are deleted. This cannot be undone."
+            : "The virtual machine shuts down and its disk is erased. This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: container ? "Stop and Delete" : "Shut Down and Remove")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.window.level = .floating
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { hosting.stop(id) }
+    }
+
     /// Dev containers have no screen, so they offer Terminal and Files only.
     private func connectMenu(_ box: NetworkSandbox) -> some View {
-        Menu("Connect") {
-            Button("Terminal (SSH)") { Task { await hosting.connect(box, kind: "ssh", model: model) } }
-            if box.kind != "devcontainer" {
-                Button("Screen Sharing") { Task { await hosting.connect(box, kind: "vnc", model: model) } }
+        Menu {
+            if box.appProfile == "home-assistant", let ip = box.meshIp, let url = URL(string: "http://\(ip):8123") {
+                Button { NSWorkspace.shared.open(url) } label: { Label("Open Home Assistant", systemImage: "safari") }
+                Divider()
             }
-            Button("Files (SFTP in Terminal)") { Task { await hosting.connect(box, kind: "files", model: model) } }
+            Button { Task { await hosting.connect(box, kind: "ssh", model: model) } } label: { Label("Terminal (SSH)", systemImage: "terminal") }
+            if box.kind != "devcontainer" {
+                Button { Task { await hosting.connect(box, kind: "vnc", model: model) } } label: { Label("Screen Sharing", systemImage: "rectangle.on.rectangle") }
+            }
+            Button { Task { await hosting.connect(box, kind: "files", model: model) } } label: { Label("Files (SFTP)", systemImage: "folder") }
+        } label: {
+            Text("Connect")
         }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
         .disabled(hosting.busyID != nil)
         .fixedSize()
+    }
+}
+
+/// One VM or development container: OS tile, name, status, details, actions and progress.
+struct InstanceCard<Actions: View>: View {
+    let title: String
+    let address: String?
+    let family: String
+    let kind: String?
+    let state: String?
+    let details: [String]
+    let expiry: Date?
+    let progressStep: String?
+    let progressPercent: Int?
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                InstanceIcon(family: family, size: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(title).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+                            .renamable(address: address, current: title)
+                        StatusPill(state: state)
+                    }
+                    Text(details.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                        .textSelection(.enabled)
+                    if let expiry, state == "running" || state == "paused" {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            Label(ThrowawayFormat.countdown(to: expiry, now: context.date), systemImage: "timer")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                Spacer(minLength: 6)
+                HStack(spacing: 8) { actions() }
+            }
+            if InstanceProgress.shows(state) {
+                InstanceProgress(kind: kind, state: state, step: progressStep, percent: progressPercent)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.35)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.5)))
+    }
+}
+
+/// A small coloured dot and word for an instance's state.
+struct StatusPill: View {
+    let state: String?
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(text).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .background(color.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+    private var text: String {
+        switch state ?? "" {
+        case "running": return "Running"
+        case "provisioning": return "Starting"
+        case "requested": return "Queued"
+        case "stopping": return "Stopping"
+        case "paused": return "Paused"
+        case "failed": return "Failed"
+        default: return (state ?? "Unknown").capitalized
+        }
+    }
+    private var color: Color {
+        switch state ?? "" {
+        case "running": return .green
+        case "provisioning", "requested", "stopping": return .orange
+        case "failed": return .red
+        default: return .gray
+        }
     }
 }
 
@@ -759,7 +892,13 @@ struct NewSandboxSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New virtual machine or development container").font(.headline)
+            HStack(spacing: 10) {
+                Image(systemName: "square.stack.3d.up.fill").font(.title2).foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("New Virtual Machine or Development Container").font(.headline)
+                    Text("It joins your private network like your other devices.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Form {
                 if runners.count > 1 {
                     Picker("Create on", selection: $runnerId) {
@@ -769,8 +908,8 @@ struct NewSandboxSheet: View {
                     }
                 }
                 Picker("Type", selection: $kind) {
-                    Text("Development container").tag("devcontainer")
-                    Text("Virtual machine").tag("vm")
+                    Label("Development container", systemImage: "shippingbox").tag("devcontainer")
+                    Label("Virtual machine", systemImage: "desktopcomputer").tag("vm")
                 }
                 .pickerStyle(.segmented)
                 .disabled(containersOnly)
@@ -779,7 +918,7 @@ struct NewSandboxSheet: View {
                         Label {
                             Text(image.version.map { "\(image.name) \($0)" } ?? image.name)
                         } icon: {
-                            Image(systemName: InstanceIcon.symbol(image.iconFamily))
+                            InstanceIcon.menuImage(image.iconFamily)
                         }
                         .tag(image.id)
                     }
@@ -802,10 +941,17 @@ struct NewSandboxSheet: View {
                 }
             }
             .formStyle(.grouped)
-            HStack(spacing: 8) {
-                if let image = selectedImage { InstanceIcon(family: image.iconFamily, size: 22) }
-                Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top, spacing: 10) {
+                InstanceIcon(family: selectedImage?.iconFamily ?? (kind == "devcontainer" ? "devcontainer" : "linux"), size: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selectedImage.map { [$0.name, $0.version].compactMap { $0 }.joined(separator: " ") } ?? "Choose an image")
+                        .font(.callout.weight(.semibold))
+                    Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.35)))
             if let reason = runner?.lockedReason, runner?.locked == true {
                 Text(reason).font(.caption).foregroundStyle(.orange)
             } else if catalog?.runner.hostingEnabled == false {
@@ -832,9 +978,12 @@ struct NewSandboxSheet: View {
     private var explanation: String {
         let place = runner.map { $0.thisComputer == true ? "this Mac" : $0.name } ?? "this Mac"
         if kind == "devcontainer" {
-            return "Runs in a container on \(place) and joins your private network. Development containers are temporary: it is deleted after the time you choose."
+            return "A development container on \(place). Temporary: deleted automatically after the time you choose."
         }
-        return "A full Linux virtual machine on \(place) that joins your private network. Virtual machines are kept until you delete them."
+        if selectedImage?.appProfile == "home-assistant" {
+            return "A Home Assistant virtual machine on \(place). Kept until you remove it; open it from its Connect menu once it is running."
+        }
+        return "A Linux virtual machine on \(place). Kept until you remove it."
     }
 
     private func start() async {

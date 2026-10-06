@@ -14,7 +14,15 @@ final class TimeMachineSetupWindow {
         alert.addButton(withTitle: "Hide")
         alert.buttons.first?.target = self
         alert.buttons.first?.action = #selector(close)
+        show(alert)
+    }
+
+    /// A non-modal NSAlert is never laid out on its own (truncated text, a placeholder
+    /// checkbox, an empty button): lay it out before ordering it front.
+    private func show(_ alert: NSAlert) {
         self.alert = alert
+        alert.layout()
+        alert.window.level = .floating
         alert.window.center()
         alert.window.makeKeyAndOrderFront(nil)
     }
@@ -36,11 +44,10 @@ final class TimeMachineSetupWindow {
             alert.buttons[2].target = self
             alert.buttons[2].action = #selector(openPermissions)
         }
-        self.alert = alert
-        alert.window.center()
-        alert.window.makeKeyAndOrderFront(nil)
+        show(alert)
         NSApp.activate(ignoringOtherApps: true)
-        openTimeMachine()
+        // Only a successful setup opens Time Machine settings by itself.
+        if error == nil { openTimeMachine() }
     }
 
     @objc private func close() { alert?.window.close() }

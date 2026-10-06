@@ -25,6 +25,10 @@ osascript -e 'tell application id "systems.nexal.connector" to quit' 2>/dev/null
 sleep 2
 pkill -x NexalMac 2>/dev/null || true
 pkill -f "$APP/Contents/Helpers/nexal run" 2>/dev/null || true
+# An older install may run the agent from ~/Library/Application Support/Nexal/bin; stop that
+# too and refresh that copy, or the old connector code keeps running after this update.
+SUPPORT_BIN="$HOME/Library/Application Support/Nexal/bin/nexal"
+pkill -f "$SUPPORT_BIN run" 2>/dev/null || true
 sleep 2
 cp "$APP/Contents/Helpers/nexal" "$OUT/nexal.previous"
 cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
@@ -40,5 +44,10 @@ codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpe
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
+if [ -f "$SUPPORT_BIN" ]; then
+  cp "$SUPPORT_BIN" "$OUT/nexal.support.previous"
+  install -m 755 "$APP/Contents/Helpers/nexal" "$SUPPORT_BIN"
+  echo "Refreshed $SUPPORT_BIN"
+fi
 open "$APP"
 echo "Done. Previous binaries kept in $OUT (nexal.previous, NexalMac.previous) for rollback."

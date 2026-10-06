@@ -187,7 +187,15 @@ final class AppModel: ObservableObject {
         capability = capabilitySource.capability(from: nil)
         // Stored only after explicit selection. Credentials/config stay in Go.
         let defaults = UserDefaults.standard
-        if let path = defaults.string(forKey: "approvedConnectorPath"),
+        // The helper inside this app bundle always wins when it validates: an older pick in
+        // ~/Library/Application Support/Nexal/bin otherwise kept running stale connector code
+        // after every app update (update-helper.sh replaces only the bundled copy).
+        let bundledFirst = try? ExecutableSelection.approve(ExecutableSelection.bundledExecutable)
+        if let bundledFirst {
+            selection = bundledFirst
+            defaults.set(bundledFirst.url.path, forKey: "approvedConnectorPath")
+            defaults.set(bundledFirst.sha256, forKey: "approvedConnectorHash")
+        } else if let path = defaults.string(forKey: "approvedConnectorPath"),
            let hash = defaults.string(forKey: "approvedConnectorHash"),
            let approved = try? ExecutableSelection.approve(URL(fileURLWithPath: path)),
            approved.sha256 == hash {
@@ -920,7 +928,16 @@ final class AppModel: ObservableObject {
             }
             let report = try JSONDecoder().decode(SetupResult.self, from: result).timeMachine
             guard ["connected", "destination_added"].contains(report.state) else {
-                throw ShellError.commandFailed(1, reason: report.detail ?? "Time Machine setup did not add a backup destination.")
+                let reason: String
+                switch report.state {
+                case "disabled":
+                    reason = "neXal has not turned on backup for this Mac yet. If this keeps happening, update the app (its connector may be out of date) and try Set up again."
+                case "blocked":
+                    reason = report.detail ?? "The backup disk on neXal Storage is not reachable over your private network right now. Check that this Mac is connected, then try again."
+                default:
+                    reason = report.detail ?? "Time Machine setup did not add a backup destination (state: \(report.state))."
+                }
+                throw ShellError.commandFailed(1, reason: reason)
             }
 			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, where you can review the backup schedule."
 			TimeMachineSetupWindow.shared.finish(error: nil)

@@ -80,7 +80,13 @@ struct SharingServicesSettingsView: View {
                 .disabled(working != nil)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task { await refresh() }
+        .task {
+            // Keep following System Settings while this tab is open (the switch lives there).
+            while !Task.isCancelled {
+                await refresh()
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refresh() }
         }
@@ -101,16 +107,37 @@ struct SharingServicesSettingsView: View {
                 Text(service.purpose).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
             Spacer()
-            if on == false {
-                if service.enableCommand != nil {
-                    Button(working == service ? "Turning on…" : "Turn On") { Task { await enable(service) } }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(working != nil)
-                }
-                Button("Open Settings") { open(service) }
+            if on == false, service.enableCommand != nil {
+                Button(working == service ? "Turning on…" : "Turn On") { Task { await enable(service) } }
+                    .buttonStyle(.borderedProminent)
                     .disabled(working != nil)
             }
+            if service == .screenSharing {
+                Button(working == service ? "Resetting…" : "Reset") { Task { await resetScreenSharing() } }
+                    .disabled(working != nil)
+                    .help("Use if viewers get “Screen Sharing is not permitted”, or the switch in System Settings disagrees with this row. Stops Screen Sharing and clears the state an earlier command-line start left behind; then turn it on in System Settings.")
+            }
+            // Always available: System Settings is where the switch actually lives.
+            Button("Open Settings") { open(service) }
+                .disabled(working != nil)
         }
+    }
+
+    /// Undoes a command-line start of Screen Sharing (an older neXal "Turn On" used launchctl), which
+    /// leaves the daemon listening while the System Settings switch shows off and refuses viewers.
+    private func resetScreenSharing() async {
+        guard working == nil else { return }
+        working = .screenSharing; message = nil
+        defer { working = nil }
+        let command = "/bin/launchctl bootout system/com.apple.screensharing 2>/dev/null; "
+            + "/bin/launchctl disable system/com.apple.screensharing; true"
+        let outcome = await Task.detached(priority: .userInitiated) {
+            Self.runPrivileged(command, prompt: "neXal needs to reset Screen Sharing so it can be turned on correctly in System Settings.")
+        }.value
+        await refresh()
+        if let outcome { message = outcome; return }
+        message = "Screen Sharing was reset. Turn it on in System Settings › General › Sharing (opening now)."
+        open(.screenSharing)
     }
 
     private func refresh() async {

@@ -534,7 +534,12 @@ struct NetworkPanel: View {
             .font(.caption)
             .padding(.top, 6)
             .padding(.leading, Self.hostDetailIndent)
-            .task { localServices = await LocalServiceProbe.run() }
+            .task {
+                while !Task.isCancelled {
+                    localServices = await LocalServiceProbe.run()
+                    try? await Task.sleep(for: .seconds(5))
+                }
+            }
         } label: {
             let details = thisMacDetails()
             let publicIP = details?.publicIp ?? model.ownNetInfo.publicAddress

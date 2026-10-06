@@ -319,6 +319,15 @@ final class ThrowawayHosting: ObservableObject {
 
     @Published private(set) var failed: [NetworkSandbox] = []
 
+    /// The coordinator's entry for a host running on this Mac (Connect goes through it).
+    func networkEntry(for box: LocalSandbox) -> NetworkSandbox? {
+        let keys = Set([box.id.lowercased()] + (box.hostname.map { [$0.lowercased()] } ?? []))
+        return network.first { entry in
+            let candidates: [String?] = [entry.id, entry.hostname, entry.name]
+            return candidates.contains { key in key.map { value in keys.contains(value.lowercased()) } ?? false }
+        }
+    }
+
     /// Network hosts not already listed under "On this Mac" (the coordinator also reports
     /// hosts running here, so the same host would otherwise show twice).
     var networkElsewhere: [NetworkSandbox] {
@@ -616,6 +625,9 @@ struct ThrowawayHostsSection: View {
                 badge(ThrowawayFormat.kindLabel(box.kind))
                 badge(ThrowawayFormat.lifecycleLabel(box.lifecycle))
                 Spacer()
+                if let entry = hosting.networkEntry(for: box), entry.canConnect || box.state == "running" {
+                    connectMenu(entry)
+                }
                 if box.isActive {
                     Button(box.state == "stopping" ? "Stopping…" : "Stop", role: .destructive) { hosting.stop(box.id) }
                         .disabled(box.state == "stopping")
@@ -644,16 +656,20 @@ struct ThrowawayHostsSection: View {
                 Text((box.state ?? "").capitalized).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if box.canConnect {
-                Menu("Connect") {
-                    Button("Terminal (SSH)") { Task { await hosting.connect(box, kind: "ssh", model: model) } }
-                    Button("Screen Sharing") { Task { await hosting.connect(box, kind: "vnc", model: model) } }
-                    Button("Files (SFTP in Terminal)") { Task { await hosting.connect(box, kind: "files", model: model) } }
-                }
-                .disabled(hosting.busyID != nil)
-                .fixedSize()
-            }
+            if box.canConnect { connectMenu(box) }
         }
+    }
+    /// Dev containers have no screen, so they offer Terminal and Files only.
+    private func connectMenu(_ box: NetworkSandbox) -> some View {
+        Menu("Connect") {
+            Button("Terminal (SSH)") { Task { await hosting.connect(box, kind: "ssh", model: model) } }
+            if box.kind != "devcontainer" {
+                Button("Screen Sharing") { Task { await hosting.connect(box, kind: "vnc", model: model) } }
+            }
+            Button("Files (SFTP in Terminal)") { Task { await hosting.connect(box, kind: "files", model: model) } }
+        }
+        .disabled(hosting.busyID != nil)
+        .fixedSize()
     }
 }
 

@@ -310,7 +310,7 @@ struct NetworkPanel: View {
             .onAppear { AppDiagnostics.ui("peer expanded", ["peer": peer.name, "lifecycle": peer.lifecycle, "pq": peer.pq]) }
         } label: {
             HStack(alignment: .top, spacing: Self.hostDotSpacing) {
-                Circle().fill(peer.lifecycle == "connected" ? Color.green : Color.orange)
+                Circle().fill(peer.lifecycle == "connected" ? Color.green : peer.lifecycle == "offline" ? Color.secondary.opacity(0.5) : Color.orange)
                     .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
                 Button {
                     Task { await model.refreshPeer(peer) }
@@ -341,9 +341,13 @@ struct NetworkPanel: View {
                         } else if model.availableExitRoutes.contains(exitRouteID(for: peer)) {
                             Image(systemName: "cloud").help("Can be used as an exit node")
                         }
+                        if peer.lifecycle == "offline" {
+                            Text("· Offline").font(.caption).foregroundStyle(.secondary)
+                        } else {
                         Text(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "· 🔐" : "· Encrypted")
                             .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
                             .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe (ML-KEM-1024)" : "Encrypted. ML-KEM-1024 key exchange is not confirmed on this link.")
+                        }
                         if peer.lifecycle == "connected", let latency = peer.latencyMs {
                             Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
                                 .font(.caption).foregroundStyle(.secondary)
@@ -406,7 +410,10 @@ struct NetworkPanel: View {
     /// "Direct - local network" on one line; other routes use their usual label.
     @ViewBuilder
     private func routeSummary(_ peer: ConnectorStatus.MeshPeer) -> some View {
-        if peer.path == "direct" {
+        if peer.lifecycle == "offline" {
+            Text(peer.lastHandshakeAt.flatMap(Self.lastSeenText) ?? "Not reachable: switched off, asleep or offline")
+                .foregroundStyle(.secondary)
+        } else if peer.path == "direct" {
             let how: String = {
                 switch peer.directVia {
                 case "lan": return " - local network"
@@ -776,7 +783,8 @@ struct NetworkPanel: View {
     private func lifecycleText(_ lifecycle: String) -> String {
         switch lifecycle {
         case "connected": "Connected"
-        case "authenticating": "Signing in"
+        case "authenticating": "Connecting"
+        case "offline": "Offline"
         case "provisioning": "Setting up"
         case "degraded": "Limited"
         case "failed": "Not connected"
@@ -795,6 +803,7 @@ struct NetworkPanel: View {
         case "connected": "🟢"
         case "failed": "🔴"
         case "degraded": "🟠"
+        case "offline": "⚪️"
         default: "🟡"
         }
     }
@@ -1112,6 +1121,16 @@ struct NetworkPanel: View {
         let unknown = peers.count - direct - relay - cloud
         if unknown > 0 { parts.append("\(unknown) not reported") }
         return parts.joined(separator: " · ")
+    }
+
+    /// "Last seen 2 h ago" from the last handshake time.
+    private static func lastSeenText(_ iso: String) -> String? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return nil }
+        let rel = RelativeDateTimeFormatter()
+        rel.unitsStyle = .full
+        return "Last seen \(rel.localizedString(for: date, relativeTo: Date()))"
     }
 
     private func routeLabel(_ peer: ConnectorStatus.MeshPeer) -> String {

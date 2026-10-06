@@ -18,7 +18,27 @@ const (
 	LifecycleConnected      Lifecycle = "connected"
 	LifecycleDegraded       Lifecycle = "degraded"
 	LifecycleFailed         Lifecycle = "failed"
+	// LifecycleOffline is a peer the runtime has been trying to reach for a while with no
+	// recent handshake: switched off, asleep, out of battery or off the internet. Distinct
+	// from authenticating, which is a reconnect in progress.
+	LifecycleOffline Lifecycle = "offline"
 )
+
+// Thresholds for calling a peer offline rather than "connecting".
+const (
+	OfflineAfterConnecting = 90 * time.Second
+	OfflineHandshakeAge    = 3 * time.Minute
+)
+
+// PeerLooksOffline: the runtime says "connecting", it has been saying so for longer than
+// OfflineAfterConnecting (or for an unknown time), and the last WireGuard handshake is
+// missing or older than OfflineHandshakeAge.
+func PeerLooksOffline(statusSince, lastHandshake time.Time, now time.Time) bool {
+	if !statusSince.IsZero() && now.Sub(statusSince) < OfflineAfterConnecting {
+		return false
+	}
+	return lastHandshake.IsZero() || now.Sub(lastHandshake) > OfflineHandshakeAge
+}
 
 type PathKind string
 

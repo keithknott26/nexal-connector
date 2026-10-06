@@ -67,6 +67,7 @@ type runtimePeer struct {
 	Status                string          `json:"status"`
 	ConnectionType        string          `json:"connectionType"`
 	LastHandshake         string          `json:"lastWireguardHandshake"`
+	LastStatusUpdate      string          `json:"lastStatusUpdate"`
 	TransferReceived      int64           `json:"transferReceived"`
 	TransferSent          int64           `json:"transferSent"`
 	QuantumResistance     bool            `json:"quantumResistance"`
@@ -132,6 +133,17 @@ func translateRuntime(out []byte, now time.Time) Status {
 			peer.Lifecycle = LifecycleConnected
 		case "connecting":
 			peer.Lifecycle = LifecycleAuthenticating
+			since, _ := time.Parse(time.RFC3339Nano, rp.LastStatusUpdate)
+			handshake, _ := time.Parse(time.RFC3339Nano, rp.LastHandshake)
+			if since.Year() < 2000 {
+				since = time.Time{}
+			}
+			if handshake.Year() < 2000 {
+				handshake = time.Time{}
+			}
+			if PeerLooksOffline(since, handshake, now) {
+				peer.Lifecycle = LifecycleOffline
+			}
 		default: // idle: lazy connection, no tunnel until traffic needs one
 			peer.Lifecycle = LifecycleUnavailable
 		}

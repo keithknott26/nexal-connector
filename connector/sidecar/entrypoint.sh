@@ -62,6 +62,10 @@ mkdir -p "$STATE/netbird" /var/log/nexal
 chmod 0700 "$STATE" "$STATE/netbird"
 export NB_STATE_DIR="$STATE/netbird"
 export NB_LAZY_CONN=off   # same as the macOS app: no lazy connections
+# The neXal quantum gate (ML-KEM-1024 per-peer keys) only works with userspace WireGuard.
+# Colima's kernel ships the wireguard module, and netbird prefers it when present, which
+# makes the engine refuse to start ("kernel backend is unsupported").
+export NB_WG_KERNEL_DISABLED=true
 # Keep the Go heap well inside the container's memory limit (devpod.go
 # SidecarLimitArgs), so the daemon collects garbage instead of being OOM-killed
 # mid-join -- which used to surface only as "netbird up failed".
@@ -86,7 +90,10 @@ OOM_BEFORE=$(oom_kills); OOM_BEFORE=${OOM_BEFORE:-0}
 # The mesh address once management is connected, else nothing.
 connected_ip() {
   local j; j=$(netbird status --json 2>/dev/null | tr -d ' \n\t')
+  # Management alone connects before the engine starts; signal connects only once the
+  # engine runs, so require both (an engine that fails to start leaves signal down).
   printf '%s' "$j" | grep -q '"management":{[^}]*"connected":true' || return 0
+  printf '%s' "$j" | grep -q '"signal":{[^}]*"connected":true' || return 0
   own_ip "$j"
 }
 # This peer's own mesh address. `netbird status --json` lists other peers (each with a
@@ -143,7 +150,7 @@ shred -u "$KEYFILE" 2>/dev/null || rm -f "$KEYFILE"
 
 ip=""
 for _ in $(seq 1 60); do
-  ip=$(own_ip "$(netbird status --json 2>/dev/null)")
+  ip=$(connected_ip)
   [ -n "$ip" ] && break
   sleep 1
 done

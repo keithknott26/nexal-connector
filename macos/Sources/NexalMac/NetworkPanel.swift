@@ -877,7 +877,6 @@ struct NetworkPanel: View {
 
     /// Only offer known protocols, using the private-network service evidence.
     @ViewBuilder
-    @ViewBuilder
     private func advertisedServices(_ peer: ConnectorStatus.MeshPeer) -> some View {
         let services = Set(peer.services ?? [])
         let storage = isStorageGateway(peer)

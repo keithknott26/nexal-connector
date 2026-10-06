@@ -31,6 +31,10 @@ func (f *fakeSandboxAPI) CreateSandbox(_ context.Context, hostID string, body js
 	f.gotHost, f.gotKey = hostID, string(body)
 	return json.RawMessage(`{"id":"sb2","state":"requested"}`), nil
 }
+func (f *fakeSandboxAPI) SandboxRunners(_ context.Context, hostID string) (json.RawMessage, error) {
+	return json.RawMessage(`{"runners":[]}`), nil
+}
+
 func (f *fakeSandboxAPI) SandboxImages(_ context.Context, hostID, runner string) (json.RawMessage, error) {
 	f.gotHost, f.gotID = hostID, runner
 	return json.RawMessage(`{"images":[]}`), nil

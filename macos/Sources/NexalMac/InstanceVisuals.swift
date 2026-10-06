@@ -1,0 +1,111 @@
+import AppKit
+import SwiftUI
+
+/// The OS or app an instance runs, for its icon: "ubuntu", "debian", "fedora", "alpine",
+/// "home-assistant", "devcontainer" or "linux".
+enum InstanceFamily {
+    static func of(imageId: String?, imageName: String?, appProfile: String?, template: String?) -> String {
+        if let appProfile, appProfile != "none" { return appProfile }
+        let text = [template, imageId, imageName].compactMap { $0?.lowercased() }.joined(separator: " ")
+        for known in ["ubuntu", "debian", "fedora", "alpine", "home-assistant", "rocky", "arch"] where text.contains(known) { return known }
+        if text.contains("home assistant") { return "home-assistant" }
+        if text.contains("devcontainer") || text.contains("dev container") { return "devcontainer" }
+        return "linux"
+    }
+}
+
+/// A small badge for an instance's OS. If the app bundle carries an image named
+/// `os-<family>` (an official logo added by the developer), that is shown; otherwise
+/// a generic symbol in the family's color.
+struct InstanceIcon: View {
+    let family: String
+    var size: CGFloat = 16
+
+    var body: some View {
+        if let logo = NSImage(named: "os-\(family)") {
+            Image(nsImage: logo).resizable().interpolation(.high).scaledToFit()
+                .frame(width: size, height: size).accessibilityLabel(Self.label(family))
+        } else {
+            Image(systemName: Self.symbol(family))
+                .font(.system(size: size * 0.62, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(Circle().fill(Self.tint(family)))
+                .accessibilityLabel(Self.label(family))
+        }
+    }
+
+    static func symbol(_ family: String) -> String {
+        switch family {
+        case "home-assistant": return "house.fill"
+        case "devcontainer": return "shippingbox.fill"
+        case "ubuntu", "debian", "fedora", "alpine", "rocky", "arch": return "server.rack"
+        default: return "terminal.fill"
+        }
+    }
+    static func tint(_ family: String) -> Color {
+        switch family {
+        case "ubuntu": return .orange
+        case "debian": return .red
+        case "fedora", "home-assistant": return .blue
+        case "alpine": return .teal
+        case "rocky": return .green
+        case "arch": return .cyan
+        case "devcontainer": return .indigo
+        default: return .gray
+        }
+    }
+    static func label(_ family: String) -> String {
+        switch family {
+        case "home-assistant": return "Home Assistant"
+        case "devcontainer": return "Dev container"
+        case "linux": return "Linux"
+        default: return family.capitalized
+        }
+    }
+}
+
+/// The start-up or shut-down step an instance is on, with a small bar.
+struct InstanceProgress: View {
+    let kind: String?
+    let state: String?
+    let step: String?
+    let percent: Int?
+
+    private var noun: String { kind == "devcontainer" ? "development container" : "VM" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let fraction {
+                ProgressView(value: fraction).progressViewStyle(.linear).controlSize(.small)
+            } else {
+                ProgressView().progressViewStyle(.linear).controlSize(.small)
+            }
+            Text(text).font(.caption2).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var fraction: Double? {
+        guard state != "stopping", let percent else { return nil }
+        return min(max(Double(percent) / 100, 0.02), 1)
+    }
+
+    var text: String {
+        if state == "stopping" { return "Shutting down and removing the \(noun) from the network…" }
+        if state == "requested" && step == nil { return "Waiting for the computer to start it…" }
+        switch step {
+        case "check": return "Checking the computer…"
+        case "download": return "Downloading the image…"
+        case "convert": return "Preparing the image…"
+        case "disk": return "Creating the disk…"
+        case "seed": return "Preparing the first boot…"
+        case "boot": return kind == "devcontainer" ? "Starting the container… (the first one can take a few minutes)" : "Starting the VM…"
+        case "join": return "Adding the \(noun) to the network…"
+        default: return "Starting…"
+        }
+    }
+
+    /// Whether an instance in this state shows progress.
+    static func shows(_ state: String?) -> Bool { ["requested", "provisioning", "stopping"].contains(state ?? "") }
+}

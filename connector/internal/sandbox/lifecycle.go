@@ -607,6 +607,10 @@ func (m *Manager) bootDev(ctx context.Context, t Task, reset bool) error {
 		return errors.New("devcontainer payload missing")
 	}
 	upStarted := time.Now()
+	// Steps the apps show while a dev container starts: check, boot (devpod up), join (mesh).
+	progress := throttle(func(step string, pct int) { m.reportProgress(t.SandboxID, step, pct) })
+	ctx = WithProgress(ctx, progress)
+	progress(StepCheck, 5)
 	m.opts.Logger.Debug("dev container up starting", "sandbox", t.SandboxID, "workspace", ws, "reset", reset,
 		"recreate", reset && !t.keepData, "driveMode", driveModeOf(t))
 	res, err := m.opts.Dev.Up(ctx, DevUpSpec{Workspace: ws, Hostname: t.Hostname, Devcontainer: *t.Devcontainer,

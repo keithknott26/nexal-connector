@@ -863,6 +863,7 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	// the runtime's socket so neither depends on the inherited environment.
 	_, _ = d.run(ctx, t, t.devpod, "provider", "set-options", "docker",
 		"--option", "DOCKER_PATH="+t.docker, "--option", "DOCKER_HOST="+t.rt.DockerHost())
+	progressOf(ctx)(StepBoot, 20)
 	upOut, uerr := d.run(ctx, t, t.devpod, DevPodUpArgs(source, s.Workspace, false)...)
 	if uerr != nil {
 		return res, devErr(DevErrDevPodFailed, "devpod up failed: %s", trimOutput([]byte(upOut)))
@@ -899,6 +900,7 @@ func (d *DevPod) Up(ctx context.Context, s DevUpSpec) (res DevUpResult, err erro
 	if managed {
 		sidecarExtra = ManagedSidecarArgs(*d.cfg.Managed, s.Tenant)
 	}
+	progressOf(ctx)(StepJoin, 70)
 	if out, rerr := d.run(ctx, t, t.docker, SidecarRunArgs(s.Workspace, cid, d.cfg.MeshImage, bootDir, s.Lifecycle == LifecyclePersistent, sidecarExtra...)...); rerr != nil {
 		return res, devErr(DevErrMeshFailed, "starting the mesh sidecar failed: %s", trimOutput([]byte(out)))
 	}

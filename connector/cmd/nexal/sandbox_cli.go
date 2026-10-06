@@ -20,6 +20,7 @@ type sandboxAPI interface {
 	ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey string) (json.RawMessage, error)
 	CreateSandbox(ctx context.Context, hostID string, body json.RawMessage) (json.RawMessage, error)
 	SandboxImages(ctx context.Context, hostID, runner string) (json.RawMessage, error)
+	SandboxRunners(ctx context.Context, hostID string) (json.RawMessage, error)
 }
 
 // sandboxCommand is the Mac app's seam to throwaway hosts on the network:
@@ -29,6 +30,8 @@ type sandboxAPI interface {
 //	nexal sandbox --action connect --id <id> --kind ssh|vnc|files [--public-key-stdin]
 //	    prints the coordinator's connect response unchanged; for ssh and files the
 //	    ssh-ed25519 public key to certify is read from stdin (one line)
+//	nexal sandbox --action runners
+//	    prints where an instance can be created: {"runners":[{id,name,thisComputer,managed,containersOnly,locked,...}]}
 //	nexal sandbox --action images [--id <runner host id>]
 //	    prints the image catalog for that computer (default: this one)
 //	nexal sandbox --action create
@@ -42,7 +45,7 @@ func sandboxCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	action := f.String("action", "", "list | connect | images | create")
+	action := f.String("action", "", "list | runners | connect | images | create")
 	id := f.String("id", "", "sandbox id (connect)")
 	kind := f.String("kind", "", "ssh | vnc | files (connect)")
 	stdin := f.Bool("public-key-stdin", false, "read the ssh-ed25519 public key from standard input")
@@ -78,9 +81,9 @@ func sandboxCommand(ctx context.Context, args []string) error {
 
 func checkSandboxArgs(action, id, kind string, stdin bool) error {
 	switch action {
-	case "list":
+	case "list", "runners":
 		if id != "" || kind != "" || stdin {
-			return &codedError{code: "invalid_arguments", err: errors.New("sandbox list takes no --id, --kind or --public-key-stdin")}
+			return &codedError{code: "invalid_arguments", err: errors.New("sandbox " + action + " takes no --id, --kind or --public-key-stdin")}
 		}
 	case "images":
 		if (id != "" && !client.ValidID(id)) || kind != "" || stdin {
@@ -107,7 +110,7 @@ func checkSandboxArgs(action, id, kind string, stdin bool) error {
 			return &codedError{code: "invalid_arguments", err: errors.New("--kind must be ssh, vnc or files")}
 		}
 	default:
-		return &codedError{code: "invalid_arguments", err: errors.New("usage: nexal sandbox --action list|images|create|connect [--id <id>] [--kind ssh|vnc|files] [--public-key-stdin]")}
+		return &codedError{code: "invalid_arguments", err: errors.New("usage: nexal sandbox --action list|runners|images|create|connect [--id <id>] [--kind ssh|vnc|files] [--public-key-stdin]")}
 	}
 	return nil
 }
@@ -121,6 +124,8 @@ func runSandbox(ctx context.Context, api sandboxAPI, hostID, action, id, kind st
 	switch action {
 	case "list":
 		body, err = api.ListSandboxes(ctx, hostID)
+	case "runners":
+		body, err = api.SandboxRunners(ctx, hostID)
 	case "images":
 		body, err = api.SandboxImages(ctx, hostID, id)
 	case "create":
@@ -165,7 +170,12 @@ func readPublicKey(r io.Reader) (string, error) {
 func sandboxError(err error) error {
 	var status *client.StatusError
 	if errors.As(err, &status) && status.Code != "" {
-		return &codedError{code: status.Code, err: err}
+		// The client keeps only the coordinator's error code (never its prose), so say in
+		// words what the common refusals mean; the Mac app shows this text as is.
+		if msg, ok := sandboxErrorText[status.Code]; ok {
+			return &codedError{code: status.Code, err: errors.New(msg)}
+		}
+		return &codedError{code: status.Code, err: fmt.Errorf("%w: %s", err, status.Code)}
 	}
 	if errors.As(err, &status) {
 		switch status.Status {
@@ -179,4 +189,20 @@ func sandboxError(err error) error {
 		return &codedError{code: "sandboxes_unavailable", err: errors.New("the coordinator does not offer throwaway hosts right now")}
 	}
 	return err
+}
+
+var sandboxErrorText = map[string]string{
+	"size_too_small":        "that size is too small for this image; choose a larger size",
+	"size_too_large":        "that computer cannot give one instance that much CPU or memory; choose a smaller size",
+	"image_kind_mismatch":   "that image cannot run as this type (Home Assistant runs as a virtual machine only)",
+	"image_unavailable":     "that image is not available for that computer",
+	"runner_not_opted_in":   "that computer is not set up to host instances (Settings › Virtual Machine Hosting)",
+	"runner_restricted":     "that computer only hosts instances for its owner",
+	"runner_full":           "that computer already runs as many instances as it allows; stop one first",
+	"runner_not_found":      "that computer is not in your network",
+	"disk_cap_reached":      "this would use more disk than your account allows; delete an instance first",
+	"containers_only":       "neXal storage runs dev containers only",
+	"managed_limit_reached": "neXal storage is full or you reached your limit there; try again shortly",
+	"plan_required":         "hosting on neXal storage needs a plan",
+	"sandbox_not_running":   "the instance is not running yet",
 }

@@ -60,9 +60,20 @@ struct NetworkSandbox: Decodable, Identifiable, Equatable {
     var expiresAt: String?
     var hostName: String?
     var failure: String?
+    var imageId: String?
+    var imageName: String?
+    var appProfile: String?
+    var runnerName: String?
+    var devcontainer: DevcontainerInfo?
+    var progress: Progress?
+
+    struct DevcontainerInfo: Decodable, Equatable { var template: String? }
+    struct Progress: Decodable, Equatable { var step: String; var percent: Int? }
 
     var title: String { name ?? hostname ?? id }
     var canConnect: Bool { state == "running" }
+    /// The OS or app family, for its icon: the dev container's template, else the image.
+    var family: String { InstanceFamily.of(imageId: imageId, imageName: imageName, appProfile: appProfile, template: devcontainer?.template) }
 }
 
 private struct NetworkSandboxList: Decodable { let sandboxes: [NetworkSandbox]? }
@@ -74,12 +85,36 @@ struct SandboxImage: Decodable, Identifiable, Equatable {
     let level: String
     let minDiskGb: Int?
     let checksumPending: Bool?
+    let family: String?
+    let appProfile: String?
+    /// "vm" and/or "devcontainer"; absent from older coordinators.
+    let kinds: [String]?
+
+    /// Dev-container images are containers only; appliance images (Home Assistant) VMs only.
+    func supports(_ kind: String) -> Bool {
+        if let kinds { return kinds.contains(kind) }
+        if family == "devcontainer" { return kind == "devcontainer" }
+        if let appProfile, appProfile != "none" { return kind == "vm" }
+        return true
+    }
+    var iconFamily: String { InstanceFamily.of(imageId: id, imageName: name, appProfile: appProfile, template: nil) }
 }
 struct SandboxImageCatalog: Decodable {
-    struct Runner: Decodable { let id: String; let name: String; let hostingEnabled: Bool? }
+    struct Runner: Decodable { let id: String; let name: String; let hostingEnabled: Bool?; let containersOnly: Bool? }
     let runner: Runner
     let images: [SandboxImage]
 }
+/// Where an instance can be created (`nexal sandbox --action runners`).
+struct SandboxRunner: Decodable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let thisComputer: Bool?
+    let managed: Bool?
+    let containersOnly: Bool?
+    let locked: Bool?
+    let lockedReason: String?
+}
+private struct SandboxRunnerList: Decodable { let runners: [SandboxRunner]? }
 struct SandboxCreateRequest: Encodable {
     let imageId: String
     let runnerHostId: String
@@ -287,7 +322,9 @@ final class ThrowawayHosting: ObservableObject {
     // MARK: Hosts on the network and Connect (through the connector CLI)
 
     func refreshNetwork(_ model: AppModel, force: Bool = false) async {
-        guard force || Date().timeIntervalSince(lastNetworkFetch) > 30 else { return }
+        // Every 4 s while something is starting or stopping, so the progress bar moves; else every 30 s.
+        let busy = network.contains { InstanceProgress.shows($0.state) } || local.contains { $0.state == "provisioning" || $0.state == "stopping" }
+        guard force || Date().timeIntervalSince(lastNetworkFetch) > (busy ? 4 : 30) else { return }
         lastNetworkFetch = Date()
         // An older connector without the `sandbox` command simply yields no list.
         guard let data = try? await model.sandbox(action: "list", id: nil, kind: nil),
@@ -345,10 +382,19 @@ final class ThrowawayHosting: ObservableObject {
     @Published private(set) var creating = false
 
     /// The image catalog for this Mac (the connector asks for its own host by default).
-    func loadImages(_ model: AppModel) async throws -> SandboxImageCatalog {
-        let data = try await model.sandbox(action: "images", id: nil, kind: nil)
+    func loadImages(_ model: AppModel, runner: String? = nil) async throws -> SandboxImageCatalog {
+        let data = try await model.sandbox(action: "images", id: runner, kind: nil)
         return try JSONDecoder().decode(SandboxImageCatalog.self, from: data)
     }
+
+    /// Where an instance can be created; empty from an older connector or coordinator.
+    func loadRunners(_ model: AppModel) async -> [SandboxRunner] {
+        guard let data = try? await model.sandbox(action: "runners", id: nil, kind: nil),
+              let list = try? JSONDecoder().decode(SandboxRunnerList.self, from: data) else { return [] }
+        return list.runners ?? []
+    }
+
+    func clearMessage() { message = nil }
 
     func create(_ request: SandboxCreateRequest, model: AppModel) async -> Bool {
         guard !creating else { return false }
@@ -622,11 +668,12 @@ struct ThrowawayHostsSection: View {
     private func localRow(_ box: LocalSandbox) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                let title = PeerNames.shared.name(for: box.meshIp) ?? hosting.networkEntry(for: box)?.name ?? box.hostname ?? box.id
-                Text(title).fontWeight(.medium)
+                let entry = hosting.networkEntry(for: box)
+                let title = PeerNames.shared.name(for: box.meshIp) ?? entry?.name ?? box.hostname ?? box.id
+                InstanceIcon(family: entry?.family ?? (box.kind == "devcontainer" ? "devcontainer" : "linux"))
+                Text(title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
                     .renamable(address: box.meshIp, current: title)
                 badge(ThrowawayFormat.kindLabel(box.kind))
-                badge(ThrowawayFormat.lifecycleLabel(box.lifecycle))
                 Spacer()
                 if let entry = hosting.networkEntry(for: box), entry.canConnect || box.state == "running" {
                     connectMenu(entry)
@@ -645,6 +692,10 @@ struct ThrowawayHostsSection: View {
                 }
                 if let ip = box.meshIp { Text(ip).foregroundStyle(.secondary).textSelection(.enabled) }
             }.font(.caption)
+            if box.state == "provisioning" || box.state == "stopping" {
+                let entry = hosting.networkEntry(for: box)
+                InstanceProgress(kind: box.kind, state: box.state, step: entry?.progress?.step, percent: entry?.progress?.percent)
+            }
         }
     }
 
@@ -653,12 +704,15 @@ struct ThrowawayHostsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     let title = PeerNames.shared.name(for: box.meshIp) ?? box.title
-                    Text(title).fontWeight(.medium)
+                    InstanceIcon(family: box.family)
+                    Text(title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
                         .renamable(address: box.meshIp, current: title)
                     badge(ThrowawayFormat.kindLabel(box.kind))
-                    badge(ThrowawayFormat.lifecycleLabel(box.lifecycle))
                 }
-                Text((box.state ?? "").capitalized).font(.caption).foregroundStyle(.secondary)
+                Text([(box.state ?? "").capitalized, box.runnerName.map { "on \($0)" }].compactMap { $0 }.joined(separator: " ")).font(.caption).foregroundStyle(.secondary)
+                if InstanceProgress.shows(box.state) {
+                    InstanceProgress(kind: box.kind, state: box.state, step: box.progress?.step, percent: box.progress?.percent)
+                }
             }
             Spacer()
             if box.canConnect { connectMenu(box) }
@@ -687,36 +741,56 @@ struct NewSandboxSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var kind = "devcontainer"
     @State private var size = "small"
-    @State private var lifecycle = "ephemeral"
     @State private var lifetime = 24
     @State private var reach = "network"
+    @State private var runners: [SandboxRunner] = []
+    @State private var runnerId = ""
     @State private var catalog: SandboxImageCatalog?
     @State private var imageId = ""
     @State private var loadError: String?
+    @State private var loading = false
 
-    private var images: [SandboxImage] { (catalog?.images ?? []).filter { kind == "devcontainer" || $0.checksumPending != true } }
+    private var runner: SandboxRunner? { runners.first { $0.id == runnerId } }
+    private var containersOnly: Bool { runner?.containersOnly == true || catalog?.runner.containersOnly == true }
+    private var images: [SandboxImage] {
+        (catalog?.images ?? []).filter { $0.supports(kind) && (kind == "devcontainer" || $0.checksumPending != true) }
+    }
+    private var selectedImage: SandboxImage? { images.first { $0.id == imageId } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New virtual machine or dev container").font(.headline)
+            Text("New virtual machine or development container").font(.headline)
             Form {
+                if runners.count > 1 {
+                    Picker("Create on", selection: $runnerId) {
+                        ForEach(runners) { r in
+                            Text(r.thisComputer == true ? "\(r.name) (this Mac)" : r.name).tag(r.id)
+                        }
+                    }
+                }
                 Picker("Type", selection: $kind) {
-                    Text("Dev container").tag("devcontainer")
+                    Text("Development container").tag("devcontainer")
                     Text("Virtual machine").tag("vm")
-                }.pickerStyle(.segmented)
+                }
+                .pickerStyle(.segmented)
+                .disabled(containersOnly)
                 Picker("Image", selection: $imageId) {
-                    ForEach(images) { image in Text(image.version.map { "\(image.name) \($0)" } ?? image.name).tag(image.id) }
-                }.disabled(images.isEmpty)
+                    ForEach(images) { image in
+                        Label {
+                            Text(image.version.map { "\(image.name) \($0)" } ?? image.name)
+                        } icon: {
+                            Image(systemName: InstanceIcon.symbol(image.iconFamily))
+                        }
+                        .tag(image.id)
+                    }
+                }
+                .disabled(images.isEmpty)
                 Picker("Size", selection: $size) {
                     Text("Small · 2 CPU, 2 GB").tag("small")
                     Text("Medium · 4 CPU, 8 GB").tag("medium")
                     Text("Large · 8 CPU, 16 GB").tag("large")
                 }
-                Picker("Keep", selection: $lifecycle) {
-                    Text("Temporary").tag("ephemeral")
-                    Text("Persistent").tag("persistent")
-                }
-                if lifecycle == "ephemeral" {
+                if kind == "devcontainer" {
                     Picker("Delete after", selection: $lifetime) {
                         Text("1 hour").tag(1); Text("4 hours").tag(4); Text("1 day").tag(24)
                         Text("3 days").tag(72); Text("1 week").tag(168)
@@ -728,43 +802,76 @@ struct NewSandboxSheet: View {
                 }
             }
             .formStyle(.grouped)
-            if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
-            if catalog?.runner.hostingEnabled == false {
-                Text("This Mac isn't set up to host instances. Turn on hosting in Settings › Virtual Machine Hosting.").font(.caption).foregroundStyle(.orange)
+            HStack(spacing: 8) {
+                if let image = selectedImage { InstanceIcon(family: image.iconFamily, size: 22) }
+                Text(explanation).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Text(kind == "devcontainer"
-                 ? "Runs in Colima on this Mac and joins your private network. The first one downloads the runtime and can take a few minutes."
-                 : "A full Linux VM on this Mac that joins your private network.")
-                .font(.caption).foregroundStyle(.secondary)
+            if let reason = runner?.lockedReason, runner?.locked == true {
+                Text(reason).font(.caption).foregroundStyle(.orange)
+            } else if catalog?.runner.hostingEnabled == false {
+                Text("That Mac isn't set up to host instances. Turn on hosting in Settings › Virtual Machine Hosting.").font(.caption).foregroundStyle(.orange)
+            }
+            if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
+            if let message = hosting.message { Text(message).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
+                if loading || hosting.creating { ProgressView().controlSize(.small) }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button(hosting.creating ? "Creating…" : "Create") { Task { await create() } }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(hosting.creating || imageId.isEmpty || catalog == nil)
+                    .disabled(hosting.creating || loading || imageId.isEmpty || catalog == nil || runner?.locked == true)
             }
         }
         .padding(20)
-        .frame(width: 460)
-        .task { await load() }
-        .onChange(of: kind) { _, _ in if !images.contains(where: { $0.id == imageId }) { imageId = images.first?.id ?? "" } }
+        .frame(width: 480)
+        .task { await start() }
+        .onChange(of: runnerId) { _, _ in Task { await loadCatalog() } }
+        .onChange(of: kind) { _, _ in pickImage() }
     }
 
-    private func load() async {
+    private var explanation: String {
+        let place = runner.map { $0.thisComputer == true ? "this Mac" : $0.name } ?? "this Mac"
+        if kind == "devcontainer" {
+            return "Runs in a container on \(place) and joins your private network. Development containers are temporary: it is deleted after the time you choose."
+        }
+        return "A full Linux virtual machine on \(place) that joins your private network. Virtual machines are kept until you delete them."
+    }
+
+    private func start() async {
+        hosting.clearMessage()
+        loading = true
+        runners = await hosting.loadRunners(model)
+        // This Mac first (the coordinator sorts it first); fall back to this Mac when no list is available.
+        runnerId = runners.first(where: { $0.thisComputer == true })?.id ?? runners.first?.id ?? ""
+        if runners.isEmpty { await loadCatalog() } // onChange does it otherwise
+        loading = false
+    }
+
+    private func loadCatalog() async {
+        loading = true; loadError = nil; catalog = nil
+        defer { loading = false }
         do {
-            let c = try await hosting.loadImages(model)
+            let c = try await hosting.loadImages(model, runner: runnerId.isEmpty || runner?.thisComputer == true ? nil : runnerId)
             catalog = c
-            imageId = images.first?.id ?? ""
-            if c.images.isEmpty { loadError = "No compatible images for this Mac yet." }
+            if containersOnly { kind = "devcontainer" }
+            pickImage()
+            if c.images.isEmpty { loadError = "No compatible images for that computer yet." }
         } catch {
             loadError = "Could not load images: \(error.localizedDescription)"
         }
     }
 
+    private func pickImage() {
+        if !images.contains(where: { $0.id == imageId }) { imageId = images.first?.id ?? "" }
+    }
+
     private func create() async {
         guard let catalog else { return }
-        let request = SandboxCreateRequest(imageId: imageId, runnerHostId: catalog.runner.id, size: size, kind: kind,
-                                           lifecycle: lifecycle, lifetimeHours: lifecycle == "ephemeral" ? lifetime : nil, reach: reach)
+        hosting.clearMessage()
+        // Development containers are temporary, virtual machines persistent.
+        let lifecycle = kind == "devcontainer" ? "ephemeral" : "persistent"
+        let request = SandboxCreateRequest(imageId: imageId, runnerHostId: runnerId.isEmpty ? catalog.runner.id : runnerId, size: size, kind: kind,
+                                           lifecycle: lifecycle, lifetimeHours: kind == "devcontainer" ? lifetime : nil, reach: reach)
         if await hosting.create(request, model: model) { dismiss() }
     }
 }

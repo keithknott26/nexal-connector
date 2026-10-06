@@ -91,7 +91,11 @@ struct RenameOnInteraction: ViewModifier {
                 }
             } else {
                 content
-                    .onTapGesture(count: 2) { begin() }
+                    // highPriorityGesture, not onTapGesture: this label usually sits inside a
+                    // DisclosureGroup (the peer row expands/collapses on a single click of its
+                    // whole label), which otherwise intercepts the click before a plain
+                    // onTapGesture's double-click recognizer ever sees it.
+                    .highPriorityGesture(TapGesture(count: 2).onEnded { begin() })
                     .help("Double-click to rename")
             }
         }

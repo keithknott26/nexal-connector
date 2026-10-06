@@ -646,7 +646,7 @@ struct NewSandboxSheet: View {
                     Text("Virtual machine").tag("vm")
                 }.pickerStyle(.segmented)
                 Picker("Image", selection: $imageId) {
-                    ForEach(images) { Text($0.version.map { v in "\($0.name) \(v)" } ?? $0.name).tag($0.id) }
+                    ForEach(images) { image in Text(image.version.map { "\(image.name) \($0)" } ?? image.name).tag(image.id) }
                 }.disabled(images.isEmpty)
                 Picker("Size", selection: $size) {
                     Text("Small · 2 CPU, 2 GB").tag("small")

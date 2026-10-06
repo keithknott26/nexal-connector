@@ -300,6 +300,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         dismissHint()
+        if let settingsWindow, settingsWindow.isVisible {
+            settingsWindow.performClose(nil)
+            return
+        }
         if popover.isShown {
             popover.performClose(sender)
         } else {

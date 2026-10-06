@@ -251,29 +251,37 @@ final class ThrowawayHosting: ObservableObject {
 
     // MARK: Container runtime (dev containers)
 
+    /// nil until the first check finishes: neither a green nor a red LED is
+    /// honest before then. After that, true/false come straight from the
+    /// installer's exit code (0 ready, 1 failure) -- never guessed from its text.
+    @Published private(set) var runtimeReady: Bool?
     @Published private(set) var runtimeStatus: String?
     @Published private(set) var installingRuntime = false
 
     /// Runs the bundled installer: Colima, Lima, docker and devpod, from Homebrew when
     /// it is installed and otherwise downloaded by neXal (checksum-verified) into
     /// ~/Library/Application Support/Nexal/runtime. The connector refuses Docker
-    /// Desktop (`docker_desktop_only`). Idempotent.
+    /// Desktop (`docker_desktop_only`). Idempotent: when a runtime already answers,
+    /// this is just the readiness check (the whole point of calling it again), not
+    /// a reinstall -- that is also why it is safe to run once, silently, whenever
+    /// dev-container hosting is enabled, rather than only when the owner clicks it.
     func installContainerRuntime() {
         guard !installingRuntime else { return }
         guard let script = Bundle.main.url(forResource: "install-container-runtime", withExtension: "sh") else {
+            runtimeReady = false
             runtimeStatus = "This build does not include the container-runtime installer."
             return
         }
         installingRuntime = true
-        runtimeStatus = "Setting up a container runtime for development containers…"
         Task { @MainActor in
-            let status = await Task.detached { ThrowawayHosting.runInstaller(script) }.value
+            let result = await Task.detached { ThrowawayHosting.runInstaller(script) }.value
             self.installingRuntime = false
-            self.runtimeStatus = status
+            self.runtimeReady = result.ready
+            self.runtimeStatus = result.message
         }
     }
 
-    nonisolated static func runInstaller(_ script: URL) -> String {
+    nonisolated static func runInstaller(_ script: URL) -> (ready: Bool, message: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [script.path]
@@ -281,13 +289,15 @@ final class ThrowawayHosting: ObservableObject {
         process.standardOutput = pipe
         process.standardError = pipe
         do { try process.run() } catch {
-            return "Could not start the container-runtime installer: \(error.localizedDescription)"
+            return (false, "Could not start the container-runtime installer: \(error.localizedDescription)")
         }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         let lines = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline)
-        if let last = lines.last { return String(last) }
-        return process.terminationStatus == 0 ? "Container runtime ready." : "Container runtime setup failed."
+        let ready = process.terminationStatus == 0
+        let last = lines.last.map(String.init)
+        let fallback = ready ? "Container runtime ready." : "Container runtime setup failed."
+        return (ready, last ?? fallback)
     }
 
     // MARK: Hosts on this Mac
@@ -577,15 +587,35 @@ struct ThrowawayHostingSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Hosts are polite to you: they pause when this Mac sleeps and resume when it wakes. You can stop any host from the menu bar or the neXal panel at any time.")
                     .font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 8) {
-                    Button(hosting.installingRuntime ? "Setting up…" : "Set up dev-container runtime") {
-                        hosting.installContainerRuntime()
+                // The LED is the point of this row: dev containers need a container
+                // runtime (Colima + docker + devpod; Docker Desktop is refused), and once
+                // it is set up there is nothing left to click -- just confirmation it is
+                // still there. Green/red only ever come from the installer's own exit
+                // code (runtimeReady), never guessed from its wording.
+                HStack(spacing: 6) {
+                    if hosting.installingRuntime {
+                        ProgressView().controlSize(.small)
+                        Text("Checking the dev-container runtime…").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Circle()
+                            .fill(hosting.runtimeReady == true ? Color.green : hosting.runtimeReady == false ? Color.red : Color.secondary.opacity(0.4))
+                            .frame(width: 8, height: 8)
+                        Text(hosting.runtimeReady == true ? "Dev-container runtime ready"
+                             : hosting.runtimeReady == false ? (hosting.runtimeStatus ?? "Dev-container runtime needs attention")
+                             : "Dev-container runtime: not checked yet")
+                            .font(.caption)
+                            .foregroundStyle(hosting.runtimeReady == true ? .secondary : hosting.runtimeReady == false ? .red : .secondary)
+                        Spacer()
+                        Button(hosting.runtimeReady == true ? "Recheck" : "Set up") {
+                            hosting.installContainerRuntime()
+                        }
+                        .controlSize(.small)
                     }
-                    .disabled(hosting.installingRuntime)
-                    if hosting.installingRuntime { ProgressView().controlSize(.small) }
                 }
-                Text(hosting.runtimeStatus ?? "Dev containers need a container runtime (Docker Desktop is not supported). neXal@home installs Colima, docker and devpod for you; no Homebrew needed.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if hosting.runtimeReady != false {
+                    Text("Dev containers need a container runtime (Docker Desktop is not supported). neXal@home installs Colima, docker and devpod for you; no Homebrew needed.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             if let message = hosting.message { Text(message).font(.caption).foregroundStyle(.orange) }
         }

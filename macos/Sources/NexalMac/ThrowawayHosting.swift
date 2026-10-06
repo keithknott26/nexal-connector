@@ -900,10 +900,15 @@ struct NewSandboxSheet: View {
                 }
             }
             Form {
-                if runners.count > 1 {
+                if !runners.isEmpty {
                     Picker("Create on", selection: $runnerId) {
                         ForEach(runners) { r in
-                            Text(r.thisComputer == true ? "\(r.name) (this Mac)" : r.name).tag(r.id)
+                            Label {
+                                Text(runnerTitle(r))
+                            } icon: {
+                                Image(systemName: r.managed == true ? "externaldrive.connected.to.line.below" : r.thisComputer == true ? "laptopcomputer" : "desktopcomputer")
+                            }
+                            .tag(r.id)
                         }
                     }
                 }
@@ -975,6 +980,14 @@ struct NewSandboxSheet: View {
         .onChange(of: kind) { _, _ in pickImage() }
     }
 
+    private func runnerTitle(_ r: SandboxRunner) -> String {
+        var title = r.name
+        if r.thisComputer == true { title += " (this Mac)" }
+        if r.managed == true { title += " · development containers only" }
+        if r.locked == true { title += " · unavailable" }
+        return title
+    }
+
     private var explanation: String {
         let place = runner.map { $0.thisComputer == true ? "this Mac" : $0.name } ?? "this Mac"
         if kind == "devcontainer" {
@@ -990,8 +1003,10 @@ struct NewSandboxSheet: View {
         hosting.clearMessage()
         loading = true
         runners = await hosting.loadRunners(model)
-        // This Mac first (the coordinator sorts it first); fall back to this Mac when no list is available.
-        runnerId = runners.first(where: { $0.thisComputer == true })?.id ?? runners.first?.id ?? ""
+        // This Mac when it can host; otherwise the first computer that can. The owner can pick any.
+        runnerId = runners.first(where: { $0.thisComputer == true && $0.locked != true })?.id
+            ?? runners.first(where: { $0.locked != true })?.id
+            ?? runners.first?.id ?? ""
         if runners.isEmpty { await loadCatalog() } // onChange does it otherwise
         loading = false
     }

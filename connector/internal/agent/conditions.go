@@ -172,7 +172,7 @@ func (a *Agent) contributionLocked() contribution.Decision {
 	s.OwnerActiveKnown = fresh
 	s.OwnerActive = a.telemetry.OwnerActive
 	s.IdleSeconds = a.telemetry.IdleSeconds
-	s.OwnerOverride = a.manualActiveLocked()
+	s.OwnerOverride = a.ownerOverrideLocked()
 	if a.bridge != nil {
 		// The bridge is authoritative when present: ProcessInfo.thermalState can
 		// distinguish "no thermal pressure" from "no information", which pmset

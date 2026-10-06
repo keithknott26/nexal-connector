@@ -36,6 +36,7 @@ type Status struct {
 	ManualAcceptanceSupported  bool                  `json:"manualAcceptanceSupported"`
 	AcceptJobsUntil            string                `json:"acceptJobsUntil,omitempty"`
 	OwnerActivityOverride      bool                  `json:"ownerActivityOverride"`
+	ShareWhileActive           bool                  `json:"shareWhileActive"`
 	ExecutionBlocker           string                `json:"executionBlocker,omitempty"`
 	Version                    string                `json:"version"`
 	HostID                     string                `json:"hostId"`
@@ -272,7 +273,7 @@ func (a *Agent) Snapshot() Status {
 	}
 	return Status{ManualAcceptanceSupported: a.cfg.Development, AcceptJobsUntil: until,
 		UploadThrottle: a.uploadThrottleLocked(), Contribution: a.contributionStatusLocked(),
-		OwnerActivityOverride: a.manualActiveLocked(), ExecutionBlocker: blocker,
+		OwnerActivityOverride: a.ownerOverrideLocked(), ShareWhileActive: a.cfg.ShareWhileActive, ExecutionBlocker: blocker,
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
 		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
@@ -312,6 +313,36 @@ func (a *Agent) AcceptJobsNow() error {
 
 func (a *Agent) manualActiveLocked() bool {
 	return a.cfg.Development && !a.cfg.Paused && time.Now().Before(a.manualUntil)
+}
+
+// ownerOverrideLocked: the owner chose to take work while using this Mac, either
+// for a moment (accept-jobs, development) or as a standing setting.
+func (a *Agent) ownerOverrideLocked() bool {
+	return a.manualActiveLocked() || (a.cfg.ShareWhileActive && !a.cfg.Paused)
+}
+
+// SetShareWhileActive persists the owner's choice to take work while active.
+func (a *Agent) SetShareWhileActive(on bool) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cfg.ShareWhileActive == on {
+		return nil
+	}
+	next := a.cfg
+	next.ShareWhileActive = on
+	if err := config.Save(a.path, next); err != nil {
+		return err
+	}
+	a.cfg = next
+	if !on {
+		// Withdrawing consent fences anything admitted under it; turning it on needs no fence.
+		a.invalidateConsentLocked()
+	}
+	select {
+	case a.heartbeatWake <- struct{}{}: // tell the coordinator now, not at the next 5-minute heartbeat
+	default:
+	}
+	return nil
 }
 
 // SetResourcePolicy persists consent before making it effective. Any change
@@ -470,7 +501,7 @@ func (a *Agent) admitLocked(checkBusy bool) error {
 	if !a.telemetry.Known || time.Since(a.telemetryAt) > 10*time.Second {
 		return errors.New("fresh resource and owner telemetry required")
 	}
-	if a.telemetry.OwnerActive && !a.manualActiveLocked() {
+	if a.telemetry.OwnerActive && !a.ownerOverrideLocked() {
 		return errors.New("owner priority blocks execution")
 	}
 	if a.telemetry.AvailableMemoryBytes > a.telemetry.TotalMemoryBytes ||
@@ -799,7 +830,8 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	// why", so the reason is visible locally (status/UI per §26) but the
 	// coordinator cannot distinguish a busy owner from a hot machine.
 	withholding := a.contributionLocked().Withholding
-	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || a.telemetry.OwnerActive || withholding,
+	// With "take work while I'm using this Mac" on, owner activity alone does not withhold.
+	h := client.Heartbeat{OwnerActive: a.cfg.Paused || !known || (a.telemetry.OwnerActive && !a.ownerOverrideLocked()) || withholding,
 		PQ: a.pq, Version: config.Version}
 	if a.manualActiveLocked() {
 		h.AcceptJobsUntil = a.manualUntil.UTC().Format("2006-01-02T15:04:05.000Z")

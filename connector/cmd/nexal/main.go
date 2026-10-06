@@ -79,7 +79,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|share-while-active|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "exit-route":
@@ -114,6 +114,12 @@ func run(ctx context.Context, args []string) error {
 		return localCommand(ctx, args[0], args[1:])
 	case "set-policy":
 		return policyCommand(ctx, args[1:])
+	case "share-while-active":
+		// nexal share-while-active on|off: take work even while the owner is using this Mac.
+		if len(args) < 2 || (args[1] != "on" && args[1] != "off") {
+			return errors.New("usage: nexal share-while-active on|off [--config absolute-path]")
+		}
+		return localCommand(ctx, "share-while-active-"+args[1], args[2:])
 	case "tunnel-check":
 		return tunnelCommand(ctx, args[1:])
 	case "doctor":

@@ -40,6 +40,10 @@ type Config struct {
 	MemoryLimitBytes   uint64 `json:"memoryLimitBytes"`
 	ReserveMemoryBytes uint64 `json:"reserveMemoryBytes"`
 	IdleSeconds        uint64 `json:"idleSeconds"`
+	// ShareWhileActive is the owner's standing choice to take work even while
+	// they are using this Mac. Memory, disk, battery and thermal limits still
+	// apply; only the "owner is active" gate is lifted. Absent means off.
+	ShareWhileActive bool `json:"shareWhileActive,omitempty"`
 	// Upload throttling (HARDENING-PLAN §16, rate half only). Absent means auto:
 	// these fields are omitempty so a config written before they existed is not
 	// rewritten with empty strings, and NormalizeUploadMode reads the absence as

@@ -27,6 +27,8 @@ enum CLICommand {
     /// an https origin and a loopback http origin can never satisfy it.
     case initializeDevelopment(name: String, memoryMiB: Int, reserveMiB: Int)
     case enroll, run, status, pause, resume, acceptJobs
+    /// Take work even while the owner is using this Mac (standing setting).
+    case shareWhileActive(Bool)
     case redeemGuestInvitation, activateGuestInvitation, guestAccessStatus
     /// The live peer view. Named peers-view in the CLI because `peers` is invitation
     /// and enrollment management, which reports no addresses.
@@ -104,6 +106,7 @@ enum CLICommand {
 		case .timeMachineCredentials: command = ["time-machine", "--reveal-credentials"]
 		case .timeMachineConnect: command = ["time-machine", "-connect"]
         case .pause: command = ["pause"]
+        case let .shareWhileActive(on): command = ["share-while-active", on ? "on" : "off"]
         case .resume: command = ["resume"]
         case .acceptJobs: command = ["accept-jobs"]
         case let .pair(role):
@@ -275,6 +278,8 @@ struct ConnectorStatus: Decodable {
     let telemetry: Telemetry?
     let manualAcceptanceSupported: Bool?
     let ownerActivityOverride: Bool?
+    /// Absent from older connectors.
+    var shareWhileActive: Bool? = nil
     let acceptJobsUntil: String?
     let executionBlocker: String?
     let lastOutcome: String?

@@ -149,6 +149,10 @@ func (a *Agent) Handler(adminToken string) (http.Handler, error) {
 			err = a.SetPaused(false)
 		case "/v1/cancel":
 			a.Cancel()
+		case "/v1/share-while-active-on":
+			err = a.SetShareWhileActive(true)
+		case "/v1/share-while-active-off":
+			err = a.SetShareWhileActive(false)
 		default:
 			apiError(w, 404, "not_found")
 			return

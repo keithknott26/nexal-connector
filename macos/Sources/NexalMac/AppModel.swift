@@ -1001,6 +1001,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Take work even while someone is using this Mac. Memory, disk, battery and heat limits still apply.
+    func setShareWhileActive(_ on: Bool) async {
+        guard !busy, status != nil else { return }
+        busy = true; activity = "Updating resource policy\u{2026}"
+        defer { busy = false; activity = nil }
+        do {
+            _ = try await invoke(.shareWhileActive(on))
+            try await updateStatus()
+            message = on ? "This Mac now takes work even while you are using it." : "This Mac now takes work only while you are away."
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
     // MARK: - Phone pairing
     //
     // Every step goes through the ONE seam: `invoke` runs the Go CLI with the

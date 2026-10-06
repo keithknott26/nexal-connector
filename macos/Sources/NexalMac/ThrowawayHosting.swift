@@ -602,7 +602,6 @@ struct ThrowawayHostsSection: View {
 
     var body: some View {
         Group {
-            Divider()
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 10) {
                     if hosting.local.isEmpty && hosting.networkElsewhere.isEmpty {

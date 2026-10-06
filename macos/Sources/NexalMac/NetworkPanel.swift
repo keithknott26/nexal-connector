@@ -8,6 +8,8 @@ struct NetworkPanel: View {
     var showSettings: () -> Void = {}
     var showAbout: () -> Void = {}
     @EnvironmentObject private var preferences: ConnectorPreferences
+    /// Names people gave peers (shared with the iPhone app); redraws when one changes.
+    @ObservedObject private var peerNames = PeerNames.shared
     /// Sharing services listening on this Mac, checked when its row is opened.
     @State private var localServices: LocalServiceProbe.Result?
 
@@ -43,6 +45,7 @@ struct NetworkPanel: View {
         .task {
             while !Task.isCancelled {
                 await model.refresh()
+                await peerNames.refresh(model)
                 do { try await Task.sleep(for: .seconds(5)) } catch { break }
             }
         }
@@ -329,6 +332,7 @@ struct NetworkPanel: View {
                     // Line 1: name, role icons, and the two things worth a glance.
                     HStack(spacing: 5) {
                         Text(displayName(peer)).font(.subheadline.weight(.semibold))
+                            .renamable(address: peer.tunnelAddress, current: displayName(peer))
                         if storage {
                             Image(systemName: "externaldrive.badge.timemachine").help("Time Machine backup location")
                         }
@@ -660,6 +664,7 @@ struct NetworkPanel: View {
     /// fixed when the computer first registers, from its hostname at that moment,
     /// so a Mac set up with Migration Assistant can carry the old Mac's name there.
     private func displayName(_ peer: ConnectorStatus.MeshPeer) -> String {
+        if let given = peerNames.name(for: peer.tunnelAddress) { return given }
         if isStorageGateway(peer) { return "neXal Storage" }
         if let name = hostDetails(for: peer)?.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty { return name }
         return peer.name.isEmpty ? peer.id : peer.name

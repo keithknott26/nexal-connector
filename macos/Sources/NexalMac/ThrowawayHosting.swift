@@ -549,6 +549,7 @@ struct ThrowawayHostingSettingsView: View {
 
 struct ThrowawayHostsSection: View {
     @ObservedObject private var hosting = ThrowawayHosting.shared
+    @ObservedObject private var peerNames = PeerNames.shared
     @EnvironmentObject private var model: AppModel
 
     private var visible: Bool { true }
@@ -621,7 +622,9 @@ struct ThrowawayHostsSection: View {
     private func localRow(_ box: LocalSandbox) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(box.hostname ?? box.id).fontWeight(.medium)
+                let title = PeerNames.shared.name(for: box.meshIp) ?? hosting.networkEntry(for: box)?.name ?? box.hostname ?? box.id
+                Text(title).fontWeight(.medium)
+                    .renamable(address: box.meshIp, current: title)
                 badge(ThrowawayFormat.kindLabel(box.kind))
                 badge(ThrowawayFormat.lifecycleLabel(box.lifecycle))
                 Spacer()
@@ -649,7 +652,9 @@ struct ThrowawayHostsSection: View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(box.title).fontWeight(.medium)
+                    let title = PeerNames.shared.name(for: box.meshIp) ?? box.title
+                    Text(title).fontWeight(.medium)
+                        .renamable(address: box.meshIp, current: title)
                     badge(ThrowawayFormat.kindLabel(box.kind))
                     badge(ThrowawayFormat.lifecycleLabel(box.lifecycle))
                 }

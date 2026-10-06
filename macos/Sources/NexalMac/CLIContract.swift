@@ -56,6 +56,8 @@ enum CLICommand {
     case honeypot(action: String)
     /// Throwaway hosts: `list`, or `connect` with an id and kind (ssh|vnc|files; ssh/files read a public key on stdin).
     case sandbox(action: String, id: String?, kind: String?)
+    /// Peer names: `list`, or `set` with a mesh address (the name is read from stdin; empty removes it).
+    case peerNames(action: String, address: String?)
     /// Diagnostic mode: switch the agent's Debug logging on or off (no restart),
     /// report it, or write a redacted bundle to an absolute path.
     case diagnostics(DiagnosticsAction)
@@ -124,6 +126,8 @@ enum CLICommand {
         case let .sandbox(action, id, kind):
             command = ["sandbox", "--action", action] + (id.map { ["--id", $0] } ?? [])
                 + (kind.map { ["--kind", $0] } ?? []) + (action != "connect" || kind == "vnc" ? [] : ["--public-key-stdin"])
+        case let .peerNames(action, address):
+            command = ["peer-names", "--action", action] + (address.map { ["--address", $0] } ?? [])
         case let .exitRoute(tunnelAddress, enabled, targetDeviceID):
             command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):

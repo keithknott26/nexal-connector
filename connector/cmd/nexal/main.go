@@ -79,7 +79,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "exit-route":
@@ -90,6 +90,8 @@ func run(ctx context.Context, args []string) error {
 		return honeypotCommand(ctx, args[1:])
 	case "sandbox":
 		return sandboxCommand(ctx, args[1:])
+	case "peer-names":
+		return peerNamesCommand(ctx, args[1:])
 	case "canary":
 		return canaryCommand(ctx, args[1:])
 	case "security-import":

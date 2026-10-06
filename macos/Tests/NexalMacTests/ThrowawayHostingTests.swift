@@ -17,6 +17,21 @@ final class ThrowawayHostingTests: XCTestCase {
                        ["sandbox", "--action", "images", "--id", "host_a", "--config", config.path])
     }
 
+    func testPeerNamesArguments() {
+        let config = URL(fileURLWithPath: "/tmp/c.json")
+        XCTAssertEqual(CLICommand.peerNames(action: "list", address: nil).arguments(config: config),
+                       ["peer-names", "--action", "list", "--config", config.path])
+        XCTAssertEqual(CLICommand.peerNames(action: "set", address: "100.86.63.60").arguments(config: config),
+                       ["peer-names", "--action", "set", "--address", "100.86.63.60", "--config", config.path])
+    }
+
+    @MainActor func testPeerNameAddressValidation() {
+        XCTAssertTrue(PeerNames.validAddress("100.86.63.60"))
+        XCTAssertFalse(PeerNames.validAddress("100.128.0.1"))
+        XCTAssertFalse(PeerNames.validAddress("192.168.68.52"))
+        XCTAssertFalse(PeerNames.validAddress("100.86.1"))
+    }
+
     func testCreateRequestOmitsLifetimeWhenPersistent() throws {
         let persistent = SandboxCreateRequest(imageId: "i", runnerHostId: "h", size: "small", kind: "vm", lifecycle: "persistent", lifetimeHours: 24, reach: "network")
         let json = String(decoding: try JSONEncoder().encode(persistent), as: UTF8.self)

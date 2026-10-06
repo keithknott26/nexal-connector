@@ -338,6 +338,10 @@ final class AppModel: ObservableObject {
         try await invoke(.sandbox(action: action, id: id, kind: kind), input: input)
     }
 
+    func peerNames(action: String, address: String? = nil, input: Data? = nil) async throws -> Data {
+        try await invoke(.peerNames(action: action, address: address), input: input)
+    }
+
     @Published var guestInvitationCode = ""
     @Published private(set) var guestInvitationProblem: String?
     var guestAccess: GuestAccessRecord? { GuestAccessRecord.read(at: selectedConfig) }

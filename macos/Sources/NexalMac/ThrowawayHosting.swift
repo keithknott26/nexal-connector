@@ -300,6 +300,20 @@ final class ThrowawayHosting: ObservableObject {
     // MARK: Create (VM or dev container, on this Mac)
 
     @Published private(set) var failed: [NetworkSandbox] = []
+
+    /// Network hosts not already listed under "On this Mac" (the coordinator also reports
+    /// hosts running here, so the same host would otherwise show twice).
+    var networkElsewhere: [NetworkSandbox] {
+        var here = Set<String>()
+        for box in local {
+            here.insert(box.id.lowercased())
+            if let name = box.hostname { here.insert(name.lowercased()) }
+        }
+        return network.filter { box in
+            let keys: [String?] = [box.id, box.hostname, box.name]
+            return !keys.contains { key in key.map { value in here.contains(value.lowercased()) } ?? false }
+        }
+    }
     @Published var showingCreate = false
     @Published private(set) var creating = false
 
@@ -524,9 +538,9 @@ struct ThrowawayHostsSection: View {
                         } else if hosting.config.enabled {
                             Text("No virtual machines or dev containers are running on this Mac.").font(.caption).foregroundStyle(.secondary)
                         }
-                        if !hosting.network.isEmpty {
+                        if !hosting.networkElsewhere.isEmpty {
                             Text("ON YOUR NETWORK").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
-                            ForEach(hosting.network) { networkRow($0) }
+                            ForEach(hosting.networkElsewhere) { networkRow($0) }
                         }
                         if hosting.config.enabled {
                             Text("Hosts pause when this Mac sleeps and resume when it wakes.")

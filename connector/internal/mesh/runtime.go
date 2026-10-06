@@ -227,3 +227,33 @@ func nonNeg(v int64) uint64 {
 	}
 	return uint64(v)
 }
+
+// PeerAddressByName returns the tunnel address of the peer whose name is fqdn
+// (case-insensitive, trailing dot ignored), read from the runtime's own peer
+// table. Callers use it when the system resolver has no answer for a mesh name
+// (macOS without the mesh DNS match domain), so the name is still pinned to an
+// address the control plane assigned inside the private network.
+func PeerAddressByName(ctx context.Context, fqdn string) (string, bool) {
+	want := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(fqdn)), ".")
+	if want == "" {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := runRuntimeStatus(ctx)
+	if err != nil {
+		return "", false
+	}
+	var rs runtimeStatus
+	if json.Unmarshal(out, &rs) != nil {
+		return "", false
+	}
+	for _, p := range rs.Peers.Details {
+		if strings.TrimSuffix(strings.ToLower(p.FQDN), ".") == want {
+			if ip, _, _ := strings.Cut(p.NetbirdIP, "/"); ip != "" {
+				return ip, true
+			}
+		}
+	}
+	return "", false
+}

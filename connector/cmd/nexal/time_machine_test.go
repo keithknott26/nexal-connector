@@ -483,3 +483,21 @@ func TestTimeMachineConnectEnrollsThenWaitsForDestination(t *testing.T) {
 		t.Fatalf("unpaid enrollment must explain the subscription requirement: %v", err)
 	}
 }
+
+func TestGatewayAddressFallsBackToPeerTable(t *testing.T) {
+	oldLookup, oldTable := meshLookup, peerTableLookup
+	defer func() { meshLookup, peerTableLookup = oldLookup, oldTable }()
+	meshLookup = nil
+	peerTableLookup = func(host string) (string, bool) {
+		if host == "gw-us-east-1.invalid" {
+			return "100.86.173.7", true
+		}
+		return "", false
+	}
+	if got := gatewayAddress("gw-us-east-1.invalid"); got != "100.86.173.7" {
+		t.Fatalf("unresolvable gateway name should use the peer table address, got %q", got)
+	}
+	if got := gatewayAddress("other.invalid"); got != "other.invalid" {
+		t.Fatalf("a name unknown to the peer table stays as is, got %q", got)
+	}
+}

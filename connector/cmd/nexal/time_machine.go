@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/mesh"
 	"nexal/connector/internal/timemachine"
 )
 
@@ -410,7 +412,27 @@ func (f *passwordFeeder) Close() {
 	f.mu.Unlock()
 }
 
-var meshLookup func(string) ([]string, error) // nil = system resolver
+var meshLookup func(string) ([]string, error) // nil = system resolver, then the mesh peer table
+
+// peerTableLookup resolves a mesh name from the runtime's peer table. Replaceable in tests.
+var peerTableLookup = func(host string) (string, bool) { return mesh.PeerAddressByName(context.Background(), host) }
+
+// gatewayAddress is the address tmutil should dial for the gateway: the name itself when the
+// system resolver answers with a mesh address, else the peer table's address for that name
+// (macOS often has no resolver for *.peers.mesh.nexal.systems). The result is still checked
+// to be inside 100.64.0.0/10 by ResolvesInsideMesh.
+func gatewayAddress(host string) string {
+	if meshLookup != nil {
+		return host
+	}
+	if addrs, err := net.LookupHost(host); err == nil && len(addrs) > 0 {
+		return host
+	}
+	if ip, ok := peerTableLookup(host); ok {
+		return ip
+	}
+	return host
+}
 
 // timeMachineCommand reports readiness. With a gateway-client configuration and
 // -connect it adds the operator gateway as a Time Machine destination.
@@ -553,12 +575,15 @@ func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c
 	}
 	d := *c.Destination
 	view := map[string]any{"role": "client", "serviceState": c.ServiceState, "host": d.Host, "share": d.Share, "quotaBytes": c.QuotaBytes}
-	if err := timemachine.ResolvesInsideMesh(d.Host, meshLookup); err != nil {
+	// The address tmutil and the destination checks use: the gateway's name, or its mesh IP when
+	// this Mac cannot resolve the name.
+	dial := gatewayAddress(d.Host)
+	if err := timemachine.ResolvesInsideMesh(dial, meshLookup); err != nil {
 		view["state"] = "blocked"
 		view["detail"] = err.Error()
 		return emit(map[string]any{"timeMachine": view})
 	}
-	if !dryRun && destinationConfigured(d.Host, d.Share) {
+	if !dryRun && (destinationConfigured(d.Host, d.Share) || (dial != d.Host && destinationConfigured(dial, d.Share))) {
 		view["state"] = "connected"
 		return emit(map[string]any{"timeMachine": view})
 	}
@@ -575,6 +600,7 @@ func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c
 		return err
 	}
 	defer credential.Zero()
+	credential.Host = dial
 	view["destination"] = credential.RedactedURL()
 	if dryRun {
 		view["state"] = "validated"
@@ -588,7 +614,7 @@ func timeMachineClient(ctx context.Context, api *client.Client, hostID string, c
 	}
 	// tmutil can exit 0 without persisting the destination. Report success only
 	// once Time Machine itself lists this gateway share.
-	if !destinationAppeared(ctx, d.Host, d.Share) {
+	if !destinationAppeared(ctx, dial, d.Share) {
 		return errors.New("macOS finished without adding the neXal backup disk to Time Machine; check the secure network and backup share availability, then retry")
 	}
 	view["state"] = "destination_added"

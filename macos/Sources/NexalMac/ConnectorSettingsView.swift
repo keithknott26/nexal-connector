@@ -134,7 +134,7 @@ struct ConnectorSettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
-            GroupBox("Throwaway hosts") {
+            GroupBox("Virtual Machine Hosting") {
                 ThrowawayHostingSettingsView().padding(8)
             }
             GroupBox("Activity") {

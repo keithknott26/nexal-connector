@@ -144,7 +144,7 @@ enum ThrowawayFormat {
         }
     }
 
-    static func runningLine(_ n: Int) -> String { "\(n) throwaway host\(n == 1 ? "" : "s") running" }
+    static func runningLine(_ n: Int) -> String { "\(n) running" }
 }
 
 enum ThrowawayConnectError: LocalizedError {
@@ -207,7 +207,7 @@ final class ThrowawayHosting: ObservableObject {
             config = next
             message = nil
         } catch {
-            message = "Could not save throwaway-host settings: \(error.localizedDescription)"
+            message = "Could not save Virtual Machine Hosting settings: \(error.localizedDescription)"
         }
     }
 
@@ -462,7 +462,7 @@ struct ThrowawayHostingSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Allow this Mac to run throwaway hosts", isOn: Binding(
+            Toggle("Allow this Mac to host virtual machines and dev containers", isOn: Binding(
                 get: { hosting.config.enabled },
                 set: { on in
                     hosting.update { $0.enabled = on }
@@ -470,7 +470,7 @@ struct ThrowawayHostingSettingsView: View {
                 }))
                 .disabled(!model.isLinked)
             Text(model.isLinked
-                 ? "Throwaway hosts are disposable virtual machines and dev containers that you or members of your network start. Only you, as this Mac's owner, can turn this on. Off by default."
+                 ? "Virtual machines and dev containers are disposable Linux machines that you or members of your network start. Only you, as this Mac's owner, can turn this on. Off by default."
                  : "Connect this Mac to neXal first. Only its owner can turn this on.")
                 .font(.caption).foregroundStyle(.secondary)
             if hosting.config.enabled {
@@ -522,7 +522,7 @@ struct ThrowawayHostsSection: View {
                             Text("ON THIS MAC").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
                             ForEach(hosting.local) { localRow($0) }
                         } else if hosting.config.enabled {
-                            Text("No throwaway hosts are running on this Mac.").font(.caption).foregroundStyle(.secondary)
+                            Text("No virtual machines or dev containers are running on this Mac.").font(.caption).foregroundStyle(.secondary)
                         }
                         if !hosting.network.isEmpty {
                             Text("ON YOUR NETWORK").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
@@ -671,7 +671,7 @@ struct NewSandboxSheet: View {
             .formStyle(.grouped)
             if let loadError { Text(loadError).font(.caption).foregroundStyle(.red) }
             if catalog?.runner.hostingEnabled == false {
-                Text("This Mac isn't set up to host instances. Turn on hosting in Settings › Throwaway hosts.").font(.caption).foregroundStyle(.orange)
+                Text("This Mac isn't set up to host instances. Turn on hosting in Settings › Virtual Machine Hosting.").font(.caption).foregroundStyle(.orange)
             }
             Text(kind == "devcontainer"
                  ? "Runs in Colima on this Mac and joins your private network. The first one downloads the runtime and can take a few minutes."

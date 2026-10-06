@@ -93,9 +93,29 @@ func TestUnknownAppProfileIsRefused(t *testing.T) {
 	if err := validateV2(task); err == nil {
 		t.Error("validateV2 accepted an unknown app profile")
 	}
-	for _, ok := range []string{"", AppProfileNone, AppProfileHomeAssistant} {
+	for _, ok := range []string{"", AppProfileNone, AppProfileHomeAssistant, AppProfileJellyfin} {
 		if !KnownAppProfile(ok) {
 			t.Errorf("KnownAppProfile(%q) = false", ok)
 		}
+	}
+}
+
+func TestRenderUserDataJellyfinProfile(t *testing.T) {
+	p := testSeed()
+	p.AppProfile = AppProfileJellyfin
+	u := RenderUserData(p)
+	for _, want := range []string{
+		"NEXAL_APP_PROFILE=jellyfin\n",
+		"docker.io/jellyfin/jellyfin:latest",
+		`-p "$IP:8096:8096"`,
+		"target=/media/shared-drive,readonly,bind-propagation=rslave",
+		"wakeonlan etherwake",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("rendered user-data is missing %q", want)
+		}
+	}
+	if strings.Contains(u, "-p 8096:8096") || strings.Contains(u, "--network host") {
+		t.Error("Jellyfin must be bound to the mesh address only")
 	}
 }

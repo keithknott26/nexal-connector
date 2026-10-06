@@ -92,13 +92,14 @@ type Image struct {
 const (
 	AppProfileNone          = "none"
 	AppProfileHomeAssistant = "home-assistant"
+	AppProfileJellyfin      = "jellyfin"
 )
 
 // KnownAppProfile reports whether the profile is one this runner can install.
 // The empty string means a plain image, as does "none".
 func KnownAppProfile(p string) bool {
 	switch p {
-	case "", AppProfileNone, AppProfileHomeAssistant:
+	case "", AppProfileNone, AppProfileHomeAssistant, AppProfileJellyfin:
 		return true
 	}
 	return false

@@ -766,8 +766,8 @@ struct ThrowawayHostsSection: View {
     /// Dev containers have no screen, so they offer Terminal and Files only.
     private func connectMenu(_ box: NetworkSandbox) -> some View {
         Menu {
-            if box.appProfile == "home-assistant", let ip = box.meshIp, let url = URL(string: "http://\(ip):8123") {
-                Button { NSWorkspace.shared.open(url) } label: { Label("Open Home Assistant", systemImage: "safari") }
+            if let app = InstanceApp(profile: box.appProfile), let ip = box.meshIp, let url = URL(string: "http://\(ip):\(app.port)") {
+                Button { NSWorkspace.shared.open(url) } label: { Label("Open \(app.title)", systemImage: "safari") }
                 Divider()
             }
             Button { Task { await hosting.connect(box, kind: "ssh", model: model) } } label: { Label("Terminal (SSH)", systemImage: "terminal") }
@@ -994,6 +994,9 @@ struct NewSandboxSheet: View {
         }
         if selectedImage?.appProfile == "home-assistant" {
             return "A Home Assistant virtual machine on \(place). Kept until you remove it; open it from its Connect menu once it is running."
+        }
+        if selectedImage?.appProfile == "jellyfin" {
+            return "A Jellyfin media server on \(place), on your private network only. Your shared drive is its media library; open it from Connect, or in the Jellyfin app at the address shown."
         }
         return "A Linux virtual machine on \(place). Kept until you remove it."
     }

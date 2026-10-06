@@ -309,6 +309,30 @@ home-assistant)
   docker run -d --name homeassistant --restart unless-stopped     -p "$IP:8123:8123" -v "$DATA:/config" -v /etc/localtime:/etc/localtime:ro     "$IMAGE" || fail "starting Home Assistant"
   log "home-assistant ready http://$IP:8123"
   ;;
+jellyfin)
+  # Jellyfin media server, published on the mesh address only (port 8096). Media: the
+  # shared drive, mounted read-only (rslave, so the drive appears once its mount unit has
+  # it), plus the VM's own library folder for files copied in over SFTP.
+  # wakeonlan/etherwake are installed so the server can wake a NAS or a sleeping Mac that
+  # holds media: run "wakeonlan <mac>" from an SSH session or a Jellyfin plugin or script.
+  DATA=/var/lib/nexal-jellyfin
+  IMAGE=docker.io/jellyfin/jellyfin:latest
+  log "installing Jellyfin"
+  export DEBIAN_FRONTEND=noninteractive
+  retry apt-get update -qq || fail "apt-get update"
+  retry apt-get install -y -qq --no-install-recommends docker.io wakeonlan etherwake || fail "installing docker"
+  systemctl enable --now docker || fail "starting docker"
+  retry docker pull "$IMAGE" || fail "pulling the Jellyfin image"
+  mkdir -p "$DATA/config" "$DATA/cache" "$DATA/media" /mnt/nexal-drive
+  docker rm -f jellyfin >/dev/null 2>&1 || true
+  docker run -d --name jellyfin --restart unless-stopped \
+    -p "$IP:8096:8096" \
+    -v "$DATA/config:/config" -v "$DATA/cache:/cache" -v "$DATA/media:/media/library" \
+    --mount type=bind,source=/mnt/nexal-drive,target=/media/shared-drive,readonly,bind-propagation=rslave \
+    -e JELLYFIN_PublishedServerUrl="http://$IP:8096" \
+    "$IMAGE" || fail "starting Jellyfin"
+  log "jellyfin ready http://$IP:8096"
+  ;;
 *)
   fail "unknown app profile"
   ;;

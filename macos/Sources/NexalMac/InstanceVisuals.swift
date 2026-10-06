@@ -7,7 +7,7 @@ enum InstanceFamily {
     static func of(imageId: String?, imageName: String?, appProfile: String?, template: String?) -> String {
         if let appProfile, appProfile != "none" { return appProfile }
         let text = [template, imageId, imageName].compactMap { $0?.lowercased() }.joined(separator: " ")
-        for known in ["ubuntu", "debian", "fedora", "alpine", "home-assistant", "rocky", "arch"] where text.contains(known) { return known }
+        for known in ["ubuntu", "debian", "fedora", "alpine", "home-assistant", "jellyfin", "rocky", "arch"] where text.contains(known) { return known }
         if text.contains("home assistant") { return "home-assistant" }
         if text.contains("devcontainer") || text.contains("dev container") { return "devcontainer" }
         return "linux"
@@ -55,6 +55,7 @@ struct InstanceIcon: View {
     static func symbol(_ family: String) -> String {
         switch family {
         case "home-assistant": return "house.fill"
+        case "jellyfin": return "play.tv.fill"
         case "devcontainer": return "shippingbox.fill"
         case "ubuntu", "debian", "fedora", "alpine", "rocky", "arch": return "server.rack"
         default: return "terminal.fill"
@@ -65,6 +66,7 @@ struct InstanceIcon: View {
         case "ubuntu": return .orange
         case "debian": return .red
         case "fedora", "home-assistant": return .blue
+        case "jellyfin": return .purple
         case "alpine": return .teal
         case "rocky": return .green
         case "arch": return .cyan
@@ -75,6 +77,7 @@ struct InstanceIcon: View {
     static func label(_ family: String) -> String {
         switch family {
         case "home-assistant": return "Home Assistant"
+        case "jellyfin": return "Jellyfin"
         case "devcontainer": return "Dev container"
         case "linux": return "Linux"
         default: return family.capitalized
@@ -125,4 +128,17 @@ struct InstanceProgress: View {
 
     /// Whether an instance in this state shows progress.
     static func shows(_ state: String?) -> Bool { ["requested", "provisioning", "stopping"].contains(state ?? "") }
+}
+
+/// The web app an appliance VM publishes on its mesh address.
+struct InstanceApp {
+    let title: String
+    let port: Int
+    init?(profile: String?) {
+        switch profile {
+        case "home-assistant": title = "Home Assistant"; port = 8123
+        case "jellyfin": title = "Jellyfin"; port = 8096
+        default: return nil
+        }
+    }
 }

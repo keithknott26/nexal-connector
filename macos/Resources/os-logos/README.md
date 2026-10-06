@@ -8,6 +8,7 @@ background), named exactly:
 | `os-ubuntu.png` | Ubuntu VMs and dev containers |
 | `os-debian.png` | Debian |
 | `os-home-assistant.png` | Home Assistant |
+| `os-jellyfin.png` | Jellyfin |
 | `os-fedora.png`, `os-alpine.png`, `os-rocky.png`, `os-arch.png` | those systems, if offered |
 | `os-devcontainer.png` | generic dev containers |
 

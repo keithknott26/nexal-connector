@@ -38,6 +38,13 @@ final class AppModel: ObservableObject {
     private var exitRouteCheckedAt: Date?
     static let exitRouteKey = "exitRouteID"
     @Published private(set) var status: ConnectorStatus?
+    /// Background polls never show the busy spinner or disable buttons, and one failed poll
+    /// does not blank the panel: only several in a row do.
+    private var polling = false
+    private var consecutivePollFailures = 0
+    private static let pollFailuresBeforeOffline = 3
+    private var peerSmoother = PeerSmoother()
+    private var latencyProbedAt = Date.distantPast
     @Published private(set) var busy = false
     /// What the connector is doing RIGHT NOW, in the owner's language.
     ///
@@ -487,7 +494,7 @@ final class AppModel: ObservableObject {
     }
 
     private func updateStatus() async throws {
-        status = try ConnectorStatus.decode(try await invoke(.status))
+        status = peerSmoother.smooth(try ConnectorStatus.decode(try await invoke(.status)))
         // Paired again after leaving: the "Left the network" notice is stale.
         if leavePhase == .left, isLinked { leavePhase = nil }
         enrollmentPresentation.observeHost(status?.hostId, for: selectedConfig)
@@ -534,7 +541,7 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() async {
-        guard !busy, selection != nil else { return }
+        guard !busy, !polling, selection != nil else { return }
 
         // An unenrolled Mac intentionally has no running agent: pair-v2 talks
         // directly to the coordinator and persists the host credential only after
@@ -562,18 +569,26 @@ final class AppModel: ObservableObject {
             return
         }
 
-        activity = "Checking connector status\u{2026}"
-        busy = true
-        defer { busy = false; activity = nil }
-        do { try await updateStatus() }
-        catch {
-            status = nil
-            lastUpdated = nil
-            // Record the gap rather than dropping the poll, so the charts stop
-            // extending instead of implying continued measurement.
-            observe(nil)
-            message = error.localizedDescription
+        // A quiet background poll: no spinner, no disabled buttons.
+        polling = true
+        defer { polling = false }
+        do {
+            try await updateStatus()
+            consecutivePollFailures = 0
+        } catch {
+            consecutivePollFailures += 1
+            // One slow or failed poll (the connector busy for a moment) keeps what is on screen.
+            if consecutivePollFailures >= Self.pollFailuresBeforeOffline {
+                status = nil
+                lastUpdated = nil
+                // Record the gap rather than dropping the poll, so the charts stop
+                // extending instead of implying continued measurement.
+                observe(nil)
+                message = error.localizedDescription
+            }
+            return
         }
+        await measurePeerLatency()
         // Both feed the panel and neither may fail the poll: a missing evidence file is
         // the normal state before the agent has ever run, and peers-view is unavailable
         // while the agent is down. A throw here would blank the status the poll just
@@ -583,6 +598,20 @@ final class AppModel: ObservableObject {
         await updatePeerLocations()
 		await updateTimeMachine()
         await updateExitRoutes()
+    }
+
+    /// Peers the runtime reports no latency for (relayed paths) get one TCP handshake over the
+    /// tunnel every 15 s, so the gauge shows a real reading instead of "no reading".
+    private func measurePeerLatency() async {
+        guard Date().timeIntervalSince(latencyProbedAt) > 15, let peers = status?.mesh?.peers else { return }
+        latencyProbedAt = Date()
+        let targets = peers.filter { $0.lifecycle == "connected" && ($0.latencyMs ?? 0) <= 0 && $0.tunnelAddress != nil }
+            .map { ($0.id, $0.tunnelAddress!, PeerLatencyProbe.port(for: $0.services)) }
+        guard !targets.isEmpty else { return }
+        let results = await Task.detached(priority: .utility) {
+            targets.compactMap { t in PeerLatencyProbe.connectRTT(t.1, port: t.2).map { ms in (t.0, ms) } }
+        }.value
+        for (id, ms) in results { peerSmoother.measured[id] = (ms, Date()) }
     }
 
     /// First click on "Leave neXal network": ask inline. A dialog is not used

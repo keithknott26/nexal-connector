@@ -288,7 +288,7 @@ struct ConnectorStatus: Decodable {
     /// revoked or expired. Absent from older connectors.
     let credentialRejected: Bool?
     let resourcePolicy: ResourcePolicy?
-	let mesh: MeshStatus?
+	var mesh: MeshStatus?
 	/// Commercial/product switches are coordinator-owned and fail closed when
 	/// absent. They control presentation, never authorization by themselves.
 	let features: ConnectorFeatures?
@@ -327,7 +327,7 @@ struct ConnectorStatus: Decodable {
 		let authenticationStep: String?
 		let pq: String
 		let updatedAt: String?
-		let peers: [MeshPeer]
+		var peers: [MeshPeer]
 		let discovery: MeshDiscovery?
 	}
 	struct MeshDiscovery: Decodable {
@@ -335,9 +335,9 @@ struct ConnectorStatus: Decodable {
 		let siteId: String?; let lastRecordAt: String?; let detail: String?
 	}
 	struct MeshPeer: Decodable, Identifiable {
-		let id: String; let name: String; let lifecycle: String
+		let id: String; let name: String; var lifecycle: String
 		let authenticationStep: String?; let path: String; let pathLabel: String
-		let relayRegion: String?; let latencyMs: Double?; let packetLossPercent: Double?
+		let relayRegion: String?; var latencyMs: Double?; let packetLossPercent: Double?
 		let lastHandshakeAt: String?; let pq: String; let pqVerifiedAt: String?
  let quantumProfile: String?; let pqExpiresAt: String?
 		let traffic: MeshTraffic

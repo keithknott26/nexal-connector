@@ -877,6 +877,7 @@ struct NetworkPanel: View {
 
     /// Only offer known protocols, using the private-network service evidence.
     @ViewBuilder
+    @ViewBuilder
     private func advertisedServices(_ peer: ConnectorStatus.MeshPeer) -> some View {
         let services = Set(peer.services ?? [])
         let storage = isStorageGateway(peer)
@@ -888,7 +889,7 @@ struct NetworkPanel: View {
         let smbOn = peer.fileSharing?.available == true || services.contains("smb")
         let vncHost = peer.screenSharing?.available == true ? (peer.screenSharing?.address ?? peer.tunnelAddress) : peer.tunnelAddress
         let smbHost = peer.fileSharing?.available == true ? (peer.fileSharing?.address ?? peer.tunnelAddress) : peer.tunnelAddress
-        VStack(alignment: .leading, spacing: 6) {
+        Group {
             if !storage {
                 serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress)
                 serviceRow("Screen Sharing", on: vncOn, symbol: "display", scheme: "vnc", host: vncHost)

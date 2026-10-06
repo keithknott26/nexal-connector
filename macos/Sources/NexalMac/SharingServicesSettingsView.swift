@@ -87,14 +87,16 @@ struct SharingServicesSettingsView: View {
     @ViewBuilder
     private func row(_ service: Service) -> some View {
         let on = probe.map { service.isOn($0) }
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: on == true ? "checkmark.circle.fill" : "circle.dashed")
                 .foregroundStyle(on == true ? .green : .orange)
                 .accessibilityLabel(on == true ? "On" : on == false ? "Off" : "Checking")
-            VStack(alignment: .leading, spacing: 2) {
-                Text(service.title)
-                Text(on == nil ? "Checking…" : on == true ? "On" : service.purpose)
-                    .font(.caption).foregroundStyle(.secondary)
+            // One line: "Remote Login (SSH)   On"; the purpose shows only while it is off.
+            Text(service.title).lineLimit(1).fixedSize()
+            Text(on == nil ? "Checking…" : on == true ? "On" : "Off")
+                .foregroundStyle(on == true ? .green : .secondary)
+            if on == false {
+                Text(service.purpose).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
             Spacer()
             if on == false {

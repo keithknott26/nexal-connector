@@ -889,11 +889,13 @@ struct NetworkPanel: View {
         let smbOn = peer.fileSharing?.available == true || services.contains("smb")
         let vncHost = peer.screenSharing?.available == true ? (peer.screenSharing?.address ?? peer.tunnelAddress) : peer.tunnelAddress
         let smbHost = peer.fileSharing?.available == true ? (peer.fileSharing?.address ?? peer.tunnelAddress) : peer.tunnelAddress
+        // The peer's own LAN address: tried first at click time when this Mac is on the same subnet.
+        let lan = hostDetails(for: peer)?.lanAddress
         Group {
             if !storage {
-                serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress)
-                serviceRow("Screen Sharing", on: vncOn, symbol: "display", scheme: "vnc", host: vncHost)
-                serviceRow("File Sharing", on: smbOn, symbol: "folder", scheme: "smb", host: smbHost,
+                serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress, lan: lan, port: 22)
+                serviceRow("Screen Sharing", on: vncOn, symbol: "display", scheme: "vnc", host: vncHost, lan: lan, port: 5900)
+                serviceRow("File Sharing", on: smbOn, symbol: "folder", scheme: "smb", host: smbHost, lan: lan, port: 445,
                            share: peer.fileSharing?.shareName)
             }
             if storage {
@@ -930,12 +932,12 @@ struct NetworkPanel: View {
     }
 
     private func serviceRow(_ title: String, on: Bool, symbol: String, scheme: String, host: String?,
-                            share: String? = nil) -> some View {
+                            lan: String? = nil, port: Int = 0, share: String? = nil) -> some View {
         detailRow(title) {
             HStack(spacing: 8) {
                 serviceLED(on)
                 if on, let host, let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName, share: share) {
-                    linkButton("Connect", symbol, url, host: host, share: share)
+                    linkButton("Connect", symbol, url, host: host, share: share, lan: lan, port: port)
                 } else if on {
                     Text("Waiting for its address").foregroundStyle(.secondary)
                 }
@@ -969,8 +971,11 @@ struct NetworkPanel: View {
         }
     }
 
-    private func linkButton(_ title: String, _ symbol: String, _ shown: URL, host: String, share: String?) -> some View {
-        Button {
+    private func linkButton(_ title: String, _ symbol: String, _ shown: URL, host meshHost: String, share: String?,
+                            lan: String? = nil, port: Int = 0) -> some View {
+        Button { Task { @MainActor in
+            // Same Wi-Fi/LAN: dial the peer's local address (faster, no relay); else the mesh address.
+            let host = await LANPreference.choose(lan: lan, mesh: meshHost, port: port)
             // Credentials are read from Keychain only now, at click, and never displayed.
             let scheme = shown.scheme ?? ""
             let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName,
@@ -984,7 +989,7 @@ struct NetworkPanel: View {
                 default: NSWorkspace.shared.open(url)
                 }
             }
-        } label: {
+        } } label: {
             Label(title, systemImage: symbol)
         }
         .buttonStyle(.bordered)
@@ -1237,4 +1242,59 @@ struct NetworkPanel: View {
 private extension String {
     /// The string, or `fallback` when it is empty.
     func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
+}
+
+
+/// Picks a peer's LAN address over its mesh address when this Mac shares that LAN (same /24 on an
+/// up en* interface) and the service port answers within a second; otherwise the mesh address.
+enum LANPreference {
+    static func choose(lan: String?, mesh: String, port: Int) async -> String {
+        guard let lan, port > 0, lan != mesh, sameSubnet(lan) else { return mesh }
+        let ok = await Task.detached { reachable(lan, port: port, timeout: 1.0) }.value
+        AppDiagnostics.ui("service route", ["lan": ok ? "yes" : "no", "port": String(port)])
+        return ok ? lan : mesh
+    }
+
+    nonisolated static func sameSubnet(_ address: String) -> Bool {
+        let target = address.split(separator: ".").prefix(3).joined(separator: ".")
+        guard address.split(separator: ".").count == 4 else { return false }
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return false }
+        defer { freeifaddrs(head) }
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let entry = cursor {
+            defer { cursor = entry.pointee.ifa_next }
+            guard let sa = entry.pointee.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET),
+                  String(cString: entry.pointee.ifa_name).hasPrefix("en"),
+                  Int32(entry.pointee.ifa_flags) & IFF_UP != 0 else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                let mine = String(cString: host)
+                if mine.split(separator: ".").prefix(3).joined(separator: ".") == target { return true }
+            }
+        }
+        return false
+    }
+
+    /// A plain TCP connect with a deadline (non-blocking socket + poll).
+    nonisolated static func reachable(_ host: String, port: Int, timeout: TimeInterval) -> Bool {
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { return false }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        let rc = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        if rc == 0 { return true }
+        guard errno == EINPROGRESS else { return false }
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        guard poll(&pfd, 1, Int32(timeout * 1000)) == 1 else { return false }
+        var err: Int32 = 0; var len = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len)
+        return err == 0
+    }
 }

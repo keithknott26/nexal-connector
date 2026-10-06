@@ -47,8 +47,10 @@ struct SharingServicesSettingsView: View {
                     + "(/bin/launchctl enable system/com.openssh.sshd; "
                     + "/bin/launchctl bootstrap system /System/Library/LaunchDaemons/ssh.plist 2>/dev/null; true)"
             case .screenSharing:
-                "/bin/launchctl enable system/com.apple.screensharing; "
-                    + "/bin/launchctl bootstrap system /System/Library/LaunchDaemons/com.apple.screensharing.plist 2>/dev/null; true"
+                // Never from the command line: since macOS 12.1 a launchctl-started Screen Sharing
+                // refuses every viewer ("Screen Sharing is not permitted … disable and re-enable").
+                // It has to be switched on in System Settings, so the row offers Open Settings only.
+                nil
             case .fileSharing:
                 nil
             }

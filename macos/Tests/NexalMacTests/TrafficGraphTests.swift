@@ -16,8 +16,12 @@ final class TrafficGraphTests: XCTestCase {
         }
         let svg = TrafficGraphSpec(received: pts, sent: pts, receivedTotal: "1 KB", sentTotal: "1 KB").svg
         // Baseline y = top + plotH = 24 + 62 = 86; no control point may go below it.
-        let numbers = svg.split(whereSeparator: { !"0123456789.".contains($0) }).compactMap { Double($0) }
+        // Strip the SVG namespace URL first: "http://www.w3.org/2000/svg" contains a bare
+        // "2000" that a naive digit scan over the raw markup picks up as a coordinate,
+        // tripping this bound on a perfectly fine graph.
+        let body = svg.replacingOccurrences(of: "http://www.w3.org/2000/svg", with: "")
+        let numbers = body.split(whereSeparator: { !"0123456789.".contains($0) }).compactMap { Double($0) }
         XCTAssertFalse(svg.contains("NaN"))
-        XCTAssertTrue(numbers.allSatisfy { $0 <= 340 })
+        XCTAssertTrue(numbers.allSatisfy { $0 <= 340 }, "unexpected large coordinate: \(numbers.filter { $0 > 340 })")
     }
 }

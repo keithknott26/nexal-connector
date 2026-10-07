@@ -332,6 +332,10 @@ struct NetworkPanel: View {
                     // Line 1: name, role icons, and the two things worth a glance.
                     HStack(spacing: 5) {
                         Text(displayName(peer)).font(.subheadline.weight(.semibold))
+                            // Override the VStack's .textSelection(.enabled) below: with text
+                            // selection on, a native selectable Text handles double-click as
+                            // "select the word" before our rename gesture ever sees it.
+                            .textSelection(.disabled)
                             .renamable(address: peer.tunnelAddress, current: displayName(peer))
                         if storage {
                             Image(systemName: "externaldrive.badge.timemachine").help("Time Machine backup location")

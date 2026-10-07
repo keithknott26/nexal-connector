@@ -579,9 +579,6 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	}
 	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey,
 		AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
-	if ap := t.Image.AppProfile; ap != "" && ap != AppProfileNone {
-		go m.watchAppSetup(id) // the app installs after the mesh join; follow and report it
-	}
 	return nil
 }
 
@@ -613,6 +610,7 @@ func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (Firs
 	deadline := m.opts.Now().Add(timeout)
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
+	var lastConsole string
 	for {
 		select {
 		case <-ctx.Done():
@@ -620,6 +618,7 @@ func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (Firs
 		case <-t.C:
 		}
 		if text, err := readTail(m.consoleLog(id), 256<<10); err == nil {
+			lastConsole = text
 			fb, ok, failed, reason := scanFirstBoot(text)
 			if ok {
 				return fb, nil
@@ -632,7 +631,11 @@ func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (Firs
 			return FirstBoot{}, errors.New("VM exited before first boot completed")
 		}
 		if m.opts.Now().After(deadline) {
-			return FirstBoot{}, errors.New("timed out waiting for the guest to join the network")
+			// The box files (including the console log) are about to be deleted by
+			// the caller's failure cleanup, so fold the last thing the guest
+			// printed into the error now -- it's the only diagnostic evidence
+			// that survives the reap.
+			return FirstBoot{}, fmt.Errorf("timed out waiting for the guest to join the network (last console output: %s)", consoleSnippet(lastConsole))
 		}
 	}
 }
@@ -655,6 +658,29 @@ func readTail(path string, max int64) (string, error) {
 	}
 	b, err := io.ReadAll(io.LimitReader(f, max))
 	return string(b), err
+}
+
+// consoleSnippet returns the last few non-blank lines of console output,
+// trimmed to a size sane for an error message, or a placeholder when the
+// guest never printed anything at all (the common "VM never got far enough
+// to boot its init" case).
+func consoleSnippet(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	var kept []string
+	for i := len(lines) - 1; i >= 0 && len(kept) < 8; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			kept = append([]string{l}, kept...)
+		}
+	}
+	if len(kept) == 0 {
+		return "<none>"
+	}
+	snippet := strings.Join(kept, " | ")
+	const max = 2000
+	if len(snippet) > max {
+		snippet = "..." + snippet[len(snippet)-max:]
+	}
+	return snippet
 }
 
 // ---- failure ----

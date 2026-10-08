@@ -389,7 +389,7 @@ struct NetworkPanel: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 14) {
                     VStack(spacing: 0) {
-                        LatencyGauge(latencyMs: connected ? peer.latencyMs.map { ($0 * 2).rounded() / 2 } : nil)
+                        LatencyGauge(latencyMs: connected ? (peer.latencyMs ?? stats?.avg).map { ($0 * 2).rounded() / 2 } : nil)
                         Text("LATENCY").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 4) {

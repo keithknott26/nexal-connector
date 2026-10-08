@@ -21,7 +21,7 @@ func TestSeedBringsItsOwnFirstBoot(t *testing.T) {
 		"  - path: " + fetchRuntimePath,
 		"  - path: " + meshRuntimeEnvPath,
 		"      NEXAL_MESH_IMAGE=ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.7",
-		"tee /dev/hvc0",
+		">> /dev/hvc0; printf",
 		"S=" + seedFirstBootPath,
 		"--enable-rosenpass",
 		"NEXAL-FIRSTBOOT-FAILED",
@@ -33,6 +33,11 @@ func TestSeedBringsItsOwnFirstBoot(t *testing.T) {
 	runcmd := u[strings.Index(u, "runcmd:"):]
 	if strings.Contains(runcmd, "> /dev/console 2>&1; else") {
 		t.Error("runcmd still reports only on /dev/console")
+	}
+	// getty's vhangup() on hvc0 breaks descriptors opened before it: hvc0 must be
+	// reopened per line, never held by a long-lived tee.
+	if strings.Contains(runcmd, "tee /dev/hvc0") {
+		t.Error("runcmd holds hvc0 open across getty's vhangup")
 	}
 	if i := strings.Index(u, "runcmd:"); strings.Index(u, "  - path: "+seedFirstBootPath) > i {
 		t.Error("the seed first-boot script must be in write_files, above runcmd")

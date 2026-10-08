@@ -251,7 +251,11 @@ func RenderUserData(p SeedParams) string {
 	// virtio console the runner logs: on stock images the kernel console (and so
 	// /dev/console) is tty0/ttyAMA0, which nobody reads -- writing only there made
 	// every VM time out silently, even its "no first-boot script" failure line.
-	b.WriteString("  - [ sh, -c, \"if [ -x /usr/local/sbin/nexal-first-boot ]; then S=/usr/local/sbin/nexal-first-boot; else S=" + seedFirstBootPath + "; fi; $S 2>&1 | tee /dev/hvc0 > /dev/console 2>/dev/null; true\" ]\n")
+	// hvc0 is reopened for every line: when serial-getty starts on hvc0 it calls
+	// vhangup(), which permanently breaks any descriptor opened on it earlier (a
+	// long-lived `tee /dev/hvc0` lost everything printed after the login prompt,
+	// including the NEXAL-FIRSTBOOT line of a VM that had joined).
+	b.WriteString("  - [ sh, -c, \"if [ -x /usr/local/sbin/nexal-first-boot ]; then S=/usr/local/sbin/nexal-first-boot; else S=" + seedFirstBootPath + "; fi; $S 2>&1 | while IFS= read -r l; do printf '%s\\\\n' \\\"$l\\\" >> /dev/hvc0; printf '%s\\\\n' \\\"$l\\\" >> /dev/console; done 2>/dev/null; true\" ]\n")
 	if p.AppProfile != "" && p.AppProfile != AppProfileNone {
 		// Started after the first-boot script so the mesh address already exists, and
 		// --no-block so a slow install never holds up cloud-init (or the boot).

@@ -196,6 +196,7 @@ fail() {
   if [ -s "$LOG" ]; then
     tail -n 200 "$LOG" | grep -Ei 'warn|error|fail|denied|refused|timeout|unreachable|invalid|x509|no such host' | tail -n 5
   fi
+  [ -x "$BIN" ] && "$BIN" status 2>/dev/null | grep -E 'Management|Signal|Relays|NetBird IP|Peers count|Quantum' | sed 's/^/mesh status: /'
   echo "NEXAL-FIRSTBOOT-FAILED $r"
   scrub
   exit 1
@@ -220,6 +221,10 @@ done
 [ -n "$NEXAL_MESH_URL" ]  || fail "no management url in the seed"
 mkdir -p /var/log/nexal "$NB_STATE_DIR"
 chmod 0700 /var/lib/nexal "$NB_STATE_DIR"
+# Throwaway host: no background upgrades restarting services (and networking)
+# a few minutes into first boot, while the mesh join settles.
+systemctl disable --now apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service \
+  dnf-automatic.timer >/dev/null 2>&1 || true
 
 say "waiting for the network"
 i=0
@@ -261,8 +266,40 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 UNIT
+cat >/usr/local/sbin/nexal-mesh-watch <<'WATCH'
+#!/bin/sh
+# Reports mesh connectivity changes and daemon restarts on hvc0, the console the
+# connector logs, so a peer that drops after first boot leaves a trace. hvc0 is
+# reopened per line (getty's vhangup breaks long-lived descriptors).
+export NB_STATE_DIR=/var/lib/nexal/netbird
+last=""
+while :; do
+  st=$(/usr/local/bin/netbird status 2>/dev/null | awk -F': *' '/^Management:/{m=$2} /^Signal:/{g=$2} END{print "management=" (m?m:"?") " signal=" (g?g:"?")}')
+  n=$(systemctl show -p NRestarts --value nexal-mesh.service 2>/dev/null)
+  a=$(systemctl is-active nexal-mesh.service 2>/dev/null)
+  cur="daemon=$a restarts=${n:-?} $st"
+  if [ "$cur" != "$last" ]; then
+    printf 'NEXAL-MESH %s %s\n' "$(date -u +%H:%M:%SZ)" "$cur" >>/dev/hvc0 2>/dev/null
+    last=$cur
+  fi
+  sleep 10
+done
+WATCH
+chmod 0755 /usr/local/sbin/nexal-mesh-watch
+cat >/etc/systemd/system/nexal-mesh-watch.service <<'UNIT'
+[Unit]
+Description=neXal mesh status reporter (virtio console)
+After=nexal-mesh.service
+[Service]
+ExecStart=/usr/local/sbin/nexal-mesh-watch
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target
+UNIT
 systemctl daemon-reload
 systemctl enable --now nexal-mesh.service >/dev/null 2>&1 || fail "could not start nexal-mesh.service"
+systemctl enable --now nexal-mesh-watch.service >/dev/null 2>&1 || true
 i=0
 until "$BIN" status --check live >/dev/null 2>&1; do
   i=$((i + 1))

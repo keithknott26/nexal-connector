@@ -30,18 +30,17 @@ func TestTunnelReportMapsOnlyFreshVerifiedRuntimeEvidence(t *testing.T) {
 	}
 }
 
-func TestCoordinatorTrafficIsExplicitlyUnavailableNotZero(t *testing.T) {
+func TestCoordinatorTrafficOmittedWhenUnavailable(t *testing.T) {
 	report := TunnelReportFromRuntime(mesh.Status{}, time.Now())
-	if report.CoordinatorTraffic.Available || report.CoordinatorTraffic.BytesSent != nil || report.CoordinatorTraffic.BytesReceived != nil {
-		t.Fatalf("unknown coordinator counters became values: %+v", report.CoordinatorTraffic)
+	if report.CoordinatorTraffic != nil {
+		t.Fatalf("unavailable coordinator traffic should be nil, got: %+v", report.CoordinatorTraffic)
 	}
 	b, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"coordinatorTraffic":{"available":false`) ||
-		strings.Contains(string(b), `"coordinatorTraffic":{"available":false,"bytes`) {
-		t.Fatalf("wire representation hides unknown telemetry: %s", b)
+	if strings.Contains(string(b), `"coordinatorTraffic"`) {
+		t.Fatalf("wire representation should omit coordinatorTraffic when unavailable: %s", b)
 	}
 }
 

@@ -148,9 +148,9 @@ type manualHeartbeatAPI struct {
 	last client.Heartbeat
 }
 
-func (f *manualHeartbeatAPI) Heartbeat(_ context.Context, _ string, h client.Heartbeat) error {
+func (f *manualHeartbeatAPI) Heartbeat(_ context.Context, _ string, h client.Heartbeat) (client.HeartbeatResponse, error) {
 	f.last = h
-	return nil
+	return client.HeartbeatResponse{}, nil
 }
 
 func TestManualHeartbeatPreservesOwnerActivityAndCarriesDeadline(t *testing.T) {

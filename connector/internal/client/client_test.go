@@ -40,7 +40,7 @@ func TestHostRESTContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if err = c.Heartbeat(ctx, "h1", Heartbeat{OwnerActive: false}); err != nil {
+	if _, err = c.Heartbeat(ctx, "h1", Heartbeat{OwnerActive: false}); err != nil {
 		t.Fatal(err)
 	}
 	at, err := c.Next(ctx, "h1")

@@ -237,11 +237,11 @@ type heartbeatRecorder struct {
 	last client.Heartbeat
 }
 
-func (h *heartbeatRecorder) Heartbeat(_ context.Context, _ string, b client.Heartbeat) error {
+func (h *heartbeatRecorder) Heartbeat(_ context.Context, _ string, b client.Heartbeat) (client.HeartbeatResponse, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.last = b
-	return nil
+	return client.HeartbeatResponse{}, nil
 }
 func (h *heartbeatRecorder) latest() client.Heartbeat {
 	h.mu.Lock()

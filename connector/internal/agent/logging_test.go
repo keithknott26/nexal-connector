@@ -65,8 +65,8 @@ func (b *syncBuffer) find(t *testing.T, msg string) map[string]any {
 
 type failingHeartbeatAPI struct{ fakeAPI }
 
-func (f *failingHeartbeatAPI) Heartbeat(context.Context, string, client.Heartbeat) error {
-	return errors.New("coordinator rejected request (HTTP 503)")
+func (f *failingHeartbeatAPI) Heartbeat(context.Context, string, client.Heartbeat) (client.HeartbeatResponse, error) {
+	return client.HeartbeatResponse{}, errors.New("coordinator rejected request (HTTP 503)")
 }
 
 func loggedAgent(t *testing.T, api client.API) (*Agent, *syncBuffer) {

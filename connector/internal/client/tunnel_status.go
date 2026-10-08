@@ -22,6 +22,15 @@ type PeerSecurityReport struct {
 	Name               string              `json:"name"`
 	Connected          bool                `json:"connected"`
 	NegotiatedSecurity *NegotiatedSecurity `json:"negotiatedSecurity,omitempty"`
+	// Per-peer network telemetry: latency, loss and traffic counters.
+	// These are populated for every connected peer, giving the coordinator a
+	// full mesh telemetry matrix instead of only the single best peer.
+	LatencyMS         float64 `json:"latencyMs,omitempty"`
+	PacketLossPercent float64 `json:"packetLossPercent,omitempty"`
+	Path              string  `json:"path,omitempty"`
+	BytesSent         uint64  `json:"bytesSent,omitempty"`
+	BytesReceived     uint64  `json:"bytesReceived,omitempty"`
+	LastHandshakeAt   string  `json:"lastHandshakeAt,omitempty"`
 }
 
 type TunnelStatusReport struct {
@@ -38,10 +47,10 @@ type TunnelStatusReport struct {
 	// Services this computer offers (ssh, vnc, smb). A pointer so that "none"
 	// is sent as [] (closing their ports) while an unset value is omitted.
 	Services *[]string `json:"services,omitempty"`
-	// CoordinatorTraffic is separate from mesh peer traffic. The HTTP client
-	// does not currently expose trustworthy wire-byte counters, so Available is
-	// false and both counters are omitted. Never encode unknown as measured zero.
-	CoordinatorTraffic CoordinatorTraffic `json:"coordinatorTraffic"`
+	// CoordinatorTraffic is separate from mesh peer traffic. Omitted when the
+	// HTTP client does not expose trustworthy wire-byte counters (the current
+	// state), to avoid sending an always-empty struct on every report.
+	CoordinatorTraffic *CoordinatorTraffic `json:"coordinatorTraffic,omitempty"`
 }
 
 type CoordinatorTraffic struct {
@@ -64,8 +73,7 @@ type TunnelTraffic struct {
 
 func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusReport {
 	status = mesh.SanitizeSnapshot(status)
-	report := TunnelStatusReport{AuthStage: "not_started", SecurityState: "unknown", Path: TunnelPath{Type: "none"},
-		CoordinatorTraffic: CoordinatorTraffic{Available: false, Reason: "wire byte counters are not available from this connector build"}}
+	report := TunnelStatusReport{AuthStage: "not_started", SecurityState: "unknown", Path: TunnelPath{Type: "none"}}
 	switch status.Lifecycle {
 	case mesh.LifecycleProvisioning:
 		report.AuthStage = "provisioning"
@@ -96,10 +104,21 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 	}
 	report.PeerSecurity = make([]PeerSecurityReport, 0, len(status.Peers))
 	for _, p := range status.Peers {
-		item := PeerSecurityReport{ID: p.ID, Name: p.Name, Connected: p.Lifecycle == mesh.LifecycleConnected}
+		connected := p.Lifecycle == mesh.LifecycleConnected
+		item := PeerSecurityReport{ID: p.ID, Name: p.Name, Connected: connected}
 		single := mesh.Status{PQ: p.PQ, Peers: []mesh.Peer{p}}
 		if single.StrictPQReadyAt(now, 2*time.Minute) {
 			item.NegotiatedSecurity = &NegotiatedSecurity{Algorithm: "ML-KEM-1024", Category: 5, Profile: p.QuantumProfile, VerifiedAt: wireTimestamp(p.PQVerifiedAt), ExpiresAt: wireTimestamp(p.PQExpiresAt)}
+		}
+		// Per-peer network telemetry for connected peers, giving the coordinator
+		// a full mesh matrix instead of only the best peer's data.
+		if connected || p.Lifecycle == mesh.LifecycleDegraded {
+			item.LatencyMS = math.Max(0, math.Round(p.LatencyMS*100)/100)
+			item.PacketLossPercent = math.Max(0, math.Min(100, p.PacketLossPercent))
+			item.Path = platformPath(p.Path)
+			item.BytesSent = p.Traffic.SentBytes
+			item.BytesReceived = p.Traffic.ReceivedBytes
+			item.LastHandshakeAt = wireTimestamp(p.LastHandshakeAt)
 		}
 		report.PeerSecurity = append(report.PeerSecurity, item)
 	}

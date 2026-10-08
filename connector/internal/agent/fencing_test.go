@@ -78,8 +78,8 @@ type heartbeatAPI struct {
 	send func(context.Context, client.Heartbeat) error
 }
 
-func (f *heartbeatAPI) Heartbeat(ctx context.Context, _ string, h client.Heartbeat) error {
-	return f.send(ctx, h)
+func (f *heartbeatAPI) Heartbeat(ctx context.Context, _ string, h client.Heartbeat) (client.HeartbeatResponse, error) {
+	return client.HeartbeatResponse{}, f.send(ctx, h)
 }
 
 func TestConsentChangeFencesInFlightHeartbeat(t *testing.T) {

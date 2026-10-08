@@ -46,6 +46,12 @@ type Heartbeat struct {
 	AvailableMemoryBytes uint64 `json:"availableMemoryBytes"`
 	PQ                   PQ     `json:"pq"`
 	Version              string `json:"version"`
+	// TunnelStatus is embedded in the heartbeat when a tunnel report is due,
+	// so the coordinator receives both in a single HTTP call. Coordinators
+	// that do not support this field ignore it; the agent falls back to the
+	// separate ReportTunnelStatus call when TunnelStatusAcked is false in the
+	// response.
+	TunnelStatus *TunnelStatusReport `json:"tunnelStatus,omitempty"`
 }
 type Renewal struct {
 	OK              bool      `json:"ok"`
@@ -65,8 +71,15 @@ type Identity struct {
 	HostID string `json:"hostId"`
 	Token  string `json:"token"`
 }
+// HeartbeatResponse carries the coordinator's response to a heartbeat,
+// including an optional server-suggested polling interval.
+type HeartbeatResponse struct {
+	HeartbeatSeconds  int  `json:"heartbeatSeconds"`
+	TunnelStatusAcked bool `json:"tunnelStatusAcked"`
+}
+
 type API interface {
-	Heartbeat(context.Context, string, Heartbeat) error
+	Heartbeat(context.Context, string, Heartbeat) (HeartbeatResponse, error)
 	Next(context.Context, string) (*Attempt, error)
 	SelfTest(context.Context, string) (bool, *Attempt, error)
 	Renew(context.Context, string) (Renewal, error)
@@ -264,22 +277,23 @@ func (c *Client) Enroll(ctx context.Context, e Enrollment) (Identity, error) {
 	}
 	return out, err
 }
-func (c *Client) Heartbeat(ctx context.Context, host string, h Heartbeat) error {
+func (c *Client) Heartbeat(ctx context.Context, host string, h Heartbeat) (HeartbeatResponse, error) {
 	if !ValidID(host) {
-		return errors.New("invalid host id")
+		return HeartbeatResponse{}, errors.New("invalid host id")
 	}
 	var out struct {
-		OK               bool `json:"ok"`
-		LeaseSeconds     int  `json:"leaseSeconds"`
-		HeartbeatSeconds int  `json:"heartbeatSeconds"`
+		OK                bool `json:"ok"`
+		LeaseSeconds      int  `json:"leaseSeconds"`
+		HeartbeatSeconds  int  `json:"heartbeatSeconds"`
+		TunnelStatusAcked bool `json:"tunnelStatusAcked"`
 	}
 	if err := c.call(ctx, "POST", "/api/hosts/"+url.PathEscape(host)+"/heartbeat", h, &out); err != nil {
-		return err
+		return HeartbeatResponse{}, err
 	}
 	if !out.OK {
-		return errors.New("heartbeat not accepted")
+		return HeartbeatResponse{}, errors.New("heartbeat not accepted")
 	}
-	return nil
+	return HeartbeatResponse{HeartbeatSeconds: out.HeartbeatSeconds, TunnelStatusAcked: out.TunnelStatusAcked}, nil
 }
 func (c *Client) Next(ctx context.Context, host string) (*Attempt, error) {
 	if !ValidID(host) {

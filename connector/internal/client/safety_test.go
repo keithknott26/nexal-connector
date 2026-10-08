@@ -26,7 +26,7 @@ func TestRejectAmbiguousCoordinatorResponses(t *testing.T) {
 			}))
 			defer srv.Close()
 			c, _ := New(srv.URL, "test-host-credential", true)
-			if err := c.Heartbeat(context.Background(), "h1", Heartbeat{}); err == nil {
+			if _, err := c.Heartbeat(context.Background(), "h1", Heartbeat{}); err == nil {
 				t.Fatal("ambiguous coordinator acknowledgement accepted")
 			}
 		})

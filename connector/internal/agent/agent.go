@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash/fnv"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -115,6 +116,15 @@ type Agent struct {
 	// multiplied writes.
 	lastTunnelReport    time.Time
 	lastTunnelLifecycle string
+	// serverHeartbeatInterval is the coordinator's suggested heartbeat cadence,
+	// returned in the heartbeat response. Zero means the coordinator did not
+	// suggest an interval; hostHeartbeatIntervalLocked falls back to the
+	// hardcoded defaults.
+	serverHeartbeatInterval time.Duration
+	// lastHeartbeatPayload is the hash of the most recently sent heartbeat
+	// payload, used to suppress duplicate sends when nothing changed. A
+	// keepalive is still sent at least once per heartbeatMaxSilence.
+	lastHeartbeatPayload uint64
 	// A consent change fences asynchronous observations started under the old
 	// policy. Per-operation sequence numbers also prevent out-of-order results.
 	stateGeneration     uint64
@@ -825,10 +835,19 @@ const credentialRetryInterval = 10 * time.Minute
 // minute so a 15 s heartbeat tick lands on it every fourth beat, not every fifth.
 const tunnelReportInterval = 55 * time.Second
 
+// heartbeatMaxSilence is the longest a host may go without sending a heartbeat,
+// even when the payload has not changed. This acts as a keepalive so the
+// coordinator knows the host is still connected.
+const heartbeatMaxSilence = 2 * time.Minute
+
 // hostHeartbeatIntervalLocked reduces background coordinator traffic only when
 // job admission is explicitly disabled. Potentially runnable work keeps its
 // existing lease cadence; consent/manual transitions bypass this interval.
 func (a *Agent) hostHeartbeatIntervalLocked() time.Duration {
+	// Prefer the coordinator's suggested interval when available and sane.
+	if a.serverHeartbeatInterval >= 5*time.Second && a.serverHeartbeatInterval <= 10*time.Minute {
+		return a.serverHeartbeatInterval
+	}
 	if a.active == "" && (a.cfg.Paused || !a.devPull || !a.cfg.Development) {
 		return 5 * time.Minute
 	}
@@ -839,6 +858,12 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 	a.mu.Lock()
 	rejected := a.credentialRejectedAt
 	deferInterval := trigger == "interval" && a.hostHeartbeatIntervalLocked() > 15*time.Second && !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < a.hostHeartbeatIntervalLocked()
+	// Change detection: for periodic ticks, suppress the network call when the
+	// payload hasn't changed and the interval is not yet due. Uses lastHeartbeat
+	// (the same timer the interval gate uses) so the two never disagree. State
+	// transitions ("consent-change") and direct callers always go through.
+	suppressUnchanged := trigger == "interval" && a.lastHeartbeatPayload != 0 &&
+		!a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < heartbeatMaxSilence
 	a.mu.Unlock()
 	if deferInterval {
 		return
@@ -847,7 +872,7 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 		return
 	}
 	started := time.Now()
-	err := a.hostHeartbeat(ctx)
+	err := a.hostHeartbeat(ctx, suppressUnchanged)
 	var status *client.StatusError
 	a.mu.Lock()
 	switch {
@@ -874,7 +899,16 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 	a.logger.Debug("host heartbeat ok", "trigger", trigger, "durationMs", time.Since(started).Milliseconds())
 }
 
-func (a *Agent) hostHeartbeat(ctx context.Context) error {
+// heartbeatPayloadHash returns a fast hash of the heartbeat struct for
+// change detection. Collisions are harmless (worst case: one extra send).
+func heartbeatPayloadHash(h client.Heartbeat) uint64 {
+	f := fnv.New64a()
+	b, _ := json.Marshal(h)
+	f.Write(b)
+	return f.Sum64()
+}
+
+func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) error {
 	ctx, stop := boundedRequest(ctx, time.Time{})
 	defer stop()
 	a.mu.Lock()
@@ -902,6 +936,14 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 	if known {
 		h.AvailableMemoryBytes = a.telemetry.AvailableMemoryBytes
 	}
+	// Change detection: skip the network call when the payload is identical to
+	// the last successful send and the caller opted in (periodic interval ticks).
+	payloadHash := heartbeatPayloadHash(h)
+	if len(suppressUnchanged) > 0 && suppressUnchanged[0] && payloadHash == a.lastHeartbeatPayload {
+		a.lastHeartbeat = time.Now()
+		a.mu.Unlock()
+		return nil
+	}
 	hostID := a.cfg.HostID
 	enrolledMesh := a.cfg.Enrollment != nil
 	provider := a.meshProvider
@@ -912,21 +954,40 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 		enrolledMesh = gate.Enrolled()
 	}
 	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
-	err := a.api.Heartbeat(ctx, hostID, h)
-	if err == nil && enrolledMesh {
-		lifecycle := string(meshStatus.Lifecycle) + "/" + meshStatus.AuthenticationStep
+	// Embed the tunnel status in the heartbeat when a report is due, so the
+	// coordinator receives both in a single HTTP call.
+	var tunnelLifecycle string
+	if enrolledMesh {
+		tunnelLifecycle = string(meshStatus.Lifecycle) + "/" + meshStatus.AuthenticationStep
 		a.mu.Lock()
-		due := time.Since(a.lastTunnelReport) >= tunnelReportInterval || lifecycle != a.lastTunnelLifecycle
+		tunnelDue := time.Since(a.lastTunnelReport) >= tunnelReportInterval || tunnelLifecycle != a.lastTunnelLifecycle
 		a.mu.Unlock()
-		if reporter, ok := a.api.(interface {
+		if tunnelDue {
+			report := client.TunnelReportFromRuntime(meshStatus, time.Now())
+			services := append([]string{}, mesh.LocalServices()...)
+			report.Services = &services
+			h.TunnelStatus = &report
+		}
+	}
+	resp, err := a.api.Heartbeat(ctx, hostID, h)
+	if err == nil && h.TunnelStatus != nil {
+		if resp.TunnelStatusAcked {
+			// Coordinator processed the embedded report; no separate call needed.
+			a.mu.Lock()
+			a.lastTunnelReport, a.lastTunnelLifecycle = time.Now(), tunnelLifecycle
+			a.mu.Unlock()
+			a.logger.Debug("tunnel status report (batched)", "lifecycle", tunnelLifecycle, "pq", string(meshStatus.PQ),
+				"peers", len(meshStatus.Peers))
+		} else if reporter, ok := a.api.(interface {
 			ReportTunnelStatus(context.Context, string, mesh.Status) error
-		}); ok && due {
-			err = reporter.ReportTunnelStatus(ctx, hostID, meshStatus)
-			a.logger.Debug("tunnel status report", "lifecycle", lifecycle, "pq", string(meshStatus.PQ),
-				"peers", len(meshStatus.Peers), "ok", err == nil)
-			if err == nil {
+		}); ok {
+			// Coordinator did not ack the embedded report; fall back to separate call.
+			tunnelErr := reporter.ReportTunnelStatus(ctx, hostID, meshStatus)
+			a.logger.Debug("tunnel status report (fallback)", "lifecycle", tunnelLifecycle, "pq", string(meshStatus.PQ),
+				"peers", len(meshStatus.Peers), "ok", tunnelErr == nil)
+			if tunnelErr == nil {
 				a.mu.Lock()
-				a.lastTunnelReport, a.lastTunnelLifecycle = time.Now(), lifecycle
+				a.lastTunnelReport, a.lastTunnelLifecycle = time.Now(), tunnelLifecycle
 				a.mu.Unlock()
 			}
 		}
@@ -948,6 +1009,11 @@ func (a *Agent) hostHeartbeat(ctx context.Context) error {
 		return err
 	}
 	a.lastHeartbeat = time.Now()
+	a.lastHeartbeatPayload = payloadHash
+	// Honor the coordinator's suggested heartbeat interval when present.
+	if resp.HeartbeatSeconds > 0 {
+		a.serverHeartbeatInterval = time.Duration(resp.HeartbeatSeconds) * time.Second
+	}
 	return nil
 }
 

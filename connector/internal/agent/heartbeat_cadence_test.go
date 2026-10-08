@@ -42,9 +42,9 @@ type cadenceAPI struct {
 	calls int
 }
 
-func (c *cadenceAPI) Heartbeat(context.Context, string, client.Heartbeat) error {
+func (c *cadenceAPI) Heartbeat(context.Context, string, client.Heartbeat) (client.HeartbeatResponse, error) {
 	c.calls++
-	return nil
+	return client.HeartbeatResponse{}, nil
 }
 func TestBackgroundHeartbeatDefersOnlyPeriodicRequests(t *testing.T) {
 	a, _ := testAgent(t)

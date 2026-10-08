@@ -540,6 +540,16 @@ func (a *Agent) WakeSelfTest() {
 	}
 }
 
+// WakeHeartbeat nudges the heartbeat loop to send an immediate heartbeat.
+// Safe to call from any goroutine (e.g. the presence relay on a
+// status.request frame when the owner opens the dashboard).
+func (a *Agent) WakeHeartbeat() {
+	select {
+	case a.heartbeatWake <- struct{}{}:
+	default:
+	}
+}
+
 // runSelfTest polls the coordinator for the owner's queued capability self-test
 // and runs it the moment this host is otherwise eligible, independent of the
 // production admission gate and of owner activity (see execute's bypassOwner).

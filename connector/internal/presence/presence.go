@@ -132,6 +132,12 @@ type Options struct {
 	// the next poll. Nil disables the nudge; the agent still polls on its own
 	// interval either way.
 	SelfTest func()
+	// StatusRefresh is called when the coordinator broadcasts a status.request
+	// frame — e.g. when the owner opens the dashboard or taps refresh on the
+	// app. The agent should send an immediate heartbeat so the coordinator
+	// (and therefore the dashboard) gets fresh PQ, memory and tunnel state.
+	// Nil disables the nudge; the host still heartbeats on its own cadence.
+	StatusRefresh func()
 	// Info returns this Mac's details for the host.info frame; nil disables it.
 	Info func(ctx context.Context) sysinfo.Info
 	// InfoEvery overrides InfoCheckInterval (tests).
@@ -505,6 +511,13 @@ func (c *Client) handle(data []byte) bool {
 	case "selftest.request":
 		if client.ValidID(e.TargetHostID) && e.TargetHostID == c.opts.HostID && c.opts.SelfTest != nil {
 			c.opts.SelfTest()
+		}
+	case "status.request":
+		// The coordinator broadcasts this when the owner opens the dashboard or
+		// taps refresh. Nudge the agent to send an immediate heartbeat so the
+		// dashboard gets fresh PQ/encryption and telemetry state.
+		if c.opts.StatusRefresh != nil {
+			c.opts.StatusRefresh()
 		}
 	default:
 		// A newer coordinator's event type; not an error.

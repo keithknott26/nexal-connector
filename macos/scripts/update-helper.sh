@@ -33,6 +33,10 @@ case "$IDENTITY" in "Developer ID Application:"*) TS=--timestamp ;; *) TS=--time
 codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$VMHOST"
 codesign -d --entitlements - "$VMHOST" 2>/dev/null | grep -q com.apple.security.virtualization \
   || { echo "nexal-vmhost is missing the virtualization entitlement"; exit 1; }
+# The home-network bridge for VMs (installed below, and from Settings in the app).
+clang -O2 -Wall -Wextra -Wno-unused-parameter -mmacosx-version-min=14.0 -arch arm64 -arch x86_64 \
+  -o "$OUT/nexal-vmnet" "$ROOT/macos/vmnet/nexal-vmnet.c" \
+  -framework vmnet -framework SystemConfiguration -framework CoreFoundation
 echo "== install (backup: $OUT/nexal.previous)"
 # Quit the app and stop its connector agent: a running process keeps the old code
 # in memory even after the file on disk is replaced.
@@ -50,6 +54,8 @@ cp "$APP/Contents/MacOS/NexalMac" "$OUT/NexalMac.previous"
 sudo install -m 755 "$OUT/nexal" "$APP/Contents/Helpers/nexal"
 sudo install -m 755 "$OUT/swift/out/Products/Release/NexalMac" "$APP/Contents/MacOS/NexalMac"
 sudo install -m 755 "$VMHOST" "$APP/Contents/Helpers/nexal-vmhost"
+sudo install -m 755 "$OUT/nexal-vmnet" "$APP/Contents/Helpers/nexal-vmnet"
+sudo install -m 755 "$ROOT/macos/scripts/install-vmnet.sh" "$APP/Contents/Resources/install-vmnet.sh"
 # The container-runtime installer behind Settings › Virtual Machine Hosting › Set up (Colima,
 # docker, devpod). package-app.sh ships it; this update path must too.
 sudo install -m 755 "$ROOT/macos/Resources/install-container-runtime.sh" "$APP/Contents/Resources/install-container-runtime.sh"
@@ -64,6 +70,7 @@ sudo chown -R "$(id -un)" "$APP"
 # Apple's timestamp server; skip them for local development identities.
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
+codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmnet"
 # nexal-vmhost needs the virtualization entitlement, or macOS refuses to start a VM.
 codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmhost"
 codesign -d --entitlements - "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | grep -q com.apple.security.virtualization \
@@ -77,7 +84,8 @@ if [ -f "$SUPPORT_BIN" ]; then
 fi
 # The LAN bridge helper (VMs get a home-network address too). Skip with NEXAL_SKIP_VMNET=1.
 if [ "${NEXAL_SKIP_VMNET:-}" != 1 ]; then
-  bash "$ROOT/macos/scripts/install-vmnet.sh" || echo "warning: nexal-vmnet was not installed; VMs keep NAT networking only"
+  bash "$ROOT/macos/scripts/install-vmnet.sh" --binary "$APP/Contents/Helpers/nexal-vmnet" \
+    || echo "warning: nexal-vmnet was not installed; VMs keep NAT networking only"
 fi
 open "$APP"
 echo "Done. Previous binaries kept in $OUT (nexal.previous, NexalMac.previous) for rollback."

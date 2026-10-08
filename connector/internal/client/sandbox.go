@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/url"
 
 	"nexal/connector/internal/sandbox"
@@ -49,7 +50,15 @@ func (c *Client) ReportSandboxState(ctx context.Context, hostID string, r sandbo
 	if !ValidID(r.SandboxID) {
 		return errors.New("invalid sandbox id")
 	}
-	return c.callLenient(ctx, "POST", p, r, nil)
+	err = c.callLenient(ctx, "POST", p, r, nil)
+	// A coordinator older than lanIp refuses unknown keys (400 invalid_schema),
+	// and would refuse every report from this VM: resend without it.
+	var se *StatusError
+	if r.LanIP != "" && errors.As(err, &se) && se.Status == http.StatusBadRequest {
+		r.LanIP = ""
+		err = c.callLenient(ctx, "POST", p, r, nil)
+	}
+	return err
 }
 
 // PutSandboxHosting is PUT /api/v2/hosts/:id/sandbox-hosting: the Mac's opt-in

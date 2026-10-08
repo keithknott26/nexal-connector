@@ -271,6 +271,7 @@ type StateReport struct {
 	// coordinator's canonical name is ackTaskId (it also accepts ackedTask).
 	AckTaskID          string `json:"ackTaskId,omitempty"`
 	MeshIP             string `json:"meshIp,omitempty"`
+	LanIP              string `json:"lanIp,omitempty"` // a bridged VM's home-network address (nexal-vmnet)
 	HostKeyFingerprint string `json:"hostKeyFingerprint,omitempty"`
 	// HostKey is the guest's ssh-ed25519 host public key ("ssh-ed25519 AAAA...",
 	// no comment); the coordinator pins it for connect responses.

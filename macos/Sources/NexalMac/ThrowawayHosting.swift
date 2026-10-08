@@ -289,6 +289,70 @@ final class ThrowawayHosting: ObservableObject {
         }
     }
 
+    // MARK: Home-network bridge (nexal-vmnet)
+
+    /// The root helper that gives VMs a second NIC on this Mac's LAN (vmnet bridged
+    /// mode, socket_vmnet-style). nil until checked.
+    @Published private(set) var lanBridgeReady: Bool?
+    @Published private(set) var lanBridgeStatus: String?
+    @Published private(set) var installingLANBridge = false
+    nonisolated static let lanBridgeSocket = "/var/run/nexal-vmnet.sock"
+
+    /// Running means its socket exists (the daemon creates it on start, owned by this user).
+    func checkLANBridge() {
+        var st = stat()
+        let up = lstat(Self.lanBridgeSocket, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
+        lanBridgeReady = up
+        if up { lanBridgeStatus = nil }
+    }
+
+    /// Installs (or reinstalls) the helper the app ships, as root through the
+    /// standard macOS administrator prompt. It is copied root-owned out of the
+    /// bundle, so a later change to the app cannot change what runs as root.
+    func installLANBridge() {
+        guard !installingLANBridge else { return }
+        let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/nexal-vmnet")
+        guard let script = Bundle.main.url(forResource: "install-vmnet", withExtension: "sh"),
+              FileManager.default.isExecutableFile(atPath: helper.path) else {
+            lanBridgeReady = false
+            lanBridgeStatus = "This build does not include the home-network bridge."
+            return
+        }
+        installingLANBridge = true
+        let uid = getuid()
+        Task { @MainActor in
+            let result = await Task.detached { ThrowawayHosting.runPrivileged(script: script, helper: helper, uid: uid) }.value
+            self.installingLANBridge = false
+            self.checkLANBridge()
+            if self.lanBridgeReady != true { self.lanBridgeStatus = result }
+        }
+    }
+
+    /// Runs install-vmnet.sh as root via the administrator prompt. Paths and the uid
+    /// travel as AppleScript arguments (quoted form), never spliced into script text.
+    nonisolated static func runPrivileged(script: URL, helper: URL, uid: uid_t) -> String {
+        let source = [
+            "on run argv",
+            "do shell script \"/bin/bash \" & quoted form of item 1 of argv & \" --binary \" & quoted form of item 2 of argv & \" --uid \" & quoted form of item 3 of argv with prompt \"neXal@home wants to install its home-network bridge, so virtual machines can get an address on your home network.\" with administrator privileges",
+            "end run",
+        ]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = source.flatMap { ["-e", $0] } + [script.path, helper.path, String(uid)]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do { try process.run() } catch {
+            return "Could not start the installer: \(error.localizedDescription)"
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let text = String(decoding: data, as: UTF8.self)
+        if text.contains("-128") { return "Setup was cancelled." }  // user pressed Cancel at the prompt
+        let last = text.split(whereSeparator: \.isNewline).last.map(String.init)
+        return process.terminationStatus == 0 ? (last ?? "Installed.") : (last ?? "The home-network bridge could not be installed.")
+    }
+
     nonisolated static func runInstaller(_ script: URL) -> (ready: Bool, message: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -624,11 +688,34 @@ struct ThrowawayHostingSettingsView: View {
                     Text("Dev containers need a container runtime (Docker Desktop is not supported). neXal@home installs Colima, docker and devpod for you; no Homebrew needed.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                // Same LED pattern: green only when the helper's socket is really there.
+                HStack(spacing: 6) {
+                    if hosting.installingLANBridge {
+                        ProgressView().controlSize(.small)
+                        Text("Setting up the home-network bridge…").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Circle()
+                            .fill(hosting.lanBridgeReady == true ? Color.green : hosting.lanBridgeStatus != nil ? Color.red : Color.secondary.opacity(0.4))
+                            .frame(width: 8, height: 8)
+                        Text(hosting.lanBridgeReady == true ? "Home network: virtual machines get an address on your network"
+                             : hosting.lanBridgeStatus ?? "Home network: not set up (virtual machines are reachable over neXal only)")
+                            .font(.caption)
+                            .foregroundStyle(hosting.lanBridgeReady != true && hosting.lanBridgeStatus != nil ? Color.red : Color.secondary)
+                        Spacer()
+                        Button(hosting.lanBridgeReady == true ? "Reinstall" : "Set up") { hosting.installLANBridge() }
+                            .controlSize(.small)
+                    }
+                }
+                Text("With the home-network bridge, new virtual machines also get an address from your router, so devices that are not on neXal (a TV, for example) can reach apps like Jellyfin. Setting it up asks for your password once.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if let message = hosting.message { Text(message).font(.caption).foregroundStyle(.orange) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { hosting.reloadConfig() }
+        .onAppear {
+            hosting.reloadConfig()
+            hosting.checkLANBridge()
+        }
     }
 }
 
@@ -638,6 +725,15 @@ struct ThrowawayHostsSection: View {
     @ObservedObject private var hosting = ThrowawayHosting.shared
     @ObservedObject private var peerNames = PeerNames.shared
     @EnvironmentObject private var model: AppModel
+    /// The instance whose stop/delete is awaiting confirmation.
+    @State private var pendingStop: PendingStop?
+
+    private struct PendingStop {
+        let id: String
+        let title: String
+        let kind: String?
+        var isContainer: Bool { kind == "devcontainer" }
+    }
 
     var body: some View {
         Group {
@@ -688,6 +784,19 @@ struct ThrowawayHostsSection: View {
             }
         }
         .sheet(isPresented: $hosting.showingCreate) { NewSandboxSheet().environmentObject(model) }
+        // Attached to the panel the user clicked in. A modal NSAlert from this
+        // menu-bar app opened behind the frontmost app's window: on macOS 14+ an
+        // app can only ask to be activated, not force it.
+        .alert(pendingStop.map { $0.isContainer ? "Stop and delete “\($0.title)”?" : "Shut down and remove “\($0.title)”?" } ?? "",
+               isPresented: Binding(get: { pendingStop != nil }, set: { if !$0 { pendingStop = nil } }),
+               presenting: pendingStop) { stop in
+            Button(stop.isContainer ? "Stop and Delete" : "Shut Down and Remove", role: .destructive) { hosting.stop(stop.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: { stop in
+            Text(stop.isContainer
+                 ? "The development container and everything in it are deleted. This cannot be undone."
+                 : "The virtual machine shuts down and its disk is erased. This cannot be undone.")
+        }
         .task {
             while !Task.isCancelled {
                 hosting.reloadLocal()
@@ -790,19 +899,7 @@ struct ThrowawayHostsSection: View {
     }
 
     private func confirmStop(id: String, title: String, kind: String?) {
-        let alert = NSAlert()
-        let container = kind == "devcontainer"
-        alert.messageText = container ? "Stop and delete “\(title)”?" : "Shut down and remove “\(title)”?"
-        alert.informativeText = container
-            ? "The development container and everything in it are deleted. This cannot be undone."
-            : "The virtual machine shuts down and its disk is erased. This cannot be undone."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: container ? "Stop and Delete" : "Shut Down and Remove")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons.first?.hasDestructiveAction = true
-        alert.window.level = .floating
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn { hosting.stop(id) }
+        pendingStop = PendingStop(id: id, title: title, kind: kind)
     }
 
     /// Dev containers have no screen, so they offer Terminal and Files only.

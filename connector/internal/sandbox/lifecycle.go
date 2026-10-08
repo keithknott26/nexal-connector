@@ -203,7 +203,7 @@ func (m *Manager) heartbeat() {
 			continue
 		}
 		if r.State == StateRunning || (r.State == StateProvisioning && r.AwaitKey) {
-			reps = append(reps, StateReport{SandboxID: r.ID, State: r.State, MeshIP: r.MeshIP,
+			reps = append(reps, StateReport{SandboxID: r.ID, State: r.State, MeshIP: r.MeshIP, LanIP: r.LanIP,
 				HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub, NeedsKey: r.AwaitKey})
 		}
 	}
@@ -270,7 +270,7 @@ func (m *Manager) startVNC(t Task) {
 		return
 	}
 	m.inflight[t.TaskID] = true
-	h, ip, hk, hpub := rec.Handle, rec.MeshIP, rec.HostKey, rec.HostKeyPub
+	h, ip, lan, hk, hpub := rec.Handle, rec.MeshIP, rec.LanIP, rec.HostKey, rec.HostKeyPub
 	m.mu.Unlock()
 	m.wg.Add(1)
 	go func() {
@@ -285,7 +285,7 @@ func (m *Manager) startVNC(t Task) {
 			m.opts.Logger.Info("vnc password not delivered", "task", t, "error", err.Error())
 			return
 		}
-		m.report(StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: ip,
+		m.report(StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: ip, LanIP: lan,
 			HostKeyFingerprint: hk, HostKey: hpub, AckTaskID: t.TaskID})
 	}()
 }
@@ -304,7 +304,7 @@ func (m *Manager) markAwaitKey(id, msg string) {
 	r.AwaitKey = true
 	m.saveLocked()
 	m.opts.Logger.Debug("sandbox awaiting fresh mesh key", "sandbox", id, "state", string(r.State), "error", msg)
-	rep := StateReport{SandboxID: id, State: r.State, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
+	rep := StateReport{SandboxID: id, State: r.State, MeshIP: r.MeshIP, LanIP: r.LanIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
 		NeedsKey: true, Error: msg}
 	m.mu.Unlock()
 	m.report(rep)
@@ -329,7 +329,7 @@ func (m *Manager) startRejoin(ctx context.Context, t Task) {
 		// so the coordinator stops redelivering (the unused one-use key is dropped).
 		var rep *StateReport
 		if rec.State == StateRunning {
-			rep = &StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: rec.MeshIP,
+			rep = &StateReport{SandboxID: t.SandboxID, State: StateRunning, MeshIP: rec.MeshIP, LanIP: rec.LanIP,
 				HostKeyFingerprint: rec.HostKey, HostKey: rec.HostKeyPub, AckTaskID: t.TaskID}
 		}
 		m.mu.Unlock()
@@ -391,7 +391,7 @@ func (m *Manager) markRunning(id, meshIP, ackTask string) {
 		m.saveLocked()
 	}
 	m.opts.Logger.Debug("sandbox running", "sandbox", id, "meshIp", r.MeshIP, "ackTask", ackTask)
-	rep := StateReport{SandboxID: id, State: StateRunning, MeshIP: r.MeshIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
+	rep := StateReport{SandboxID: id, State: StateRunning, MeshIP: r.MeshIP, LanIP: r.LanIP, HostKeyFingerprint: r.HostKey, HostKey: r.HostKeyPub,
 		AckTaskID: ackTask}
 	m.mu.Unlock()
 	m.report(rep)

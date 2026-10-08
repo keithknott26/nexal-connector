@@ -67,6 +67,12 @@ chmod 755 "$CANDIDATE/Contents/Helpers/nexal"
 # The VM runner for throwaway hosts. The connector looks for it next to itself in Contents/Helpers.
 # `swift build` above already produced both slices; it is signed below with the virtualization entitlement.
 install -m 755 "$BIN/nexal-vmhost" "$CANDIDATE/Contents/Helpers/nexal-vmhost"
+# The home-network bridge for VMs (vmnet bridged mode, socket_vmnet-style). The app
+# installs it -- a root-owned copy, via the macOS administrator prompt -- from
+# Settings › Virtual Machine Hosting › Home network, using install-vmnet.sh.
+/usr/bin/clang -O2 -Wall -Wextra -Wno-unused-parameter -mmacosx-version-min=14.0 -arch arm64 -arch x86_64 \
+    -o "$CANDIDATE/Contents/Helpers/nexal-vmnet" "$ROOT/vmnet/nexal-vmnet.c" \
+    -framework vmnet -framework SystemConfiguration -framework CoreFoundation
 # Runtime artifacts must come from the reviewed custom patch build. Never fall
 # back to downloading stock NetBird when a custom artifact is unavailable.
 python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
@@ -75,15 +81,18 @@ install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Re
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
 # Run by the app when the owner turns on throwaway hosts: sets up Colima for dev containers.
 install -m 755 "$ROOT/Resources/install-container-runtime.sh" "$CANDIDATE/Contents/Resources/install-container-runtime.sh"
+install -m 755 "$ROOT/scripts/install-vmnet.sh" "$CANDIDATE/Contents/Resources/install-vmnet.sh"
 /usr/bin/plutil -lint "$CANDIDATE/Contents/Info.plist"
 test -x "$CANDIDATE/Contents/MacOS/NexalMac"
 test -x "$CANDIDATE/Contents/Helpers/nexal"
 test -x "$CANDIDATE/Contents/Helpers/nexal-network"
 test -x "$CANDIDATE/Contents/Resources/install-container-runtime.sh"
+test -x "$CANDIDATE/Contents/Helpers/nexal-vmnet"
+test -x "$CANDIDATE/Contents/Resources/install-vmnet.sh"
 # Fail loudly if either slice is missing. Without this a silent fallback to a
 # single-architecture build would ship an Intel-broken DMG that looks fine on
 # the arm64 machine that built it -- exactly the bug this replaces.
-for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/Helpers/nexal-vmhost"; do
+for BINARY in "$CANDIDATE/Contents/MacOS/NexalMac" "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/Helpers/nexal-vmhost" "$CANDIDATE/Contents/Helpers/nexal-vmnet"; do
   ARCHS="$(/usr/bin/lipo -archs "$BINARY")"
   case " $ARCHS " in
     *" arm64 "*) ;;
@@ -101,7 +110,7 @@ if [ -n "$PRIVATE_PAYLOAD" ]; then
   printf 'Refusing to package private runtime payloads or credential files.\n' >&2
   exit 1
 fi
-for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/MacOS/NexalMac"; do
+for BINARY in "$CANDIDATE/Contents/Helpers/nexal" "$CANDIDATE/Contents/Helpers/nexal-network" "$CANDIDATE/Contents/Helpers/nexal-vmnet" "$CANDIDATE/Contents/MacOS/NexalMac"; do
   /usr/bin/codesign --force --options runtime --timestamp --sign "$NEXAL_CODE_SIGN_IDENTITY" "$BINARY"
 done
 # Virtualization.framework refuses to start a VM without this entitlement.

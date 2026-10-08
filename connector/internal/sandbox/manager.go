@@ -606,7 +606,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	if err := RemoveSeed(m.seedDir(id), m.seedISO(id)); err != nil {
 		m.opts.Logger.Warn("seed not removed", "sandbox", id, "error", err.Error())
 	}
-	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey,
+	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, LanIP: fb.LanIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey,
 		AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
 	return nil
 }

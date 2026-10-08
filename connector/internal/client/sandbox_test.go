@@ -133,3 +133,39 @@ func TestSandboxListAndConnect(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// A coordinator older than lanIp refuses unknown keys: the report is resent
+// without it instead of failing every heartbeat. Other 400s are not retried
+// without the field when there is none to drop.
+func TestReportSandboxStateFallsBackWithoutLanIP(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(b))
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(b), "lanIp") {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"invalid_schema","message":"Unknown field lanIp."}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"accepted":true}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := sandbox.StateReport{SandboxID: "sb1", State: sandbox.StateRunning, MeshIP: "100.64.2.9", LanIP: "192.168.68.77"}
+	if err := c.ReportSandboxState(context.Background(), "h1", rep); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || !strings.Contains(bodies[0], `"lanIp":"192.168.68.77"`) ||
+		strings.Contains(bodies[1], "lanIp") || !strings.Contains(bodies[1], `"meshIp":"100.64.2.9"`) {
+		t.Fatalf("bodies: %q", bodies)
+	}
+	bodies = nil
+	rep.LanIP = ""
+	if err := c.ReportSandboxState(context.Background(), "h1", rep); err != nil || len(bodies) != 1 {
+		t.Fatalf("%v %q", err, bodies)
+	}
+}

@@ -6,8 +6,13 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 APP=${APP:-/Applications/neXal-Connector.app}
-IDENTITY=${1:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}
-[ -n "$IDENTITY" ] || { echo "No Developer ID identity found; pass it as the first argument."; exit 1; }
+# Developer ID if this Mac has one, else Apple Development, else ad hoc ("-"): a local
+# build only needs a valid signature that carries nexal-vmhost's entitlement.
+ids=$(security find-identity -v -p codesigning)
+IDENTITY=${1:-$(printf '%s\n' "$ids" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}
+[ -n "$IDENTITY" ] || IDENTITY=$(printf '%s\n' "$ids" | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)
+[ -n "$IDENTITY" ] || IDENTITY=-
+echo "== signing as: $IDENTITY"
 [ -x "$APP/Contents/Helpers/nexal" ] || { echo "$APP has no Contents/Helpers/nexal"; exit 1; }
 OUT=$(mktemp -d)
 echo "== test"
@@ -21,6 +26,13 @@ lipo -create "$OUT/nexal-arm64" "$OUT/nexal-amd64" -output "$OUT/nexal"
 # The VM helper (Virtualization.framework, Apple Silicon only) for virtual machines.
 (cd "$ROOT/macos" && swift build --scratch-path "$OUT/vmhost" -c release --product nexal-vmhost)
 VMHOST="$(cd "$ROOT/macos" && swift build --scratch-path "$OUT/vmhost" -c release --product nexal-vmhost --show-bin-path)/nexal-vmhost"
+case "$IDENTITY" in "Developer ID Application:"*) TS=--timestamp ;; *) TS=--timestamp=none ;; esac
+# Sign nexal-vmhost before it is installed: if signing fails, the installed copy stays the
+# old signed one. A linker-signed (unsigned) helper has no virtualization entitlement and
+# every VM fails with "The process doesn't have the com.apple.security.virtualization entitlement".
+codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$VMHOST"
+codesign -d --entitlements - "$VMHOST" 2>/dev/null | grep -q com.apple.security.virtualization \
+  || { echo "nexal-vmhost is missing the virtualization entitlement"; exit 1; }
 echo "== install (backup: $OUT/nexal.previous)"
 # Quit the app and stop its connector agent: a running process keeps the old code
 # in memory even after the file on disk is replaced.
@@ -50,12 +62,11 @@ done
 sudo chown -R "$(id -un)" "$APP"
 # Secure timestamps are only needed for notarized Developer ID builds and need
 # Apple's timestamp server; skip them for local development identities.
-case "$IDENTITY" in "Developer ID Application:"*) TS=--timestamp ;; *) TS=--timestamp=none ;; esac
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 # nexal-vmhost needs the virtualization entitlement, or macOS refuses to start a VM.
 codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmhost"
-codesign -d --entitlements :- "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | grep -q com.apple.security.virtualization \
+codesign -d --entitlements - "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | grep -q com.apple.security.virtualization \
   || { echo "nexal-vmhost is missing the virtualization entitlement"; exit 1; }
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"

@@ -1,0 +1,97 @@
+
+===== this Mac's view of sbx peers =====
+ sbx-cf87fce9-63-60.peers.mesh.nexal.systems:
+  NetBird IP: 100.86.63.60
+  NetBird IPv6: fdb4:7d2:6547:d8ad:4c78:849a:3099:c6d1
+  Public key: Y1ib1mrEYQe3eF1W7ZblRYJ2SgHARjMmShSxJ3ORrzU=
+  Status: Connecting
+  -- detail --
+  Connection type: -
+  ICE candidate (Local/Remote): -/-
+  ICE candidate endpoints (Local/Remote): -/-
+  Relay server address: 
+  Last connection update: 5 minutes, 2 seconds ago
+  Last WireGuard handshake: -
+  Transfer status (received/sent) 0 B/0 B
+  Quantum resistance: false (connection won't work without a permissive mode)
+  Networks: -
+  Latency: 0s
+
+===== ping container =====
+
+--- 100.86.63.60 ping statistics ---
+3 packets transmitted, 0 packets received, 100.0% packet loss
+
+===== ssh port =====
+nc: connectx to 100.86.63.60 port 22 (tcp) failed: Operation timed out
+
+===== containers =====
+nexal-mesh-nexal-cf87fce9-2d27-4b3d-80b3-f6ccc5f3c4c9 | ghcr.io/keithknott26/nexal-mesh-sidecar:0.1.6 | Up 5 minutes
+funny_poitras | mcr.microsoft.com/devcontainers/base:ubuntu | Up 6 minutes
+
+===== sidecar nexal-mesh-nexal-cf87fce9-2d27-4b3d-80b3-f6ccc5f3c4c9: netbird status =====
+Peers detail:
+Events:
+  [INFO] SYSTEM (335ef620-bbf5-445f-a589-9fec0dc8bece)
+    Message: daemon config changed (source=up_rpc)
+    Time: 5 minutes, 12 seconds ago
+    Metadata: source: up_rpc, type: config_changed
+OS: linux/arm64
+Daemon version: 0.79.0-nexal-mlkem1024-gated.13-linux
+CLI version: 0.79.0-nexal-mlkem1024-gated.13-linux
+Profile: default
+Management: Disconnected, reason: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+Signal: Disconnected, reason: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+Relays: 
+  [rels://mesh.nexal.systems:443] is Unavailable, reason: relay connection is not established
+Nameservers: 
+FQDN: 
+NetBird IP: N/A
+Interface type: N/A
+Wireguard port: N/A
+Quantum resistance: true
+Lazy connection: false
+SSH Server: Disabled
+Networks: -
+Peers count: 0/0 Connected
+
+===== sidecar nexal-mesh-nexal-cf87fce9-2d27-4b3d-80b3-f6ccc5f3c4c9: log tail =====
+nexal-sidecar: SIDECAR_VERSION=0.1.6 NETBIRD_RUNTIME_VERSION=0.79.0-nexal-mlkem1024-gated.13-linux MESH_PROFILE=nexal-mlkem1024-tcp-v2 
+netbird up returned 1 but the daemon finished joining; continuing
+NEXAL-FIRSTBOOT {"meshIp":"100.86.63.60"}
+
+===== sidecar nexal-mesh-nexal-cf87fce9-2d27-4b3d-80b3-f6ccc5f3c4c9: client.log errors =====
+2026-10-06T02:49:48.717Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+2026-10-06T02:50:00.011Z WARN client/iface/wgproxy/factory_kernel.go:41: failed to initialize ebpf proxy, fallback to user space proxy: failed to set memlock rlimit: operation not permitted
+2026-10-06T02:50:01.239Z ERRO client/internal/routemanager/systemops/systemops_linux.go:126: Error setting up sysctl: 1 error occurred:
+2026-10-06T02:50:01.302Z ERRO client/internal/connect.go:461: error while starting Netbird Connection Engine: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+2026-10-06T02:50:01.303Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+2026-10-06T02:50:03.531Z WARN client/iface/wgproxy/factory_kernel.go:41: failed to initialize ebpf proxy, fallback to user space proxy: failed to set memlock rlimit: operation not permitted
+2026-10-06T02:50:04.371Z ERRO client/internal/routemanager/systemops/systemops_linux.go:126: Error setting up sysctl: 1 error occurred:
+2026-10-06T02:50:04.435Z ERRO client/internal/connect.go:461: error while starting Netbird Connection Engine: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+2026-10-06T02:50:04.437Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+2026-10-06T02:50:07.213Z WARN client/iface/wgproxy/factory_kernel.go:41: failed to initialize ebpf proxy, fallback to user space proxy: failed to set memlock rlimit: operation not permitted
+2026-10-06T02:50:08.253Z ERRO client/internal/routemanager/systemops/systemops_linux.go:126: Error setting up sysctl: 1 error occurred:
+2026-10-06T02:50:08.321Z ERRO client/internal/connect.go:461: error while starting Netbird Connection Engine: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+2026-10-06T02:50:08.323Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+2026-10-06T02:50:32.834Z WARN client/iface/wgproxy/factory_kernel.go:41: failed to initialize ebpf proxy, fallback to user space proxy: failed to set memlock rlimit: operation not permitted
+2026-10-06T02:50:33.879Z ERRO client/internal/routemanager/systemops/systemops_linux.go:126: Error setting up sysctl: 1 error occurred:
+2026-10-06T02:50:33.958Z ERRO client/internal/connect.go:461: error while starting Netbird Connection Engine: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+2026-10-06T02:50:33.960Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+2026-10-06T02:51:03.366Z WARN client/iface/wgproxy/factory_kernel.go:41: failed to initialize ebpf proxy, fallback to user space proxy: failed to set memlock rlimit: operation not permitted
+2026-10-06T02:51:04.591Z ERRO client/internal/routemanager/systemops/systemops_linux.go:126: Error setting up sysctl: 1 error occurred:
+2026-10-06T02:51:04.655Z ERRO client/internal/connect.go:461: error while starting Netbird Connection Engine: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+2026-10-06T02:51:04.657Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+2026-10-06T02:51:20.220Z WARN client/iface/wgproxy/factory_kernel.go:41: failed to initialize ebpf proxy, fallback to user space proxy: failed to set memlock rlimit: operation not permitted
+2026-10-06T02:51:21.347Z ERRO client/internal/routemanager/systemops/systemops_linux.go:126: Error setting up sysctl: 1 error occurred:
+2026-10-06T02:51:21.403Z ERRO client/internal/connect.go:461: error while starting Netbird Connection Engine: neXal quantum gate requires userspace WireGuard; kernel backend is unsupported
+2026-10-06T02:51:21.405Z WARN [relay: rels://mesh.nexal.systems:443] shared/relay/client/client.go:837: relay connection was already marked as not running
+
+===== colima network =====
+PROFILE    STATUS     ARCH       CPUS    MEMORY    DISK      RUNTIME    ADDRESS
+default    Running    aarch64    2       2GiB      100GiB    docker     
+    inet 127.0.0.1/8 scope host lo
+    inet 192.168.5.1/24 metric 200 brd 192.168.5.255 scope global dynamic eth0
+    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0
+
+DONE

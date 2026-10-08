@@ -32,11 +32,11 @@ type Caps struct {
 // DefaultCaps returns the §0 defaults (opt-in still off).
 func DefaultCaps() Caps {
 	return Caps{
-		MaxSandboxes:     5,
-		MaxCPUFraction:   0.5,
-		MaxMemFraction:   0.5,
-		DiskMarginBytes:  10 << 30,
-		StopGrace:        30 * time.Second,
+		MaxSandboxes:    5,
+		MaxCPUFraction:  0.5,
+		MaxMemFraction:  0.5,
+		DiskMarginBytes: 10 << 30,
+		StopGrace:       30 * time.Second,
 		// Budgeted at 90s daemon + 300s join + 60s address waits = 450s; that left
 		// only 90s of slack on a loaded Mac and two VMs (sbx-e2264d25, sbx-71b28725)
 		// both ran out the clock stuck between login and the mesh-join report. Give

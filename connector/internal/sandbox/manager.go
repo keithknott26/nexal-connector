@@ -70,7 +70,12 @@ type record struct {
 	DriveUnavailable string `json:"driveUnavailable,omitempty"`
 	// AwaitKey: the mesh peer is gone; a rejoin task with a fresh key is needed.
 	AwaitKey bool `json:"awaitKey,omitempty"`
-	busy     bool // an operation goroutine owns this sandbox; not persisted
+	// LAN: the guest was given a second NIC on the Mac's LAN at first boot (its
+	// network config names it lan0), so restarts keep the same two MAC addresses.
+	// LanIP is that NIC's address as the guest last reported it.
+	LAN   bool   `json:"lan,omitempty"`
+	LanIP string `json:"lanIp,omitempty"`
+	busy  bool   // an operation goroutine owns this sandbox; not persisted
 	// bootDeadline is when awaitFirstBoot gives up, while the sandbox is still
 	// StateProvisioning. Not persisted. Suspend/Resume only reconcile Running and
 	// Paused sandboxes (see lifecycle.go), so without this a VM whose host sleeps
@@ -535,6 +540,14 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	if err := CloneDisk(ctx, base, m.diskPath(id), t.Size.DiskGB); err != nil {
 		return err
 	}
+	// A second NIC on the Mac's LAN when the nexal-vmnet bridge helper is installed
+	// (lan.go). The seed names both NICs by MAC, so they are fixed now.
+	nic := guestNICs(id, lanBridgeAvailable())
+	m.mu.Lock()
+	if r := m.boxes[id]; r != nil {
+		r.LAN = nic.LANMAC != ""
+	}
+	m.mu.Unlock()
 	seed := SeedParams{SandboxID: id, InstanceID: fmt.Sprintf("%s-%d", id, m.opts.Now().Unix()),
 		Hostname: t.Hostname, SetupKey: t.SetupKey, VNCPassword: t.VNCPassword,
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
@@ -543,7 +556,8 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		AppProfile: t.Image.AppProfile,
 		// Stock cloud images carry no neXal runtime: the seed's first-boot script
 		// pulls it from the same pinned sidecar image dev containers run.
-		MeshImage: ResolveMeshImage(os.Getenv(MeshImageEnv))}
+		MeshImage: ResolveMeshImage(os.Getenv(MeshImageEnv)),
+		NATMAC:    nic.NATMAC, LANMAC: nic.LANMAC}
 	progress(StepSeed, 82)
 	if err := WriteSeedDir(m.seedDir(id), seed); err != nil {
 		return err
@@ -558,7 +572,8 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	progress(StepBoot, 88)
 	h, err := m.opts.Hypervisor.Start(ctx, Spec{SandboxID: id, Hostname: t.Hostname, CPUs: t.Size.CPUs,
 		MemoryMB: t.Size.MemoryMB, DiskPath: m.diskPath(id), SeedPath: m.seedISO(id),
-		ConsoleLog: m.consoleLog(id), Desktop: t.Desktop, KeepAwake: false})
+		ConsoleLog: m.consoleLog(id), Desktop: t.Desktop, KeepAwake: false,
+		MACAddress: nic.NATMAC, LanSocket: nic.Socket, LanMACAddress: nic.LANMAC})
 	if err != nil {
 		return err
 	}
@@ -581,6 +596,7 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		return errors.New("sandbox vanished during boot")
 	}
 	r.MeshIP, r.HostKey, r.HostKeyPub, r.AwaitKey = fb.MeshIP, fb.HostKeyFingerprint, fb.HostKey, false
+	r.LanIP = fb.LanIP
 	err = m.setStateLocked(r, StateRunning)
 	m.mu.Unlock()
 	if err != nil {

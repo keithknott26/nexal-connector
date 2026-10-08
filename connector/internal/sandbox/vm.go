@@ -30,8 +30,8 @@ import (
 // SeedPath may be empty (a persistent VM restarted after first boot has no seed).
 //
 // Devices: virtio block (Disk, read-write), virtio block (Seed, read-only),
-// NAT network, virtio entropy, serial console appended to ConsoleLog, and a
-// virtio GPU when Desktop is set.
+// NAT network (plus a LAN-bridged one when LanSocket is set), virtio entropy,
+// serial console appended to ConsoleLog, and a virtio GPU when Desktop is set.
 type Spec struct {
 	SandboxID     string `json:"sandboxId"`
 	Hostname      string `json:"hostname"`
@@ -48,6 +48,15 @@ type Spec struct {
 	// KeepAwake asks the host process to hold a power assertion while the VM runs.
 	// The runner always sends false: sandboxes sleep with the Mac (suspend-with-host).
 	KeepAwake bool `json:"keepAwake"`
+	// MACAddress fixes the NAT NIC's address so the seed's network config can
+	// match it. Empty: nexal-vmhost picks one and keeps it next to the disk.
+	MACAddress string `json:"macAddress,omitempty"`
+	// LanSocket is the nexal-vmnet root helper's socket (lan.go). When set,
+	// nexal-vmhost adds a second NIC (LanMACAddress) bridged onto the Mac's LAN,
+	// the way Lima attaches socket_vmnet. Best effort: if the helper cannot be
+	// reached the VM still boots, NAT only.
+	LanSocket     string `json:"lanSocket,omitempty"`
+	LanMACAddress string `json:"lanMacAddress,omitempty"`
 }
 
 // Handle identifies a started VM. It is persisted so a restarted connector can

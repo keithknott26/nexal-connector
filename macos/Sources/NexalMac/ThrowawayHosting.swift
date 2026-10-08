@@ -37,6 +37,8 @@ struct LocalSandbox: Decodable, Identifiable, Equatable {
     var state: String?
     var hostname: String?
     var meshIp: String?
+    /// The VM's address on this Mac's home network (bridged by nexal-vmnet), if any.
+    var lanIp: String?
     var expiresAt: String?
     var kind: String?
     var lifecycle: String?
@@ -198,6 +200,12 @@ final class ThrowawayHosting: ObservableObject {
 
     @Published private(set) var config = SandboxHostingConfig()
     @Published private(set) var local: [LocalSandbox] = []
+
+    /// The home-network address of a VM hosted on this Mac, by its mesh address.
+    func lanAddress(forMesh meshIP: String?) -> String? {
+        guard let meshIP else { return nil }
+        return local.first { $0.meshIp == meshIP }?.lanIp
+    }
     @Published private(set) var network: [NetworkSandbox] = []
     @Published private(set) var message: String?
     @Published private(set) var busyID: String?
@@ -741,12 +749,13 @@ struct ThrowawayHostsSection: View {
             title: title, address: box.meshIp,
             family: entry?.family ?? (box.kind == "devcontainer" ? "devcontainer" : "linux"),
             kind: box.kind, state: state,
-            details: [Self.imageText(entry), ThrowawayFormat.kindLabel(box.kind), box.meshIp].compactMap { $0 },
+            details: [Self.imageText(entry), ThrowawayFormat.kindLabel(box.kind), box.meshIp,
+                      box.lanIp.map { "home network \($0)" }].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : box.expiry,
             progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent,
             appTitle: InstanceApp(profile: entry?.appProfile)?.title, runnerName: nil, runnerOnline: true
         ) {
-            if let entry, entry.canConnect || box.state == "running" { connectMenu(entry) }
+            if let entry, entry.canConnect || box.state == "running" { connectMenu(entry, lan: box.lanIp) }
             if box.isActive {
                 Button { confirmStop(id: box.id, title: title, kind: box.kind) } label: {
                     Image(systemName: "stop.circle")
@@ -797,10 +806,14 @@ struct ThrowawayHostsSection: View {
     }
 
     /// Dev containers have no screen, so they offer Terminal and Files only.
-    private func connectMenu(_ box: NetworkSandbox) -> some View {
+    /// `lan` is the VM's home-network address when it is hosted on this Mac.
+    private func connectMenu(_ box: NetworkSandbox, lan: String? = nil) -> some View {
         Menu {
             if let app = InstanceApp(profile: box.appProfile), let ip = box.meshIp, let url = URL(string: "http://\(ip):\(app.port)") {
                 Button { NSWorkspace.shared.open(url) } label: { Label("Open \(app.title)", systemImage: "safari") }
+                if let lan, let lanURL = URL(string: "http://\(lan):\(app.port)") {
+                    Button { NSWorkspace.shared.open(lanURL) } label: { Label("Open \(app.title) (home network)", systemImage: "house") }
+                }
                 Divider()
             }
             Button { Task { await hosting.connect(box, kind: "ssh", model: model) } } label: { Label("Terminal (SSH)", systemImage: "terminal") }

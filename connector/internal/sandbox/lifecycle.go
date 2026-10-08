@@ -406,7 +406,7 @@ func (m *Manager) restartVM(ctx context.Context, id string) (GuestReply, error) 
 		m.mu.Unlock()
 		return GuestReply{}, errors.New("sandbox unknown")
 	}
-	old, size, host, desktop := rec.Handle, rec.Size, rec.Hostname, rec.Boot.Desktop
+	old, size, host, desktop, lan := rec.Handle, rec.Size, rec.Hostname, rec.Boot.Desktop, rec.LAN
 	timeout := m.caps.FirstBootTimeout
 	m.mu.Unlock()
 	if _, err := os.Stat(m.diskPath(id)); err != nil {
@@ -415,9 +415,19 @@ func (m *Manager) restartVM(ctx context.Context, id string) (GuestReply, error) 
 	if old.Label != "" {
 		_ = m.opts.Hypervisor.Kill(ctx, old) // unload a stale job so the label is free
 	}
+	// A guest first booted with a LAN NIC matches both NICs by MAC: keep them,
+	// bridging lan0 again only if the helper is (still) installed. A guest first
+	// booted without one keeps its NAT address as it was.
+	var nic guestNIC
+	if lan {
+		nic = guestNICs(id, true)
+		if !lanBridgeAvailable() {
+			nic.Socket = ""
+		}
+	}
 	h, err := m.opts.Hypervisor.Start(ctx, Spec{SandboxID: id, Hostname: host, CPUs: size.CPUs,
 		MemoryMB: size.MemoryMB, DiskPath: m.diskPath(id), ConsoleLog: m.consoleLog(id), Desktop: desktop,
-		KeepAwake: false})
+		KeepAwake: false, MACAddress: nic.NATMAC, LanSocket: nic.Socket, LanMACAddress: nic.LANMAC})
 	if err != nil {
 		return GuestReply{}, err
 	}

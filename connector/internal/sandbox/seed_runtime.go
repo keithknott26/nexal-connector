@@ -277,7 +277,8 @@ while :; do
   st=$(/usr/local/bin/netbird status 2>/dev/null | awk -F': *' '/^Management:/{m=$2} /^Signal:/{g=$2} END{print "management=" (m?m:"?") " signal=" (g?g:"?")}')
   n=$(systemctl show -p NRestarts --value nexal-mesh.service 2>/dev/null)
   a=$(systemctl is-active nexal-mesh.service 2>/dev/null)
-  cur="daemon=$a restarts=${n:-?} $st"
+  l=$(ip -4 -o addr show dev lan0 scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')
+  cur="daemon=$a restarts=${n:-?} $st lan=${l:--}"
   if [ "$cur" != "$last" ]; then
     printf 'NEXAL-MESH %s %s\n' "$(date -u +%H:%M:%SZ)" "$cur" >>/dev/hvc0 2>/dev/null
     last=$cur
@@ -356,10 +357,32 @@ fi
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 fp=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 2>/dev/null | awk '{print $2}')
 key=$(awk 'NR==1{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null)
-scrub
-if [ -n "$fp" ] && [ -n "$key" ]; then
-  printf 'NEXAL-FIRSTBOOT {"meshIp":"%s","hostKeyFingerprint":"%s","hostKey":"%s"}\n' "$ip" "$fp" "$key"
-else
-  printf 'NEXAL-FIRSTBOOT {"meshIp":"%s"}\n' "$ip"
+
+# lan0 is the NIC bridged onto the Mac's home network (when the Mac has the
+# nexal-vmnet helper); give the router's DHCP a moment, it is not required.
+lan=""
+if ip link show lan0 >/dev/null 2>&1; then
+  i=0
+  while [ $i -lt 45 ]; do
+    lan=$(ip -4 -o addr show dev lan0 scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')
+    [ -n "$lan" ] && break
+    i=$((i + 1))
+    sleep 1
+  done
+  if [ -n "$lan" ]; then
+    say "home network address $lan"
+  else
+    say "no home network address on lan0 yet (no DHCP answer from the router)"
+  fi
 fi
+
+scrub
+extra=""
+if [ -n "$fp" ] && [ -n "$key" ]; then
+  extra=",\"hostKeyFingerprint\":\"$fp\",\"hostKey\":\"$key\""
+fi
+if [ -n "$lan" ]; then
+  extra="$extra,\"lanIp\":\"$lan\""
+fi
+printf 'NEXAL-FIRSTBOOT {"meshIp":"%s"%s}\n' "$ip" "$extra"
 `

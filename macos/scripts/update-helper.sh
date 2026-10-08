@@ -64,5 +64,9 @@ if [ -f "$SUPPORT_BIN" ]; then
   install -m 755 "$APP/Contents/Helpers/nexal" "$SUPPORT_BIN"
   echo "Refreshed $SUPPORT_BIN"
 fi
+# The LAN bridge helper (VMs get a home-network address too). Skip with NEXAL_SKIP_VMNET=1.
+if [ "${NEXAL_SKIP_VMNET:-}" != 1 ]; then
+  bash "$ROOT/macos/scripts/install-vmnet.sh" || echo "warning: nexal-vmnet was not installed; VMs keep NAT networking only"
+fi
 open "$APP"
 echo "Done. Previous binaries kept in $OUT (nexal.previous, NexalMac.previous) for rollback."

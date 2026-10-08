@@ -71,7 +71,23 @@ enum VMConfigBuilder {
         let net = VZVirtioNetworkDeviceConfiguration()
         net.attachment = VZNATNetworkDeviceAttachment()
         net.macAddress = try resolveMAC(spec: spec)
-        config.networkDevices = [net]
+        var nics = [net]
+        // Optional second NIC on the Mac's LAN (a home-network address from the
+        // router), bridged by the nexal-vmnet root helper. Best effort: without
+        // the helper the VM still boots with NAT, and says why on stderr.
+        if let lanSocket = spec.lan {
+            do {
+                let (attachment, info) = try LANBridge.attach(socketPath: lanSocket, interfaceID: spec.sandboxId)
+                let lan = VZVirtioNetworkDeviceConfiguration()
+                lan.attachment = attachment
+                if let s = spec.lanMacAddress, let mac = VZMACAddress(string: s) { lan.macAddress = mac }
+                nics.append(lan)
+                FileHandle.standardError.write(Data("nexal-vmhost: LAN bridge up (\(info))\n".utf8))
+            } catch {
+                FileHandle.standardError.write(Data("nexal-vmhost: \(error); continuing with NAT only\n".utf8))
+            }
+        }
+        config.networkDevices = nics
 
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
         config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]

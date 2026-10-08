@@ -39,6 +39,11 @@ type SeedParams struct {
 	// neXal runtime, so seedFirstBootScript pulls the netbird binary out of this
 	// image's linux layer on first boot. Not secret; rendered into its own file.
 	MeshImage string
+	// NATMAC and LANMAC, when set, are the guest's two NICs (see GuestMACs): the
+	// seed then carries a network-config naming them nat0 (primary route) and
+	// lan0 (the Mac's LAN, through the nexal-vmnet bridge), both DHCP.
+	NATMAC string
+	LANMAC string
 }
 
 // First-boot protocol. The guest's first-boot script (shipped in the pre-baked
@@ -102,6 +107,9 @@ func ValidateSeed(p SeedParams) error {
 	}
 	if p.MeshImage != "" && !imageRefPattern.MatchString(p.MeshImage) {
 		return errors.New("invalid mesh runtime image")
+	}
+	if (p.NATMAC != "" || p.LANMAC != "") && (!macPattern.MatchString(p.NATMAC) || !macPattern.MatchString(p.LANMAC) || p.NATMAC == p.LANMAC) {
+		return errors.New("invalid guest nic addresses")
 	}
 	return nil
 }
@@ -321,6 +329,15 @@ while [ -z "$IP" ]; do
   sleep 5
 done
 
+# The home-network address (lan0, bridged by the Mac's nexal-vmnet helper), if
+# any: apps are published there too, so TVs and phones on the LAN reach them.
+LANIP=$(ip -4 -o addr show dev lan0 scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}' || true)
+lan_url() {
+  if [ -n "$LANIP" ]; then
+    echo " (home network: http://$LANIP:$1)"
+  fi
+}
+
 case "$NEXAL_APP_PROFILE" in
 home-assistant)
   DATA=/var/lib/nexal-homeassistant
@@ -337,8 +354,12 @@ home-assistant)
   step app-start 85
   mkdir -p "$DATA"
   docker rm -f homeassistant >/dev/null 2>&1 || true
-  docker run -d --name homeassistant --restart unless-stopped     -p "$IP:8123:8123" -v "$DATA:/config" -v /etc/localtime:/etc/localtime:ro     "$IMAGE" || fail "starting Home Assistant"
-  log "home-assistant ready http://$IP:8123"
+  set -- -p "$IP:8123:8123"
+  if [ -n "$LANIP" ]; then
+    set -- "$@" -p "$LANIP:8123:8123"
+  fi
+  docker run -d --name homeassistant --restart unless-stopped "$@" -v "$DATA:/config" -v /etc/localtime:/etc/localtime:ro     "$IMAGE" || fail "starting Home Assistant"
+  log "home-assistant ready http://$IP:8123$(lan_url 8123)"
   ;;
 jellyfin)
   # Jellyfin media server, published on the mesh address only (port 8096). Media: the
@@ -360,8 +381,11 @@ jellyfin)
   step app-start 85
   mkdir -p "$DATA/config" "$DATA/cache" "$DATA/media" /mnt/nexal-drive
   docker rm -f jellyfin >/dev/null 2>&1 || true
-  docker run -d --name jellyfin --restart unless-stopped \
-    -p "$IP:8096:8096" \
+  set -- -p "$IP:8096:8096"
+  if [ -n "$LANIP" ]; then
+    set -- "$@" -p "$LANIP:8096:8096"
+  fi
+  docker run -d --name jellyfin --restart unless-stopped "$@" \
     -v "$DATA/config:/config" -v "$DATA/cache:/cache" -v "$DATA/media:/media/library" \
     --mount type=bind,source=/mnt/nexal-drive,target=/media/shared-drive,readonly,bind-propagation=rslave \
     -e JELLYFIN_PublishedServerUrl="http://$IP:8096" \
@@ -377,7 +401,7 @@ jellyfin)
     fi
     sleep 5
   done
-  log "jellyfin ready http://$IP:8096"
+  log "jellyfin ready http://$IP:8096$(lan_url 8096)"
   ;;
 *)
   fail "unknown app profile"
@@ -465,6 +489,11 @@ func WriteSeedDir(dir string, p SeedParams) error {
 	if err := os.WriteFile(filepath.Join(dir, "user-data"), []byte(RenderUserData(p)), 0o600); err != nil {
 		return err
 	}
+	if p.LANMAC != "" {
+		if err := os.WriteFile(filepath.Join(dir, "network-config"), []byte(RenderNetworkConfig(p)), 0o600); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(filepath.Join(dir, "meta-data"), []byte(RenderMetaData(p)), 0o600)
 }
 
@@ -508,4 +537,7 @@ type FirstBoot struct {
 	// HostKey is the guest's ssh-ed25519 host public key, "ssh-ed25519 AAAA..."
 	// without a comment (contents of ssh_host_ed25519_key.pub, comment stripped).
 	HostKey string `json:"hostKey,omitempty"`
+	// LanIP is the guest's address on the Mac's home network (the bridged lan0
+	// NIC), when it has one.
+	LanIP string `json:"lanIp,omitempty"`
 }

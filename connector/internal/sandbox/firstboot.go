@@ -48,6 +48,13 @@ func ParseFirstBootLine(line string) (fb FirstBoot, ok bool, failed bool, reason
 			fb.HostKeyFingerprint = fp
 		}
 	}
+	// The LAN address is informational: drop anything that is not a private IPv4
+	// address (e.g. a 169.254 self-assigned one) rather than the whole report.
+	if fb.LanIP != "" {
+		if a, err := netip.ParseAddr(fb.LanIP); err != nil || !a.Is4() || !a.IsPrivate() {
+			fb.LanIP = ""
+		}
+	}
 	return fb, true, false, ""
 }
 

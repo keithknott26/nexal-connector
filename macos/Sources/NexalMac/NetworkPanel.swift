@@ -10,6 +10,7 @@ struct NetworkPanel: View {
     @EnvironmentObject private var preferences: ConnectorPreferences
     /// Names people gave peers (shared with the iPhone app); redraws when one changes.
     @ObservedObject private var peerNames = PeerNames.shared
+    @ObservedObject private var hosting = ThrowawayHosting.shared
     /// Sharing services listening on this Mac, checked when its row is opened.
     @State private var localServices: LocalServiceProbe.Result?
 
@@ -264,7 +265,9 @@ struct NetworkPanel: View {
         let info = model.peerNetInfo[peer.id]
         let publicIP = details?.publicIp ?? info?.publicAddress
         let location = details?.location ?? info?.location
-        let privateIP = details?.lanAddress ?? (peer.directIsPrivate == true ? peer.directAddress : nil)
+        // A VM hosted on this Mac reports its home-network address itself (lan0).
+        let privateIP = details?.lanAddress ?? hosting.lanAddress(forMesh: peer.tunnelAddress)
+            ?? (peer.directIsPrivate == true ? peer.directAddress : nil)
         let storage = isStorageGateway(peer)
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {

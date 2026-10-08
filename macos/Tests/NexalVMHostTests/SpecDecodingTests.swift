@@ -113,4 +113,16 @@ final class SpecDecodingTests: XCTestCase {
         XCTAssertEqual(lo.cpus, 1)
         XCTAssertEqual(lo.memoryBytes, 128 << 20)
     }
+
+    func testLANBridgeFields() throws {
+        let s = try decodeValidate(["lanSocket": "/var/run/nexal-vmnet.sock", "lanMacAddress": "02:4c:76:45:a1:f1",
+                                    "macAddress": "02:4e:32:23:03:6f"])
+        XCTAssertEqual(s.lan, "/var/run/nexal-vmnet.sock")
+        XCTAssertEqual(s.lanMacAddress, "02:4c:76:45:a1:f1")
+        XCTAssertNil(try decodeValidate(["lanSocket": ""]).lan, "an empty lanSocket means NAT only")
+        XCTAssertNil(try decodeValidate().lan)
+        assertInvalid(["lanSocket": "relative.sock"], "lanSocket must be an absolute path")
+        assertInvalid(["lanMacAddress": "02:4c:zz:45:a1:f1"], "invalid lanMacAddress")
+        assertInvalid(["lanSocket": "/" + String(repeating: "a", count: 120)], "lanSocket is too long")
+    }
 }

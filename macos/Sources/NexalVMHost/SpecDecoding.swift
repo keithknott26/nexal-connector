@@ -31,11 +31,16 @@ struct VMSpec: Decodable, Equatable {
     var macAddress: String?
     var stopGraceSeconds: Int?
     var sharedDirs: [SharedDirSpec]?
+    // A second NIC bridged onto the Mac's LAN through the nexal-vmnet root helper
+    // (LANBridge.swift); absent: NAT only.
+    var lanSocket: String?
+    var lanMacAddress: String?
 
     static let defaultGraceSeconds = 30
 
     var seed: String? { (seedPath?.isEmpty ?? true) ? nil : seedPath }
     var guest: String? { (guestSocket?.isEmpty ?? true) ? nil : guestSocket }
+    var lan: String? { (lanSocket?.isEmpty ?? true) ? nil : lanSocket }
     var wantsDesktop: Bool { desktop ?? false }
     var graceSeconds: Int { stopGraceSeconds ?? VMSpec.defaultGraceSeconds }
 
@@ -67,6 +72,11 @@ enum SpecValidator {
             throw SpecError("stopGraceSeconds must be 1...3600")
         }
         if let mac = s.macAddress, !mac.isEmpty, !isValidMAC(mac) { throw SpecError("invalid macAddress") }
+        if let mac = s.lanMacAddress, !mac.isEmpty, !isValidMAC(mac) { throw SpecError("invalid lanMacAddress") }
+        if let lan = s.lan {
+            try checkShape(lan, label: "lanSocket")
+            if lan.utf8.count > maxSocketPath { throw SpecError("lanSocket is too long for a unix socket") }
+        }
 
         try requirePath(s.diskPath, label: "diskPath", kind: .file)
         if let seed = s.seed { try requirePath(seed, label: "seedPath", kind: .file) }

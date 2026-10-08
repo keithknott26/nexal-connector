@@ -540,7 +540,10 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
 		DriveWritable: driveWritable(t), SSHCAPublicKey: t.SSHCAPublicKey, DriveToken: t.DriveToken,
 		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL, DriveURL: t.DriveURL,
-		AppProfile: t.Image.AppProfile}
+		AppProfile: t.Image.AppProfile,
+		// Stock cloud images carry no neXal runtime: the seed's first-boot script
+		// pulls it from the same pinned sidecar image dev containers run.
+		MeshImage: ResolveMeshImage(os.Getenv(MeshImageEnv))}
 	progress(StepSeed, 82)
 	if err := WriteSeedDir(m.seedDir(id), seed); err != nil {
 		return err

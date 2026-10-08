@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -33,6 +34,11 @@ type SeedParams struct {
 	// AppProfile installs one application on first boot ("" or "none" for a plain
 	// image); see renderAppProfile.
 	AppProfile string
+	// MeshImage is the OCI image (the dev-container mesh sidecar) that carries the
+	// patched NetBird runtime every peer must run. Stock cloud images have no
+	// neXal runtime, so seedFirstBootScript pulls the netbird binary out of this
+	// image's linux layer on first boot. Not secret; rendered into its own file.
+	MeshImage string
 }
 
 // First-boot protocol. The guest's first-boot script (shipped in the pre-baked
@@ -94,8 +100,15 @@ func ValidateSeed(p SeedParams) error {
 	if !KnownAppProfile(p.AppProfile) {
 		return errors.New("unknown app profile")
 	}
+	if p.MeshImage != "" && !imageRefPattern.MatchString(p.MeshImage) {
+		return errors.New("invalid mesh runtime image")
+	}
 	return nil
 }
+
+// imageRefPattern accepts registry/repo[/...]:tag (no digest form, no scheme):
+// the value is interpolated into a guest file and handed to the fetcher.
+var imageRefPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)+:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$`)
 
 // yq quotes a string as a YAML scalar. JSON strings are valid YAML double-quoted
 // scalars, so the encoder does the escaping.
@@ -206,6 +219,7 @@ func RenderUserData(p SeedParams) string {
 		b.WriteString("    content: |\n")
 		w("      NEXAL_DRIVE_TOKEN=%s\n", p.DriveToken)
 	}
+	renderMeshRuntime(&b, p.MeshImage)
 	renderAppProfile(&b, p.AppProfile)
 	b.WriteString("  - path: /etc/systemd/system/nexal-drive.service\n")
 	b.WriteString("    owner: root:root\n")
@@ -231,11 +245,13 @@ func RenderUserData(p SeedParams) string {
 	b.WriteString("runcmd:\n")
 	b.WriteString("  - [ mkdir, -p, /mnt/nexal-drive ]\n")
 	b.WriteString("  - [ sh, -c, \"systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true\" ]\n")
-	// The first-boot script is part of the pre-baked image (it installs/starts
-	// the mesh runtime with NEXAL_SETUP_KEY, sets the VNC password, binds sshd
-	// and VNC to the mesh interface, enables nexal-drive, prints the
-	// NEXAL-FIRSTBOOT line, then shreds first-boot.env).
-	b.WriteString("  - [ sh, -c, \"if [ -x /usr/local/sbin/nexal-first-boot ]; then /usr/local/sbin/nexal-first-boot > /dev/console 2>&1; else echo 'NEXAL-FIRSTBOOT-FAILED no first-boot script in image' > /dev/console; fi\" ]\n")
+	// A pre-baked neXal-ready image ships /usr/local/sbin/nexal-first-boot; the
+	// stock cloud images the catalog actually serves do not, so the seed brings its
+	// own (seedFirstBootScript). Either way the report must land on hvc0, the
+	// virtio console the runner logs: on stock images the kernel console (and so
+	// /dev/console) is tty0/ttyAMA0, which nobody reads -- writing only there made
+	// every VM time out silently, even its "no first-boot script" failure line.
+	b.WriteString("  - [ sh, -c, \"if [ -x /usr/local/sbin/nexal-first-boot ]; then S=/usr/local/sbin/nexal-first-boot; else S=" + seedFirstBootPath + "; fi; $S 2>&1 | tee /dev/hvc0 > /dev/console 2>/dev/null; true\" ]\n")
 	if p.AppProfile != "" && p.AppProfile != AppProfileNone {
 		// Started after the first-boot script so the mesh address already exists, and
 		// --no-block so a slow install never holds up cloud-init (or the boot).

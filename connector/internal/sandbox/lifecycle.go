@@ -607,10 +607,6 @@ func (m *Manager) bootDev(ctx context.Context, t Task, reset bool) error {
 		return errors.New("devcontainer payload missing")
 	}
 	upStarted := time.Now()
-	// Steps the apps show while a dev container starts: check, boot (devpod up), join (mesh).
-	progress := throttle(func(step string, pct int) { m.reportProgress(t.SandboxID, step, pct) })
-	ctx = WithProgress(ctx, progress)
-	progress(StepCheck, 5)
 	m.opts.Logger.Debug("dev container up starting", "sandbox", t.SandboxID, "workspace", ws, "reset", reset,
 		"recreate", reset && !t.keepData, "driveMode", driveModeOf(t))
 	res, err := m.opts.Dev.Up(ctx, DevUpSpec{Workspace: ws, Hostname: t.Hostname, Devcontainer: *t.Devcontainer,
@@ -678,6 +674,14 @@ func (m *Manager) Resume(gap time.Duration) {
 	for id, r := range m.boxes {
 		if r.State == StateRunning || r.State == StatePaused {
 			ids = append(ids, id)
+		}
+		// A sandbox still StateProvisioning is riding out awaitFirstBoot, which
+		// has no sleep awareness of its own: its ticker (and the VM) simply stop
+		// running across the sleep, so without this its deadline would already
+		// be blown the instant we wake, regardless of how little awake time it
+		// actually used. Credit the sleep gap back.
+		if r.State == StateProvisioning && gap > 0 && !r.bootDeadline.IsZero() {
+			r.bootDeadline = r.bootDeadline.Add(gap)
 		}
 	}
 	m.mu.Unlock()

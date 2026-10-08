@@ -71,6 +71,16 @@ type record struct {
 	// AwaitKey: the mesh peer is gone; a rejoin task with a fresh key is needed.
 	AwaitKey bool `json:"awaitKey,omitempty"`
 	busy     bool // an operation goroutine owns this sandbox; not persisted
+	// bootDeadline is when awaitFirstBoot gives up, while the sandbox is still
+	// StateProvisioning. Not persisted. Suspend/Resume only reconcile Running and
+	// Paused sandboxes (see lifecycle.go), so without this a VM whose host sleeps
+	// mid-boot gets no credit for the sleep time at all: the ticker (and the VM
+	// itself) simply stop running, and the instant everything wakes, wall-clock
+	// time has already blown the deadline -- an instant, console-empty "timed
+	// out" failure no matter how little of the budget was actually used while
+	// awake. Resume(gap) pushes this forward by the sleep duration so a VM that
+	// was legitimately still booting gets its waiting time back.
+	bootDeadline time.Time
 }
 
 // Manager turns coordinator tasks into running VMs and tears them down in order.
@@ -606,8 +616,11 @@ func (m *Manager) handleOf(id string) Handle {
 func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (FirstBoot, error) {
 	m.mu.Lock()
 	timeout := m.caps.FirstBootTimeout
-	m.mu.Unlock()
 	deadline := m.opts.Now().Add(timeout)
+	if r := m.boxes[id]; r != nil {
+		r.bootDeadline = deadline
+	}
+	m.mu.Unlock()
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	var lastConsole string
@@ -617,6 +630,13 @@ func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (Firs
 			return FirstBoot{}, ctx.Err()
 		case <-t.C:
 		}
+		// Resume(gap) may have pushed this sandbox's deadline forward to credit
+		// back time lost to the host sleeping mid-boot; re-read it each tick.
+		m.mu.Lock()
+		if r := m.boxes[id]; r != nil {
+			deadline = r.bootDeadline
+		}
+		m.mu.Unlock()
 		if text, err := readTail(m.consoleLog(id), 256<<10); err == nil {
 			lastConsole = text
 			fb, ok, failed, reason := scanFirstBoot(text)

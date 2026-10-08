@@ -538,7 +538,7 @@ func (a *Agent) WakeSelfTest() {
 // every production Mac, per admitLocked), which would leave an owner-triggered
 // test waiting up to 5 minutes for no reason the owner can see.
 func (a *Agent) runSelfTest(ctx context.Context, hostID string) {
-	t := time.NewTicker(2 * time.Second)
+	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
 		select {
@@ -1020,7 +1020,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}()
 	go func() {
 		defer wg.Done()
-		t := time.NewTicker(2 * time.Second)
+		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
 		for {
 			select {
@@ -1039,7 +1039,7 @@ func (a *Agent) Run(ctx context.Context) error {
 				expired := reqCtx.Err() != nil
 				stop()
 				if expired || err != nil {
-					// Every 2 s, so Debug: a coordinator outage would otherwise
+					// Every 10 s, so Debug: a coordinator outage would otherwise
 					// bury the records that matter under thousands of lines.
 					a.logger.Debug("attempt poll failed", "expired", expired, "error", errorText(err))
 					continue
@@ -1104,7 +1104,7 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 		a.sandbox.RunKillRequests(ctx)
 	}()
 	defer func() { <-killDone }()
-	t := time.NewTicker(10 * time.Second)
+	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
 		select {

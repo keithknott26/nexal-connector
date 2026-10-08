@@ -71,3 +71,28 @@ func TestValidateSeedMeshImage(t *testing.T) {
 		}
 	}
 }
+
+// App setup progress and readiness must reach hvc0 too, or the apps never learn
+// that (or whether) the application came up.
+func TestAppSetupReportsOnHvc0(t *testing.T) {
+	if !strings.Contains(appSetupScript, ">> /dev/hvc0") {
+		t.Error("app setup does not report on hvc0")
+	}
+	for _, f := range []string{"log() { out ", "step() { out ", "ready() { out ", "fail() { out "} {
+		if !strings.Contains(appSetupScript, f) {
+			t.Errorf("app setup reporter %q does not go through out()", f)
+		}
+	}
+	if !strings.Contains(appSetupScript, "http://$IP:8096/health") {
+		t.Error("jellyfin is declared ready without checking that it answers")
+	}
+}
+
+// OpenSSH >= 9.8 resets connections from sources it penalised (the apps' service
+// probes never authenticate); the mesh range is exempted where sshd supports it.
+func TestSeedExemptsMeshFromSSHPenalties(t *testing.T) {
+	if !strings.Contains(seedFirstBootScript, "sshd -t -o PerSourcePenaltyExemptList=100.64.0.0/10") ||
+		!strings.Contains(seedFirstBootScript, "PerSourcePenaltyExemptList 100.64.0.0/10") {
+		t.Error("mesh range is not exempted from sshd per-source penalties")
+	}
+}

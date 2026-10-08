@@ -275,16 +275,19 @@ set -eu
 STATE_DIR=/var/lib/nexal
 . /etc/nexal/app.env
 DONE="$STATE_DIR/app-$NEXAL_APP_PROFILE.done"
-log() { echo "NEXAL-APP $*" > /dev/console 2>/dev/null || true; }
+# Reports go to hvc0 (the virtio console the runner reads; reopened per line,
+# since getty's vhangup breaks long-lived descriptors) and /dev/console.
+out() { printf '%s\n' "$*" >> /dev/hvc0 2>/dev/null; printf '%s\n' "$*" > /dev/console 2>/dev/null; return 0; }
+log() { out "NEXAL-APP $*"; }
 # Progress the runner forwards to the apps: "NEXAL-APP-STEP <step> <percent>".
-step() { echo "NEXAL-APP-STEP $1 $2" > /dev/console 2>/dev/null || true; }
-ready() { echo "NEXAL-APP-READY $NEXAL_APP_PROFILE" > /dev/console 2>/dev/null || true; }
+step() { out "NEXAL-APP-STEP $1 $2"; }
+ready() { out "NEXAL-APP-READY $NEXAL_APP_PROFILE"; }
 if [ -f "$DONE" ]; then
   ready
   exit 0
 fi
 
-fail() { echo "NEXAL-APP-FAILED $*" > /dev/console 2>/dev/null || true; exit 1; }
+fail() { out "NEXAL-APP-FAILED $*"; exit 1; }
 # Every "[ x ] && y" here is written as an if: under set -e a false test is a
 # failed command and would end the script.
 retry() {
@@ -363,6 +366,17 @@ jellyfin)
     --mount type=bind,source=/mnt/nexal-drive,target=/media/shared-drive,readonly,bind-propagation=rslave \
     -e JELLYFIN_PublishedServerUrl="http://$IP:8096" \
     "$IMAGE" || fail "starting Jellyfin"
+  # Ready means answering, not merely started: first start takes a while.
+  n=0
+  until curl -fsS -m 5 -o /dev/null "http://$IP:8096/health" 2>/dev/null; do
+    n=$((n + 1))
+    if [ "$n" -ge 60 ]; then
+      log "jellyfin container: $(docker ps -a --filter name=jellyfin --format '{{.Status}}' 2>/dev/null)"
+      docker logs --tail 5 jellyfin 2>&1 | while IFS= read -r l; do log "jellyfin: $l"; done
+      fail "Jellyfin did not answer on http://$IP:8096 within 5 minutes"
+    fi
+    sleep 5
+  done
   log "jellyfin ready http://$IP:8096"
   ;;
 *)

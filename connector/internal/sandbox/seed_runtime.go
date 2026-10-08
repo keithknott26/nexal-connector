@@ -345,6 +345,14 @@ if [ -z "$ip" ]; then
 fi
 
 [ -e /etc/ssh/ssh_host_ed25519_key ] || ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_key
+# OpenSSH >= 9.8 (Debian 13) penalises sources whose connections never
+# authenticate, then resets every new connection from them before the banner.
+# The neXal apps' service probes (connect, close) look exactly like that, so
+# exempt the mesh range (mesh access is already policy-controlled and
+# certificate-only). Older sshd rejects the option, so only add it where valid.
+if /usr/sbin/sshd -t -o PerSourcePenaltyExemptList=100.64.0.0/10 >/dev/null 2>&1; then
+  printf 'PerSourcePenaltyExemptList 100.64.0.0/10\n' >/etc/ssh/sshd_config.d/05-nexal-mesh.conf
+fi
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
 fp=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 2>/dev/null | awk '{print $2}')
 key=$(awk 'NR==1{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null)

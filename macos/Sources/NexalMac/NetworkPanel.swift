@@ -355,7 +355,7 @@ struct NetworkPanel: View {
                             .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
                             .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe (ML-KEM-1024)" : "Encrypted. ML-KEM-1024 key exchange is not confirmed on this link.")
                         }
-                        if peer.lifecycle == "connected", let latency = peer.latencyMs {
+                        if (peer.lifecycle == "connected" || peer.lifecycle == "degraded"), let latency = peer.latencyMs {
                             Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -379,7 +379,7 @@ struct NetworkPanel: View {
 
     /// Connection overview: latency dial (labelled) beside two status lines, with min/avg/max below.
     private func peerConnectionCard(_ peer: ConnectorStatus.MeshPeer) -> some View {
-        let connected = peer.lifecycle == "connected"
+        let connected = peer.lifecycle == "connected" || peer.lifecycle == "degraded"
         let stats = model.history.latencyStats(forPeer: peer.id)
         var extras: [String] = []
         if let loss = peer.packetLossPercent { extras.append("Packet loss " + loss.formatted(.number.precision(.fractionLength(1))) + "%") }

@@ -667,7 +667,12 @@ func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (Firs
 			}
 		}
 		if alive, err := m.opts.Hypervisor.Alive(ctx, h); err == nil && !alive {
-			return FirstBoot{}, errors.New("VM exited before first boot completed")
+			// The box files are deleted by the caller's failure cleanup: keep what
+			// nexal-vmhost said (a rejected configuration, a failed start) and the
+			// guest's last console lines, the only evidence of why it stopped.
+			host, _ := readTail(m.consoleLog(id)+".host", 16<<10)
+			return FirstBoot{}, fmt.Errorf("VM exited before first boot completed (nexal-vmhost: %s; last console output: %s)",
+				consoleSnippet(host), consoleSnippet(lastConsole))
 		}
 		if m.opts.Now().After(deadline) {
 			// The box files (including the console log) are about to be deleted by

@@ -351,6 +351,7 @@ struct ConnectorStatus: Decodable {
 		/// "lan" or "nat": how the P2P tunnel reaches this peer. Absent from older connectors.
 		let directVia: String?
 		let services: [String]?
+		let bandwidthMbps: Double?
 	}
 	struct MeshTraffic: Decodable { let receivedBytes: UInt64; let sentBytes: UInt64; let lastAt: String? }
 	struct MeshFileSharing: Decodable {

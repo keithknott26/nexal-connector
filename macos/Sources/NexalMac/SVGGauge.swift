@@ -20,6 +20,7 @@ struct SVGGaugeSpec: Equatable {
 
     static let latencyColors = ["#34C759", "#FFD60A", "#FF453A"]
     static let trafficColors = ["#64D2FF", "#0A84FF", "#BF5AF2"]
+    static let bandwidthColors = ["#FF453A", "#FFD60A", "#34C759"]
 
     // Geometry: centre (60,60), radius 44, sweep 270° with the gap at the bottom.
     private static let cx = 60.0, cy = 60.0, r = 44.0

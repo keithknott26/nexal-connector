@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"nexal/connector/internal/bandwidth"
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/contribution"
@@ -179,6 +180,11 @@ type Agent struct {
 	// sandbox runs throwaway VMs for the coordinator; nil unless WithSandbox.
 	// It has its own lock and never takes a.mu.
 	sandbox *sandbox.Manager
+	// bandwidthRunner runs periodic peer-to-peer throughput tests over the mesh
+	// tunnel and stores the most recent result per peer. Its results are merged
+	// into mesh snapshots so the local API, the heartbeat tunnel report, and the
+	// macOS UI all see bandwidthMbps on each peer. Nil unless WithBandwidth.
+	bandwidthRunner *bandwidth.Runner
 }
 
 // Option configures optional Agent behaviour. Options exist so observability can
@@ -217,6 +223,13 @@ func WithMeshProvider(p mesh.Provider) Option {
 // coordinator for sandbox tasks and hands them to m. Without it nothing is polled.
 func WithSandbox(m *sandbox.Manager) Option {
 	return func(a *Agent) { a.sandbox = m }
+}
+
+// WithBandwidth enables periodic peer-to-peer throughput tests over the mesh
+// tunnel. The runner measures download speed to each connected peer and makes
+// the results available on mesh snapshots via enrichMeshStatus.
+func WithBandwidth(r *bandwidth.Runner) Option {
+	return func(a *Agent) { a.bandwidthRunner = r }
 }
 
 func New(c config.Config, path string, api client.API, probe Probe, devPull bool, opts ...Option) (*Agent, error) {
@@ -291,10 +304,25 @@ func (a *Agent) Snapshot() Status {
 		OwnerActivityOverride: a.ownerOverrideLocked(), ShareWhileActive: a.cfg.ShareWhileActive, ExecutionBlocker: blocker,
 		Version: config.Version, HostID: a.cfg.HostID, Mode: mode, Transport: transport, Paused: a.cfg.Paused,
 		Telemetry: a.telemetry, ActiveAttempt: a.active, LastOutcome: a.lastOutcome, PQ: a.pq,
-		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: mesh.SanitizeSnapshot(a.meshProvider.Snapshot()),
+		ResourcePolicy: a.cfg.ResourcePolicy(), Mesh: a.enrichMeshStatus(mesh.SanitizeSnapshot(a.meshProvider.Snapshot())),
 		Presence: a.presenceStatusLocked(), Wake: a.wakeStatusLocked(),
 		CoordinatorHealthy: !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < a.hostHeartbeatIntervalLocked()+15*time.Second,
 		CredentialRejected: !a.credentialRejectedAt.IsZero()}
+}
+
+// enrichMeshStatus merges bandwidth test results into a mesh snapshot. The
+// bandwidth runner stores results separately because it measures throughput
+// over the tunnel, which the mesh runtime does not report natively.
+func (a *Agent) enrichMeshStatus(s mesh.Status) mesh.Status {
+	if a.bandwidthRunner == nil {
+		return s
+	}
+	for i := range s.Peers {
+		if mbps := a.bandwidthRunner.PeerBandwidth(s.Peers[i].ID); mbps > 0 {
+			s.Peers[i].BandwidthMbps = mbps
+		}
+	}
+	return s
 }
 
 // AcceptJobsNow is explicit, local owner consent for ten minutes of zero-cost
@@ -963,7 +991,7 @@ func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) er
 		// configuration this agent loaded at start.
 		enrolledMesh = gate.Enrolled()
 	}
-	meshStatus := mesh.SanitizeSnapshot(provider.Snapshot())
+	meshStatus := a.enrichMeshStatus(mesh.SanitizeSnapshot(provider.Snapshot()))
 	// Embed the tunnel status in the heartbeat when a report is due, so the
 	// coordinator receives both in a single HTTP call.
 	var tunnelLifecycle string
@@ -1141,6 +1169,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			a.runSandbox(ctx, hostID)
+		}()
+	}
+	if a.bandwidthRunner != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			a.bandwidthRunner.Run(ctx, a.meshProvider)
 		}()
 	}
 	defer func() { a.Cancel(); wg.Wait() }()

@@ -82,6 +82,18 @@ if [ -f "$SUPPORT_BIN" ]; then
   install -m 755 "$APP/Contents/Helpers/nexal" "$SUPPORT_BIN"
   echo "Refreshed $SUPPORT_BIN"
 fi
+# Symlink the Nexal bin directory onto PATH so `nexal`, `nexal-network` etc. are
+# available from the terminal without manual shell-profile edits.
+NEXAL_BIN="$HOME/Library/Application Support/Nexal/bin"
+if [ -d "$NEXAL_BIN" ]; then
+  for bin in "$NEXAL_BIN"/*; do
+    [ -x "$bin" ] || continue
+    name=$(basename "$bin")
+    sudo ln -sf "$bin" "/usr/local/bin/$name" 2>/dev/null \
+      && echo "Linked /usr/local/bin/$name" \
+      || echo "warning: could not link /usr/local/bin/$name"
+  done
+fi
 # The LAN bridge helper (VMs get a home-network address too). Skip with NEXAL_SKIP_VMNET=1.
 if [ "${NEXAL_SKIP_VMNET:-}" != 1 ]; then
   bash "$ROOT/macos/scripts/install-vmnet.sh" --binary "$APP/Contents/Helpers/nexal-vmnet" \

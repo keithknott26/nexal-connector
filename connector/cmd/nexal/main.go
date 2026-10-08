@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"nexal/connector/internal/agent"
+	"nexal/connector/internal/bandwidth"
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/cybersecurity"
@@ -546,6 +547,8 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	// reporting (and listing its peers) without an agent restart.
 	meshProvider := enrollmentGatedMesh{path: *path, inner: mesh.NewRuntimeProvider()}
 	opts = append(opts, agent.WithMeshProvider(meshProvider))
+	bwRunner := bandwidth.NewRunner(logger.With("component", "bandwidth"))
+	opts = append(opts, agent.WithBandwidth(bwRunner))
 	// This Mac's details for the other computers' panels, sent over the
 	// presence stream below (one frame, only on material change).
 	hostInfo := sysinfo.NewCollector()

@@ -154,6 +154,12 @@ type Peer struct {
 	DirectVia string `json:"directVia,omitempty"`
 	// Services lists what answered on the tunnel address: "ssh", "vnc", "smb".
 	Services []string `json:"services,omitempty"`
+	// BandwidthMbps is the most recent measured download throughput to this peer
+	// in megabits per second. Populated by the bandwidth test runner, not the
+	// mesh provider. Local-only: the coordinator report copies it into
+	// PeerSecurityReport.BandwidthMbps but it is not part of the runtime's
+	// native status.
+	BandwidthMbps float64 `json:"bandwidthMbps,omitempty"`
 }
 
 type Status struct {
@@ -194,10 +200,11 @@ func SanitizeSnapshot(s Status) Status {
 		if peer.PQ != PQProtected || !valid {
 			peer.FileSharing.Available, peer.FileSharing.Address = false, ""
 			peer.ScreenSharing.Available, peer.ScreenSharing.Address = false, ""
-			if peer.PQReason == PQReasonPeerLacksProfile {
-				// A device that never carries the profile (a phone) is not a
-				// degraded link; it is not covered. Its link stays unprotected
-				// (the gate never opens for it), and it does not demote the host.
+			if peer.PQReason == PQReasonPeerLacksProfile || peer.PQReason == PQReasonRuntimeNotStrict {
+				// A device that never carries the profile (a phone) or a runtime
+				// that is not in strict ML-KEM mode is not a degraded link; it is
+				// not covered. Its link stays unprotected (the gate never opens
+				// for it), and it does not demote the host or the peer lifecycle.
 				peer.PQ = PQUnsupported
 				continue
 			}

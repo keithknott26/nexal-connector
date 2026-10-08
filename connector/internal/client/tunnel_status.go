@@ -31,6 +31,7 @@ type PeerSecurityReport struct {
 	BytesSent         uint64  `json:"bytesSent,omitempty"`
 	BytesReceived     uint64  `json:"bytesReceived,omitempty"`
 	LastHandshakeAt   string  `json:"lastHandshakeAt,omitempty"`
+	BandwidthMbps     float64 `json:"bandwidthMbps,omitempty"`
 }
 
 type TunnelStatusReport struct {
@@ -119,6 +120,7 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 			item.BytesSent = p.Traffic.SentBytes
 			item.BytesReceived = p.Traffic.ReceivedBytes
 			item.LastHandshakeAt = wireTimestamp(p.LastHandshakeAt)
+			item.BandwidthMbps = p.BandwidthMbps
 		}
 		report.PeerSecurity = append(report.PeerSecurity, item)
 	}

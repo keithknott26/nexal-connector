@@ -52,6 +52,7 @@ final class LoginItemSettings: ObservableObject {
         startsAtLogin = current == .enabled || current == .requiresApproval
         requiresApproval = current == .requiresApproval
     }
+
 }
 
 struct ConnectorSettingsView: View {
@@ -119,9 +120,15 @@ struct ConnectorSettingsView: View {
             }
             .tabItem { Label("Remote Access", systemImage: "terminal") }
             .tag(3)
+
+            ScrollView {
+                subscriptionSettings.padding(20)
+            }
+            .tabItem { Label("Subscription", systemImage: "creditcard") }
+            .tag(4)
         }
         .padding(12)
-        .frame(width: 620, height: 560)
+        .frame(width: 620, height: 600)
         .onAppear { loginItem.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             loginItem.refresh()
@@ -193,5 +200,106 @@ struct ConnectorSettingsView: View {
             }
         }
         .toggleStyle(.checkbox)
+    }
+
+    // MARK: - Subscription
+
+    private var subscriptionSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.title)
+                            .foregroundStyle(.blue)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("neXal@home")
+                                .font(.headline)
+                            Text("Personal Network Membership")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Divider()
+
+                    Text("Your membership includes:")
+                        .font(.subheadline.weight(.medium))
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        benefitRow("lock.shield", "End-to-end encrypted mesh networking with post-quantum key exchange")
+                        benefitRow("desktopcomputer", "Connect unlimited personal devices — Macs, iPhones, and iPads")
+                        benefitRow("network", "Private peer-to-peer connections with automatic NAT traversal")
+                        benefitRow("externaldrive.connected.to.line.below", "Secure file sharing and screen sharing across your network")
+                        benefitRow("server.rack", "Virtual machine and development container hosting on your own hardware")
+                        benefitRow("gauge.with.dots.needle.33percent", "Bandwidth monitoring and network performance insights")
+                        benefitRow("bell.badge", "Canary and honeypot intrusion detection for your network")
+                        benefitRow("terminal", "Remote access — SSH, Screen Sharing, and File Sharing over your private network")
+                    }
+
+                    Divider()
+
+                    Text("Paid membership unlocks priority relay infrastructure, expanded VM hosting quotas, advanced analytics, and dedicated network support.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+            }
+
+            GroupBox("Manage membership") {
+                VStack(alignment: .leading, spacing: 12) {
+                    if model.isLinked {
+                        leaveNetworkSection
+                    } else {
+                        Label("Connect this Mac to neXal to manage your membership.", systemImage: "link")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+            }
+        }
+    }
+
+    private func benefitRow(_ symbol: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol)
+                .frame(width: 18, alignment: .center)
+                .foregroundStyle(.blue)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var leaveNetworkSection: some View {
+        if model.leavePhase == .confirming {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(LeavePhase.confirming.title, systemImage: LeavePhase.confirming.symbol)
+                    .font(.subheadline.weight(.semibold))
+                Text(LeavePhase.confirming.detail)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Cancel", role: .cancel) { model.cancelLeave() }
+                    Spacer()
+                    Button("Leave network", role: .destructive) { Task { await model.leaveNetwork() } }
+                        .buttonStyle(.borderedProminent).tint(.red)
+                        .accessibilityIdentifier("confirm-leave-network")
+                }
+            }
+            .padding(12)
+            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        } else {
+            Text("Leaving the neXal network removes this Mac from your personal mesh, revokes all keys, and disconnects all shared services. This cannot be undone.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Leave neXal network", role: .destructive) { model.requestLeave() }
+                .disabled(model.leavePhase?.inProgress == true)
+                .accessibilityIdentifier("leave-network")
+        }
     }
 }

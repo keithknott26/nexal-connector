@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,7 +17,9 @@ var servicePorts = []struct {
 
 const (
 	serviceProbeTimeout = 1500 * time.Millisecond // relayed and PQ-rekeying links answer well after 400 ms
-	serviceProbeTTL     = 60 * time.Second
+	// A peer's offered services change rarely, and a reconnect (see
+	// forgetServices) forces a fresh probe, so a stable link is re-probed slowly.
+	serviceProbeTTL = 10 * time.Minute
 )
 
 type serviceProbe struct {
@@ -48,10 +51,10 @@ func LocalServices() []string {
 }
 
 // probeServices returns the offered services on a peer's tunnel IP, cached for
-// a minute so status polls do not dial the peer every time.
+// serviceProbeTTL so status polls do not dial the peer every time.
 func probeServices(ip string) []string {
 	serviceMu.Lock()
-	if p, ok := serviceCache[ip]; ok && time.Since(p.at) < serviceProbeTTL {
+	if p, ok := serviceCache[ip]; ok && time.Since(p.at) < probeTTL(ip) {
 		serviceMu.Unlock()
 		return p.services
 	}
@@ -78,4 +81,38 @@ func probeServices(ip string) []string {
 	serviceMu.Unlock()
 	noteServiceProbe(ip, services)
 	return services
+}
+
+// probeTTL: this computer's own services can be toggled in System Settings at
+// any time, so the loopback probe stays fresh; peers get the long TTL.
+func probeTTL(ip string) time.Duration {
+	if ip == "127.0.0.1" {
+		return time.Minute
+	}
+	return serviceProbeTTL
+}
+
+// forgetServices drops a peer's cached probe. Called when the peer is not
+// connected, so the first poll after a reconnect (or tunnel address change,
+// which is a different cache key) probes afresh.
+func forgetServices(ip string) {
+	if ip == "" {
+		return
+	}
+	serviceMu.Lock()
+	delete(serviceCache, ip)
+	serviceMu.Unlock()
+}
+
+// isMobilePeer reports whether a peer is an iPhone or iPad, going by the names
+// the apps register ("iphone", "iphone-28-93", "ipad-..."). Same rule as the Mac
+// panel's isMobileDevice.
+func isMobilePeer(names ...string) bool {
+	for _, n := range names {
+		n = strings.ToLower(n)
+		if strings.Contains(n, "iphone") || strings.Contains(n, "ipad") {
+			return true
+		}
+	}
+	return false
 }

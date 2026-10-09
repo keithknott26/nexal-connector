@@ -80,7 +80,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|share-while-active|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|inference|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|share-while-active|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
 	}
 	switch args[0] {
 	case "exit-route":
@@ -137,6 +137,8 @@ func run(ctx context.Context, args []string) error {
 		return driveCommand(ctx, args[1:])
 	case "collective":
 		return collectiveCommand(ctx, args[1:])
+	case "inference":
+		return inferenceCommand(ctx, args[1:])
 	case "pair":
 		return pairCommand(ctx, args[1:])
 	case "pair-v2":
@@ -489,6 +491,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		logDir = ""
 	}
 	diag := diaglog.New(os.Stderr, level, *path, logDir)
+	defer diag.Flush() // a pending "(repeated N times)" note must not be lost on exit
 	logger := diag.Logger()
 	go diag.Watch(ctx, diaglog.PollInterval, logger.With("component", "diagnostics"))
 	mesh.SetDiagnosticLogger(logger.With("component", "mesh"))

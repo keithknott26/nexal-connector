@@ -173,6 +173,7 @@ struct NetworkPanel: View {
             }
             .panelCard()
             ThrowawayHostsSection().panelCard()
+            InferenceSection().panelCard()
             activityGraphs.panelCard()
 			if let report = model.timeMachine, report.timeMachine.enabled {
 				timeMachine(report).panelCard()
@@ -183,25 +184,17 @@ struct NetworkPanel: View {
                     Task { await model.resetUnfinishedPairing() }
                 }.disabled(model.busy)
             }
-            Divider()
-            if model.leavePhase == .confirming {
-                leaveConfirmation
-            } else {
-                Button("Leave neXal network", role: .destructive) { model.requestLeave() }
-                    .disabled(model.leavePhase?.inProgress == true)
-                    .accessibilityIdentifier("leave-network")
-            }
         }
     }
 
     /// SVG status banner: connection state, plus peers online, average latency and quantum label.
     private var connectedHero: some View {
         let peers = model.status?.mesh?.peers ?? []
-        let online = peers.filter { $0.lifecycle == "connected" }
+        let online = peers.filter { $0.lifecycle == "connected" || $0.lifecycle == "degraded" }
         let lat = online.compactMap { $0.latencyMs }
         let avg = lat.isEmpty ? "—" : "\(Int((lat.reduce(0, +) / Double(lat.count)).rounded())) ms"
         let quantum = MeshQuantumPresentation.label(peers: peers)
-        let degraded = model.status?.mesh.map { $0.lifecycle != "connected" } ?? false
+        let degraded = model.status?.mesh.map { $0.lifecycle != "connected" && $0.lifecycle != "degraded" } ?? false
         return PanelHeroView(spec: PanelHeroSpec(
             tone: degraded ? .notice : .good,
             title: degraded ? "Connecting…" : "Connected",
@@ -211,25 +204,6 @@ struct NetworkPanel: View {
             .frame(height: 126)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Connected to the neXal@home network. \(online.count) of \(peers.count) computers online.")
-    }
-
-    /// Inline instead of a dialog: MenuBarExtra windows do not reliably present one.
-    private var leaveConfirmation: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(LeavePhase.confirming.title, systemImage: LeavePhase.confirming.symbol)
-                .font(.subheadline.weight(.semibold))
-            Text(LeavePhase.confirming.detail)
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Cancel", role: .cancel) { model.cancelLeave() }
-                Spacer()
-                Button("Leave network", role: .destructive) { Task { await model.leaveNetwork() } }
-                    .buttonStyle(.borderedProminent).tint(.red)
-                    .accessibilityIdentifier("confirm-leave-network")
-            }
-        }
-        .padding(12)
-        .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     /// Progress and outcome of leaving, at the top of the panel. Stays visible
@@ -276,6 +250,15 @@ struct NetworkPanel: View {
                 peerCard("Security") {
                     detailRow("Post-quantum protection") { pqText(effectivePQ(peer.pq, peers: [peer])) }
                     detailRow("Quantum type") { quantumType([peer]) }
+                    if effectivePQ(peer.pq, peers: [peer]) != "protected", let why = pqReasonAdvice(peer.pqReason) {
+                        Text("\(why.reason). \(why.action)").font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let flaps = peer.pathFlapsLastHour, flaps >= Self.unstableFlapThreshold {
+                        Label("Connection unstable (\(flaps) path changes in the last hour)", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let verified = lastVerified(peer) {
                         detailRow("Last verified") {
                             Text(verified.relative).help(verified.exact)
@@ -526,7 +509,7 @@ struct NetworkPanel: View {
     /// This Mac, first in the list: its own connection, its post-quantum claim (which
     /// follows the neXal gateway link) and the services it offers to the others.
     private func thisMac(_ mesh: ConnectorStatus.MeshStatus) -> some View {
-        let gateway = mesh.peers.first { isStorageGateway($0) && $0.lifecycle == "connected" }
+        let gateway = mesh.peers.first { isStorageGateway($0) && ($0.lifecycle == "connected" || $0.lifecycle == "degraded") }
         let protected = mesh.pq == "protected"
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: 10) {
@@ -570,7 +553,7 @@ struct NetworkPanel: View {
             let privateIP = details?.lanAddress
             let location = details?.location ?? model.ownNetInfo.location
             HStack(alignment: .top, spacing: Self.hostDotSpacing) {
-                Circle().fill(mesh.lifecycle == "connected" ? Color.green : Color.orange)
+                Circle().fill(mesh.lifecycle == "connected" || mesh.lifecycle == "degraded" ? Color.green : Color.orange)
                     .frame(width: Self.hostDotSize, height: Self.hostDotSize).padding(.top, 5)
                 // An empty placeholder the same size as a peer row's refresh button, so
                 // this Mac's name and detail text line up in the same columns as every
@@ -924,7 +907,7 @@ struct NetworkPanel: View {
         let lan = hostDetails(for: peer)?.lanAddress
         Group {
             if !storage {
-                serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress, lan: lan, port: 22)
+                serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress, lan: lan, port: 22, flaps: peer.pathFlapsLastHour)
                 serviceRow("Screen Sharing", on: vncOn, symbol: "display", scheme: "vnc", host: vncHost, lan: lan, port: 5900)
                 serviceRow("File Sharing", on: smbOn, symbol: "folder", scheme: "smb", host: smbHost, lan: lan, port: 445,
                            share: peer.fileSharing?.shareName)
@@ -963,12 +946,16 @@ struct NetworkPanel: View {
     }
 
     private func serviceRow(_ title: String, on: Bool, symbol: String, scheme: String, host: String?,
-                            lan: String? = nil, port: Int = 0, share: String? = nil) -> some View {
+                            lan: String? = nil, port: Int = 0, share: String? = nil, flaps: Int? = nil) -> some View {
         detailRow(title) {
             HStack(spacing: 8) {
                 serviceLED(on)
                 if on, let host, let url = PeerServiceURL.make(scheme: scheme, host: host, user: model.loginName, share: share) {
                     linkButton("Connect", symbol, url, host: host, share: share, lan: lan, port: port)
+                    if scheme == "ssh", let flaps, flaps >= Self.unstableFlapThreshold {
+                        Label("Unstable link: session may pause during path changes", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange).labelStyle(.titleAndIcon)
+                    }
                 } else if on {
                     Text("Waiting for its address").foregroundStyle(.secondary)
                 }
@@ -1015,7 +1002,11 @@ struct NetworkPanel: View {
             AppDiagnostics.ui("service link opened", ["service": scheme, "link": PeerServiceURL.redacted(url)])
             do {
                 switch url.scheme {
-                case "ssh": model.openServiceApplication("com.apple.Terminal", url: url)
+                case "ssh":
+                    // Own script (not ssh:// in Terminal) so keepalive options survive path flaps.
+                    if !PeerSSHLauncher.open(user: model.loginName, host: host) {
+                        model.openServiceApplication("com.apple.Terminal", url: url)
+                    }
                 case "vnc": model.openServiceApplication("com.apple.ScreenSharing", url: url)
                 default: NSWorkspace.shared.open(url)
                 }
@@ -1160,6 +1151,25 @@ struct NetworkPanel: View {
     /// the runtime's coarser flag says.
     private func effectivePQ(_ value: String, peers: [ConnectorStatus.MeshPeer]) -> String {
         MeshQuantumPresentation.label(peers: peers) == "Not reported" ? value : "protected"
+    }
+
+    /// Path changes (direct <-> relay) per hour at which a link is called unstable.
+    private static let unstableFlapThreshold = 6
+
+    /// Plain-words reason PQ is not protected, with one suggested action.
+    private func pqReasonAdvice(_ code: String?) -> (reason: String, action: String)? {
+        switch code {
+        case "exchange-pending": ("Key exchange not finished yet", "Give it a minute; it retries automatically")
+        case "peer-unreachable": ("Peer offline or blocked", "Check it is awake and online")
+        case "peer-lacks-profile": ("Peer does not support post-quantum keys", "Phones and older runtimes stay on standard encryption")
+        case "evidence-expired": ("Protection lease expired", "A fresh key exchange is needed; check the peer is reachable")
+        case "evidence-stale": ("Last key exchange is too old", "Check the peer is online so it can renew")
+        case "key-install-failed": ("Key could not be installed", "Restart neXal on this Mac")
+        case "session-pending": ("Waiting for the tunnel session", "Should clear in a moment")
+        case "peer-disconnected": ("No tunnel to the peer right now", "Wake the peer or check its network")
+        case "runtime-not-strict": ("This Mac is not in strict ML-KEM mode", "Update or restart the neXal runtime")
+        default: nil
+        }
     }
 
     private func pqLabel(_ value: String) -> String {

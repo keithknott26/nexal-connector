@@ -87,7 +87,7 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 	}
 	// The claim is about the gateway link (see mesh.GatewayPQReadyAt); per-peer links
 	// are reported individually in PeerSecurity below.
-	if status.GatewayPQReadyAt(now, 2*time.Minute) {
+	if status.GatewayPQReadyAt(now, 5*time.Minute) {
 		report.SecurityState = "quantum_protected"
 	} else {
 		switch status.PQ {
@@ -108,7 +108,7 @@ func TunnelReportFromRuntime(status mesh.Status, now time.Time) TunnelStatusRepo
 		connected := p.Lifecycle == mesh.LifecycleConnected
 		item := PeerSecurityReport{ID: p.ID, Name: p.Name, Connected: connected}
 		single := mesh.Status{PQ: p.PQ, Peers: []mesh.Peer{p}}
-		if single.StrictPQReadyAt(now, 2*time.Minute) {
+		if single.StrictPQReadyAt(now, 5*time.Minute) {
 			item.NegotiatedSecurity = &NegotiatedSecurity{Algorithm: "ML-KEM-1024", Category: 5, Profile: p.QuantumProfile, VerifiedAt: wireTimestamp(p.PQVerifiedAt), ExpiresAt: wireTimestamp(p.PQExpiresAt)}
 		}
 		// Per-peer network telemetry for connected peers, giving the coordinator

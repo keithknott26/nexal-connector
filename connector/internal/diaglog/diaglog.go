@@ -154,6 +154,7 @@ type Controller struct {
 	on       atomic.Bool
 	flag     string
 	base     slog.Handler
+	dedup    *Dedup
 	file     *RotatingFile
 	fileH    slog.Handler
 }
@@ -164,12 +165,20 @@ type Controller struct {
 func New(w io.Writer, baseline slog.Level, configPath, logDir string) *Controller {
 	c := &Controller{baseline: baseline, flag: FlagPath(configPath)}
 	c.level.Set(baseline)
-	c.base = slog.NewJSONHandler(w, &slog.HandlerOptions{Level: &c.level})
+	c.dedup = NewDedup(w)
+	c.base = slog.NewJSONHandler(c.dedup, &slog.HandlerOptions{Level: &c.level})
 	if logDir != "" {
 		c.file = NewRotatingFile(filepath.Join(logDir, FileName), MaxFileBytes)
 		c.fileH = slog.NewJSONHandler(c.file, &slog.HandlerOptions{Level: slog.LevelDebug})
 	}
 	return c
+}
+
+// Flush writes any pending "(repeated N times)" note. Call it on shutdown.
+func (c *Controller) Flush() {
+	if c.dedup != nil {
+		c.dedup.Flush()
+	}
 }
 
 // Logger returns a logger that writes through this controller.

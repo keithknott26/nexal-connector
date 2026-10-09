@@ -10,6 +10,8 @@ import SwiftUI
 //   sandboxes/state.json                  written by the connector (sandbox.Manager), read here (JSON array of records).
 //   sandboxes/kill-requests/<sandboxId>   written here to ask the connector to tear a host down now
 //                                         (the connector calls Manager.Kill(id) and deletes the file).
+//   sandboxes/stop-requests/<sandboxId>   written here to shut a PERSISTENT VM down but keep its disk (state "stopped").
+//   sandboxes/start-requests/<sandboxId>  written here to boot a stopped persistent VM again from its disk.
 // The connector has no local HTTP API for List/Kill, so files are the simplest consistent seam.
 // Hosts on the network (other Macs, cloud) and Connect go through the connector CLI (`nexal sandbox ...`),
 // because this app deliberately has no coordinator client.
@@ -48,6 +50,9 @@ struct LocalSandbox: Decodable, Identifiable, Equatable {
     /// Holds CPU, memory or disk (provisioning, running, stopping, or paused by sleep).
     var isActive: Bool { ["provisioning", "running", "stopping", "paused"].contains(state ?? "") }
     var isRunning: Bool { state == "running" || state == "paused" }
+    var isStopped: Bool { state == "stopped" }
+    /// Only a persistent VM can be stopped without deleting it (ephemeral ones are wiped on every stop).
+    var canStopKeepingDisk: Bool { lifecycle == "persistent" && kind != "devcontainer" }
 }
 
 /// A host on the network, from `nexal sandbox --action list`.
@@ -178,6 +183,7 @@ enum ThrowawayFormat {
         case "provisioning": return "Starting"
         case "running": return "Running"
         case "stopping": return "Stopping"
+        case "stopped": return "Stopped"
         case "failed": return "Failed"
         case "deleted": return "Deleted"
         default: return "Unknown"
@@ -189,8 +195,13 @@ enum ThrowawayFormat {
 
 enum ThrowawayConnectError: LocalizedError {
     case unusable(String)
+    /// The guest is still setting the one-time screen-sharing password; asking again in a few seconds works.
+    case pending
     var errorDescription: String? {
-        switch self { case .unusable(let s): return s }
+        switch self {
+        case .unusable(let s): return s
+        case .pending: return "The host is still preparing its screen-sharing password. Try again in a few seconds."
+        }
     }
 }
 
@@ -226,6 +237,8 @@ final class ThrowawayHosting: ObservableObject {
     var configURL: URL { root.appendingPathComponent("sandbox-hosting.json") }
     var stateURL: URL { root.appendingPathComponent("sandboxes/state.json") }
     var killDir: URL { root.appendingPathComponent("sandboxes/kill-requests", isDirectory: true) }
+    var stopDir: URL { root.appendingPathComponent("sandboxes/stop-requests", isDirectory: true) }
+    var startDir: URL { root.appendingPathComponent("sandboxes/start-requests", isDirectory: true) }
 
     var runningHere: [LocalSandbox] { local.filter { $0.isActive } }
     var runningLine: String { ThrowawayFormat.runningLine(runningHere.count) }
@@ -402,7 +415,28 @@ final class ThrowawayHosting: ObservableObject {
         }
     }
 
-    func stopAll() { for s in runningHere { stop(s.id) } }
+    /// Asks the connector to shut a persistent VM down and keep its disk, or (`start`) to boot it again.
+    func requestKeepingDisk(_ id: String, start: Bool) {
+        guard Self.validID(id) else { return }
+        let dir = start ? startDir : stopDir
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data().write(to: dir.appendingPathComponent(id), options: .atomic)
+            message = nil
+        } catch {
+            message = "Could not \(start ? "start" : "stop") it: \(error.localizedDescription)"
+        }
+    }
+
+    /// Quit-time "stop all": persistent VMs are stopped with their disks kept; everything else
+    /// (ephemeral VMs, dev containers) keeps the old behavior and is torn down.
+    func stopAll() {
+        for s in runningHere {
+            if s.canStopKeepingDisk && s.isRunning { requestKeepingDisk(s.id, start: false) }
+            else if s.canStopKeepingDisk { continue } // provisioning or already stopping: never erase a persistent disk from here
+            else { stop(s.id) }
+        }
+    }
 
     // MARK: Hosts on the network and Connect (through the connector CLI)
 
@@ -507,7 +541,7 @@ final class ThrowawayHosting: ObservableObject {
                 let data = try await model.sandbox(action: "connect", id: box.id, kind: "vnc")
                 let reply = try JSONDecoder().decode(SandboxConnectReply.self, from: data)
                 if reply.pending == true {
-                    throw ThrowawayConnectError.unusable("The host is still preparing its screen-sharing password. Try again in a few seconds.")
+                    throw ThrowawayConnectError.pending
                 }
                 try Self.openScreenSharing(reply)
             default:
@@ -523,7 +557,29 @@ final class ThrowawayHosting: ObservableObject {
         }
     }
 
+    /// The screen address and a fresh password for the built-in viewer (hover preview, live window).
+    /// Unlike `connect`, this does not claim `busyID` or set `message`: a hover must not grey out the
+    /// Connect menus. Every call asks the connector again, because the password is one-time; nothing is cached.
+    func vncEndpoint(for box: NetworkSandbox, model: AppModel) async throws -> VNCEndpoint {
+        guard Self.validID(box.id) else {
+            throw ThrowawayConnectError.unusable("This host has no usable identifier.")
+        }
+        let data = try await model.sandbox(action: "connect", id: box.id, kind: "vnc")
+        let reply = try JSONDecoder().decode(SandboxConnectReply.self, from: data)
+        return try Self.vncEndpoint(from: reply)
+    }
+
     // MARK: Connect helpers (pure enough to unit test)
+
+    nonisolated static func vncEndpoint(from reply: SandboxConnectReply) throws -> VNCEndpoint {
+        if reply.pending == true { throw ThrowawayConnectError.pending }
+        let port = reply.port ?? 5900
+        guard let host = reply.host, validHost(host), let password = reply.password, !password.isEmpty,
+              (1...65535).contains(port) else {
+            throw ThrowawayConnectError.unusable("The host returned connection details this app cannot use.")
+        }
+        return VNCEndpoint(host: host, port: port, password: password)
+    }
 
     nonisolated static func validHost(_ s: String) -> Bool {
         !s.isEmpty && s.count <= 253 && s.range(of: "^[A-Za-z0-9.:-]+$", options: .regularExpression) != nil
@@ -598,7 +654,8 @@ final class ThrowawayHosting: ObservableObject {
         trap 'rm -rf "$D"' EXIT
         clear
         \(tool) \(port) -i "$D/key" -o CertificateFile="$D/key-cert.pub" -o IdentitiesOnly=yes \
-        -o UserKnownHostsFile="$D/known_hosts" -o StrictHostKeyChecking=yes \(user)@\(host)
+        -o UserKnownHostsFile="$D/known_hosts" -o StrictHostKeyChecking=yes \
+        -o ServerAliveInterval=15 -o ServerAliveCountMax=8 -o TCPKeepAlive=yes \(user)@\(host)
         """
         let scriptURL = directory.appendingPathComponent(files ? "files.command" : "ssh.command")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -708,6 +765,7 @@ struct ThrowawayHostingSettingsView: View {
                 }
                 Text("With the home-network bridge, new virtual machines also get an address from your router, so devices that are not on neXal (a TV, for example) can reach apps like Jellyfin. Setting it up asks for your password once.")
                     .font(.caption).foregroundStyle(.secondary)
+                NetworkSetupCheckView(autoRun: hosting.lanBridgeReady == true && hosting.local.contains { $0.isRunning && $0.lanIp == nil })
             }
             if let message = hosting.message { Text(message).font(.caption).foregroundStyle(.orange) }
         }
@@ -862,10 +920,27 @@ struct ThrowawayHostsSection: View {
                       box.lanIp.map { "home network \($0)" }].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : box.expiry,
             progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent,
-            appTitle: InstanceApp(profile: entry?.appProfile)?.title, runnerName: nil, runnerOnline: true
+            appTitle: InstanceApp(profile: entry?.appProfile)?.title, runnerName: nil, runnerOnline: true,
+            preview: previewTarget(for: entry, title: title, kind: box.kind, state: state, paused: box.paused)
         ) {
             if let entry, entry.canConnect || box.state == "running" { connectMenu(entry, lan: box.lanIp) }
-            if box.isActive {
+            if box.canStopKeepingDisk {
+                if box.isStopped {
+                    Button { hosting.requestKeepingDisk(box.id, start: true) } label: { Image(systemName: "play.circle") }
+                        .buttonStyle(.borderless)
+                        .help("Start")
+                } else if box.isRunning {
+                    Button { hosting.requestKeepingDisk(box.id, start: false) } label: { Image(systemName: "stop.circle") }
+                        .buttonStyle(.borderless)
+                        .help("Stop (keeps its disk)")
+                }
+                if box.isActive || box.isStopped {
+                    Button { confirmStop(id: box.id, title: title, kind: box.kind) } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                        .disabled(box.state == "stopping" || box.state == "provisioning")
+                        .help("Delete (erases its disk)")
+                }
+            } else if box.isActive {
                 Button { confirmStop(id: box.id, title: title, kind: box.kind) } label: {
                     Image(systemName: "stop.circle")
                 }
@@ -883,10 +958,23 @@ struct ThrowawayHostsSection: View {
             details: [Self.imageText(box), box.runnerName.map { "on \($0)" }, box.meshIp].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : ThrowawayFormat.date(box.expiresAt),
             progressStep: box.progress?.step, progressPercent: box.progress?.percent,
-            appTitle: InstanceApp(profile: box.appProfile)?.title, runnerName: box.runnerName, runnerOnline: box.runnerOnline
+            appTitle: InstanceApp(profile: box.appProfile)?.title, runnerName: box.runnerName, runnerOnline: box.runnerOnline,
+            preview: previewTarget(for: box, title: title, kind: box.kind, state: box.state, paused: nil)
         ) {
             if box.canConnect { connectMenu(box) }
         }
+    }
+
+    /// Only a running virtual machine has a screen to show. Stopped, paused, starting and container rows get nil.
+    private func previewTarget(for entry: NetworkSandbox?, title: String, kind: String?, state: String?, paused: Bool?) -> VMPreviewTarget? {
+        guard let entry, ThrowawayHosting.validID(entry.id),
+              VMPreviewEligibility.unavailableReason(kind: kind ?? entry.kind, state: state, paused: paused) == nil else { return nil }
+        let hosting = self.hosting
+        let model = self.model
+        return VMPreviewTarget(
+            id: entry.id, title: title,
+            fetchEndpoint: { try await hosting.vncEndpoint(for: entry, model: model) },
+            openScreenSharing: { Task { await hosting.connect(entry, kind: "vnc", model: model) } })
     }
 
     private static func imageText(_ box: NetworkSandbox?) -> String? {
@@ -928,6 +1016,21 @@ struct ThrowawayHostsSection: View {
     }
 }
 
+/// Clicking the OS tile of a running VM opens its live window. (Not the title: a double-click there renames.)
+private struct LiveViewTap: ViewModifier {
+    let enabled: Bool
+    let action: () -> Void
+    func body(content: Content) -> some View {
+        Group {
+            if enabled {
+                content.contentShape(Rectangle()).onTapGesture(perform: action)
+            } else {
+                content
+            }
+        }
+    }
+}
+
 /// One VM or development container: OS tile, name, status, details, actions and progress.
 struct InstanceCard<Actions: View>: View {
     let title: String
@@ -942,12 +1045,54 @@ struct InstanceCard<Actions: View>: View {
     var appTitle: String? = nil
     var runnerName: String? = nil
     var runnerOnline: Bool? = nil
+    /// Set for a running virtual machine only: hovering the row shows a live thumbnail and clicking opens the live window.
+    var preview: VMPreviewTarget? = nil
     @ViewBuilder let actions: () -> Actions
+
+    @State private var previewModel: VMPreviewModel?
+    @State private var hoverTask: Task<Void, Never>?
+
+    /// Opens the thumbnail after the pointer has rested on the row for 0.4 s; closes it shortly after
+    /// the pointer leaves the row and the thumbnail (the gap between them must not flicker it).
+    private func hoverChanged(_ inside: Bool) {
+        guard preview != nil else { return }
+        hoverTask?.cancel()
+        if inside {
+            guard previewModel == nil else { return }
+            hoverTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled, let preview, previewModel == nil else { return }
+                let model = VMPreviewModel(mode: .preview, fetchEndpoint: preview.fetchEndpoint)
+                previewModel = model
+                model.start()
+            }
+        } else {
+            hoverTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+                closePreview()
+            }
+        }
+    }
+
+    private func closePreview() {
+        hoverTask?.cancel()
+        hoverTask = nil
+        previewModel?.stop()
+        previewModel = nil
+    }
+
+    private func openLive() {
+        guard let preview else { return }
+        closePreview()
+        VMLiveWindowController.shared.show(preview)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
                 InstanceIcon(family: family, size: 30)
+                    .modifier(LiveViewTap(enabled: preview != nil, action: openLive))
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(title).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
@@ -965,7 +1110,26 @@ struct InstanceCard<Actions: View>: View {
                     }
                 }
                 Spacer(minLength: 6)
-                HStack(spacing: 8) { actions() }
+                HStack(spacing: 8) {
+                    if preview != nil {
+                        Button { openLive() } label: { Image(systemName: "play.rectangle") }
+                            .buttonStyle(.borderless)
+                            .help("Open live view")
+                    }
+                    actions()
+                }
+            }
+            .contentShape(Rectangle())
+            .onChange(of: preview?.id) { _, _ in
+                if preview == nil { closePreview() }
+            }
+            .onDisappear { closePreview() }
+            // Shown inline, not as a popover: a MenuBarExtra window does not reliably present popovers.
+            if let previewModel, preview != nil {
+                VMPreviewThumbnail(preview: previewModel)
+                    .contentShape(Rectangle())
+                    .onTapGesture { openLive() }
+                    .transition(.opacity)
             }
             if InstanceProgress.shows(state) || progressStep?.hasPrefix("app-") == true {
                 InstanceProgress(kind: kind, state: state, step: progressStep, percent: progressPercent,
@@ -975,6 +1139,7 @@ struct InstanceCard<Actions: View>: View {
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.quaternary.opacity(0.35)))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.5)))
+        .onHover { hoverChanged($0) }
     }
 }
 
@@ -996,6 +1161,7 @@ struct StatusPill: View {
         case "provisioning": return "Starting"
         case "requested": return "Queued"
         case "stopping": return "Stopping"
+        case "stopped": return "Stopped"
         case "paused": return "Paused"
         case "failed": return "Failed"
         default: return (state ?? "Unknown").capitalized

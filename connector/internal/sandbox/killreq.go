@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -75,6 +76,62 @@ func (m *Manager) RunKillRequests(ctx context.Context) {
 			return
 		case <-t.C:
 			m.ProcessKillRequests()
+			m.ProcessStopRequests()
+			m.ProcessStartRequests()
 		}
 	}
+}
+
+// Stop and start requests work like kill requests, in sibling directories:
+// stop-requests/<id> and start-requests/<id>. A request for a sandbox that is
+// unknown, or that can never honor it (ephemeral), is dropped; a busy one is
+// retried until killRequestTTL.
+func (m *Manager) stopRequestsDir() string  { return filepath.Join(m.opts.DataDir, "stop-requests") }
+func (m *Manager) startRequestsDir() string { return filepath.Join(m.opts.DataDir, "start-requests") }
+
+func (m *Manager) processRequests(dir, what string, act func(string) error) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	done := 0
+	for _, e := range entries {
+		id := e.Name()
+		path := filepath.Join(dir, id)
+		fi, err := os.Lstat(path)
+		if err != nil {
+			continue
+		}
+		if !ValidID(id) || !fi.Mode().IsRegular() {
+			_ = os.Remove(path)
+			continue
+		}
+		if err := act(id); err != nil {
+			if m.opts.Now().Sub(fi.ModTime()) > killRequestTTL || permanentRequestError(err) {
+				m.opts.Logger.Warn("owner "+what+" request dropped", "sandbox", id, "error", err.Error())
+				_ = os.Remove(path)
+			}
+			continue
+		}
+		done++
+		_ = os.Remove(path)
+		m.opts.Logger.Info("owner "+what+" requested", "sandbox", id)
+	}
+	return done
+}
+
+// permanentRequestError reports refusals that will not change on a retry.
+func permanentRequestError(err error) bool {
+	s := err.Error()
+	return strings.Contains(s, "unknown") || strings.Contains(s, "only a persistent") || strings.Contains(s, "not supported") || strings.Contains(s, "invalid")
+}
+
+// ProcessStopRequests stops (keeping the disk) every sandbox with a pending request.
+func (m *Manager) ProcessStopRequests() int {
+	return m.processRequests(m.stopRequestsDir(), "stop", m.Stop)
+}
+
+// ProcessStartRequests starts every stopped sandbox with a pending request.
+func (m *Manager) ProcessStartRequests() int {
+	return m.processRequests(m.startRequestsDir(), "start", m.Start)
 }

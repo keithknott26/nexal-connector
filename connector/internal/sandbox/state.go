@@ -7,15 +7,17 @@ package sandbox
 //	running      -> stopping | failed | provisioning (reset/re-create) | paused
 //	paused       -> running | stopping | failed | provisioning
 //	failed       -> stopping | provisioning (reset)
-//	stopping     -> deleted | failed
+//	stopping     -> deleted | failed | stopped (persistent Stop keeps the disk)
+//	stopped      -> provisioning (Start) | stopping (Delete)
 //	deleted      -> (terminal)
 var transitions = map[State][]State{
 	"":                {StateProvisioning},
-	StateProvisioning: {StateRunning, StateFailed, StateStopping, StateProvisioning},
+	StateProvisioning: {StateRunning, StateFailed, StateStopping, StateProvisioning, StateStopped},
 	StateRunning:      {StateStopping, StateFailed, StateProvisioning, StatePaused},
 	StatePaused:       {StateRunning, StateStopping, StateFailed, StateProvisioning},
 	StateFailed:       {StateStopping, StateProvisioning},
-	StateStopping:     {StateDeleted, StateFailed},
+	StateStopping:     {StateDeleted, StateFailed, StateStopped},
+	StateStopped:      {StateProvisioning, StateStopping},
 	StateDeleted:      {},
 }
 

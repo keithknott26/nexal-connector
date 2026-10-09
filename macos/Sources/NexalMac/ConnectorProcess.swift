@@ -253,3 +253,122 @@ enum ConnectorProcess {
         return try stdout.result()
     }
 }
+
+/// Lets the owner stop a streaming child. Thread-safe: `cancel()` is called from the
+/// main actor while the reader blocks on another thread.
+final class ProcessCancelToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelledFlag = false
+    private var timedOutFlag = false
+
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelledFlag }
+    var isTimedOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOutFlag }
+
+    fileprivate func attach(_ child: Process) {
+        lock.lock()
+        process = child
+        let already = cancelledFlag
+        lock.unlock()
+        if already { Self.stop(child) }
+    }
+
+    /// SIGTERM now, SIGKILL two seconds later if the child is still running.
+    func cancel() {
+        lock.lock()
+        cancelledFlag = true
+        let child = process
+        lock.unlock()
+        if let child { Self.stop(child) }
+    }
+
+    fileprivate func expire() {
+        lock.lock(); timedOutFlag = true; lock.unlock()
+        cancel()
+    }
+
+    private static func stop(_ child: Process) {
+        if child.isRunning { child.terminate() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if child.isRunning { Darwin.kill(child.processIdentifier, SIGKILL) }
+        }
+    }
+}
+
+struct ConnectorStreamResult: Sendable {
+    let status: Int32
+    /// The connector's own stderr message, when it wrote the structured envelope.
+    let reason: String?
+    let cancelled: Bool
+    let timedOut: Bool
+}
+
+extension ConnectorProcess {
+    /// Runs a long command and delivers each stdout line (newline-delimited JSON) to
+    /// `onLine` as it is written. Same executable pinning, environment and
+    /// no-shell rules as `execute`; the difference is that stdout is streamed, not
+    /// captured whole. A single line over 64 KiB is dropped, not buffered without
+    /// limit. Run only on a worker queue.
+    static func stream(
+        _ selection: ExecutableSelection, _ command: CLICommand, config: URL? = nil,
+        token: ProcessCancelToken, onLine: @Sendable (Data) -> Void
+    ) throws -> ConnectorStreamResult {
+        let process = try make(selection, command, config: config)
+        let output = Pipe()
+        let errorOutput = Pipe()
+        process.standardOutput = output
+        process.standardError = errorOutput
+        process.standardInput = FileHandle.nullDevice
+        let stderr = BoundedCapture()
+        let group = DispatchGroup()
+        try process.run()
+        token.attach(process)
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            stderr.drain(errorOutput.fileHandleForReading)
+            group.leave()
+        }
+        let deadline = DispatchWorkItem { token.expire() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + command.timeLimit, execute: deadline)
+
+        let reader = output.fileHandleForReading
+        let maxLine = 65_536
+        var buffer = Data()
+        var skippingOversizedLine = false
+        while true {
+            let chunk = reader.availableData
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[buffer.startIndex..<newline])
+                buffer.removeSubrange(buffer.startIndex...newline)
+                if skippingOversizedLine { skippingOversizedLine = false }
+                else if !line.isEmpty { onLine(line) }
+            }
+            if buffer.count > maxLine { buffer.removeAll(); skippingOversizedLine = true }
+        }
+        if !buffer.isEmpty, !skippingOversizedLine { onLine(buffer) }
+        process.waitUntilExit()
+        deadline.cancel()
+        _ = group.wait(timeout: .now() + 3)
+        return ConnectorStreamResult(
+            status: process.terminationStatus,
+            reason: ConnectorFailure.reason(in: stderr.bytes()),
+            cancelled: token.isCancelled && !token.isTimedOut,
+            timedOut: token.isTimedOut)
+    }
+}
+
+/// Collects streamed stdout lines (a pretty-printed JSON document arrives as several lines).
+final class LineSink: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [Data] = []
+    func append(_ line: Data) { lock.lock(); lines.append(line); lock.unlock() }
+    func joined() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        return lines.reduce(into: Data()) { out, line in
+            if !out.isEmpty { out.append(0x0A) }
+            out.append(line)
+        }
+    }
+}

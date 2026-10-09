@@ -63,6 +63,18 @@ enum CLICommand {
     /// Diagnostic mode: switch the agent's Debug logging on or off (no restart),
     /// report it, or write a redacted bundle to an absolute path.
     case diagnostics(DiagnosticsAction)
+    /// AI inference preflight (`nexal inference preflight --json`): a read-only check of
+    /// what this Mac and its peers could run. It installs and downloads nothing.
+    case inferencePreflight
+    /// `nexal inference install <id> --json`: downloads and verifies a model, printing
+    /// NDJSON events. Long-running, so it is run by `ConnectorProcess.stream`, not `execute`.
+    case inferenceInstall(modelId: String)
+    /// `nexal inference status --json`: the installed models.
+    case inferenceStatus
+    /// `nexal inference verify <id> --json`: re-hash an installed model's files.
+    case inferenceVerify(modelId: String)
+    /// `nexal inference remove <id> --yes --json`: delete an installed model's files.
+    case inferenceRemove(modelId: String)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination: it may wait up to 90 s for the
@@ -74,6 +86,14 @@ enum CLICommand {
         if case .activateGuestInvitation = self { return 40 }
         if case .exitRoute = self { return 35 }
         if case .diagnostics(.bundle(_)) = self { return 60 }
+        // Reads the connector status, collects this Mac's details and may run the
+        // runtime probe (10 s limit); the connector call alone allows 5 s.
+        if case .inferencePreflight = self { return 45 }
+        // A model download is many GB: the limit is a backstop against a hung child, not a pace.
+        if case .inferenceInstall = self { return 6 * 3600 }
+        // Re-hashes every file of a multi-GB model.
+        if case .inferenceVerify = self { return 300 }
+        if case .inferenceRemove = self { return 60 }
         return 20
     }
 
@@ -104,7 +124,7 @@ enum CLICommand {
         case .peersView: command = ["peers-view"]
 		case .timeMachine: command = ["time-machine"]
 		case .timeMachineCredentials: command = ["time-machine", "--reveal-credentials"]
-		case .timeMachineConnect: command = ["time-machine", "-connect"]
+		case .timeMachineConnect: command = ["time-machine", "--connect"]
         case .pause: command = ["pause"]
         case let .shareWhileActive(on): command = ["share-while-active", on ? "on" : "off"]
         case .resume: command = ["resume"]
@@ -142,6 +162,16 @@ enum CLICommand {
             case .status: command = ["diagnostics", "--status"]
             case let .bundle(path): command = ["diagnostics", "--bundle", path]
             }
+        case .inferencePreflight:
+            command = ["inference", "preflight", "--json"]
+        case let .inferenceInstall(modelId):
+            command = ["inference", "install", modelId, "--json"]
+        case .inferenceStatus:
+            command = ["inference", "status", "--json"]
+        case let .inferenceVerify(modelId):
+            command = ["inference", "verify", modelId, "--json"]
+        case let .inferenceRemove(modelId):
+            command = ["inference", "remove", modelId, "--yes", "--json"]
         }
         return command + ["--config", config.path]
     }
@@ -340,6 +370,7 @@ struct ConnectorStatus: Decodable {
 		let relayRegion: String?; var latencyMs: Double?; let packetLossPercent: Double?
 		let lastHandshakeAt: String?; let pq: String; let pqVerifiedAt: String?
  let quantumProfile: String?; let pqExpiresAt: String?
+		let pqReason: String?; let pathFlapsLastHour: Int?
 		let traffic: MeshTraffic
 		let fileSharing: MeshFileSharing?
 		let screenSharing: MeshScreenSharing?

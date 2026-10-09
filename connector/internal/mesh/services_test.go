@@ -62,3 +62,37 @@ func TestLocalServicesProbesLoopback(t *testing.T) {
 		t.Fatalf("services = %v (dialed %v)", got, dialed)
 	}
 }
+
+func TestIsMobilePeer(t *testing.T) {
+	for name, want := range map[string]bool{
+		"iphone-28-93.peers.mesh.nexal.systems":       true,
+		"iPad-pro":                                    true,
+		"keiths-macbook-pro.peers.mesh.nexal.systems": false,
+		"": false,
+	} {
+		if got := isMobilePeer(name); got != want {
+			t.Errorf("isMobilePeer(%q) = %v, want %v", name, got, want)
+		}
+	}
+	if !isMobilePeer("", "iPhone") {
+		t.Error("any matching name should count")
+	}
+}
+
+func TestForgetServicesForcesReprobe(t *testing.T) {
+	var calls atomic.Int32
+	prev := dialService
+	defer func() { dialService = prev }()
+	dialService = func(string) bool { calls.Add(1); return false }
+	probeServices("100.64.0.77")
+	probeServices("100.64.0.77")
+	n := calls.Load()
+	if int(n) != len(servicePorts) {
+		t.Fatalf("second probe not cached: %d dials", n)
+	}
+	forgetServices("100.64.0.77")
+	probeServices("100.64.0.77")
+	if int(calls.Load()) != 2*len(servicePorts) {
+		t.Fatalf("no reprobe after forget: %d dials", calls.Load())
+	}
+}

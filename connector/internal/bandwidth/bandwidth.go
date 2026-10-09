@@ -93,6 +93,7 @@ func (s *Server) Stop() {
 	s.mu.Lock()
 	ln := s.listener
 	s.listener = nil
+	s.addr = ""
 	s.mu.Unlock()
 	if ln != nil {
 		_ = ln.Close()
@@ -139,8 +140,8 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) {
 
 func (s *Server) handleConn(conn net.Conn, buf []byte) {
 	defer conn.Close()
-	// 10 s deadline for the entire exchange.
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	// 30 s deadline for the entire exchange; matches the client side so slow links can complete.
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	// Read 4-byte big-endian payload length.
 	var sizeBuf [4]byte

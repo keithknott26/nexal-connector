@@ -345,6 +345,54 @@ final class AppModel: ObservableObject {
         try await invoke(.sandbox(action: action, id: id, kind: kind), input: input)
     }
 
+    /// `nexal inference preflight --json`: the read-only "what could run here" check.
+    /// Decode with `InferenceReport.decode`.
+    func inferencePreflight() async throws -> Data {
+        try await invoke(.inferencePreflight)
+    }
+
+    /// `nexal inference status --json`. Decode with `InferenceInstalledReport.decode`.
+    func inferenceStatus() async throws -> Data {
+        try await invoke(.inferenceStatus)
+    }
+
+    /// `nexal inference verify <id> --json`. Decode with `InferenceVerifyResult.decode`.
+    /// The CLI exits 1 with `ok:false` yet still prints the document, so this reads stdout
+    /// whatever the exit status; it throws only when no document came back.
+    func inferenceVerify(modelId: String) async throws -> Data {
+        guard InferenceModelID.isValid(modelId) else { throw InferenceInstallError.invalidModelID }
+        guard let selection else { throw ShellError.noExecutable }
+        let config = selectedConfig
+        return try await Task.detached(priority: .userInitiated) {
+            let sink = LineSink()
+            let result = try ConnectorProcess.stream(selection, .inferenceVerify(modelId: modelId), config: config,
+                                                     token: ProcessCancelToken()) { sink.append($0) }
+            let doc = sink.joined()
+            if doc.isEmpty { throw ShellError.commandFailed(result.status, reason: result.reason) }
+            return doc
+        }.value
+    }
+
+    /// `nexal inference remove <id> --yes`. Only call after the owner confirmed.
+    func inferenceRemove(modelId: String) async throws {
+        guard InferenceModelID.isValid(modelId) else { throw InferenceInstallError.invalidModelID }
+        _ = try await invoke(.inferenceRemove(modelId: modelId))
+    }
+
+    /// Runs `nexal inference install <id> --json`, handing each NDJSON line to `onLine`
+    /// as it arrives. `token.cancel()` terminates the child. A non-zero exit is returned
+    /// in the result, not thrown, because the error event on stdout is the real reason.
+    func runInferenceInstall(modelId: String, token: ProcessCancelToken,
+                             onLine: @escaping @Sendable (Data) -> Void) async throws -> ConnectorStreamResult {
+        guard InferenceModelID.isValid(modelId) else { throw InferenceInstallError.invalidModelID }
+        guard let selection else { throw ShellError.noExecutable }
+        let config = selectedConfig
+        return try await Task.detached(priority: .userInitiated) {
+            try ConnectorProcess.stream(selection, .inferenceInstall(modelId: modelId), config: config,
+                                        token: token, onLine: onLine)
+        }.value
+    }
+
     func peerNames(action: String, address: String? = nil, input: Data? = nil) async throws -> Data {
         try await invoke(.peerNames(action: action, address: address), input: input)
     }

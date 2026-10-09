@@ -66,6 +66,7 @@ const (
 	StateRunning      State = "running"
 	StatePaused       State = "paused" // the host Mac is asleep or its lid is closed
 	StateStopping     State = "stopping"
+	StateStopped      State = "stopped" // persistent VM shut down with its disk kept; local only, never reported to the coordinator
 	StateDeleted      State = "deleted"
 	StateFailed       State = "failed"
 )

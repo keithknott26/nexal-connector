@@ -466,6 +466,113 @@ or persist it. The coordinator still authorizes the credential request.
   in. An unenrolled computer fails locally with `not_enrolled`; coordinator `forbidden` means the host has no
   active owner/network.
 
+### AI inference preflight (`nexal inference preflight`)
+
+- `nexal inference preflight [--json] [--runtime-owner-policy /absolute/owner-policy.json] [--config path]` is a
+  **read-only** check behind the Mac app's "Add AI Inference Model" button. It installs nothing, downloads nothing and
+  opens no network connection. Without `--json` it prints a plain-language report; with `--json` it prints one
+  document with `schemaVersion` 1 (consumers must refuse an unknown version).
+- Inputs: the connector's local `GET /v1/status` (owner memory cap and reserve, telemetry, mesh peers with path, latency,
+  PQ state, `pathFlapsLastHour` and measured `bandwidthMbps`, and the chip/OS/memory/disk other hosts reported), this Mac's
+  own details, and the MLX runtime's metadata-only `probe`. The probe runs `python -I -B <entry> probe` only after the
+  interpreter and every runtime file match the SHA-256 pins in the owner policy. The policy defaults to
+  `inference/owner-policy.json` beside `config.json`; a missing policy reports the runtime as `not_configured`.
+- Report fields: `headline`, `machines[]` (memory, owner cap/reserve, usable bytes, disk, runtime state, eligibility),
+  `links[]` (path, latency, bandwidth, PQ, flaps, quality; measured values are absent when unmeasured),
+  `models[]` (verdict `runs_now`, `fits_single_host_blocked`, `fits_sharded_only` or `does_not_fit`, with reasons),
+  `recommendation` (largest runnable catalog model, with `howToUse`), `sharing`, `blockers[]` (each with a fix),
+  `gaps[]` (what could not be seen) and `assumptions[]`.
+- Memory fit is decided by `pool.PlanMLX`. Catalog memory figures are **estimates** from parameter count and bits per
+  weight. The embedded catalog is unpinned; `inference/pins.json` (written by `nexal inference pin`) is merged over it
+  and a model is `installable` only when fully pinned. `installBlockedReason` states exactly what is missing. The
+  `catalog-not-pinned` blocker is reported only while no entry is installable. Each `models[]` entry also carries
+  `downloadBytes` (additive, no schema bump): the sum of the pinned file sizes, omitted when the model is unpinned.
+- `fits_sharded_only` is a planned layout only: multi-host execution is not available (`sharing.multiHostExecution` is
+  always `"unavailable"`). Other Macs' owner policy, MLX runtime state and peer-to-peer links are not visible remotely and
+  are reported as assumptions or gaps.
+- Failure: exit status 1 and `{"error":{"code","message"}}` on stderr for bad flags. A connector that is not running is a
+  finding in the report (`connector-unreachable`), not a command failure. Typical output is 15-30 KB.
+
+### AI inference model management (`nexal inference pin|install|status|verify|remove`)
+
+Second half of "Add AI Inference Model". Common rules: `--config` is optional everywhere and the inference directory
+is `inference/` beside `config.json` (`<dir>`). The model id comes first (`<model-id> [flags]`) or after the flags.
+Exit status is `0` on success and `1` on any failure; on failure stderr carries the standard
+`{"error":{"code","message"}}` document. Nothing here ever writes `owner-policy.json` or `runtime-config.json`, and
+nothing here claims a model is runnable. Only `pin` and `install` use the network, and only to `huggingface.co`,
+`*.huggingface.co` and `*.hf.co` over https (no credentials ever sent, at most 5 redirects, every redirect hop re-checked against that
+allowlist, http and foreign hosts refused).
+
+Layout: `<dir>/pins.json` (0600), `<dir>/models/<id>/` (0700; files 0400; the runtime model directory),
+`<dir>/models/.<id>.partial/` (an interrupted download, kept for resuming), `<dir>/receipts/<id>.json` (0600; the
+install receipt, deliberately outside the model directory because the runtime rejects undeclared files in it).
+
+**`nexal inference pin <model-id> --revision <40-hex> [--repo owner/name] [--json]`** (maintainer/owner step; needs
+network). `--revision` must be a 40-hex commit; a branch, tag or ref is refused with `mutable_revision` before any
+request. It reads the Hub metadata at that exact commit (the commit must resolve to itself; gated/private repos are
+refused), lists the top-level tree, downloads only allowlisted files (`config.json`, `tokenizer.json`,
+`tokenizer_config.json`, `generation_config.json`, `special_tokens_map.json`, `added_tokens.json`,
+`model.safetensors.index.json`, `model(-NNNNN-of-NNNNN).safetensors`), hashes them, cross-checks each LFS digest the Hub
+lists, reads the license and the architecture facts from `config.json`, and merges the result atomically into
+`<dir>/pins.json`. The hfRepo default is the catalog's; the catalog's repo names are conventional and unverified, so pin
+fails with `repo_not_found` if one is wrong (use `--repo`). Metadata is checked exactly as the runtime does
+(`auto_map`, `model_file`, `trust_remote_code`, `_name_or_path`, any `*_file`/`*_path` key; duplicate JSON keys;
+tokenizer class; weight index targets): a hit is reported as `blockers[]` with error `remote_code_metadata`, nothing is
+written and the files are never sanitized. `--json` prints one document:
+`{"schemaVersion":1,"modelId","hfRepo","revision","license","modelType","arch":{"layers","kvHeads","headDim","hiddenSize","intermediateSize","vocabSize"},"files":[{"name","size","sha256"}],"ignored":[],"totalBytes","blockers":[{"file","key","detail"}],"overlayPath","wrote":true,"pin":{...pins.json entry...},"commit":["what to commit/copy"]}`
+(on a blocker refusal the same document is printed with `"wrote":false` and the command exits 1). Error codes:
+`mutable_revision`, `model_not_found`, `invalid_arguments`, `repo_not_found`, `repo_not_public`, `revision_mismatch`,
+`license_missing`, `unsupported_files`, `bad_remote_path`, `lfs_mismatch`, `size_overflow`, the network codes
+(`network`, `http_status`, `host_not_allowed`, `redirect_refused`, `insecure_url`), `config_invalid`,
+`tokenizer_not_approved`, `index_mismatch`, `remote_code_metadata`, `cancelled`.
+
+**`nexal inference install <model-id> [--json]`** requires an installable pin. Checks first (no download): the model is
+in the catalog, fully pinned, the preflight verdict for **this** Mac is not `does_not_fit`/`fits_sharded_only` and the
+model fits this Mac (not only a peer), and free disk covers the remaining bytes plus the owner's free-space floor.
+Then, one file at a time: HTTPS GET of `https://huggingface.co/<repo>/resolve/<revision>/<file>`, size capped at the
+pinned size, `<file>.part` resumed with `Range` (a server that ignores it restarts the file), SHA-256 verified before the
+atomic rename, a mismatch deletes the partial file, cancellation (SIGINT/SIGTERM) keeps it. Files go to
+`models/.<id>.partial/`, then `nexal-model-manifest.json` (runtimes schema 1: `schema_version`, `model_id`, `revision`,
+`license`, `model_type` from the catalog architecture, `files`, and the six-key `memory` block from the catalog
+**estimate**, with `weights_bytes` never below the real weight files) is written, the directory is checked to hold exactly
+the declared files, and it is renamed to `models/<id>/`. The install receipt (it records `estimatedMemory`, the revision, every file hash, the manifest SHA-256, the time and the
+owner's next steps) is written to `receipts/<id>.json`: `{schemaVersion,modelId,state:"installed_unmeasured",estimatedMemory:true,hfRepo,revision,license,modelType,installedAt,dir,manifestSha256,manifestBytes,memory,files[],totalBytes,warnings[],nextSteps[]}`.
+Final state is always `installed_unmeasured`: the owner must still measure memory, write `runtime-config.json`, pass
+`verify-model` and the release gates (`nextSteps` / `howToUse` list the real runtime commands with placeholder owner
+paths, and state that there is no chat/web UI and no multi-host execution yet).
+
+With `--json`, stdout is NDJSON, one object per line, in this order (`progress` is throttled to about 4 per second but
+every file always ends with a `progress` where `bytes == total`):
+
+```
+{"event":"start","modelId","totalBytes"}
+{"event":"progress","file","bytes","total","overallBytes","overallTotal"}   (repeated)
+{"event":"verified","file"}                                                  (after each file's last progress)
+{"event":"done","modelId","dir","manifestSha256","state":"installed_unmeasured","howToUse":["..."]}
+{"event":"error","code","message","fix"}                                    (instead of done; also exits 1)
+```
+A refusal before downloading emits only `error`. Without `--json` the same events print as text. Error codes:
+`invalid_arguments`, `model_not_found`, `not_installable` (message = exactly what the pin lacks), `preflight_failed`,
+`host_unknown`, `does_not_fit`, `sharded_only`, `disk_low`, `disk_unknown`, `locked`, `already_installed`,
+`model_dir_exists`, `bad_file_name`, `mutable_revision`, `hash_mismatch`, `size_overflow`, `size_mismatch`,
+`download_incomplete`, `bad_range`, `file_not_found`, `repo_not_public`, `network`, `http_status`, `host_not_allowed`,
+`redirect_refused`, `insecure_url`, `unexpected_file`, `receipt_failed`, `cancelled`, `io_error`.
+
+**`nexal inference status [--json]`** (offline, cheap): lists installed models from receipts and re-checks only presence,
+type, mode and size (a same-size change is only found by `verify`).
+`{"schemaVersion":1,"inferenceDir","models":[{"modelId","displayName"?,"state","revision","hfRepo","license","bytesOnDisk","installedAt","dir","manifestSha256","estimatedMemory","problems":[]}],"incomplete":[{"modelId","dir","bytesOnDisk"}]}`;
+`state` is `installed_unmeasured`, or `damaged` when `problems` is non-empty (or the receipt is unreadable).
+
+**`nexal inference verify <model-id> [--json]`**: re-hashes every file and the manifest against the receipt.
+`{"schemaVersion":1,"modelId","ok","full":true,"state","revision","files":[{"name","status"}],"problems":[]}` with
+`status` one of `ok`, `missing`, `size_mismatch`, `hash_mismatch`, `not_regular`, `bad_mode`, `unexpected`. Exit 1 with
+code `verify_failed` when `ok` is false (the document is still printed); `not_installed` when no receipt exists.
+
+**`nexal inference remove <model-id> [--yes] [--json]`**: deletes only `models/<id>`, `models/.<id>.partial` and
+`receipts/<id>.json`. Without `--yes` it deletes nothing and fails with `confirmation_required`. Ids are validated
+(`invalid_arguments` for `..`, separators, etc.); a symlink in any of those places is refused (`path_escape`) and never
+followed. `{"schemaVersion":1,"modelId","removed":["path",...]}`; `not_installed` if there was nothing to remove.
+
 ### Diagnostic mode (`nexal diagnostics`)
 
 - `nexal diagnostics [--on|--off|--status] [--config path]` creates or removes `diagnostics.enabled` next to

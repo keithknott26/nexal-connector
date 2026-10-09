@@ -110,6 +110,19 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider) {
 		result := TestPeer(testCtx, peer.ID, peer.Name, peer.TunnelAddress)
 		cancel()
 
+		// One retry on failure — transient TCP or timeout errors are common on slow links.
+		if result.DownloadMbps == 0 && ctx.Err() == nil {
+			r.logger.Debug("bandwidth test retrying", "peer", peer.Name)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(3 * time.Second):
+			}
+			testCtx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
+			result = TestPeer(testCtx2, peer.ID, peer.Name, peer.TunnelAddress)
+			cancel2()
+		}
+
 		r.mu.Lock()
 		if result.DownloadMbps > 0 {
 			r.results[peer.ID] = result
@@ -120,7 +133,7 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider) {
 				"peer", peer.Name, "mbps", result.DownloadMbps,
 				"elapsed", result.Elapsed.Round(time.Millisecond))
 		} else {
-			r.logger.Debug("bandwidth test failed or zero", "peer", peer.Name)
+			r.logger.Debug("bandwidth test failed after retry", "peer", peer.Name)
 		}
 		r.mu.Unlock()
 

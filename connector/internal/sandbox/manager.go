@@ -104,6 +104,9 @@ type Manager struct {
 	inflight  map[string]bool // task ids being handled
 	recovered bool
 
+	// stoppedWarned: the "coordinator rejected stopped" warning was logged already.
+	stoppedWarned bool
+
 	cfgw    *configWatcher
 	pub     *HostingConfig // last config read from the file, to publish
 	pubDone bool
@@ -247,6 +250,137 @@ func (m *Manager) Kill(id string) error {
 	return nil
 }
 
+// Stop shuts a persistent VM down but keeps its disk, identity and host key: the
+// state becomes "stopped" (local only; the coordinator is not told) until Start.
+// Ephemeral sandboxes and dev containers are refused: they keep the destructive
+// Kill behavior.
+func (m *Manager) Stop(id string) error {
+	if !ValidID(id) {
+		return errors.New("invalid sandbox id")
+	}
+	m.mu.Lock()
+	rec := m.boxes[id]
+	switch {
+	case rec == nil:
+		m.mu.Unlock()
+		return errors.New("sandbox unknown")
+	case rec.Lifecycle != LifecyclePersistent:
+		m.mu.Unlock()
+		return errors.New("only a persistent sandbox can be stopped without deleting it")
+	case rec.Kind == SandboxDevcontainer:
+		m.mu.Unlock()
+		return errors.New("stopping a dev container without deleting it is not supported")
+	case rec.State == StateStopped:
+		m.mu.Unlock()
+		return nil
+	case rec.State != StateRunning && rec.State != StatePaused:
+		m.mu.Unlock()
+		return fmt.Errorf("sandbox is %s", rec.State)
+	case rec.busy:
+		m.mu.Unlock()
+		return errors.New("sandbox is busy")
+	}
+	if err := m.setStateLocked(rec, StateStopping); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	rec.busy = true
+	h := rec.Handle
+	m.mu.Unlock()
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		defer m.release("", id)
+		m.stopVM(context.WithoutCancel(m.ctx), h)
+		m.mu.Lock()
+		if r := m.boxes[id]; r != nil {
+			r.Handle = Handle{}
+			r.AwaitKey = false
+			_ = m.setStateLocked(r, StateStopped)
+		}
+		m.mu.Unlock()
+		m.reportStopped(id)
+	}()
+	return nil
+}
+
+// reportStopped tells the coordinator the VM is stopped (disk kept). A coordinator
+// that predates the "stopped" state rejects it; that is logged once and the
+// sandbox simply stays "running" there while it is correct locally. One attempt
+// per stop, one log line per process: nothing depends on it, and the running
+// report after a Start corrects it.
+func (m *Manager) reportStopped(id string) {
+	m.mu.Lock()
+	coord, hostID := m.coord, m.hostID
+	m.mu.Unlock()
+	if coord == nil || hostID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(m.ctx), 10*time.Second)
+	defer cancel()
+	if err := coord.ReportSandboxState(ctx, hostID, StateReport{SandboxID: id, State: StateStopped}); err != nil {
+		m.mu.Lock()
+		first := !m.stoppedWarned
+		m.stoppedWarned = true
+		m.mu.Unlock()
+		if first {
+			m.opts.Logger.Warn("coordinator did not accept the stopped state; stopping stays local", "sandbox", id, "error", err.Error())
+		}
+	}
+}
+
+// Start boots a stopped persistent VM again from its kept disk.
+func (m *Manager) Start(id string) error {
+	if !ValidID(id) {
+		return errors.New("invalid sandbox id")
+	}
+	m.mu.Lock()
+	rec := m.boxes[id]
+	switch {
+	case rec == nil:
+		m.mu.Unlock()
+		return errors.New("sandbox unknown")
+	case rec.State != StateStopped:
+		m.mu.Unlock()
+		return fmt.Errorf("sandbox is %s, not stopped", rec.State)
+	case rec.busy:
+		m.mu.Unlock()
+		return errors.New("sandbox is busy")
+	}
+	if err := m.setStateLocked(rec, StateProvisioning); err != nil {
+		m.mu.Unlock()
+		return err
+	}
+	rec.busy = true
+	m.mu.Unlock()
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		defer m.release("", id)
+		rep, err := m.restartVM(m.ctx, id)
+		if err != nil {
+			m.opts.Logger.Warn("start failed; sandbox stays stopped", "sandbox", id, "error", err.Error())
+			m.mu.Lock()
+			if r := m.boxes[id]; r != nil {
+				_ = m.setStateLocked(r, StateStopped)
+			}
+			m.mu.Unlock()
+			return
+		}
+		if rep.Connected {
+			m.markRunning(id, rep.MeshIP, "")
+			return
+		}
+		m.mu.Lock()
+		if r := m.boxes[id]; r != nil {
+			_ = m.setStateLocked(r, StateRunning)
+		}
+		m.mu.Unlock()
+		m.markAwaitKey(id, "")
+	}()
+	return nil
+}
+
 // ---- paths ----
 
 func (m *Manager) statePath() string { return filepath.Join(m.opts.DataDir, "state.json") }
@@ -270,6 +404,7 @@ func (m *Manager) saveLocked() {
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })
 	b, err := json.MarshalIndent(recs, "", "  ")
 	if err != nil {
+		m.opts.Logger.Warn("sandbox state marshal failed", "error", err.Error())
 		return
 	}
 	tmp := m.statePath() + ".tmp"

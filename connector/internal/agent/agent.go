@@ -104,6 +104,8 @@ type Agent struct {
 	// released on the server). Retrying every 15 s cannot fix that, so heartbeats
 	// back off to credentialRetryInterval and status tells the app to re-pair.
 	credentialRejectedAt time.Time
+	rejectBackoff        time.Duration
+	rejectBackoffUntil   time.Time
 
 	heartbeatWake chan struct{}
 	// selfTestWake nudges runSelfTest to poll immediately: set by the presence
@@ -869,6 +871,12 @@ func errorText(err error) string {
 // not to fill the coordinator's logs with 401s from a Mac nobody re-paired.
 const credentialRetryInterval = 10 * time.Minute
 
+// heartbeatRejectBackoffMin / Max control exponential backoff when the
+// coordinator rejects heartbeats with 400/403/503. Without this the
+// agent hammers the coordinator every 15 s with the same payload.
+const heartbeatRejectBackoffMin = 30 * time.Second
+const heartbeatRejectBackoffMax = 5 * time.Minute
+
 // tunnelReportInterval is the steady-state tunnel-status cadence. Slightly under a
 // minute so a 15 s heartbeat tick lands on it every fourth beat, not every fifth.
 const tunnelReportInterval = 55 * time.Second
@@ -909,6 +917,13 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 	if !rejected.IsZero() && trigger == "interval" && time.Since(rejected) < credentialRetryInterval {
 		return
 	}
+	// Exponential backoff for persistent 400/403/503 rejections.
+	a.mu.Lock()
+	backoffUntil := a.rejectBackoffUntil
+	a.mu.Unlock()
+	if trigger == "interval" && !backoffUntil.IsZero() && time.Now().Before(backoffUntil) {
+		return
+	}
 	started := time.Now()
 	err := a.hostHeartbeat(ctx, suppressUnchanged)
 	var status *client.StatusError
@@ -916,8 +931,22 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 	switch {
 	case err == nil:
 		a.credentialRejectedAt = time.Time{}
+		a.rejectBackoff = 0
+		a.rejectBackoffUntil = time.Time{}
 	case errors.As(err, &status) && status.Status == http.StatusUnauthorized:
 		a.credentialRejectedAt = time.Now()
+	case errors.As(err, &status) && (status.Status == http.StatusBadRequest ||
+		status.Status == http.StatusForbidden ||
+		status.Status == http.StatusServiceUnavailable):
+		if a.rejectBackoff == 0 {
+			a.rejectBackoff = heartbeatRejectBackoffMin
+		} else {
+			a.rejectBackoff *= 2
+			if a.rejectBackoff > heartbeatRejectBackoffMax {
+				a.rejectBackoff = heartbeatRejectBackoffMax
+			}
+		}
+		a.rejectBackoffUntil = time.Now().Add(a.rejectBackoff)
 	}
 	a.mu.Unlock()
 	if err != nil {
@@ -929,6 +958,21 @@ func (a *Agent) heartbeat(ctx context.Context, trigger string) {
 		if status != nil && status.Status == http.StatusUnauthorized {
 			a.logger.Warn("coordinator no longer accepts this host's credential; leave and pair this Mac again",
 				"retryIn", credentialRetryInterval.String())
+			return
+		}
+		if status != nil && status.Status == http.StatusBadRequest {
+			a.logger.Warn("coordinator rejected heartbeat payload (HTTP 400); backing off",
+				"trigger", trigger, "backoff", a.rejectBackoff.String(), "code", status.Code)
+			return
+		}
+		if status != nil && status.Status == http.StatusForbidden {
+			a.logger.Warn("coordinator denied heartbeat (HTTP 403); backing off",
+				"trigger", trigger, "backoff", a.rejectBackoff.String())
+			return
+		}
+		if status != nil && status.Status == http.StatusServiceUnavailable {
+			a.logger.Warn("coordinator unavailable (HTTP 503); backing off",
+				"trigger", trigger, "backoff", a.rejectBackoff.String())
 			return
 		}
 		a.logger.Warn("host heartbeat failed", "trigger", trigger, "error", errorText(err))
@@ -978,7 +1022,9 @@ func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) er
 	// the last successful send and the caller opted in (periodic interval ticks).
 	payloadHash := heartbeatPayloadHash(h)
 	if len(suppressUnchanged) > 0 && suppressUnchanged[0] && payloadHash == a.lastHeartbeatPayload {
-		a.lastHeartbeat = time.Now()
+		// Do NOT update lastHeartbeat here — no network call was made, so the
+		// coordinator lease has not actually been refreshed. Updating it would
+		// mask coordinator outages in CoordinatorHealthy and the admission gate.
 		a.mu.Unlock()
 		return nil
 	}
@@ -1215,17 +1261,40 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 		a.sandbox.RunKillRequests(ctx)
 	}()
 	defer func() { <-killDone }()
-	t := time.NewTicker(30 * time.Second)
+	const (
+		sandboxPollInterval    = 30 * time.Second
+		sandboxBackoffMin      = 30 * time.Second
+		sandboxBackoffMax      = 5 * time.Minute
+	)
+	t := time.NewTicker(sandboxPollInterval)
 	defer t.Stop()
+	var sandboxBackoff time.Duration
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		case <-a.sandbox.Nudge(): // just woke: poll and re-report right away
+			sandboxBackoff = 0 // explicit nudge resets backoff
+		}
+		if sandboxBackoff > 0 {
+			t.Reset(sandboxBackoff)
+			continue
 		}
 		if err := a.sandbox.Poll(ctx, hostID); err != nil && !client.IsNotSupported(err) {
 			a.logger.Debug("sandbox poll failed", "error", errorText(err))
+			if sandboxBackoff == 0 {
+				sandboxBackoff = sandboxBackoffMin
+			} else {
+				sandboxBackoff *= 2
+			}
+			if sandboxBackoff > sandboxBackoffMax {
+				sandboxBackoff = sandboxBackoffMax
+			}
+			t.Reset(sandboxBackoff)
+		} else {
+			sandboxBackoff = 0
+			t.Reset(sandboxPollInterval)
 		}
 	}
 }

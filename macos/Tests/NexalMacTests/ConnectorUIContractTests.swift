@@ -21,7 +21,10 @@ final class ConnectorUIContractTests: XCTestCase {
         XCTAssertTrue(text.contains("Post-quantum protection"))
         XCTAssertTrue(text.contains("neXal cloud route"))
         XCTAssertTrue(text.contains("pathLabel.isEmpty ? \"Direct\""))
-        XCTAssertTrue(text.contains("Leave neXal network"))
+        let settings = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/NexalMac/ConnectorSettingsView.swift"), encoding: .utf8)
+        XCTAssertTrue(settings.contains("Leave neXal network"))
         XCTAssertTrue(text.contains("metered"))
     }
 

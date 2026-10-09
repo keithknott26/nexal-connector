@@ -185,8 +185,13 @@ func translateRuntime(out []byte, now time.Time) Status {
 				allProtected = false
 			}
 		}
-		if peer.Lifecycle == LifecycleConnected && peer.TunnelAddress != "" {
+		peer.PathFlapsLastHour = flapTracker.observe(peer.ID, peer.Path, now)
+		// Phones and tablets do not host SSH, Screen Sharing or File Sharing, so
+		// probing them only generates refused connections (and wakes the radio).
+		if peer.Lifecycle == LifecycleConnected && peer.TunnelAddress != "" && !isMobilePeer(rp.FQDN, peer.Name) {
 			peer.Services = probeServices(peer.TunnelAddress)
+		} else if peer.Lifecycle != LifecycleConnected {
+			forgetServices(peer.TunnelAddress)
 		}
 		s.Peers = append(s.Peers, peer)
 	}

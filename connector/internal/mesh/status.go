@@ -134,11 +134,14 @@ type Peer struct {
 	PQExpiresAt        string    `json:"pqExpiresAt,omitempty"`
 	// PQReason is the machine-readable explanation while PQ is not protected
 	// (see PQReason* constants). Empty when the link is protected.
-	PQReason      string         `json:"pqReason,omitempty"`
-	Traffic       Traffic        `json:"traffic"`
-	FileSharing   FileSharing    `json:"fileSharing"`
-	ScreenSharing ScreenSharing  `json:"screenSharing"`
-	Hostname      HostnameStatus `json:"hostname"`
+	PQReason string `json:"pqReason,omitempty"`
+	// PathFlapsLastHour counts direct<->relay path changes in the last hour.
+	// Local-only: client.TunnelReportFromRuntime never copies it.
+	PathFlapsLastHour int            `json:"pathFlapsLastHour,omitempty"`
+	Traffic           Traffic        `json:"traffic"`
+	FileSharing       FileSharing    `json:"fileSharing"`
+	ScreenSharing     ScreenSharing  `json:"screenSharing"`
+	Hostname          HostnameStatus `json:"hostname"`
 	// Local-only fields for the owner's own panel. The coordinator report is
 	// built by client.TunnelReportFromRuntime, which never copies them.
 	//
@@ -253,7 +256,7 @@ func (s Status) GatewayPQReadyAt(now time.Time, maxAge time.Duration) bool {
 }
 
 func (s Status) StrictPQReady() bool {
-	return s.StrictPQReadyAt(time.Now(), 2*time.Minute)
+	return s.StrictPQReadyAt(time.Now(), 5*time.Minute)
 }
 
 func (s Status) StrictPQReadyAt(now time.Time, maxAge time.Duration) bool {

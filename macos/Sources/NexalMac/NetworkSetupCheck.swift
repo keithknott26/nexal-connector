@@ -135,7 +135,7 @@ struct NetworkSetupCheckView: View {
                 }
             }
         }
-        .onChange(of: autoRun) { newValue in
+        .onChange(of: autoRun) { _, newValue in
             if newValue && result == nil { runCheck() }
         }
         .onAppear { if autoRun && result == nil { runCheck() } }

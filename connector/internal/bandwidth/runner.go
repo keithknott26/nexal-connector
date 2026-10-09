@@ -17,6 +17,30 @@ const TestInterval = 30 * time.Minute
 // StartupDelay gives the mesh time to connect before the first bandwidth test.
 const StartupDelay = 30 * time.Second
 
+// RetryInterval is the first wait before re-testing when a connected peer still has no
+// measurement (the mesh was still settling at startup, or the peer was unreachable). It
+// doubles per failed cycle up to TestInterval, so a peer that can never answer (for
+// example one on an older build) costs a few small tests rather than one every minute,
+// while a healthy mesh gets its first reading within a minute or two instead of 30.
+const RetryInterval = time.Minute
+
+// nextDelay is how long to wait before the next cycle: TestInterval when every connected
+// peer has a fresh reading, otherwise RetryInterval doubled once per consecutive cycle
+// that left a peer unmeasured, capped at TestInterval.
+func nextDelay(unmeasured bool, retries int) time.Duration {
+	if !unmeasured {
+		return TestInterval
+	}
+	d := RetryInterval
+	for i := 0; i < retries && d < TestInterval; i++ {
+		d *= 2
+	}
+	if d > TestInterval {
+		d = TestInterval
+	}
+	return d
+}
+
 // Runner manages periodic bandwidth tests to all connected mesh peers.
 // It stores the most recent result per peer and exposes them for the status
 // API and the coordinator report.
@@ -68,31 +92,55 @@ func (r *Runner) Run(ctx context.Context, provider mesh.Provider) {
 	}
 	defer r.server.Stop()
 
-	// Run initial test, then periodically.
-	r.testAllPeers(ctx, provider)
-
-	t := time.NewTicker(TestInterval)
-	defer t.Stop()
+	// Run initial test, then periodically. A cycle that leaves a connected peer without a
+	// reading is retried soon (see RetryInterval); the full refresh still happens every
+	// TestInterval.
+	r.testAllPeers(ctx, provider, false)
+	lastFull := time.Now()
+	retries := 0
 	for {
+		unmeasured := r.hasUnmeasuredPeer(provider)
+		if unmeasured {
+			retries++
+		} else {
+			retries = 0
+		}
+		delay := nextDelay(unmeasured, max(retries-1, 0))
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
-			// Re-check tunnel address in case it changed.
-			status = provider.Snapshot()
-			if status.SelfTunnelAddress != "" && r.server.Addr() == "" {
-				if err := r.server.Start(ctx, status.SelfTunnelAddress); err != nil {
-					r.logger.Debug("bandwidth server restart failed", "error", err.Error())
-				}
+		case <-time.After(delay):
+		}
+		// Re-check tunnel address in case it changed or was not known at startup.
+		status = provider.Snapshot()
+		if status.SelfTunnelAddress != "" && r.server.Addr() == "" {
+			if err := r.server.Start(ctx, status.SelfTunnelAddress); err != nil {
+				r.logger.Debug("bandwidth server restart failed", "error", err.Error())
 			}
-			r.testAllPeers(ctx, provider)
+		}
+		full := time.Since(lastFull) >= TestInterval
+		r.testAllPeers(ctx, provider, !full)
+		if full {
+			lastFull = time.Now()
 		}
 	}
 }
 
+// hasUnmeasuredPeer reports whether a connected peer with a tunnel address has no fresh
+// reading.
+func (r *Runner) hasUnmeasuredPeer(provider mesh.Provider) bool {
+	for _, peer := range mesh.SanitizeSnapshot(provider.Snapshot()).Peers {
+		if (peer.Lifecycle == mesh.LifecycleConnected || peer.Lifecycle == mesh.LifecycleDegraded) &&
+			peer.TunnelAddress != "" && r.PeerBandwidth(peer.ID) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // testAllPeers runs a bandwidth test to every connected peer sequentially.
 // Sequential avoids saturating the link with parallel tests.
-func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider) {
+func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider, onlyMissing bool) {
 	status := mesh.SanitizeSnapshot(provider.Snapshot())
 	for _, peer := range status.Peers {
 		if ctx.Err() != nil {
@@ -102,6 +150,9 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider) {
 			continue
 		}
 		if peer.TunnelAddress == "" {
+			continue
+		}
+		if onlyMissing && r.PeerBandwidth(peer.ID) > 0 {
 			continue
 		}
 

@@ -243,7 +243,9 @@ func TestDevelopmentPrivateLoopEndToEnd(t *testing.T) {
 	if command("POST", "/v1/resume") != 200 {
 		t.Fatal("resume failed")
 	}
-	for deadline := time.Now().Add(6 * time.Second); ; {
+	// The agent polls for work every 10 s since 7aabd7d (it was 2 s), so the first poll after
+	// resume lands up to 10 s in; the deadline must outlast it or this fails on every machine.
+	for deadline := time.Now().Add(20 * time.Second); ; {
 		mu.Lock()
 		n := completed
 		mu.Unlock()

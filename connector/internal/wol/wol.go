@@ -94,6 +94,12 @@ func checkUnicast(mac net.HardwareAddr) error {
 	if zero {
 		return errors.New("invalid MAC address: all-zero address")
 	}
+	// 02:00:00:00:00:00 is the placeholder some virtual and tunnel interfaces carry (it
+	// showed up in every Mac's wake info). It names no hardware, so a packet to it wakes
+	// nothing and only pads the list the relay sends.
+	if mac[0] == 0x02 && mac[1]|mac[2]|mac[3]|mac[4]|mac[5] == 0 {
+		return errors.New("invalid MAC address: placeholder address")
+	}
 	return nil
 }
 

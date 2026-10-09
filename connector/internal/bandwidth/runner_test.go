@@ -107,3 +107,15 @@ func TestResultsFilterExpired(t *testing.T) {
 		t.Error("stale result should be filtered out")
 	}
 }
+
+func TestNextDelayRetriesSoonThenBacksOff(t *testing.T) {
+	if got := nextDelay(false, 0); got != TestInterval {
+		t.Fatalf("all peers measured: %v, want %v", got, TestInterval)
+	}
+	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 16 * time.Minute, TestInterval, TestInterval}
+	for i, w := range want {
+		if got := nextDelay(true, i); got != w {
+			t.Errorf("retry %d: %v, want %v", i, got, w)
+		}
+	}
+}

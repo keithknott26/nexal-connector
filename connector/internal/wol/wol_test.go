@@ -282,3 +282,12 @@ func TestParseHardwarePorts(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestPlaceholderMACIsNotWakeable(t *testing.T) {
+	if err := checkUnicast(net.HardwareAddr{0x02, 0, 0, 0, 0, 0}); err == nil {
+		t.Fatal("02:00:00:00:00:00 names no hardware and must be rejected")
+	}
+	if err := checkUnicast(net.HardwareAddr{0x02, 0, 0, 0, 0, 1}); err != nil {
+		t.Fatalf("a real locally administered address must stay valid: %v", err)
+	}
+}

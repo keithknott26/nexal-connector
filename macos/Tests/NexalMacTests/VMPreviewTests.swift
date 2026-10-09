@@ -9,6 +9,8 @@ final class VMPreviewTests: XCTestCase {
     func testOnlyARunningVirtualMachineCanBePreviewed() {
         XCTAssertNil(VMPreviewEligibility.unavailableReason(kind: "vm", state: "running"))
         XCTAssertNil(VMPreviewEligibility.unavailableReason(kind: nil, state: "running"))
+        XCTAssertNil(VMPreviewEligibility.unavailableReason(kind: "vm", state: "running", desktop: true))
+        XCTAssertEqual(VMPreviewEligibility.unavailableReason(kind: "vm", state: "running", desktop: false), "Created without a desktop.")
     }
 
     func testOtherStatesGiveAnHonestReason() {

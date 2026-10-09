@@ -19,6 +19,8 @@ type sandboxAPI interface {
 	ListSandboxes(ctx context.Context, hostID string) (json.RawMessage, error)
 	ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey string) (json.RawMessage, error)
 	CreateSandbox(ctx context.Context, hostID string, body json.RawMessage) (json.RawMessage, error)
+	DeleteSandbox(ctx context.Context, hostID, id string) (json.RawMessage, error)
+	SetSandboxPower(ctx context.Context, hostID, id, action string) (json.RawMessage, error)
 	SandboxImages(ctx context.Context, hostID, runner string) (json.RawMessage, error)
 	SandboxRunners(ctx context.Context, hostID string) (json.RawMessage, error)
 }
@@ -45,7 +47,7 @@ func sandboxCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	action := f.String("action", "", "list | runners | connect | images | create")
+	action := f.String("action", "", "list | runners | connect | images | create | delete | stop | start")
 	id := f.String("id", "", "sandbox id (connect)")
 	kind := f.String("kind", "", "ssh | vnc | files (connect)")
 	stdin := f.Bool("public-key-stdin", false, "read the ssh-ed25519 public key from standard input")
@@ -93,6 +95,10 @@ func checkSandboxArgs(action, id, kind string, stdin bool) error {
 		if id != "" || kind != "" || stdin {
 			return &codedError{code: "invalid_arguments", err: errors.New("sandbox create reads its request from stdin and takes no other flags")}
 		}
+	case "delete", "stop", "start":
+		if !client.ValidID(id) || kind != "" || stdin {
+			return &codedError{code: "invalid_arguments", err: errors.New("sandbox " + action + " takes only --id <sandbox id>")}
+		}
 	case "connect":
 		if !client.ValidID(id) {
 			return &codedError{code: "invalid_arguments", err: errors.New("--id must be a sandbox id")}
@@ -110,7 +116,7 @@ func checkSandboxArgs(action, id, kind string, stdin bool) error {
 			return &codedError{code: "invalid_arguments", err: errors.New("--kind must be ssh, vnc or files")}
 		}
 	default:
-		return &codedError{code: "invalid_arguments", err: errors.New("usage: nexal sandbox --action list|runners|images|create|connect [--id <id>] [--kind ssh|vnc|files] [--public-key-stdin]")}
+		return &codedError{code: "invalid_arguments", err: errors.New("usage: nexal sandbox --action list|runners|images|create|delete|stop|start|connect [--id <id>] [--kind ssh|vnc|files] [--public-key-stdin]")}
 	}
 	return nil
 }
@@ -126,6 +132,10 @@ func runSandbox(ctx context.Context, api sandboxAPI, hostID, action, id, kind st
 		body, err = api.ListSandboxes(ctx, hostID)
 	case "runners":
 		body, err = api.SandboxRunners(ctx, hostID)
+	case "delete":
+		body, err = api.DeleteSandbox(ctx, hostID, id)
+	case "stop", "start":
+		body, err = api.SetSandboxPower(ctx, hostID, id, action)
 	case "images":
 		body, err = api.SandboxImages(ctx, hostID, id)
 	case "create":

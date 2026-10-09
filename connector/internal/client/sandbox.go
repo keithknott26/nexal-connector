@@ -130,6 +130,43 @@ func (c *Client) ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey
 	return out, nil
 }
 
+// DeleteSandbox is DELETE /api/v2/hosts/:hostId/sandboxes/:id: remove an instance of the
+// owner's network, wherever it runs; the runner tears it down on its next poll.
+func (c *Client) DeleteSandbox(ctx context.Context, hostID, id string) (json.RawMessage, error) {
+	if !ValidID(id) {
+		return nil, errors.New("invalid sandbox id")
+	}
+	p, err := sandboxPath(hostID, "sandboxes/"+url.PathEscape(id))
+	if err != nil {
+		return nil, err
+	}
+	var out json.RawMessage
+	if err := c.callLenient(ctx, "DELETE", p, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetSandboxPower is POST /api/v2/hosts/:hostId/sandboxes/:id/(stop|start): shut a persistent VM
+// down keeping its disk, or boot it again, wherever it runs.
+func (c *Client) SetSandboxPower(ctx context.Context, hostID, id, action string) (json.RawMessage, error) {
+	if !ValidID(id) {
+		return nil, errors.New("invalid sandbox id")
+	}
+	if action != "stop" && action != "start" {
+		return nil, errors.New("invalid power action")
+	}
+	p, err := sandboxPath(hostID, "sandboxes/"+url.PathEscape(id)+"/"+action)
+	if err != nil {
+		return nil, err
+	}
+	var out json.RawMessage
+	if err := c.callLenient(ctx, "POST", p, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CreateSandbox is POST /api/v2/hosts/:hostId/sandboxes: start a VM or dev container
 // as the host's owner. body is the member create request (imageId, runnerHostId, kind,
 // size, lifecycle, lifetimeHours, devcontainer, ...), passed through unchanged.

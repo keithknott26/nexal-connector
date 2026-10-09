@@ -20,8 +20,9 @@ struct VNCEndpoint: Equatable, CustomStringConvertible, CustomDebugStringConvert
 /// What the row offers a VM that is in a given state. Only a running virtual machine has a screen.
 enum VMPreviewEligibility {
     /// nil when the VM can be previewed, else the plain reason it cannot.
-    static func unavailableReason(kind: String?, state: String?, paused: Bool? = nil) -> String? {
+    static func unavailableReason(kind: String?, state: String?, paused: Bool? = nil, desktop: Bool? = nil) -> String? {
         if kind == "devcontainer" { return "Development containers have no screen." }
+        if desktop == false { return "Created without a desktop." }
         if paused == true || state == "paused" { return "Paused while this Mac sleeps." }
         switch state ?? "" {
         case "running": return nil

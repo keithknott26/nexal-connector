@@ -528,6 +528,16 @@ func (m *Manager) dispatch(ctx context.Context, t Task) {
 		m.startVNC(t)
 	case KindRejoin:
 		m.startRejoin(ctx, t)
+	case KindStop:
+		// The coordinator completes the task when the "stopped" report arrives. A refusal (unknown id,
+		// busy, not persistent) is logged; the coordinator expires an unfinished task by itself.
+		if err := m.Stop(t.SandboxID); err != nil {
+			m.opts.Logger.Warn("remote stop refused", "sandbox", t.SandboxID, "error", err.Error())
+		}
+	case KindStart:
+		if err := m.Start(t.SandboxID); err != nil {
+			m.opts.Logger.Warn("remote start refused", "sandbox", t.SandboxID, "error", err.Error())
+		}
 	}
 }
 

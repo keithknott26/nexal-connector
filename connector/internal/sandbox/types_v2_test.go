@@ -111,3 +111,14 @@ func TestTaskUnmarshalDigest(t *testing.T) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
+
+func TestValidateTaskAcceptsRemoteStopAndStart(t *testing.T) {
+	for _, k := range []Kind{KindStop, KindStart} {
+		if err := ValidateTask(Task{TaskID: "t1", SandboxID: "s1", Kind: k}); err != nil {
+			t.Fatalf("%s: %v", k, err)
+		}
+	}
+	if err := ValidateTask(Task{TaskID: "t1", SandboxID: "s1", Kind: "pause"}); err == nil {
+		t.Fatal("unknown kind accepted")
+	}
+}

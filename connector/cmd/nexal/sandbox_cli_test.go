@@ -31,6 +31,14 @@ func (f *fakeSandboxAPI) CreateSandbox(_ context.Context, hostID string, body js
 	f.gotHost, f.gotKey = hostID, string(body)
 	return json.RawMessage(`{"id":"sb2","state":"requested"}`), nil
 }
+func (f *fakeSandboxAPI) DeleteSandbox(_ context.Context, hostID, id string) (json.RawMessage, error) {
+	f.gotHost, f.gotID = hostID, id
+	return json.RawMessage(`{"id":"` + id + `","state":"stopping"}`), nil
+}
+func (f *fakeSandboxAPI) SetSandboxPower(_ context.Context, hostID, id, action string) (json.RawMessage, error) {
+	f.gotHost, f.gotID, f.gotKind = hostID, id, action
+	return json.RawMessage(`{"id":"` + id + `","state":"` + action + `ping"}`), nil
+}
 func (f *fakeSandboxAPI) SandboxRunners(_ context.Context, hostID string) (json.RawMessage, error) {
 	return json.RawMessage(`{"runners":[]}`), nil
 }
@@ -113,5 +121,47 @@ func TestSandboxCLI(t *testing.T) {
 	}
 	if err := runSandbox(ctx, &fakeSandboxAPI{listErr: &client.StatusError{Status: 429}}, "host1", "list", "", "", false, nil, &out); codeOf(err) != "rate_limited" {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestSandboxCLIDelete(t *testing.T) {
+	ctx := context.Background()
+	api := &fakeSandboxAPI{}
+	var out bytes.Buffer
+	if err := runSandbox(ctx, api, "host1", "delete", "sb1", "", false, strings.NewReader(""), &out); err != nil ||
+		api.gotHost != "host1" || api.gotID != "sb1" || !strings.Contains(out.String(), `"stopping"`) {
+		t.Fatalf("delete: %q %v", out.String(), err)
+	}
+	for _, bad := range [][3]string{{"", "", ""}, {"../x", "", ""}, {"sb1", "vnc", ""}} {
+		if err := checkSandboxArgs("delete", bad[0], bad[1], false); err == nil {
+			t.Fatalf("delete accepted %v", bad)
+		}
+	}
+	if err := checkSandboxArgs("delete", "sb1", "", true); err == nil {
+		t.Fatal("delete accepted --public-key-stdin")
+	}
+	if err := checkSandboxArgs("delete", "sb1", "", false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSandboxCLIStopStart(t *testing.T) {
+	ctx := context.Background()
+	for _, action := range []string{"stop", "start"} {
+		api := &fakeSandboxAPI{}
+		var out bytes.Buffer
+		if err := runSandbox(ctx, api, "host1", action, "sb1", "", false, strings.NewReader(""), &out); err != nil ||
+			api.gotHost != "host1" || api.gotID != "sb1" || api.gotKind != action {
+			t.Fatalf("%s: %q %v", action, out.String(), err)
+		}
+		if err := checkSandboxArgs(action, "sb1", "", false); err != nil {
+			t.Fatal(err)
+		}
+		if err := checkSandboxArgs(action, "", "", false); err == nil {
+			t.Fatalf("%s accepted no id", action)
+		}
+		if err := checkSandboxArgs(action, "sb1", "vnc", false); err == nil {
+			t.Fatalf("%s accepted --kind", action)
+		}
 	}
 }

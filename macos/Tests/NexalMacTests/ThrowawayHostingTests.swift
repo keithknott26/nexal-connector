@@ -11,6 +11,12 @@ final class ThrowawayHostingTests: XCTestCase {
                        ["sandbox", "--action", "connect", "--id", "sb1", "--kind", "vnc", "--config", config.path])
         XCTAssertEqual(CLICommand.sandbox(action: "connect", id: "sb1", kind: "ssh").arguments(config: config),
                        ["sandbox", "--action", "connect", "--id", "sb1", "--kind", "ssh", "--public-key-stdin", "--config", config.path])
+        XCTAssertEqual(CLICommand.sandbox(action: "stop", id: "sb1", kind: nil).arguments(config: config),
+                       ["sandbox", "--action", "stop", "--id", "sb1", "--config", config.path])
+        XCTAssertEqual(CLICommand.sandbox(action: "start", id: "sb1", kind: nil).arguments(config: config),
+                       ["sandbox", "--action", "start", "--id", "sb1", "--config", config.path])
+        XCTAssertEqual(CLICommand.sandbox(action: "delete", id: "sb1", kind: nil).arguments(config: config),
+                       ["sandbox", "--action", "delete", "--id", "sb1", "--config", config.path])
         XCTAssertEqual(CLICommand.sandbox(action: "create", id: nil, kind: nil).arguments(config: config),
                        ["sandbox", "--action", "create", "--config", config.path])
         XCTAssertEqual(CLICommand.sandbox(action: "images", id: "host_a", kind: nil).arguments(config: config),

@@ -180,7 +180,10 @@ func Measure(ctx context.Context, tunnelAddr string, payloadBytes int) (float64,
 	}
 
 	addr := net.JoinHostPort(tunnelAddr, fmt.Sprintf("%d", Port))
-	var d net.Dialer
+	// A short dial timeout: peers that run no bandwidth server (a phone, a gateway) drop the
+	// connection attempt silently, and waiting out the whole test budget for each of them
+	// delayed every real measurement behind a minute of failures.
+	d := net.Dialer{Timeout: 5 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return 0, 0, fmt.Errorf("bandwidth test dial: %w", err)

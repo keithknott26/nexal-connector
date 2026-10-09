@@ -71,6 +71,8 @@ struct NetworkSandbox: Decodable, Identifiable, Equatable {
     var imageName: String?
     var imageVersion: String?
     var appProfile: String?
+    /// False when the VM was created without a desktop; nil from older coordinators.
+    var desktop: Bool?
     var runnerName: String?
     var runnerOnline: Bool?
     var devcontainer: DevcontainerInfo?
@@ -412,6 +414,36 @@ final class ThrowawayHosting: ObservableObject {
             message = nil
         } catch {
             message = "Could not stop it: \(error.localizedDescription)"
+        }
+    }
+
+    /// Removes an instance that runs on another computer of this network, through the coordinator. That
+    /// computer's runner tears it down on its next poll, so the row shows "Stopping" until it does.
+    func deleteRemote(_ id: String, model: AppModel) async {
+        guard Self.validID(id), busyID == nil else { return }
+        busyID = id
+        message = nil
+        defer { busyID = nil }
+        do {
+            _ = try await model.sandbox(action: "delete", id: id, kind: nil)
+            await refreshNetwork(model, force: true)
+        } catch {
+            message = "Could not remove it: \(error.localizedDescription)"
+        }
+    }
+
+    /// Stops (keeping its disk) or starts a persistent VM that runs on another computer, through the
+    /// coordinator; that computer's runner carries it out on its next poll.
+    func setRemotePower(_ id: String, start: Bool, model: AppModel) async {
+        guard Self.validID(id), busyID == nil else { return }
+        busyID = id
+        message = nil
+        defer { busyID = nil }
+        do {
+            _ = try await model.sandbox(action: start ? "start" : "stop", id: id, kind: nil)
+            await refreshNetwork(model, force: true)
+        } catch {
+            message = "Could not \(start ? "start" : "stop") it: \(error.localizedDescription)"
         }
     }
 
@@ -790,6 +822,8 @@ struct ThrowawayHostsSection: View {
         let id: String
         let title: String
         let kind: String?
+        /// True for an instance that runs on another computer (removed through the coordinator).
+        var remote = false
         var isContainer: Bool { kind == "devcontainer" }
     }
 
@@ -848,7 +882,7 @@ struct ThrowawayHostsSection: View {
         .alert(pendingStop.map { $0.isContainer ? "Stop and delete “\($0.title)”?" : "Shut down and remove “\($0.title)”?" } ?? "",
                isPresented: Binding(get: { pendingStop != nil }, set: { if !$0 { pendingStop = nil } }),
                presenting: pendingStop) { stop in
-            Button(stop.isContainer ? "Stop and Delete" : "Shut Down and Remove", role: .destructive) { hosting.stop(stop.id) }
+            Button(stop.isContainer ? "Stop and Delete" : "Shut Down and Remove", role: .destructive) { if stop.remote { Task { await hosting.deleteRemote(stop.id, model: model) } } else { hosting.stop(stop.id) } }
             Button("Cancel", role: .cancel) {}
         } message: { stop in
             Text(stop.isContainer
@@ -962,13 +996,32 @@ struct ThrowawayHostsSection: View {
             preview: previewTarget(for: box, title: title, kind: box.kind, state: box.state, paused: nil)
         ) {
             if box.canConnect { connectMenu(box) }
+            if box.lifecycle == "persistent" && box.kind != "devcontainer" {
+                if box.state == "stopped" {
+                    Button { Task { await hosting.setRemotePower(box.id, start: true, model: model) } } label: { Image(systemName: "play.circle") }
+                        .buttonStyle(.borderless)
+                        .disabled(hosting.busyID == box.id)
+                        .help("Start")
+                } else if box.state == "running" {
+                    Button { Task { await hosting.setRemotePower(box.id, start: false, model: model) } } label: { Image(systemName: "stop.circle") }
+                        .buttonStyle(.borderless)
+                        .disabled(hosting.busyID == box.id)
+                        .help("Stop (keeps its disk)")
+                }
+            }
+            if box.state != "stopping" && box.state != "deleted" {
+                Button { confirmStop(id: box.id, title: title, kind: box.kind, remote: true) } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .disabled(hosting.busyID == box.id)
+                    .help(box.runnerOnline == false ? "Remove (it goes away when that computer is back online)" : "Remove")
+            }
         }
     }
 
     /// Only a running virtual machine has a screen to show. Stopped, paused, starting and container rows get nil.
     private func previewTarget(for entry: NetworkSandbox?, title: String, kind: String?, state: String?, paused: Bool?) -> VMPreviewTarget? {
         guard let entry, ThrowawayHosting.validID(entry.id),
-              VMPreviewEligibility.unavailableReason(kind: kind ?? entry.kind, state: state, paused: paused) == nil else { return nil }
+              VMPreviewEligibility.unavailableReason(kind: kind ?? entry.kind, state: state, paused: paused, desktop: entry.desktop) == nil else { return nil }
         let hosting = self.hosting
         let model = self.model
         return VMPreviewTarget(
@@ -986,8 +1039,8 @@ struct ThrowawayHostsSection: View {
         return [name, box.imageVersion].compactMap { $0 }.joined(separator: " ")
     }
 
-    private func confirmStop(id: String, title: String, kind: String?) {
-        pendingStop = PendingStop(id: id, title: title, kind: kind)
+    private func confirmStop(id: String, title: String, kind: String?, remote: Bool = false) {
+        pendingStop = PendingStop(id: id, title: title, kind: kind, remote: remote)
     }
 
     /// Dev containers have no screen, so they offer Terminal and Files only.
@@ -1003,7 +1056,7 @@ struct ThrowawayHostsSection: View {
             }
             Button { Task { await hosting.connect(box, kind: "ssh", model: model) } } label: { Label("Terminal (SSH)", systemImage: "terminal") }
             if box.kind != "devcontainer" {
-                Button { Task { await hosting.connect(box, kind: "vnc", model: model) } } label: { Label("Screen Sharing", systemImage: "rectangle.on.rectangle") }
+                if box.desktop != false { Button { Task { await hosting.connect(box, kind: "vnc", model: model) } } label: { Label("Screen Sharing", systemImage: "rectangle.on.rectangle") } }
             }
             Button { Task { await hosting.connect(box, kind: "files", model: model) } } label: { Label("Files (SFTP)", systemImage: "folder") }
         } label: {

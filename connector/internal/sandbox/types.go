@@ -32,6 +32,10 @@ const (
 	// dropped (the Mac slept, or the VM/container was re-created). The runner asks
 	// for it with StateReport.NeedsKey.
 	KindRejoin Kind = "rejoin"
+	// KindStop shuts a persistent VM down keeping its disk; KindStart boots it again from that disk.
+	// Both are the owner's remote twins of the Mac app's local Stop and Start.
+	KindStop  Kind = "stop"
+	KindStart Kind = "start"
 )
 
 // SandboxKind is what a sandbox is: a full VM or a dev container.
@@ -306,7 +310,7 @@ func ValidateTask(t Task) error {
 		return fmt.Errorf("invalid sandboxId")
 	}
 	switch t.Kind {
-	case KindCreate, KindReset, KindDelete, KindVNCPassword, KindRejoin:
+	case KindCreate, KindReset, KindDelete, KindVNCPassword, KindRejoin, KindStop, KindStart:
 	default:
 		return fmt.Errorf("unknown task kind %q", string(t.Kind))
 	}

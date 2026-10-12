@@ -938,6 +938,7 @@ final class AppModel: ObservableObject {
                 ($0.name.lowercased() == host?.lowercased() || $0.tunnelAddress == timeMachine?.timeMachine.host) && $0.lifecycle == "connected"
             } == true
             timeMachineDiscovery.update(timeMachine?.timeMachine, connected: connected)
+            timeMachineAdvertised = TimeMachineDiscovery.eligible(timeMachine?.timeMachine, connected: connected)
         }
 		if !force, let lastTimeMachineCheck, Date().timeIntervalSince(lastTimeMachineCheck) < 60 { return }
 		lastTimeMachineCheck = Date()
@@ -990,6 +991,9 @@ final class AppModel: ObservableObject {
 	/// True from the "Set up" click until setup finishes, including while it waits
 	/// for a status refresh to end. Keeps the button from re-arming mid-setup.
 	@Published private(set) var timeMachineSetupRunning = false
+	/// True while this Mac advertises its backup share to Time Machine ("Add Backup Disk" lists
+	/// it only then).
+	@Published private(set) var timeMachineAdvertised = false
 
 	/// One-click Time Machine, manual flavour: prepares this Mac's backup share and
 	/// credentials on neXal Storage (no tmutil, no administrator prompt), shows the
@@ -1009,7 +1013,16 @@ final class AppModel: ObservableObject {
 			let data = try await invoke(.timeMachinePrepare)
 			let credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
 			TimeMachineCredentialWindow.shared.show(credential)
-			message = "Backup disk ready. In Time Machine settings choose Add Backup Disk and sign in with the credentials shown."
+			// Time Machine lists a share only once it is advertised, and its disk sheet reads the
+			// list when opened: refresh and wait for the advertisement before opening settings.
+			for _ in 0..<6 {
+				await updateTimeMachine(force: true)
+				if timeMachineAdvertised { break }
+				try? await Task.sleep(for: .seconds(2))
+			}
+			message = timeMachineAdvertised
+				? "Backup disk ready. In Time Machine settings choose Add Backup Disk and sign in with the credentials shown."
+				: "Backup disk prepared, but it is not visible to Time Machine yet (waiting for the secure network or storage service). Close the Add Backup Disk sheet and reopen it in a minute."
 			if let url = URL(string: "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") {
 				NSWorkspace.shared.open(url)
 			}

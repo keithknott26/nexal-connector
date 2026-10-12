@@ -87,6 +87,8 @@ private struct TimeMachineCredentialView: View {
                 .font(.caption).textSelection(.enabled)
             row("Username", credential.username)
             row("Password", credential.password)
+            Text("Not listed? Close and reopen the Add Backup Disk sheet after a few seconds. In Finder, Go \u{203A} Connect to Server\u{2026} with smb://\(credential.host)/\(credential.share) also works.")
+                .font(.caption).foregroundStyle(.secondary)
             Text("This is your backup share password, not your Mac password. This window closes after two minutes.")
                 .font(.caption).foregroundStyle(.secondary)
         }.padding(20).frame(width: 530)

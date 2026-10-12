@@ -46,12 +46,26 @@ func TestAdmitCapsMaxCount(t *testing.T) {
 	}
 }
 
+func TestAdmitCapsCPUOvercommit(t *testing.T) {
+	// Default: CPUs are virtual and may be oversubscribed.
+	if err := AdmitCaps(enabledCaps(), okHost(), Usage{Count: 4, CPUs: 40}, Size{CPUs: 4, MemoryMB: 512, DiskGB: 5}); err != nil {
+		t.Fatalf("overcommit should pass: %v", err)
+	}
+	// A single instance larger than the host is still refused.
+	err := AdmitCaps(enabledCaps(), okHost(), Usage{}, Size{CPUs: 64, MemoryMB: 512, DiskGB: 5})
+	if code(err) != RefuseCPU {
+		t.Fatalf("want cpu, got %v", err)
+	}
+}
+
 func TestAdmitCapsCPUHalf(t *testing.T) {
-	// 10 CPUs -> 5 allowed in total.
-	if err := AdmitCaps(enabledCaps(), okHost(), Usage{Count: 1, CPUs: 1}, Size{CPUs: 4, MemoryMB: 512, DiskGB: 5}); err != nil {
+	// Strict mode (managed hosts): 10 CPUs -> 5 allowed in total.
+	strict := enabledCaps()
+	strict.StrictCPU = true
+	if err := AdmitCaps(strict, okHost(), Usage{Count: 1, CPUs: 1}, Size{CPUs: 4, MemoryMB: 512, DiskGB: 5}); err != nil {
 		t.Fatalf("5 of 5 should pass: %v", err)
 	}
-	err := AdmitCaps(enabledCaps(), okHost(), Usage{Count: 1, CPUs: 2}, Size{CPUs: 4, MemoryMB: 512, DiskGB: 5})
+	err := AdmitCaps(strict, okHost(), Usage{Count: 1, CPUs: 2}, Size{CPUs: 4, MemoryMB: 512, DiskGB: 5})
 	if code(err) != RefuseCPU {
 		t.Fatalf("want cpu, got %v", err)
 	}

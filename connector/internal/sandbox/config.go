@@ -128,6 +128,7 @@ func (c HostingConfig) Caps() Caps {
 		// A dedicated server: guests may use most of it (the per-tenant slices and
 		// the coordinator's per-tenant caps bound each tenant).
 		k.MaxCPUFraction, k.MaxMemFraction = 0.85, 0.85
+		k.StrictCPU = true // many tenants share it: keep the CPU budget hard
 	}
 	return k.Normalized()
 }

@@ -785,5 +785,9 @@ func ackIf(cond bool, id string) string {
 
 // offerable is the largest single instance this Mac would admit when idle.
 func offerable(c Caps, f HostFacts) (cpus, memoryMB int) {
-	return int(float64(f.CPUs)*c.MaxCPUFraction + 1e-9), int(float64(f.MemoryMB)*c.MaxMemFraction + 1e-9)
+	cpus = int(float64(f.CPUs)*c.MaxCPUFraction + 1e-9)
+	if !c.StrictCPU {
+		cpus = f.CPUs // overcommitted: one instance may use every core
+	}
+	return cpus, int(float64(f.MemoryMB)*c.MaxMemFraction + 1e-9)
 }

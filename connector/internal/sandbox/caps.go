@@ -16,6 +16,12 @@ type Caps struct {
 	// CPUs and memory as a fraction of the host's. Default 0.5 each.
 	MaxCPUFraction float64
 	MaxMemFraction float64
+	// StrictCPU makes MaxCPUFraction a hard limit on the SUM of virtual CPUs. By default
+	// (false) CPUs are overcommitted: virtual CPUs are threads the host schedules, so any number
+	// of instances can run at once and share the cores (each only has to fit the Mac's core
+	// count); the owner's real limits are memory and the instance count. A managed server that
+	// hosts several tenants keeps the strict limit.
+	StrictCPU bool
 	// DiskMarginBytes is the free space required beyond the image itself.
 	// Default 10 GiB.
 	DiskMarginBytes uint64
@@ -132,8 +138,12 @@ func AdmitCaps(c Caps, h HostFacts, u Usage, req Size) error {
 	if u.Count >= c.MaxSandboxes {
 		return refuse(RefuseCount, "already running %d of %d allowed", u.Count, c.MaxSandboxes)
 	}
-	maxCPU := int(float64(h.CPUs)*c.MaxCPUFraction + 1e-9)
-	if u.CPUs+req.CPUs > maxCPU {
+	if !c.StrictCPU {
+		// Overcommit: only a single instance with more virtual CPUs than the Mac has cores is refused.
+		if h.CPUs > 0 && req.CPUs > h.CPUs {
+			return refuse(RefuseCPU, "this size needs %d CPUs but this Mac has %d; choose a smaller size", req.CPUs, h.CPUs)
+		}
+	} else if maxCPU := int(float64(h.CPUs)*c.MaxCPUFraction + 1e-9); u.CPUs+req.CPUs > maxCPU {
 		if req.CPUs > maxCPU {
 			return refuse(RefuseCPU, "this size needs %d CPUs but this Mac offers at most %d to instances; choose a smaller size", req.CPUs, maxCPU)
 		}

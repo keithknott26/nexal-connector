@@ -321,8 +321,8 @@ func TestManagedHostingConfig(t *testing.T) {
 	if err != nil || c.MaxSandboxes != 40 || c.Caps().MaxCPUFraction != 0.85 {
 		t.Fatalf("%+v %v", c, err)
 	}
-	if _, err := ParseHostingConfig([]byte(`{"enabled":true,"maxSandboxes":40}`)); err == nil {
-		t.Fatal("a Mac stays at 10")
+	if _, err := ParseHostingConfig([]byte(`{"enabled":true,"maxSandboxes":1001}`)); err == nil {
+		t.Fatal("a Mac stays at 1000")
 	}
 }
 

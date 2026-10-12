@@ -36,6 +36,11 @@ type HostingConfig struct {
 	Managed bool `json:"managed,omitempty"`
 }
 
+// MaxUnmanagedSandboxes is the most a Mac may run: effectively no limit (CPU is
+// overcommitted; memory and disk still bound what is admitted). Matches the
+// coordinator's ABSOLUTE_MAX_PER_RUNNER.
+const MaxUnmanagedSandboxes = 1000
+
 // MaxManagedSandboxes is the most a managed server may run (the coordinator's
 // MANAGED_ABSOLUTE_MAX).
 const MaxManagedSandboxes = 64
@@ -55,13 +60,13 @@ func DefaultHostingConfigPath() (string, error) {
 	return filepath.Join(home, "Library", "Application Support", "Nexal", "sandbox-hosting.json"), nil
 }
 
-// Normalize validates and fills defaults: maxSandboxes 1..10 (default 5),
+// Normalize validates and fills defaults: maxSandboxes 1..1000 (default 5),
 // placement members|owner (default members).
 func (c HostingConfig) Normalize() (HostingConfig, error) {
 	if c.MaxSandboxes == 0 {
 		c.MaxSandboxes = 5
 	}
-	limit := 10
+	limit := MaxUnmanagedSandboxes
 	if c.Managed {
 		limit = MaxManagedSandboxes
 	}

@@ -21,13 +21,15 @@ struct SandboxHostingConfig: Codable, Equatable {
     var enabled = false
     var maxSandboxes = 5
     var placement = "members"
+    /// "No limit" is stored as this ceiling (the connector and coordinator accept up to it).
+    static let noLimit = 1000
 
     static let placements: [(value: String, label: String)] = [
         ("members", "Any member of my network"), ("owner", "Only my own devices")]
 
     var clamped: SandboxHostingConfig {
         var c = self
-        c.maxSandboxes = min(10, max(1, c.maxSandboxes))
+        c.maxSandboxes = min(Self.noLimit, max(1, c.maxSandboxes))
         if !Self.placements.contains(where: { $0.value == c.placement }) { c.placement = "members" }
         return c
     }
@@ -762,9 +764,14 @@ struct ThrowawayHostingSettingsView: View {
                  : "Connect this Mac to neXal first. Only its owner can turn this on.")
                 .font(.caption).foregroundStyle(.secondary)
             if hosting.config.enabled {
-                Stepper(value: Binding(get: { hosting.config.maxSandboxes },
-                                       set: { n in hosting.update { $0.maxSandboxes = n } }), in: 1...10) {
-                    Text("Most hosts at once: \(hosting.config.maxSandboxes)")
+                Toggle("No limit on hosts at once", isOn: Binding(
+                    get: { hosting.config.maxSandboxes >= SandboxHostingConfig.noLimit },
+                    set: { on in hosting.update { $0.maxSandboxes = on ? SandboxHostingConfig.noLimit : 5 } }))
+                if hosting.config.maxSandboxes < SandboxHostingConfig.noLimit {
+                    Stepper(value: Binding(get: { hosting.config.maxSandboxes },
+                                           set: { n in hosting.update { $0.maxSandboxes = n } }), in: 1...100) {
+                        Text("Most hosts at once: \(hosting.config.maxSandboxes)")
+                    }
                 }
                 Picker("Who can start one here", selection: Binding(
                     get: { hosting.config.placement },

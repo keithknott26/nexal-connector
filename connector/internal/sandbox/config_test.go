@@ -21,7 +21,7 @@ func TestParseHostingConfig(t *testing.T) {
 			t.Fatalf("alias %s: %+v %v", alias, c, err)
 		}
 	}
-	for _, bad := range []string{`{`, `{"enabled":true,"maxSandboxes":11}`, `{"maxSandboxes":-1}`, `{"placement":"everyone"}`} {
+	for _, bad := range []string{`{`, `{"enabled":true,"maxSandboxes":1001}`, `{"maxSandboxes":-1}`, `{"placement":"everyone"}`} {
 		if _, err := ParseHostingConfig([]byte(bad)); err == nil {
 			t.Errorf("%s should be rejected", bad)
 		}
@@ -42,7 +42,7 @@ func TestLoadHostingConfigFailsClosed(t *testing.T) {
 	if err != nil || !c.Enabled || c.MaxSandboxes != 9 {
 		t.Fatalf("explicit opt-in must be honored: %+v %v", c, err)
 	}
-	if err := os.WriteFile(p, []byte(`{"maxSandboxes":11}`), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte(`{"maxSandboxes":1001}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err = LoadHostingConfig(p)

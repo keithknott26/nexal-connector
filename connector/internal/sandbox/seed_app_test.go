@@ -110,6 +110,12 @@ func TestRenderUserDataJellyfinProfile(t *testing.T) {
 		`-p "$IP:8096:8096"`,
 		"target=/media/shared-drive,readonly,bind-propagation=rslave",
 		"wakeonlan etherwake",
+		// Debian 13 packages the docker client separately and the install skips recommends.
+		"install -y -qq --no-install-recommends docker-cli",
+		// Progress a person can follow: what is happening, what comes next, and a download heartbeat.
+		`plan 3 5 "downloading Jellyfin`,
+		"Next: $4.",
+		"still downloading $1",
 	} {
 		if !strings.Contains(u, want) {
 			t.Errorf("rendered user-data is missing %q", want)

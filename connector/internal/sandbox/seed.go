@@ -310,6 +310,43 @@ retry() {
   return 0
 }
 
+# Plain-language progress for the log: "step N/T: what is happening now. Next: what follows."
+plan() { log "step $1/$2: $3. Next: $4."; }
+
+# docker pull that stays visibly alive: a heartbeat every 20 s says it is still downloading and how many
+# layers are done (a pull prints nothing else to the console). Returns docker's own status.
+pull_image() {
+  plog=$(mktemp)
+  ( s=0; while sleep 20; do s=$((s + 20)); log "still downloading $1 (${s}s, $(grep -c 'Pull complete' "$plog" 2>/dev/null || true) layers done)"; done ) &
+  hb=$!
+  rc=0
+  docker pull "$1" >"$plog" 2>&1 || rc=$?
+  kill "$hb" 2>/dev/null || true
+  wait "$hb" 2>/dev/null || true
+  if [ "$rc" -ne 0 ]; then
+    log "download of $1 failed: $(tail -n 1 "$plog" | cut -c1-160)"
+  fi
+  rm -f "$plog"
+  return "$rc"
+}
+
+# The version the image reports about itself ("" when it carries none).
+image_version() {
+  v=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null || true)
+  case "$v" in
+  "<no value>") v="" ;;
+  esac
+  printf '%s' "$v"
+}
+
+# Debian 13 splits the docker client into its own package (docker-cli), which docker.io only
+# Recommends, and the installs below skip recommends. Ubuntu's docker.io ships the client.
+ensure_docker_cli() {
+  if ! command -v docker >/dev/null 2>&1; then
+    retry apt-get install -y -qq --no-install-recommends docker-cli || fail "installing the docker client"
+  fi
+}
+
 # The mesh address (CGNAT 100.64.0.0/10) is the only address the app is published on.
 mesh_ip() {
   ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 |
@@ -345,13 +382,20 @@ home-assistant)
   log "installing Home Assistant"
   export DEBIAN_FRONTEND=noninteractive
   step app-packages 10
+  plan 1 5 "updating the package list" "install Docker"
   retry apt-get update -qq || fail "apt-get update"
   step app-packages 25
+  plan 2 5 "installing Docker" "download Home Assistant"
   retry apt-get install -y -qq --no-install-recommends docker.io || fail "installing docker"
   systemctl enable --now docker || fail "starting docker"
+  ensure_docker_cli
   step app-download 40
-  retry docker pull "$IMAGE" || fail "pulling the Home Assistant image"
+  plan 3 5 "downloading Home Assistant ($IMAGE), usually a few minutes" "start Home Assistant"
+  retry pull_image "$IMAGE" || fail "pulling the Home Assistant image"
+  VER=$(image_version "$IMAGE")
+  log "downloaded Home Assistant${VER:+ v$VER}"
   step app-start 85
+  plan 4 5 "starting Home Assistant" "wait for it to be ready"
   mkdir -p "$DATA"
   docker rm -f homeassistant >/dev/null 2>&1 || true
   set -- -p "$IP:8123:8123"
@@ -359,6 +403,7 @@ home-assistant)
     set -- "$@" -p "$LANIP:8123:8123"
   fi
   docker run -d --name homeassistant --restart unless-stopped "$@" -v "$DATA:/config" -v /etc/localtime:/etc/localtime:ro     "$IMAGE" || fail "starting Home Assistant"
+  plan 5 5 "Home Assistant is starting, its first start can take a few minutes" "open http://$IP:8123"
   log "home-assistant ready http://$IP:8123$(lan_url 8123)"
   ;;
 jellyfin)
@@ -375,17 +420,24 @@ jellyfin)
   log "installing Jellyfin"
   export DEBIAN_FRONTEND=noninteractive
   step app-packages 10
+  plan 1 5 "updating the package list" "install Docker"
   retry apt-get update -qq || fail "apt-get update"
   step app-packages 25
+  plan 2 5 "installing Docker and wake-on-LAN tools" "download Jellyfin"
   retry apt-get install -y -qq --no-install-recommends docker.io wakeonlan etherwake || fail "installing docker"
   systemctl enable --now docker || fail "starting docker"
+  ensure_docker_cli
   step app-download 40
-  if ! retry docker pull "$IMAGE"; then
-    log "pulling $IMAGE failed, trying $FALLBACK_IMAGE"
+  plan 3 5 "downloading Jellyfin ($IMAGE), usually a few minutes" "start Jellyfin"
+  if ! retry pull_image "$IMAGE"; then
+    log "download from $IMAGE failed, downloading from $FALLBACK_IMAGE instead"
     IMAGE=$FALLBACK_IMAGE
-    retry docker pull "$IMAGE" || fail "pulling the Jellyfin image: $(docker pull "$IMAGE" 2>&1 | tail -n 1 | cut -c1-160)"
+    retry pull_image "$IMAGE" || fail "pulling the Jellyfin image from both registries"
   fi
+  VER=$(image_version "$IMAGE")
+  log "downloaded Jellyfin${VER:+ v$VER}"
   step app-start 85
+  plan 4 5 "starting Jellyfin" "wait for it to answer"
   mkdir -p "$DATA/config" "$DATA/cache" "$DATA/media" /mnt/nexal-drive
   docker rm -f jellyfin >/dev/null 2>&1 || true
   set -- -p "$IP:8096:8096"
@@ -398,6 +450,7 @@ jellyfin)
     -e JELLYFIN_PublishedServerUrl="http://$IP:8096" \
     "$IMAGE" || fail "starting Jellyfin"
   # Ready means answering, not merely started: first start takes a while.
+  plan 5 5 "waiting for Jellyfin to answer on http://$IP:8096, up to 5 minutes" "open it and finish the setup wizard"
   n=0
   until curl -fsS -m 5 -o /dev/null "http://$IP:8096/health" 2>/dev/null; do
     n=$((n + 1))

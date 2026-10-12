@@ -368,7 +368,10 @@ jellyfin)
   # wakeonlan/etherwake are installed so the server can wake a NAS or a sleeping Mac that
   # holds media: run "wakeonlan <mac>" from an SSH session or a Jellyfin plugin or script.
   DATA=/var/lib/nexal-jellyfin
-  IMAGE=docker.io/jellyfin/jellyfin:latest
+  # GitHub's registry is the first choice (the guest already pulls the mesh runtime from ghcr.io, and
+  # Docker Hub rate-limits shared home addresses); Docker Hub is the fallback.
+  IMAGE=ghcr.io/jellyfin/jellyfin:latest
+  FALLBACK_IMAGE=docker.io/jellyfin/jellyfin:latest
   log "installing Jellyfin"
   export DEBIAN_FRONTEND=noninteractive
   step app-packages 10
@@ -377,7 +380,11 @@ jellyfin)
   retry apt-get install -y -qq --no-install-recommends docker.io wakeonlan etherwake || fail "installing docker"
   systemctl enable --now docker || fail "starting docker"
   step app-download 40
-  retry docker pull "$IMAGE" || fail "pulling the Jellyfin image"
+  if ! retry docker pull "$IMAGE"; then
+    log "pulling $IMAGE failed, trying $FALLBACK_IMAGE"
+    IMAGE=$FALLBACK_IMAGE
+    retry docker pull "$IMAGE" || fail "pulling the Jellyfin image: $(docker pull "$IMAGE" 2>&1 | tail -n 1 | cut -c1-160)"
+  fi
   step app-start 85
   mkdir -p "$DATA/config" "$DATA/cache" "$DATA/media" /mnt/nexal-drive
   docker rm -f jellyfin >/dev/null 2>&1 || true

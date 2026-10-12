@@ -137,6 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
         loginItem.configureFirstLaunch()
+        // VMs get a home-network address by default: ask once for the password the bridge helper needs.
+        ThrowawayHosting.shared.offerLANBridgeOnce()
         if preferences.showSplash {
             showSplash { [weak self] in
                 self?.launchFinished = true

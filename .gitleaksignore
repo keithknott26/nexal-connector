@@ -1,0 +1,3 @@
+# False positive: m2-check.txt is saved `netbird status` output; the "Public key"
+# line is a WireGuard public key (not a secret).
+3ec394eedc159775f021edb9cf5c3a8d4e506a70:m2-check.txt:generic-api-key:6

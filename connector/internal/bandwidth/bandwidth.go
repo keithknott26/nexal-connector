@@ -56,6 +56,8 @@ type Result struct {
 	Elapsed       time.Duration `json:"elapsed"`
 	MeasuredAt    time.Time     `json:"measuredAt"`
 	TunnelAddress string        `json:"tunnelAddress"`
+	// Error is why a measurement failed ("" on success); logged, never sent to a peer.
+	Error string `json:"error,omitempty"`
 }
 
 // Server listens on the tunnel address and serves bandwidth test payloads.
@@ -237,6 +239,8 @@ func TestPeer(ctx context.Context, peerID, peerName, tunnelAddr string) Result {
 	if err == nil {
 		result.DownloadMbps = mbps
 		result.Elapsed = elapsed
+	} else {
+		result.Error = err.Error()
 	}
 	return result
 }

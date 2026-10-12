@@ -75,6 +75,17 @@ struct NetworkSandbox: Decodable, Identifiable, Equatable {
     var desktop: Bool?
     var runnerName: String?
     var runnerOnline: Bool?
+    /// Details for the ⓘ sheet (all optional: older coordinators omit them).
+    var lanIp: String?
+    var size: String?
+    var cpu: Int?
+    var memoryMb: Int?
+    var diskGb: Int?
+    var reach: String?
+    var drive: String?
+    var createdAt: String?
+    var lastConnectedByName: String?
+    var lastConnectedAt: String?
     var devcontainer: DevcontainerInfo?
     var progress: Progress?
 
@@ -319,6 +330,17 @@ final class ThrowawayHosting: ObservableObject {
         let up = lstat(Self.lanBridgeSocket, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
         lanBridgeReady = up
         if up { lanBridgeStatus = nil }
+    }
+
+    private nonisolated static let lanBridgeOfferedKey = "lanBridgeOffered"
+
+    /// The bridge is on by default: at the first launch without the helper, ask once for the administrator
+    /// password. A cancel is respected (the flag is set first); the Settings button stays available.
+    func offerLANBridgeOnce(defaults: UserDefaults = .standard) {
+        checkLANBridge()
+        guard lanBridgeReady == false, !defaults.bool(forKey: Self.lanBridgeOfferedKey) else { return }
+        defaults.set(true, forKey: Self.lanBridgeOfferedKey)
+        installLANBridge()
     }
 
     /// Installs (or reinstalls) the helper the app ships, as root through the
@@ -817,6 +839,8 @@ struct ThrowawayHostsSection: View {
     @EnvironmentObject private var model: AppModel
     /// The instance whose stop/delete is awaiting confirmation.
     @State private var pendingStop: PendingStop?
+    /// The instance whose ⓘ details sheet is open.
+    @State private var infoShown: SandboxInfo?
 
     private struct PendingStop {
         let id: String
@@ -876,6 +900,7 @@ struct ThrowawayHostsSection: View {
             }
         }
         .sheet(isPresented: $hosting.showingCreate) { NewSandboxSheet().environmentObject(model) }
+        .sheet(item: $infoShown) { SandboxInfoSheet(info: $0) }
         // Attached to the panel the user clicked in. A modal NSAlert from this
         // menu-bar app opened behind the frontmost app's window: on macOS 14+ an
         // app can only ask to be activated, not force it.
@@ -958,6 +983,7 @@ struct ThrowawayHostsSection: View {
             preview: previewTarget(for: entry, title: title, kind: box.kind, state: state, paused: box.paused)
         ) {
             if let entry, entry.canConnect || box.state == "running" { connectMenu(entry, lan: box.lanIp) }
+            SandboxInfoButton { infoShown = SandboxInfoBuilder.make(network: entry, local: box, title: title) }
             if box.canStopKeepingDisk {
                 if box.isStopped {
                     Button { hosting.requestKeepingDisk(box.id, start: true) } label: { Image(systemName: "play.circle") }
@@ -996,6 +1022,7 @@ struct ThrowawayHostsSection: View {
             preview: previewTarget(for: box, title: title, kind: box.kind, state: box.state, paused: nil)
         ) {
             if box.canConnect { connectMenu(box) }
+            SandboxInfoButton { infoShown = SandboxInfoBuilder.make(network: box, local: nil, title: title) }
             if box.lifecycle == "persistent" && box.kind != "devcontainer" {
                 if box.state == "stopped" {
                     Button { Task { await hosting.setRemotePower(box.id, start: true, model: model) } } label: { Image(systemName: "play.circle") }

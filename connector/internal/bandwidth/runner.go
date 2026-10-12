@@ -184,7 +184,7 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider, onlyM
 				"peer", peer.Name, "mbps", result.DownloadMbps,
 				"elapsed", result.Elapsed.Round(time.Millisecond))
 		} else {
-			r.logger.Debug("bandwidth test failed after retry", "peer", peer.Name)
+			r.logger.Warn("bandwidth test failed after retry", "peer", peer.Name, "addr", peer.TunnelAddress, "error", result.Error)
 		}
 		r.mu.Unlock()
 

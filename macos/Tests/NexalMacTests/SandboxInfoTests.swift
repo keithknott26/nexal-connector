@@ -57,3 +57,30 @@ final class SandboxInfoTests: XCTestCase {
         XCTAssertFalse(info.sections.flatMap(\.rows).contains { $0.label.lowercased().contains("password") && $0.copyable })
     }
 }
+
+final class SandboxLogReaderTests: XCTestCase {
+    func testCleanStripsColourCodesAndCarriageReturns() {
+        XCTAssertEqual(SandboxLogReader.clean("a\r\n\u{1B}[31mred\u{1B}[0m\rb\u{0}c\n"), "a\nredbc\n")
+    }
+
+    func testTailKeepsOnlyTheEndAndDropsTheCutLine() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("console-\(UUID().uuidString).log")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try "first line\nsecond line\nthird line\n".write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(SandboxLogReader.tail(of: url, maxBytes: 100), "first line\nsecond line\nthird line\n")
+        XCTAssertEqual(SandboxLogReader.tail(of: url, maxBytes: 16), "third line\n")
+    }
+
+    func testMissingLogIsNil() {
+        XCTAssertNil(SandboxLogReader.tail(of: URL(fileURLWithPath: "/nonexistent/console.log")))
+    }
+
+    func testLogButtonOnlyForVMsHostedHere() throws {
+        let url = URL(fileURLWithPath: "/tmp/console.log")
+        let vm = LocalSandbox(id: "a", state: "running", hostname: nil, meshIp: nil, lanIp: nil, expiresAt: nil, kind: "vm", lifecycle: "persistent", paused: nil)
+        let box = LocalSandbox(id: "b", state: "running", hostname: nil, meshIp: nil, lanIp: nil, expiresAt: nil, kind: "devcontainer", lifecycle: nil, paused: nil)
+        XCTAssertEqual(SandboxInfoBuilder.make(network: nil, local: vm, title: "t", logURL: url).logURL, url)
+        XCTAssertNil(SandboxInfoBuilder.make(network: nil, local: box, title: "t", logURL: url).logURL)
+        XCTAssertNil(SandboxInfoBuilder.make(network: nil, local: vm, title: "t").logURL)
+    }
+}

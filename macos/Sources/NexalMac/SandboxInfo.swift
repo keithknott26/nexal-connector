@@ -24,12 +24,39 @@ struct SandboxInfo: Equatable, Identifiable {
     var title: String
     var stateText: String
     var sections: [SandboxInfoSection]
+    /// The VM's console log on this Mac, when this Mac hosts it. nil hides "View logs".
+    var logURL: URL? = nil
+}
+
+/// Reads the end of a VM's console log for the "View logs" pane.
+enum SandboxLogReader {
+    static let maxBytes = 96 * 1024
+
+    /// The last `maxBytes` of the file, cleaned for display. nil when the file does not exist or cannot be read.
+    static func tail(of url: URL, maxBytes: Int = SandboxLogReader.maxBytes) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+        guard (try? handle.seek(toOffset: start)) != nil, let data = try? handle.readToEnd() else { return nil }
+        var text = String(decoding: data, as: UTF8.self)
+        // Started mid-file: the first line is usually cut, so drop it.
+        if start > 0, let newline = text.firstIndex(of: "\n") { text = String(text[text.index(after: newline)...]) }
+        return clean(text)
+    }
+
+    /// Console output carries colour codes and carriage returns that show as noise in a text view.
+    static func clean(_ raw: String) -> String {
+        var s = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        s = s.replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[A-Za-z]", with: "", options: .regularExpression)
+        return s.filter { $0 == "\n" || $0 == "\t" || !($0.unicodeScalars.first.map { $0.value < 0x20 || $0.value == 0x7F } ?? false) }
+    }
 }
 
 enum SandboxInfoBuilder {
     static let user = "nexal"
 
-    static func make(network: NetworkSandbox?, local: LocalSandbox?, title: String, now: Date = Date()) -> SandboxInfo {
+    static func make(network: NetworkSandbox?, local: LocalSandbox?, title: String, logURL: URL? = nil, now: Date = Date()) -> SandboxInfo {
         let kind = network?.kind ?? local?.kind
         let isContainer = kind == "devcontainer"
         let lifecycle = network?.lifecycle ?? local?.lifecycle
@@ -96,7 +123,7 @@ enum SandboxInfoBuilder {
                         SandboxInfoSection(title: "System", rows: system),
                         SandboxInfoSection(title: "Activity", rows: activity)]
             .filter { !$0.rows.isEmpty }
-        return SandboxInfo(title: title, stateText: stateLabel(rawState), sections: sections)
+        return SandboxInfo(title: title, stateText: stateLabel(rawState), sections: sections, logURL: isContainer ? nil : logURL)
     }
 
     private static func clean(_ s: String?) -> String? {
@@ -132,8 +159,17 @@ struct SandboxInfoSheet: View {
     let info: SandboxInfo
     @Environment(\.dismiss) private var dismiss
     @State private var copied: String?
+    @State private var showingLogs = false
 
     var body: some View {
+        if showingLogs, let url = info.logURL {
+            SandboxLogView(title: info.title, url: url) { showingLogs = false }
+        } else {
+            details
+        }
+    }
+
+    private var details: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Image(systemName: "info.circle").foregroundStyle(.secondary)
@@ -161,7 +197,14 @@ struct SandboxInfoSheet: View {
                     }
                 }
             }
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            HStack {
+                if info.logURL != nil {
+                    Button { showingLogs = true } label: { Label("View logs", systemImage: "doc.text.magnifyingglass") }
+                        .help("The VM's console output: boot, mesh join, app install")
+                }
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
         }
         .padding(16)
         .frame(width: 340, height: 420)
@@ -181,5 +224,67 @@ struct SandboxInfoButton: View {
         Button(action: action) { Image(systemName: "info.circle") }
             .buttonStyle(.borderless)
             .help("Details")
+    }
+}
+
+/// The console log of a VM hosted on this Mac, refreshed while it is open, so a starting, running or
+/// stopping VM can be followed live. Shown inside the details sheet (nested sheets are unreliable in the panel).
+struct SandboxLogView: View {
+    let title: String
+    let url: URL
+    let back: () -> Void
+    @State private var text: String?
+    @State private var loaded = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button(action: back) { Label("Details", systemImage: "chevron.left") }.buttonStyle(.borderless)
+                Spacer()
+                Text("Logs · \(title)").font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(display)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.35)))
+                .onChange(of: text) { proxy.scrollTo("end", anchor: .bottom) }
+            }
+            HStack {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text ?? "", forType: .string)
+                    copied = true
+                } label: { Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc") }
+                    .disabled(text == nil)
+                Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Label("Show in Finder", systemImage: "folder") }
+                    .disabled(text == nil)
+                Spacer()
+                Text("Updates every 2 s").font(.caption2).foregroundStyle(.secondary)
+            }
+            .controlSize(.small)
+        }
+        .padding(16)
+        .frame(width: 340, height: 420)
+        .task {
+            while !Task.isCancelled {
+                let url = self.url
+                let fresh = await Task.detached { SandboxLogReader.tail(of: url) }.value
+                if fresh != text { text = fresh }
+                loaded = true
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private var display: String {
+        guard loaded else { return "Loading…" }
+        guard let text else { return "No log yet. It appears once the VM starts." }
+        return text.isEmpty ? "The log is empty." : text
     }
 }

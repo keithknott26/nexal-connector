@@ -252,6 +252,11 @@ final class ThrowawayHosting: ObservableObject {
     var killDir: URL { root.appendingPathComponent("sandboxes/kill-requests", isDirectory: true) }
     var stopDir: URL { root.appendingPathComponent("sandboxes/stop-requests", isDirectory: true) }
     var startDir: URL { root.appendingPathComponent("sandboxes/start-requests", isDirectory: true) }
+    /// A VM hosted on this Mac writes its console output here (see the connector's Manager.consolePath).
+    func consoleLogURL(for id: String) -> URL? {
+        guard Self.validID(id) else { return nil }
+        return root.appendingPathComponent("sandboxes/boxes/\(id)/console.log")
+    }
 
     var runningHere: [LocalSandbox] { local.filter { $0.isActive } }
     var runningLine: String { ThrowawayFormat.runningLine(runningHere.count) }
@@ -983,7 +988,7 @@ struct ThrowawayHostsSection: View {
             preview: previewTarget(for: entry, title: title, kind: box.kind, state: state, paused: box.paused)
         ) {
             if let entry, entry.canConnect || box.state == "running" { connectMenu(entry, lan: box.lanIp) }
-            SandboxInfoButton { infoShown = SandboxInfoBuilder.make(network: entry, local: box, title: title) }
+            SandboxInfoButton { infoShown = SandboxInfoBuilder.make(network: entry, local: box, title: title, logURL: hosting.consoleLogURL(for: box.id)) }
             if box.canStopKeepingDisk {
                 if box.isStopped {
                     Button { hosting.requestKeepingDisk(box.id, start: true) } label: { Image(systemName: "play.circle") }

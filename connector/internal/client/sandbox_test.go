@@ -75,7 +75,7 @@ func TestSandboxRunnerRoutes(t *testing.T) {
 	if err := json.Unmarshal([]byte(bodies[3]), &hs); err != nil || hs.Awake || !hs.OnBattery {
 		t.Fatalf("hosting-state body %q", bodies[3])
 	}
-	if err := c.PutSandboxHosting(ctx, "h1", sandbox.HostingConfig{Enabled: true, MaxSandboxes: 99}); err == nil {
+	if err := c.PutSandboxHosting(ctx, "h1", sandbox.HostingConfig{Enabled: true, MaxSandboxes: 1001}); err == nil {
 		t.Fatal("out-of-range maxSandboxes must be refused client-side")
 	}
 	if _, err := c.SandboxTasks(ctx, "../x"); err == nil {

@@ -334,7 +334,7 @@ struct NetworkPanel: View {
                         if peer.lifecycle == "offline" {
                             Text("· Offline").font(.caption).foregroundStyle(.secondary)
                         } else {
-                        Text(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "· 🔐" : "· Encrypted")
+                        Text(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "· 🔐 Encrypted - Level 5" : "· 🔐 Encrypted")
                             .font(.caption).foregroundStyle(peer.pq == "protected" ? .green : .orange)
                             .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe (ML-KEM-1024)" : "Encrypted. ML-KEM-1024 key exchange is not confirmed on this link.")
                         }
@@ -346,7 +346,8 @@ struct NetworkPanel: View {
                     .foregroundStyle(.primary)
                     // Line 2: where it is. neXal's own infrastructure shows no
                     // addresses: they are not the customer's to use.
-                    Text((storage ? [location] : [publicIP, privateIP, location]).compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
+                    Text(storage ? PeerAddressText.summary(publicIP: nil, lanIP: nil, meshIP: peer.tunnelAddress, location: location)
+                         : PeerAddressText.summary(publicIP: publicIP, lanIP: privateIP, meshIP: peer.tunnelAddress, location: location))
                         .font(.caption).foregroundStyle(.secondary)
                         .help(storage ? "" : "Public IP · Private IP · Location")
                     if let error = model.peerRefreshErrors[peer.id] {
@@ -558,10 +559,10 @@ struct NetworkPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Text("\(model.hostName) (this Mac)").font(.subheadline.weight(.semibold))
-                        if protected { Text("· 🔐").help("Quantum-safe link to neXal storage") }
+                        if protected { Text("· 🔐 Encrypted - Level 5").help("Quantum-safe link to neXal storage") }
                     }
                     .foregroundStyle(.primary)
-                    Text([publicIP, privateIP, location].compactMap { $0 }.joined(separator: " · ").ifEmpty("—"))
+                    Text(PeerAddressText.summary(publicIP: publicIP, lanIP: privateIP, meshIP: nil, location: location))
                         .font(.caption).foregroundStyle(.secondary)
                         .help("Public IP · Private IP · Location")
                 }

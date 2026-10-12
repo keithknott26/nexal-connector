@@ -17,3 +17,16 @@ enum PeerLinkText {
         return mbps.formatted(.number.precision(.fractionLength(1))) + " Mbps"
     }
 }
+
+/// The labelled address line under a peer: "Public: … · LAN: … · Mesh: … · Location: …".
+/// Missing parts are skipped; "—" when nothing is known.
+enum PeerAddressText {
+    static func summary(publicIP: String?, lanIP: String?, meshIP: String?, location: String?) -> String {
+        let parts: [(String, String?)] = [("Public", publicIP), ("LAN", lanIP), ("Mesh", meshIP), ("Location", location)]
+        let text = parts.compactMap { label, value -> String? in
+            guard let v = value?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
+            return "\(label): \(v)"
+        }.joined(separator: " · ")
+        return text.isEmpty ? "—" : text
+    }
+}

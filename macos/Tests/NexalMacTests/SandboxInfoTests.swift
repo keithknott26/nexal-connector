@@ -84,3 +84,17 @@ final class SandboxLogReaderTests: XCTestCase {
         XCTAssertNil(SandboxInfoBuilder.make(network: nil, local: vm, title: "t").logURL)
     }
 }
+
+final class SandboxPeerMatchTests: XCTestCase {
+    func testMatchesAPeerToItsVMByMeshAddress() throws {
+        let list = try JSONDecoder().decode([NetworkSandbox].self, from: Data("""
+        [{"id":"a","meshIp":"100.86.1.1","state":"running"},{"id":"b","meshIp":"100.86.1.2","state":"running"},
+         {"id":"c","meshIp":"100.86.1.3","state":"deleted"}]
+        """.utf8))
+        XCTAssertEqual(SandboxPeerMatch.sandbox(forMeshIp: "100.86.1.2", in: list)?.id, "b")
+        XCTAssertNil(SandboxPeerMatch.sandbox(forMeshIp: "100.86.9.9", in: list))
+        XCTAssertNil(SandboxPeerMatch.sandbox(forMeshIp: "100.86.1.3", in: list))
+        XCTAssertNil(SandboxPeerMatch.sandbox(forMeshIp: nil, in: list))
+        XCTAssertNil(SandboxPeerMatch.sandbox(forMeshIp: " ", in: list))
+    }
+}

@@ -355,6 +355,43 @@ if /usr/sbin/sshd -t -o PerSourcePenaltyExemptList=100.64.0.0/10 >/dev/null 2>&1
   printf 'PerSourcePenaltyExemptList 100.64.0.0/10\n' >/etc/ssh/sshd_config.d/05-nexal-mesh.conf
 fi
 systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+
+# Answer the mesh bandwidth test (connector/internal/bandwidth, port 41820) on the mesh address, so the
+# Mac's meter has something to measure for this VM. The peer sends a 4-byte big-endian length; this
+# streams that many random bytes (capped at 8 MiB) and exits. Socket-activated: nothing runs between tests.
+cat >/usr/local/sbin/nexal-bandwidth <<'BWEOF'
+#!/bin/sh
+n=$(head -c 4 | od -An -tu1 | awk 'NF == 4 {printf "%d", $1*16777216+$2*65536+$3*256+$4}')
+case "$n" in ''|*[!0-9]*) exit 0 ;; esac
+[ "$n" -gt 0 ] || exit 0
+[ "$n" -le 8388608 ] || n=8388608
+exec head -c "$n" /dev/urandom
+BWEOF
+chmod 755 /usr/local/sbin/nexal-bandwidth
+cat >/etc/systemd/system/nexal-bandwidth.socket <<BWEOF
+[Unit]
+Description=neXal mesh bandwidth test
+[Socket]
+ListenStream=$ip:41820
+Accept=yes
+FreeBind=yes
+MaxConnections=4
+[Install]
+WantedBy=sockets.target
+BWEOF
+cat >/etc/systemd/system/nexal-bandwidth@.service <<'BWEOF'
+[Unit]
+Description=neXal mesh bandwidth test connection
+[Service]
+ExecStart=/usr/local/sbin/nexal-bandwidth
+StandardInput=socket
+StandardOutput=socket
+StandardError=null
+TimeoutStartSec=30
+RuntimeMaxSec=30
+BWEOF
+systemctl daemon-reload
+systemctl enable --now nexal-bandwidth.socket >/dev/null 2>&1 || say "could not start the bandwidth responder (the meter will show no reading for this VM)"
 fp=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 2>/dev/null | awk '{print $2}')
 key=$(awk 'NR==1{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null)
 

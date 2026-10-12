@@ -1,11 +1,14 @@
 package sandbox
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"nexal/connector/internal/bandwidth"
 )
 
 // firstBootScript finds the guest first-boot script (it lives in the platform
@@ -146,5 +149,25 @@ func TestFirstBootScriptReportsHostKey(t *testing.T) {
 	}
 	if !strings.Contains(script, "ssh_host_ed25519_key.pub") {
 		t.Error("hostKey must come from ssh_host_ed25519_key.pub")
+	}
+}
+
+// The Mac's bandwidth meter dials every mesh peer on bandwidth.Port; a guest that does not answer shows
+// "no reading" forever, so the seeded first-boot script installs a responder on that port.
+func TestSeedFirstBootAnswersBandwidthTests(t *testing.T) {
+	for _, want := range []string{
+		"/usr/local/sbin/nexal-bandwidth",
+		fmt.Sprintf("ListenStream=$ip:%d", bandwidth.Port),
+		"Accept=yes",
+		"FreeBind=yes",
+		"systemctl enable --now nexal-bandwidth.socket",
+		"8388608", // the server-side cap, bandwidth.MaxPayloadBytes
+	} {
+		if !strings.Contains(seedFirstBootScript, want) {
+			t.Errorf("seed first-boot script is missing %q", want)
+		}
+	}
+	if bandwidth.MaxPayloadBytes != 8388608 {
+		t.Errorf("responder cap 8388608 no longer matches bandwidth.MaxPayloadBytes (%d)", bandwidth.MaxPayloadBytes)
 	}
 }

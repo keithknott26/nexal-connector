@@ -288,3 +288,13 @@ struct SandboxLogView: View {
         return text.isEmpty ? "The log is empty." : text
     }
 }
+
+/// A mesh peer that is one of the network's VMs or containers (matched by its private-network address).
+/// Such a peer is not a Mac: it has no account named like this Mac's user and no keys of its own, so
+/// its Connect buttons must go through the sandbox connect flow (user `nexal`, one-time credentials).
+enum SandboxPeerMatch {
+    static func sandbox(forMeshIp ip: String?, in list: [NetworkSandbox]) -> NetworkSandbox? {
+        guard let ip = ip?.trimmingCharacters(in: .whitespaces), !ip.isEmpty else { return nil }
+        return list.first { $0.meshIp == ip && $0.state != "deleted" }
+    }
+}

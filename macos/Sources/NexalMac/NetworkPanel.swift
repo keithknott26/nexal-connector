@@ -339,7 +339,7 @@ struct NetworkPanel: View {
                             .help(effectivePQ(peer.pq, peers: [peer]) == "protected" ? "Quantum-safe (ML-KEM-1024)" : "Encrypted. ML-KEM-1024 key exchange is not confirmed on this link.")
                         }
                         if (peer.lifecycle == "connected" || peer.lifecycle == "degraded"), let latency = peer.latencyMs {
-                            Text("· \(peer.path == "direct" ? "⚡️ " : "")\(latency.formatted(.number.precision(.fractionLength(0)))) ms")
+                            Text("· " + PeerLinkText.summary(direct: peer.path == "direct", latencyMs: latency, bandwidthMbps: peer.bandwidthMbps))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -374,10 +374,6 @@ struct NetworkPanel: View {
                     VStack(spacing: 0) {
                         LatencyGauge(latencyMs: connected ? peer.latencyMs.map { ($0 * 2).rounded() / 2 } : nil)
                         Text("LATENCY").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
-                    }
-                    VStack(spacing: 0) {
-                        BandwidthGauge(bandwidthMbps: connected ? peer.bandwidthMbps : nil)
-                        Text("BANDWIDTH").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
                     }
                 }
                 HStack(alignment: .center, spacing: 8) {
@@ -906,7 +902,9 @@ struct NetworkPanel: View {
         // The peer's own LAN address: tried first at click time when this Mac is on the same subnet.
         let lan = hostDetails(for: peer)?.lanAddress
         Group {
-            if !storage {
+            if !storage, let box = SandboxPeerMatch.sandbox(forMeshIp: peer.tunnelAddress, in: hosting.network) {
+                sandboxServiceRows(box)
+            } else if !storage {
                 serviceRow("Remote Login (SSH)", on: sshOn, symbol: "terminal", scheme: "ssh", host: peer.tunnelAddress, lan: lan, port: 22, flaps: peer.pathFlapsLastHour)
                 serviceRow("Screen Sharing", on: vncOn, symbol: "display", scheme: "vnc", host: vncHost, lan: lan, port: 5900)
                 serviceRow("File Sharing", on: smbOn, symbol: "folder", scheme: "smb", host: smbHost, lan: lan, port: 445,
@@ -940,6 +938,37 @@ struct NetworkPanel: View {
                         .disabled(model.timeMachineSetupRunning)
                         .help("Prepare a backup disk on neXal Storage and add it to Time Machine on this Mac")
                     }
+                }
+            }
+        }
+    }
+
+    /// A VM or container peer: connect through the sandbox flow (user `nexal`, one-time credentials), the
+    /// same as the VM's own Connect menu. Plain ssh as this Mac's user, with this Mac's keys, is refused.
+    @ViewBuilder
+    private func sandboxServiceRows(_ box: NetworkSandbox) -> some View {
+        sandboxRow("Terminal (SSH)", symbol: "terminal", box: box, kind: "ssh")
+        if box.kind != "devcontainer" && box.desktop != false {
+            sandboxRow("Screen Sharing", symbol: "display", box: box, kind: "vnc")
+        }
+        sandboxRow("Files (SFTP)", symbol: "folder", box: box, kind: "files")
+        Text("Signs in as \(SandboxInfoBuilder.user) with neXal's one-time credentials.")
+            .font(.caption2).foregroundStyle(.secondary)
+    }
+
+    private func sandboxRow(_ title: String, symbol: String, box: NetworkSandbox, kind: String) -> some View {
+        detailRow(title) {
+            HStack(spacing: 8) {
+                serviceLED(box.canConnect)
+                if box.canConnect {
+                    Button { Task { await hosting.connect(box, kind: kind, model: model) } } label: {
+                        Label("Connect", systemImage: symbol)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(hosting.busyID != nil)
+                } else {
+                    Text(box.state == "stopped" ? "Stopped" : "Not running yet").foregroundStyle(.secondary)
                 }
             }
         }

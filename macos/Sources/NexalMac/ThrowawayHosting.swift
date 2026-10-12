@@ -985,7 +985,8 @@ struct ThrowawayHostsSection: View {
             expiry: box.lifecycle == "persistent" ? nil : box.expiry,
             progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent,
             appTitle: InstanceApp(profile: entry?.appProfile)?.title, runnerName: nil, runnerOnline: true,
-            preview: previewTarget(for: entry, title: title, kind: box.kind, state: state, paused: box.paused)
+            preview: previewTarget(for: entry, title: title, kind: box.kind, state: state, paused: box.paused),
+            console: box.kind == "devcontainer" ? nil : hosting.consoleLogURL(for: box.id)
         ) {
             if let entry, entry.canConnect || box.state == "running" { connectMenu(entry, lan: box.lanIp) }
             SandboxInfoButton { infoShown = SandboxInfoBuilder.make(network: entry, local: box, title: title, logURL: hosting.consoleLogURL(for: box.id)) }
@@ -1132,21 +1133,26 @@ struct InstanceCard<Actions: View>: View {
     var runnerOnline: Bool? = nil
     /// Set for a running virtual machine only: hovering the row shows a live thumbnail and clicking opens the live window.
     var preview: VMPreviewTarget? = nil
+    /// The text console log of a VM hosted on this Mac. Hovering shows it when there is no graphical screen
+    /// to show (no desktop, still starting, stopped), or the graphical one is unavailable.
+    var console: URL? = nil
     @ViewBuilder let actions: () -> Actions
 
     @State private var previewModel: VMPreviewModel?
+    @State private var consoleOpen = false
     @State private var hoverTask: Task<Void, Never>?
 
     /// Opens the thumbnail after the pointer has rested on the row for 0.4 s; closes it shortly after
     /// the pointer leaves the row and the thumbnail (the gap between them must not flicker it).
     private func hoverChanged(_ inside: Bool) {
-        guard preview != nil else { return }
+        guard preview != nil || console != nil else { return }
         hoverTask?.cancel()
         if inside {
-            guard previewModel == nil else { return }
+            guard previewModel == nil, !consoleOpen else { return }
             hoverTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard !Task.isCancelled, let preview, previewModel == nil else { return }
+                guard !Task.isCancelled, previewModel == nil, !consoleOpen else { return }
+                guard let preview else { consoleOpen = console != nil; return }
                 let model = VMPreviewModel(mode: .preview, fetchEndpoint: preview.fetchEndpoint)
                 previewModel = model
                 model.start()
@@ -1165,6 +1171,7 @@ struct InstanceCard<Actions: View>: View {
         hoverTask = nil
         previewModel?.stop()
         previewModel = nil
+        consoleOpen = false
     }
 
     private func openLive() {
@@ -1206,14 +1213,15 @@ struct InstanceCard<Actions: View>: View {
             }
             .contentShape(Rectangle())
             .onChange(of: preview?.id) { _, _ in
-                if preview == nil { closePreview() }
+                if preview == nil && previewModel != nil { closePreview() }
             }
             .onDisappear { closePreview() }
             // Shown inline, not as a popover: a MenuBarExtra window does not reliably present popovers.
             if let previewModel, preview != nil {
-                VMPreviewThumbnail(preview: previewModel)
-                    .contentShape(Rectangle())
-                    .onTapGesture { openLive() }
+                VMHoverScreen(preview: previewModel, console: console, stateText: state, openLive: openLive)
+                    .transition(.opacity)
+            } else if consoleOpen, let console {
+                VMConsoleThumbnail(url: console, stateText: state)
                     .transition(.opacity)
             }
             if InstanceProgress.shows(state) || progressStep?.hasPrefix("app-") == true {

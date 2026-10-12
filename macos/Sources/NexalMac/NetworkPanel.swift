@@ -1069,11 +1069,6 @@ struct NetworkPanel: View {
 		VStack(alignment: .leading, spacing: 7) {
 			Label("Time Machine", systemImage: "externaldrive.badge.timemachine")
 				.font(.subheadline.weight(.semibold))
-            Button("Allow Full Disk Access…") {
-                PermissionHelpWindow.shared.showFullDiskAccess()
-            }
-            .help("Needed only for Time Machine")
-            .accessibilityIdentifier("request-full-disk-access")
             if report.timeMachine.role == "client" && report.timeMachine.enabled {
                 Button("Reveal credentials…") { Task { await model.revealTimeMachineCredentials() } }
                     .disabled(model.busy)
@@ -1089,7 +1084,7 @@ struct NetworkPanel: View {
 			}
 			switch report.timeMachine.state {
 			case "ready_to_connect":
-				Text("Your backup disk is ready. Add it to Time Machine on this Mac with one click.")
+				Text("Your backup disk is ready. Set up opens Time Machine settings so you can add it.")
 					.font(.caption).foregroundStyle(.secondary)
 				HStack {
 					Button {

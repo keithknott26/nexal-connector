@@ -24,7 +24,7 @@ final class TimeMachineCredentialWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
         window.level = .floating
-        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.delegate = self
         window.contentView = NSHostingView(rootView:
             VStack(spacing: 12) {
@@ -82,7 +82,7 @@ private struct TimeMachineCredentialView: View {
     let credential: TimeMachineCredential
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Choose Registered User in the macOS share login.")
+            Text("In Time Machine settings, click Add Backup Disk, choose \(credential.share), then choose Registered User and sign in with these details.")
             Text("Server: \(credential.host)\nShare: \(credential.share)")
                 .font(.caption).textSelection(.enabled)
             row("Username", credential.username)

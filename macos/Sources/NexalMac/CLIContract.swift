@@ -38,6 +38,7 @@ enum CLICommand {
 	/// administrator dialog. Waits on a person, so it has a longer time limit.
 	case timeMachineCredentials
 	case timeMachineConnect
+	case timeMachinePrepare
     /// Mint a phone pairing and render it. `--no-poll` is deliberate: this app
     /// polls with `pairingStatus` through the SAME bounded `ConnectorProcess`
     /// execution as every other command, rather than holding a long-lived child
@@ -82,6 +83,7 @@ enum CLICommand {
     /// administrator dialog (the CLI itself gives up on that at 3 min).
     var timeLimit: TimeInterval {
         if case .timeMachineConnect = self { return 300 }
+        if case .timeMachinePrepare = self { return 120 }
         if case .redeemGuestInvitation = self { return 60 }
         if case .activateGuestInvitation = self { return 40 }
         if case .exitRoute = self { return 35 }
@@ -125,6 +127,7 @@ enum CLICommand {
 		case .timeMachine: command = ["time-machine"]
 		case .timeMachineCredentials: command = ["time-machine", "--reveal-credentials"]
 		case .timeMachineConnect: command = ["time-machine", "--connect"]
+		case .timeMachinePrepare: command = ["time-machine", "--prepare"]
         case .pause: command = ["pause"]
         case let .shareWhileActive(on): command = ["share-while-active", on ? "on" : "off"]
         case .resume: command = ["resume"]

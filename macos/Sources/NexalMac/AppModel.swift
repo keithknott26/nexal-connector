@@ -991,6 +991,10 @@ final class AppModel: ObservableObject {
 	/// for a status refresh to end. Keeps the button from re-arming mid-setup.
 	@Published private(set) var timeMachineSetupRunning = false
 
+	/// One-click Time Machine, manual flavour: prepares this Mac's backup share and
+	/// credentials on neXal Storage (no tmutil, no administrator prompt), shows the
+	/// share login, and opens Time Machine settings so the disk is added there with
+	/// "Add Backup Disk". The password goes straight to the credential window.
 	func setUpTimeMachine() async {
 		guard !timeMachineSetupRunning else { return }
 		timeMachineSetupRunning = true
@@ -998,36 +1002,20 @@ final class AppModel: ObservableObject {
 		// A periodic refresh briefly sets `busy`. Wait it out instead of dropping the click.
 		for _ in 0..<40 where busy { try? await Task.sleep(for: .milliseconds(250)) }
 		guard !busy else { message = "neXal is busy. Try Set up again in a moment."; return }
-		TimeMachineSetupWindow.shared.begin()
+		TimeMachineCredentialWindow.shared.begin()
 		busy = true; activity = "Preparing your backup disk on neXal Storage…"
 		defer { busy = false; activity = nil }
 		do {
-            let result = try await invoke(.timeMachineConnect)
-            struct SetupResult: Decodable {
-                struct Status: Decodable { let state: String; let detail: String? }
-                let timeMachine: Status
-            }
-            let report = try JSONDecoder().decode(SetupResult.self, from: result).timeMachine
-            guard ["connected", "destination_added"].contains(report.state) else {
-                let reason: String
-                switch report.state {
-                case "disabled":
-                    reason = "neXal has not turned on backup for this Mac yet. If this keeps happening, update the app (its connector may be out of date) and try Set up again."
-                case "blocked":
-                    reason = report.detail ?? "The backup disk on neXal Storage is not reachable over your private network right now. Check that this Mac is connected, then try again."
-                default:
-                    reason = report.detail ?? "Time Machine setup did not add a backup destination (state: \(report.state))."
-                }
-                throw ShellError.commandFailed(1, reason: reason)
-            }
-			message = "Backup disk added. It now appears in System Settings \u{203A} General \u{203A} Time Machine, where you can review the backup schedule."
-			TimeMachineSetupWindow.shared.finish(error: nil)
+			let data = try await invoke(.timeMachinePrepare)
+			let credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
+			TimeMachineCredentialWindow.shared.show(credential)
+			message = "Backup disk ready. In Time Machine settings choose Add Backup Disk and sign in with the credentials shown."
 			if let url = URL(string: "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") {
 				NSWorkspace.shared.open(url)
 			}
 		} catch {
-			message = error.localizedDescription
-            TimeMachineSetupWindow.shared.finish(error: error.localizedDescription)
+			message = "Could not prepare the backup disk: \(error.localizedDescription)"
+			TimeMachineCredentialWindow.shared.showError()
 		}
 		await updateTimeMachine(force: true)
 	}

@@ -443,13 +443,17 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	reveal := f.Bool("reveal-credentials", false, "explicitly reveal this computer’s SMB credential for manual setup")
+	prepare := f.Bool("prepare", false, "turn backup on for this computer and emit its SMB credential, without calling tmutil (manual Time Machine setup)")
 	connect := f.Bool("connect", false, "add the storage gateway as a Time Machine destination")
 	dryRun := f.Bool("dry-run", false, "with -connect, validate everything but do not call tmutil")
 	if err = parse(f, args, path); err != nil {
 		return err
 	}
-	if *reveal && (*connect || *dryRun) {
+	if (*reveal || *prepare) && (*connect || *dryRun) {
 		return errors.New("credential reveal cannot be combined with connect or dry-run")
+	}
+	if *reveal && *prepare {
+		return errors.New("choose either reveal-credentials or prepare")
 	}
 	cfg, err := config.Load(*path)
 	if err != nil {
@@ -471,7 +475,7 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	var clientCfg timemachine.ClientConfig
-	if *connect && !*dryRun {
+	if (*connect && !*dryRun) || *prepare {
 		clientCfg, err = enrollTimeMachine(ctx, api, cfg.HostID)
 	} else {
 		clientCfg, err = api.TimeMachineClientConfig(ctx, cfg.HostID)
@@ -479,7 +483,7 @@ func timeMachineCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *reveal {
+	if *reveal || *prepare {
 		if err := clientCfg.Validate(); err != nil {
 			return err
 		}

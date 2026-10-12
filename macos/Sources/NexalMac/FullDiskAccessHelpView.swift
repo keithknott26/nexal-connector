@@ -59,7 +59,8 @@ final class PermissionHelpWindow: NSObject, NSWindowDelegate {
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.level = .floating
-        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        // Visible on every Space, so it is on the same desktop as System Settings wherever that opens.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: FullDiskAccessHelpView { [weak panel] in
             panel?.close()
         })

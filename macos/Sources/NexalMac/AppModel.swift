@@ -935,7 +935,7 @@ final class AppModel: ObservableObject {
         defer {
             let host = timeMachine?.timeMachine.host?.split(separator: ".").first.map(String.init)
             let connected = status?.mesh?.peers.contains {
-                ($0.name.lowercased() == host?.lowercased() || $0.tunnelAddress == timeMachine?.timeMachine.host) && $0.lifecycle == "connected"
+                ($0.name.lowercased() == host?.lowercased() || $0.tunnelAddress == timeMachine?.timeMachine.host) && ($0.lifecycle == "connected" || $0.lifecycle == "degraded")
             } == true
             timeMachineDiscovery.update(timeMachine?.timeMachine, connected: connected)
             timeMachineAdvertised = TimeMachineDiscovery.eligible(timeMachine?.timeMachine, connected: connected)

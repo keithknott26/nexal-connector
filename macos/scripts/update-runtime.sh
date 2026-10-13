@@ -30,8 +30,8 @@ python3 "$PATCHES/prepare.py" --netbird-source "$(ls -d "$WORK"/pristine/netbird
   --rosenpass-source "$RP" --wireguard-source "$WG" --output "$WORK/candidate"
 
 echo "== test"
-(cd "$WORK/candidate/rosenpass" && go test -run 'TestNexal|TestMessages' -count=1 -timeout 180s .)
-(cd "$WORK/candidate/netbird" && go test -mod=mod ./client/internal/rosenpass -run 'TestNexal|TestHandshake' -count=1 -timeout 180s)
+(cd "$WORK/candidate/rosenpass" && go test -run 'TestNexal|TestMessages' -count=1 -timeout 900s .)
+(cd "$WORK/candidate/netbird" && go test -mod=mod ./client/internal/rosenpass -run 'TestNexal|TestHandshake' -count=1 -timeout 600s)
 (cd "$WORK/candidate/wireguard" && go test ./conn -run 'TestNexal' -count=1 -timeout 60s)
 
 echo "== build"

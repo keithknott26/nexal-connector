@@ -44,9 +44,15 @@ lipo -create "$WORK/nexal-network-arm64" "$WORK/nexal-network-amd64" -output "$W
 
 echo "== install (previous runtime kept at $WORK/nexal-network.previous)"
 cp "$APP/Contents/Helpers/nexal-network" "$WORK/nexal-network.previous"
+# Sign as YOU, never under sudo: root cannot use the login keychain's private key
+# (errSecInternalComponent). Sign the new binary first, then install it, then re-seal the app.
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$WORK/nexal-network"
 sudo install -m 755 "$WORK/nexal-network" "$APP/Contents/Helpers/nexal-network"
-sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-network"
-sudo codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+if ! codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"; then
+  # The bundle may be root-owned from an earlier install: take it back, then retry as you.
+  sudo chown -R "$(id -un)" "$APP"
+  codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 sudo launchctl kickstart -k system/netbird
 echo "Installed $VERSION and restarted the mesh service."

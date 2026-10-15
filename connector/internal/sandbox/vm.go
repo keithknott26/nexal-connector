@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Spec is everything the VM host process needs to boot one guest. It is written
@@ -83,8 +84,16 @@ type Hypervisor interface {
 // cmdRunner runs an external command; replaceable for tests.
 type cmdRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
 
+// cmdTimeout bounds one launchctl/vmhost call. Teardown runs on a context that
+// is never cancelled, so without it a hung command leaves a VM "Stopping" forever.
+const cmdTimeout = 20 * time.Second
+
 func execRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = 2 * time.Second // don't wait on pipes held by orphaned children
+	return cmd.CombinedOutput()
 }
 
 // vzHypervisor is the Virtualization.framework backend. It does no

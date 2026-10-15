@@ -148,6 +148,7 @@ struct NetworkPanel: View {
                 connectedHero
             }
             MeshRuntimeBanner()
+            UpdateBanner()
             VStack(alignment: .leading, spacing: 12) {
             Text("Your connections").font(.subheadline.weight(.semibold))
             if let mesh = model.status?.mesh { thisMac(mesh) }

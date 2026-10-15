@@ -1,0 +1,12 @@
+{
+  "mac": {
+    "sources": ["macos/Sources/NexalMac"],
+    "strings": "macos/Resources",
+    "plist": "macos/Resources/Info.plist"
+  },
+  "ios": {
+    "sources": ["../nexal-ios/Sources/NexalHomeApp", "../nexal-ios/Shared"],
+    "strings": "../nexal-ios/Resources",
+    "plist": "../nexal-ios/Resources/Info.plist"
+  }
+}

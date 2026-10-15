@@ -79,6 +79,10 @@ python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
 install -m 755 "$NEXAL_MESH_RUNTIME_ARTIFACT" "$CANDIDATE/Contents/Helpers/nexal-network"
 install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
+# Translations: one <lang>.lproj/Localizable.strings per language (i18n/README.md).
+for LPROJ in "$ROOT"/Resources/*.lproj; do
+  [ -d "$LPROJ" ] && cp -R "$LPROJ" "$CANDIDATE/Contents/Resources/"
+done
 # Run by the app when the owner turns on throwaway hosts: sets up Colima for dev containers.
 install -m 755 "$ROOT/Resources/install-container-runtime.sh" "$CANDIDATE/Contents/Resources/install-container-runtime.sh"
 install -m 755 "$ROOT/scripts/install-vmnet.sh" "$CANDIDATE/Contents/Resources/install-vmnet.sh"

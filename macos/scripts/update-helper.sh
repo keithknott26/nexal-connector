@@ -63,6 +63,10 @@ sudo install -m 755 "$ROOT/macos/Resources/install-container-runtime.sh" "$APP/C
 for logo in "$ROOT"/macos/Resources/os-logos/os-*.png; do
   [ -f "$logo" ] && sudo install -m 644 "$logo" "$APP/Contents/Resources/$(basename "$logo")"
 done
+# Translations (macos/Resources/*.lproj), so a language added since the last install shows up.
+for lproj in "$ROOT"/macos/Resources/*.lproj; do
+  [ -d "$lproj" ] && sudo ditto "$lproj" "$APP/Contents/Resources/$(basename "$lproj")"
+done
 # Sign as the current user: root cannot reach the login keychain's private key
 # (codesign fails with errSecInternalComponent under sudo).
 sudo chown -R "$(id -un)" "$APP"

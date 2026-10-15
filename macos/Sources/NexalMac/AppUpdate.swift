@@ -176,7 +176,7 @@ final class AppUpdater: ObservableObject {
             defaults.set(Date(), forKey: "nexal.updates.lastCheck"); lastChecked = Date()
             guard code == 200 else {
                 phase = .idle
-                if manual { checkMessage = code == 404 ? "No releases are published yet." : "The update server answered \(code)." }
+                if manual { checkMessage = code == 404 ? L10n.tr("No releases are published yet.") : L10n.tr("The update server answered %lld.", code) }
                 return
             }
             if let release = AppUpdate.release(from: data), AppUpdate.isNewer(release.version, than: currentVersion) {
@@ -185,21 +185,21 @@ final class AppUpdater: ObservableObject {
                 if !promptedThisLaunch || manual { promptedThisLaunch = true; prompt(for: release) }
             } else {
                 phase = .idle
-                if manual { checkMessage = "neXal@home \(currentVersion) is up to date." }
+                if manual { checkMessage = L10n.tr("neXal@home %@ is up to date.", currentVersion) }
             }
         } catch {
             phase = .idle
-            if manual { checkMessage = "Couldn't check for updates: \(error.localizedDescription)" }
+            if manual { checkMessage = L10n.tr("Couldn't check for updates: %@", error.localizedDescription) }
         }
     }
 
     private func prompt(for release: AppUpdate.Release) {
         let alert = NSAlert()
-        alert.messageText = "neXal@home \(release.version) is available"
-        alert.informativeText = "You have \(currentVersion). Download and install it now? neXal@home will quit and reopen."
-        alert.addButton(withTitle: "Install and Relaunch")
-        alert.addButton(withTitle: "Later")
-        alert.addButton(withTitle: "Skip This Version")
+        alert.messageText = L10n.tr("neXal@home %@ is available", release.version)
+        alert.informativeText = L10n.tr("You have %@. Download and install it now? neXal@home will quit and reopen.", currentVersion)
+        alert.addButton(withTitle: L10n.tr("Install and Relaunch"))
+        alert.addButton(withTitle: L10n.tr("Later"))
+        alert.addButton(withTitle: L10n.tr("Skip This Version"))
         NSApp.activate(ignoringOtherApps: true)
         switch alert.runModal() {
         case .alertFirstButtonReturn: install(release)
@@ -234,32 +234,32 @@ final class AppUpdater: ObservableObject {
             try await download(release.dmgURL, to: dmg)
             phase = .verifying
             // The checksum must be published with the release; without it the download is refused.
-            guard let sumURL = release.checksumURL else { return fail("This release has no checksum file, so it was not installed.") }
+            guard let sumURL = release.checksumURL else { return fail(L10n.tr("This release has no checksum file, so it was not installed.")) }
             let (sumData, _) = try await URLSession.shared.data(from: sumURL)
             guard let expected = AppUpdate.expectedDigest(in: String(decoding: sumData, as: UTF8.self), for: release.dmgName) else {
-                return fail("The release checksum file is unreadable.")
+                return fail(L10n.tr("The release checksum file is unreadable."))
             }
             let actual = try await Task.detached { try AppUpdate.sha256(of: dmg) }.value
-            guard actual == expected else { return fail("The download failed its checksum check, so it was not installed.") }
+            guard actual == expected else { return fail(L10n.tr("The download failed its checksum check, so it was not installed.")) }
 
             let mountPoint = staging.appendingPathComponent("mnt")
             try fm.createDirectory(at: mountPoint, withIntermediateDirectories: true)
             let attach = Self.run("/usr/bin/hdiutil", ["attach", "-nobrowse", "-readonly", "-noverify", "-mountpoint", mountPoint.path, dmg.path])
-            guard attach.status == 0 else { return fail("Couldn't open the downloaded disk image.") }
+            guard attach.status == 0 else { return fail(L10n.tr("Couldn't open the downloaded disk image.")) }
             mount = mountPoint
             let source = mountPoint.appendingPathComponent("neXal-Connector.app")
-            guard fm.fileExists(atPath: source.path) else { return fail("The disk image doesn't contain neXal-Connector.app.") }
+            guard fm.fileExists(atPath: source.path) else { return fail(L10n.tr("The disk image doesn't contain neXal-Connector.app.")) }
             let staged = staging.appendingPathComponent("neXal-Connector.app")
-            guard Self.run("/usr/bin/ditto", [source.path, staged.path]).status == 0 else { return fail("Couldn't copy the new version.") }
+            guard Self.run("/usr/bin/ditto", [source.path, staged.path]).status == 0 else { return fail(L10n.tr("Couldn't copy the new version.")) }
             _ = Self.run("/usr/bin/hdiutil", ["detach", mountPoint.path, "-force"]); mount = nil
 
             guard Self.run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path]).status == 0,
                   Self.run("/usr/sbin/spctl", ["--assess", "--type", "execute", staged.path]).status == 0 else {
-                return fail("The new version failed its signature check, so it was not installed.")
+                return fail(L10n.tr("The new version failed its signature check, so it was not installed."))
             }
             // Same publisher as the running app (skipped when the running copy is ad hoc signed).
             if let mine = Self.teamID(Bundle.main.bundleURL.path), let theirs = Self.teamID(staged.path), mine != theirs {
-                return fail("The new version is signed by a different developer, so it was not installed.")
+                return fail(L10n.tr("The new version is signed by a different developer, so it was not installed."))
             }
 
             phase = .installing
@@ -275,7 +275,7 @@ final class AppUpdater: ObservableObject {
             try helper.run()
             NSApp.terminate(nil)
         } catch {
-            fail("Update failed: \(error.localizedDescription)")
+            fail(L10n.tr("Update failed: %@", error.localizedDescription))
         }
     }
 

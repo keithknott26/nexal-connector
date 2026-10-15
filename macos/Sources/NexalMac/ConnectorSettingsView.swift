@@ -162,6 +162,7 @@ struct ConnectorSettingsView: View {
                 .padding(8)
             }
             UpdateSettingsGroup()
+            LanguageSettingsGroup()
             GroupBox("Sound & menu bar") {
                 VStack(alignment: .leading, spacing: 10) {
                     Toggle("Play a sound after successful pairing", isOn: $preferences.playPairingSound)

@@ -6,6 +6,11 @@ struct TimeMachineCredential: Decodable {
     let share: String
     let username: String
     let password: String
+    /// Filled in by the app: the storage peer's mesh (100.x) address. Preferred over `host`, whose name
+    /// does not always resolve on a Mac.
+    var meshAddress: String? = nil
+    var connectHost: String { meshAddress ?? host }
+    private enum CodingKeys: String, CodingKey { case host, share, username, password }
 }
 
 @MainActor
@@ -82,7 +87,7 @@ final class TimeMachineCredentialWindow: NSObject, NSWindowDelegate {
 
 private struct TimeMachineCredentialView: View {
     let credential: TimeMachineCredential
-    private var address: String { "smb://\(credential.host)/\(credential.share)" }
+    private var address: String { "smb://\(credential.connectHost)/\(credential.share)" }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             wrapped("1. Click Connect in Finder below (or in Finder choose Go \u{203A} Connect to Server\u{2026} and paste the address). Choose Registered User and sign in with the username and password below.")
@@ -93,7 +98,7 @@ private struct TimeMachineCredentialView: View {
             HStack {
                 Button("Connect in Finder") {
                     var c = URLComponents()
-                    c.scheme = "smb"; c.user = credential.username; c.host = credential.host; c.path = "/" + credential.share
+                    c.scheme = "smb"; c.user = credential.username; c.host = credential.connectHost; c.path = "/" + credential.share
                     if let url = c.url { NSWorkspace.shared.open(url) }
                 }.buttonStyle(.borderedProminent)
                 Button("Open Time Machine") {

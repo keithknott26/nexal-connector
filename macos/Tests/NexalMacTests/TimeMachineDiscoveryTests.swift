@@ -12,6 +12,9 @@ final class TimeMachineDiscoveryTests: XCTestCase {
         XCTAssertTrue(TimeMachineDiscovery.eligible(try state(), connected: true))
         XCTAssertTrue(TimeMachineDiscovery.eligible(try state(["host": "100.86.173.7"]), connected: true))
         XCTAssertFalse(TimeMachineDiscovery.eligible(try state(["host": "15.204.217.213"]), connected: true))
+        // The gateway's name may not resolve on this Mac: its mesh address is used instead.
+        XCTAssertTrue(TimeMachineDiscovery.eligible(try state(["host": "gw.unresolvable.example"]), connected: true, meshAddress: "100.86.173.7"))
+        XCTAssertFalse(TimeMachineDiscovery.eligible(try state(["host": "gw.unresolvable.example"]), connected: true, meshAddress: "15.204.217.213"))
         XCTAssertFalse(TimeMachineDiscovery.eligible(try state(), connected: false))
         XCTAssertFalse(TimeMachineDiscovery.eligible(nil, connected: true))
         for changes: [String: Any] in [["enabled": false], ["entitled": false], ["serviceState": "provisioning"],

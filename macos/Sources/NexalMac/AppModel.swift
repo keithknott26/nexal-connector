@@ -934,11 +934,14 @@ final class AppModel: ObservableObject {
 	func updateTimeMachine(force: Bool = false) async {
         defer {
             let host = timeMachine?.timeMachine.host?.split(separator: ".").first.map(String.init)
-            let connected = status?.mesh?.peers.contains {
-                ($0.name.lowercased() == host?.lowercased() || $0.tunnelAddress == timeMachine?.timeMachine.host) && ($0.lifecycle == "connected" || $0.lifecycle == "degraded")
-            } == true
-            timeMachineDiscovery.update(timeMachine?.timeMachine, connected: connected)
-            timeMachineAdvertised = TimeMachineDiscovery.eligible(timeMachine?.timeMachine, connected: connected)
+            let peer = status?.mesh?.peers.first {
+                ($0.name.lowercased() == host?.lowercased() || $0.tunnelAddress == timeMachine?.timeMachine.host)
+                    && ($0.lifecycle == "connected" || $0.lifecycle == "degraded")
+            }
+            let connected = peer != nil
+            timeMachineMeshAddress = peer?.tunnelAddress
+            timeMachineDiscovery.update(timeMachine?.timeMachine, connected: connected, meshAddress: peer?.tunnelAddress)
+            timeMachineAdvertised = TimeMachineDiscovery.eligible(timeMachine?.timeMachine, connected: connected, meshAddress: peer?.tunnelAddress)
         }
 		if !force, let lastTimeMachineCheck, Date().timeIntervalSince(lastTimeMachineCheck) < 60 { return }
 		lastTimeMachineCheck = Date()
@@ -980,7 +983,8 @@ final class AppModel: ObservableObject {
         defer { busy = false }
         do {
             let data = try await invoke(.timeMachineCredentials)
-            let credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
+            var credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
+            credential.meshAddress = timeMachineMeshAddress
             TimeMachineCredentialWindow.shared.show(credential)
         } catch {
             message = "Could not get Time Machine credentials. Check that backup is turned on and this Mac is online."
@@ -994,6 +998,8 @@ final class AppModel: ObservableObject {
 	/// True while this Mac advertises its backup share to Time Machine ("Add Backup Disk" lists
 	/// it only then).
 	@Published private(set) var timeMachineAdvertised = false
+	/// The storage peer's mesh (100.x) address: its DNS name may not resolve on this Mac.
+	private(set) var timeMachineMeshAddress: String?
 
 	/// One-click Time Machine, manual flavour: prepares this Mac's backup share and
 	/// credentials on neXal Storage (no tmutil, no administrator prompt), shows the
@@ -1011,7 +1017,8 @@ final class AppModel: ObservableObject {
 		defer { busy = false; activity = nil }
 		do {
 			let data = try await invoke(.timeMachinePrepare)
-			let credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
+			var credential = try JSONDecoder().decode(TimeMachineCredential.self, from: data)
+			credential.meshAddress = timeMachineMeshAddress
 			TimeMachineCredentialWindow.shared.show(credential)
 			// Time Machine lists a share only once it is advertised, and its disk sheet reads the
 			// list when opened: refresh and wait for the advertisement before opening settings.

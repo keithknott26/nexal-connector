@@ -8,10 +8,13 @@ final class TimeMachineDiscovery {
     private var references: [DNSServiceRef] = []
     private var current: String?
 
-    static func eligible(_ state: TimeMachineReport.State?, connected: Bool) -> Bool {
+    /// `meshAddress` is the storage peer's 100.x address. The gateway's DNS name often does not
+    /// resolve on a Mac, so when the address is known it is what gets advertised and connected to.
+    static func eligible(_ state: TimeMachineReport.State?, connected: Bool, meshAddress: String? = nil) -> Bool {
         guard connected, let state, state.role == "client", state.enabled,
               state.entitled, state.serviceState == "ready",
-              let host = state.host, (host.hasSuffix(".mesh.nexal.systems") || privateIPv4(host) != nil),
+              let host = meshAddress.flatMap({ privateIPv4($0) != nil ? $0 : nil }) ?? state.host,
+              (host.hasSuffix(".mesh.nexal.systems") || privateIPv4(host) != nil),
               let share = state.shareName,
               share.range(of: "^tm[a-f0-9]{20}$", options: .regularExpression) != nil else { return false }
         return true
@@ -31,9 +34,10 @@ final class TimeMachineDiscovery {
         current = nil
     }
 
-    func update(_ state: TimeMachineReport.State?, connected: Bool) {
-        guard Self.eligible(state, connected: connected), let state,
-              let host = state.host, let share = state.shareName else { stop(); return }
+    func update(_ state: TimeMachineReport.State?, connected: Bool, meshAddress: String? = nil) {
+        guard Self.eligible(state, connected: connected, meshAddress: meshAddress), let state,
+              let host = meshAddress.flatMap({ Self.privateIPv4($0) != nil ? $0 : nil }) ?? state.host,
+              let share = state.shareName else { stop(); return }
         let identity = host + "/" + share
         guard current != identity else { return }
         stop()

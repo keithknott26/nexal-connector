@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1042,7 +1044,7 @@ func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) er
 	// coordinator receives both in a single HTTP call.
 	var tunnelLifecycle string
 	if enrolledMesh {
-		tunnelLifecycle = string(meshStatus.Lifecycle) + "/" + meshStatus.AuthenticationStep
+		tunnelLifecycle = tunnelSignature(meshStatus, time.Now())
 		a.mu.Lock()
 		tunnelDue := time.Since(a.lastTunnelReport) >= tunnelReportInterval || tunnelLifecycle != a.lastTunnelLifecycle
 		a.mu.Unlock()
@@ -1162,7 +1164,15 @@ func (a *Agent) Run(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				a.heartbeat(ctx, "interval")
+				// A change in who is connected, over which path, or whether the gateway
+				// link is post-quantum protected must reach the coordinator now. Left to
+				// the idle cadence (up to 5 minutes) the iPhone showed a Mac as
+				// "Connecting" or "Negotiating" long after it had settled.
+				if a.tunnelChanged() {
+					a.heartbeat(ctx, "tunnel-change")
+				} else {
+					a.heartbeat(ctx, "interval")
+				}
 			case <-a.heartbeatWake:
 				a.heartbeat(ctx, "consent-change")
 			}
@@ -1297,4 +1307,38 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 			t.Reset(sandboxPollInterval)
 		}
 	}
+}
+
+// tunnelSignature condenses the parts of the mesh status the coordinator and the
+// iPhone act on: overall lifecycle, each peer's connection, key-exchange and path,
+// and the gateway post-quantum claim. Latency and traffic are left out on purpose;
+// they change every second and ride the periodic report.
+func tunnelSignature(s mesh.Status, now time.Time) string {
+	peers := make([]string, 0, len(s.Peers))
+	for _, p := range s.Peers {
+		peers = append(peers, fmt.Sprintf("%s:%s:%s:%s", p.ID, p.Lifecycle, p.PQ, p.Path))
+	}
+	sort.Strings(peers)
+	return fmt.Sprintf("%s/%s|%s|gw=%t|%s", s.Lifecycle, s.AuthenticationStep, s.PQ,
+		s.GatewayPQReadyAt(now, 5*time.Minute), strings.Join(peers, ","))
+}
+
+// tunnelChanged reports whether the mesh status differs from what was last sent.
+func (a *Agent) tunnelChanged() bool {
+	a.mu.Lock()
+	enrolled := a.cfg.Enrollment != nil
+	provider := a.meshProvider
+	last := a.lastTunnelLifecycle
+	a.mu.Unlock()
+	if provider == nil {
+		return false
+	}
+	if gate, ok := provider.(interface{ Enrolled() bool }); ok {
+		enrolled = gate.Enrolled()
+	}
+	if !enrolled || last == "" {
+		return false
+	}
+	now := time.Now()
+	return tunnelSignature(a.enrichMeshStatus(mesh.SanitizeSnapshot(provider.Snapshot())), now) != last
 }

@@ -575,6 +575,8 @@ kali)
   # downgrade them, and the libexpat1 downgrade has to be requested by name before the tool set.
   # Nothing may start while packages install (apache2 and others would grab ports and fail), and the
   # debconf questions (kismet, atftpd) get their defaults instead of a text prompt.
+  # apt-listchanges (a Python hook) crashes on this guest and fails every install; it only shows news.
+  rm -f /etc/apt/apt.conf.d/20listchanges
   printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
   printf 'atftpd atftpd/use_inetd boolean false\n' | debconf-set-selections 2>/dev/null || true

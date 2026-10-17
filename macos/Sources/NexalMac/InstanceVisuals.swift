@@ -148,6 +148,14 @@ struct InstanceProgress: View {
 
 /// The web app an appliance VM publishes on its mesh address.
 struct InstanceApp {
+    /// Name shown while a profile installs: also covers profiles with no web app (Kali, the desktop add-on).
+    static func progressTitle(profile: String?) -> String? {
+        switch profile {
+        case "kali": return "Kali Linux"
+        case "desktop": return "the desktop"
+        default: return InstanceApp(profile: profile)?.title
+        }
+    }
     let title: String
     let port: Int
     init?(profile: String?) {

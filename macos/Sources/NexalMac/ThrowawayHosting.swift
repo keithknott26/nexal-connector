@@ -991,7 +991,7 @@ struct ThrowawayHostsSection: View {
                       box.lanIp.map { "home network \($0)" }].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : box.expiry,
             progressStep: entry?.progress?.step, progressPercent: entry?.progress?.percent,
-            appTitle: InstanceApp(profile: entry?.appProfile)?.title, runnerName: nil, runnerOnline: true,
+            appTitle: InstanceApp.progressTitle(profile: entry?.appProfile), runnerName: nil, runnerOnline: true,
             preview: previewTarget(for: entry, title: title, kind: box.kind, state: state, paused: box.paused),
             console: box.kind == "devcontainer" ? nil : hosting.consoleLogURL(for: box.id)
         ) {
@@ -1031,7 +1031,7 @@ struct ThrowawayHostsSection: View {
             details: [Self.imageText(box), box.runnerName.map { "on \($0)" }, box.meshIp].compactMap { $0 },
             expiry: box.lifecycle == "persistent" ? nil : ThrowawayFormat.date(box.expiresAt),
             progressStep: box.progress?.step, progressPercent: box.progress?.percent,
-            appTitle: InstanceApp(profile: box.appProfile)?.title, runnerName: box.runnerName, runnerOnline: box.runnerOnline,
+            appTitle: InstanceApp.progressTitle(profile: box.appProfile), runnerName: box.runnerName, runnerOnline: box.runnerOnline,
             preview: previewTarget(for: box, title: title, kind: box.kind, state: box.state, paused: nil)
         ) {
             if box.canConnect { connectMenu(box) }

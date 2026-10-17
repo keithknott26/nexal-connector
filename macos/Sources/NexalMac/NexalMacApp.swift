@@ -17,7 +17,7 @@ struct NexalMacApp: App {
         // panel, the status menu and ⌘,). If macOS opens this scene's own window as well, it closes
         // itself and hands over, so Settings never appears twice.
         Settings {
-            SettingsSceneRedirect { appDelegate.showSettings() }
+            SettingsSceneRedirect { appDelegate.showSettingsFromScene() }
         }
             .commands {
                 CommandGroup(replacing: .appSettings) {
@@ -326,6 +326,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func openConnector() { showWindow() }
 
     @objc private func stopThrowawayHosts() { ThrowawayHosting.shared.stopAll() }
+
+    /// The SwiftUI Settings scene can be restored at launch when Settings was open at the last quit. That is
+    /// not a request from the owner, so it is ignored until the splash has finished; Settings then only opens
+    /// from the menu, the panel or the keyboard shortcut.
+    func showSettingsFromScene() {
+        guard launchFinished else { return }
+        showSettings()
+    }
 
     @objc func showSettings() {
         popover.performClose(nil)

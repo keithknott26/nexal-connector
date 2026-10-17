@@ -87,7 +87,11 @@ codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 touch "$APP"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
-killall Dock 2>/dev/null || true
+# Finder and the Dock keep the icon they first saw for this app (blank, before it had one) in an icon cache.
+sudo rm -rf /Library/Caches/com.apple.iconservices.store 2>/dev/null || true
+killall iconservicesagent iconservicesd 2>/dev/null || true
+killall Dock Finder 2>/dev/null || true
+echo "Icon in the installed app: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist" 2>&1) ($(ls -l "$APP/Contents/Resources/AppIcon.icns" 2>&1 | awk '{print $5}') bytes)"
 if [ -f "$SUPPORT_BIN" ]; then
   cp "$SUPPORT_BIN" "$OUT/nexal.support.previous"
   install -m 755 "$APP/Contents/Helpers/nexal" "$SUPPORT_BIN"

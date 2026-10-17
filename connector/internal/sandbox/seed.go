@@ -563,7 +563,23 @@ kali)
   retry apt-get update -qq || fail "apt-get update (Kali)"
   step app-download 25
   plan 3 5 "installing Kali Linux and its tools, a large download (several GB), usually 10 to 30 minutes" "set up the remote desktop"
-  ( s=0; while sleep 60; do s=$((s + 60)); log "still installing Kali ($((s / 60)) min)"; done ) &
+  # Progress while apt downloads: bytes already in the package cache against the size apt announced.
+  rm -f /run/nexal-apt-total
+  (
+    s=0
+    while sleep 15; do
+      s=$((s + 15))
+      total=$(cat /run/nexal-apt-total 2>/dev/null || echo 0)
+      have=$(find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -printf '%s\n' 2>/dev/null | awk '{t += $1} END {print t + 0}')
+      if [ "$total" -gt 0 ]; then
+        pct=$((25 + have * 50 / total)); [ "$pct" -gt 75 ] && pct=75
+        step app-download "$pct"
+        if [ $((s % 60)) -eq 0 ]; then log "downloaded $((have / 1048576)) of $((total / 1048576)) MB"; fi
+      elif [ $((s % 60)) -eq 0 ]; then
+        log "still installing Kali ($((s / 60)) min)"
+      fi
+    done
+  ) &
   hb=$!
   rc=0
   if [ "$WANT_DESKTOP" = "1" ]; then
@@ -586,6 +602,10 @@ kali)
     apt_install --allow-downgrades "libexpat1=$EXPAT" || rc=$?
   fi
   if [ "$rc" -eq 0 ]; then
+    # shellcheck disable=SC2086
+    apt-get install -s -y --no-install-recommends --allow-downgrades $KALI_PKGS 2>/dev/null \
+      | sed -n 's/^Need to get \([0-9,.]*\) \([kMG]\)B.*/\1 \2/p' | head -n 1 \
+      | awk '{gsub(",", "", $1); m = ($2 == "G") ? 1073741824 : ($2 == "M") ? 1048576 : 1024; printf "%d\n", $1 * m}' >/run/nexal-apt-total 2>/dev/null || true
     # shellcheck disable=SC2086
     apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?
   fi

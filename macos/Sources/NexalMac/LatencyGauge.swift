@@ -15,6 +15,8 @@ struct LatencyGauge: View {
     let latencyMs: Double?
     /// End of the scale. Anything at or above it pins the needle to the end.
     var maxMs: Double = 200
+    /// Size factor: 1 is the full dial, 0.5 a half-size one for tight rows.
+    var scale: CGFloat = 1
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -53,7 +55,7 @@ struct LatencyGauge: View {
             unit: value == nil ? "no reading" : "ms",
             minLabel: "0", midLabel: Self.formatted(maxMs / 2), maxLabel: Self.formatted(maxMs) + "+",
             colors: SVGGaugeSpec.latencyColors, animated: !reduceMotion))
-            .frame(width: Self.width, height: Self.height)
+            .frame(width: Self.width * scale, height: Self.height * scale)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Latency")
             .accessibilityValue(value.map { Self.formatted($0) + " milliseconds" } ?? "Unknown")

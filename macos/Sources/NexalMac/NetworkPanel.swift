@@ -12,6 +12,8 @@ struct NetworkPanel: View {
     @ObservedObject private var peerNames = PeerNames.shared
     @ObservedObject private var hosting = ThrowawayHosting.shared
     @State private var machinesOpen = false
+    @State private var openPeers: Set<String> = []
+    @State private var thisMacOpen = false
     @State private var inferenceOpen = false
     @State private var graphsOpen = false
     /// Sharing services listening on this Mac, checked when its row is opened.
@@ -249,10 +251,9 @@ struct NetworkPanel: View {
         let privateIP = details?.lanAddress ?? hosting.lanAddress(forMesh: peer.tunnelAddress)
             ?? (peer.directIsPrivate == true ? peer.directAddress : nil)
         let storage = isStorageGateway(peer)
-        return DisclosureGroup {
+        return DisclosureGroup(isExpanded: peerOpen(peer.id)) {
             VStack(alignment: .leading, spacing: 10) {
                 peerConnectionCard(peer)
-                peerTrafficGraph(peer)
                 peerCard("Security") {
                     detailRow("Post-quantum protection") { pqText(effectivePQ(peer.pq, peers: [peer])) }
                     detailRow("Quantum type") { quantumType([peer]) }
@@ -365,6 +366,13 @@ struct NetworkPanel: View {
             }
         }
         .accessibilityIdentifier("host-\(peer.id)")
+        .expandsOnClick(peerOpen(peer.id))
+    }
+
+    /// Whether one peer's row is open. Kept here (not inside the row) so a click anywhere on a collapsed row can open it.
+    private func peerOpen(_ id: String) -> Binding<Bool> {
+        Binding(get: { openPeers.contains(id) },
+                set: { if $0 { openPeers.insert(id) } else { openPeers.remove(id) } })
     }
 
     /// Connection overview: latency dial (labelled) beside two status lines, with min/avg/max below.
@@ -377,11 +385,14 @@ struct NetworkPanel: View {
         if let hostname = peer.hostname?.hostname { extras.append(hostname) }
         return CollapsibleCard(title: "Connection") {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 14) {
-                    VStack(spacing: 0) {
-                        LatencyGauge(latencyMs: connected ? peer.latencyMs.map { ($0 * 2).rounded() / 2 } : nil)
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(spacing: 3) {
+                        LatencyGauge(latencyMs: connected ? peer.latencyMs.map { ($0 * 2).rounded() / 2 } : nil, scale: 0.5)
                         Text("LATENCY").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
+                        statTile("AVG", stats.map { milliseconds($0.avg) })
                     }
+                    peerTrafficGraph(peer)
+                        .frame(maxWidth: .infinity)
                 }
                 HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -390,12 +401,6 @@ struct NetworkPanel: View {
                         routeSummary(peer).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                HStack(spacing: 8) {
-                    statTile("MIN", stats.map { milliseconds($0.min) })
-                    statTile("AVG", stats.map { milliseconds($0.avg) })
-                    statTile("MAX", stats.map { milliseconds($0.max) })
-                    Text("last 5 min").font(.caption2).foregroundStyle(.secondary)
                 }
                 if !extras.isEmpty {
                     Text(extras.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
@@ -453,13 +458,11 @@ struct NetworkPanel: View {
         }
         let spec = TrafficGraphSpec(received: series("In"), sent: series("Out"),
                                     receivedTotal: bytes(peer.traffic.receivedBytes), sentTotal: bytes(peer.traffic.sentBytes))
-        return CollapsibleCard(title: "Traffic") {
-            TrafficGraphView(spec: spec)
-                .frame(height: 92)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Traffic")
-                .accessibilityValue("Received \(bytes(peer.traffic.receivedBytes)) total, sent \(bytes(peer.traffic.sentBytes)) total")
-        }
+        return TrafficGraphView(spec: spec)
+            .frame(height: 92)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Traffic")
+            .accessibilityValue("Received \(bytes(peer.traffic.receivedBytes)) total, sent \(bytes(peer.traffic.sentBytes)) total")
     }
 
     /// Chart points inside the selected time range.
@@ -514,7 +517,7 @@ struct NetworkPanel: View {
     private func thisMac(_ mesh: ConnectorStatus.MeshStatus) -> some View {
         let gateway = mesh.peers.first { isStorageGateway($0) && ($0.lifecycle == "connected" || $0.lifecycle == "degraded") }
         let protected = mesh.pq == "protected"
-        return DisclosureGroup {
+        return DisclosureGroup(isExpanded: $thisMacOpen) {
             VStack(alignment: .leading, spacing: 10) {
                 peerCard("Connection") {
                     detailRow("Status") { Text("\(lifecycleEmoji(mesh.lifecycle)) \(lifecycleText(mesh.lifecycle))") }
@@ -576,6 +579,7 @@ struct NetworkPanel: View {
             }
         }
         .accessibilityIdentifier("this-mac")
+        .expandsOnClick($thisMacOpen)
     }
 
     /// This Mac's own self-reported details, the same presence list a peer's are read from.

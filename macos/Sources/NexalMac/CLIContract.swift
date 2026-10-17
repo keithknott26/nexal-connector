@@ -76,6 +76,12 @@ enum CLICommand {
     case inferenceVerify(modelId: String)
     /// `nexal inference remove <id> --yes --json`: delete an installed model's files.
     case inferenceRemove(modelId: String)
+    /// `nexal inference setup --json`: creates the private MLX environment (pinned packages).
+    case inferenceSetup
+    /// `nexal inference pin <id> --latest --json`: pins the repository's current commit and hashes its files.
+    case inferencePinLatest(modelId: String)
+    /// `nexal inference serve <id> --host 127.0.0.1 --port N`: runs the local chat server until stopped.
+    case inferenceServe(modelId: String, port: Int)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination: it may wait up to 90 s for the
@@ -96,6 +102,10 @@ enum CLICommand {
         // Re-hashes every file of a multi-GB model.
         if case .inferenceVerify = self { return 300 }
         if case .inferenceRemove = self { return 60 }
+        // pip downloads about 200 MB; hashing a multi-GB pin reads every file; serving runs until stopped.
+        if case .inferenceSetup = self { return 3600 }
+        if case .inferencePinLatest = self { return 3600 }
+        if case .inferenceServe = self { return 7 * 24 * 3600 }
         return 20
     }
 
@@ -175,6 +185,12 @@ enum CLICommand {
             command = ["inference", "verify", modelId, "--json"]
         case let .inferenceRemove(modelId):
             command = ["inference", "remove", modelId, "--yes", "--json"]
+        case .inferenceSetup:
+            command = ["inference", "setup", "--json"]
+        case let .inferencePinLatest(modelId):
+            command = ["inference", "pin", modelId, "--latest", "--json"]
+        case let .inferenceServe(modelId, port):
+            command = ["inference", "serve", modelId, "--host", "127.0.0.1", "--port", String(port)]
         }
         return command + ["--config", config.path]
     }

@@ -393,6 +393,17 @@ final class AppModel: ObservableObject {
         }.value
     }
 
+    /// Streams one of the `nexal inference` commands that print events or logs line by line
+    /// (setup, pin, serve). Callers validate model ids before building the command.
+    func runInferenceCommand(_ command: CLICommand, token: ProcessCancelToken,
+                             onLine: @escaping @Sendable (Data) -> Void) async throws -> ConnectorStreamResult {
+        guard let selection else { throw ShellError.noExecutable }
+        let config = selectedConfig
+        return try await Task.detached(priority: .userInitiated) {
+            try ConnectorProcess.stream(selection, command, config: config, token: token, onLine: onLine)
+        }.value
+    }
+
     func peerNames(action: String, address: String? = nil, input: Data? = nil) async throws -> Data {
         try await invoke(.peerNames(action: action, address: address), input: input)
     }

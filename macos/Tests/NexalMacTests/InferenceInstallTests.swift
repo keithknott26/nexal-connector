@@ -188,6 +188,13 @@ final class InferenceInstallTests: XCTestCase {
                        ["inference", "verify", "m", "--json", "--config", config.path])
         XCTAssertEqual(CLICommand.inferenceRemove(modelId: "m").arguments(config: config),
                        ["inference", "remove", "m", "--yes", "--json", "--config", config.path])
+        XCTAssertEqual(CLICommand.inferenceSetup.arguments(config: config),
+                       ["inference", "setup", "--json", "--config", config.path])
+        XCTAssertEqual(CLICommand.inferencePinLatest(modelId: "m").arguments(config: config),
+                       ["inference", "pin", "m", "--latest", "--json", "--config", config.path])
+        // The chat server only ever listens on this Mac's loopback address.
+        XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8080).arguments(config: config),
+                       ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8080", "--config", config.path])
         XCTAssertGreaterThan(CLICommand.inferenceInstall(modelId: "m").timeLimit, 3600)
         XCTAssertGreaterThanOrEqual(CLICommand.inferenceVerify(modelId: "m").timeLimit, 120)
     }

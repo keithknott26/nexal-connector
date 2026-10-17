@@ -221,6 +221,7 @@ struct InferenceSection: View {
                 }
                 Text(InferenceInstallText.unavailableLine)
                     .font(.caption2).foregroundStyle(.tertiary)
+                InferenceQuickStartView(installedIDs: installedModelIDs) { installed.refresh(model) }
                 installState
                 switch check.phase {
                 case .idle:
@@ -259,6 +260,11 @@ struct InferenceSection: View {
         } message: { item in
             Text(item.message)
         }
+    }
+
+    private var installedModelIDs: Set<String> {
+        if case let .loaded(report) = installed.phase { return Set(report.models.map(\.modelId)) }
+        return []
     }
 
     // MARK: Offer
@@ -428,7 +434,7 @@ private extension InferenceInstaller.Phase {
     }
 }
 
-private extension View {
+extension View {
     func cardStyle() -> some View {
         padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -437,7 +443,7 @@ private extension View {
 }
 
 /// Monospaced lines the owner can select, with a Copy button.
-private struct CopyableBlock: View {
+struct CopyableBlock: View {
     let title: String
     let lines: [String]
 

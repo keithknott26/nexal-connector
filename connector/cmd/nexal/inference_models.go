@@ -80,21 +80,46 @@ func gibText(b int64) string { return fmt.Sprintf("%.2f GiB", float64(b)/(1<<30)
 
 func inferencePin(ctx context.Context, args []string) error {
 	var revision, repo *string
-	var asJSON *bool
+	var asJSON, latest *bool
 	id, _, path, err := parseModelArgs("pin", args, true, func(f *flag.FlagSet) {
 		revision = f.String("revision", "", "immutable 40-hex commit to pin (required)")
 		repo = f.String("repo", "", "Hugging Face repository owner/name (default: the catalog's)")
 		asJSON = f.Bool("json", false, "print one JSON document")
+		latest = f.Bool("latest", false, "pin the commit the repository's main branch points at now")
 	})
 	if err != nil {
 		return err
 	}
-	if *revision == "" {
-		return &codedError{code: "invalid_arguments", err: errors.New("--revision <40-hex commit> is required")}
-	}
 	client, err := inference.NewHFClient(inference.HFOptions{})
 	if err != nil {
 		return coded(err)
+	}
+	if *latest && *revision == "" {
+		// Simple mode: read the commit the repository's main branch points at right now and pin that
+		// exact commit (every file is still hashed and the pin is immutable afterwards).
+		base, lerr := inference.LoadCatalog()
+		if lerr != nil {
+			return lerr
+		}
+		repoName := *repo
+		if repoName == "" {
+			for _, e := range base.Entries {
+				if e.ID == id {
+					repoName = e.HFRepo
+				}
+			}
+		}
+		if repoName == "" {
+			return &codedError{code: "model_not_found", err: fmt.Errorf("%q is not a catalog model", id)}
+		}
+		info, ierr := client.Info(ctx, repoName, "main")
+		if ierr != nil {
+			return coded(ierr)
+		}
+		*revision = info.SHA
+	}
+	if *revision == "" {
+		return &codedError{code: "invalid_arguments", err: errors.New("--revision <40-hex commit> (or --latest) is required")}
 	}
 	base, err := inference.LoadCatalog()
 	if err != nil {

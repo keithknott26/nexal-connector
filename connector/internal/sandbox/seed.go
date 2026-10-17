@@ -578,8 +578,11 @@ kali)
   printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
   printf 'atftpd atftpd/use_inetd boolean false\n' | debconf-set-selections 2>/dev/null || true
-  # shellcheck disable=SC2086
-  apt_install --allow-downgrades libexpat1 || rc=$?
+  # Plain "libexpat1" is "already the newest version" to apt, so the downgrade names Kali's exact version.
+  EXPAT=$(apt-cache madison libexpat1 2>/dev/null | awk '/kali/ {print $3; exit}')
+  if [ -n "$EXPAT" ]; then
+    apt_install --allow-downgrades "libexpat1=$EXPAT" || rc=$?
+  fi
   if [ "$rc" -eq 0 ]; then
     # shellcheck disable=SC2086
     apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?

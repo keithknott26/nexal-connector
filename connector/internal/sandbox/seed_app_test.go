@@ -138,7 +138,7 @@ func TestRenderUserDataKaliProfile(t *testing.T) {
 	for _, want := range []string{
 		"NEXAL_APP_PROFILE=kali\n",
 		"kali-rolling main contrib non-free non-free-firmware",
-		"apt_install --allow-downgrades libexpat1",
+		"apt_install --allow-downgrades \"libexpat1=$EXPAT\"",
 		"mv \"$f\" /root/apt-debian/",
 		"exit 101",
 		"kali-linux-default kali-desktop-xfce",

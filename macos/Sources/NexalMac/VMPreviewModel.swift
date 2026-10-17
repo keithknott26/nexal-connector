@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 // Built-in live view of a virtual machine's screen (hover thumbnail and live window).
@@ -70,6 +71,38 @@ enum VMScreenGeometry {
     }
 }
 
+/// The last picture seen of each VM's screen, kept on disk (in Caches, so macOS may clear it) and
+/// shown dimmed while a new connection is made or when it cannot be made.
+enum VMSnapshotStore {
+    private struct Box: @unchecked Sendable { let image: CGImage }
+
+    static func url(for key: String) -> URL? {
+        guard key.range(of: "^[A-Za-z0-9-]{1,64}$", options: .regularExpression) != nil,
+              let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        return caches.appendingPathComponent("neXal/vm-snapshots", isDirectory: true).appendingPathComponent(key + ".png")
+    }
+
+    static func load(key: String) -> (image: CGImage, date: Date)? {
+        guard let url = url(for: key),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let date = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? Date()
+        return (image, date)
+    }
+
+    /// Encodes and writes off the main thread; a failure just means no snapshot.
+    static func save(_ image: CGImage, key: String) {
+        guard let url = url(for: key) else { return }
+        let box = Box(image: image)
+        Task.detached(priority: .utility) {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { return }
+            CGImageDestinationAddImage(dest, box.image, nil)
+            _ = CGImageDestinationFinalize(dest)
+        }
+    }
+}
+
 @MainActor
 final class VMPreviewModel: ObservableObject {
     enum Status: Equatable {
@@ -84,6 +117,11 @@ final class VMPreviewModel: ObservableObject {
 
     @Published private(set) var status: Status = .idle
     @Published private(set) var frame: CGImage?
+    /// The last picture saved from an earlier connection, shown until a live one arrives.
+    @Published private(set) var snapshot: CGImage?
+    @Published private(set) var snapshotDate: Date?
+    /// What to draw: the live picture, else the saved snapshot.
+    var displayImage: CGImage? { frame ?? snapshot }
     /// Remote screen size in pixels, zero until the first frame.
     @Published private(set) var framebufferSize: CGSize = .zero
     /// On by default: nothing typed or clicked here reaches the VM until this is turned off.
@@ -94,14 +132,22 @@ final class VMPreviewModel: ObservableObject {
     private var connection: RFBConnection?
     private var startTask: Task<Void, Never>?
     private var generation = 0
+    private let snapshotKey: String?
+    private var lastSnapshotSave = Date.distantPast
 
     /// The connector says "pending" while the guest is still setting the password: wait and ask again.
     private static let pendingAttempts = 5
     private static let pendingDelay: UInt64 = 2_000_000_000
 
-    init(mode: RFBConnection.Mode, fetchEndpoint: @escaping @MainActor () async throws -> VNCEndpoint) {
+    init(mode: RFBConnection.Mode, fetchEndpoint: @escaping @MainActor () async throws -> VNCEndpoint,
+         snapshotKey: String? = nil) {
         self.mode = mode
         self.fetchEndpoint = fetchEndpoint
+        self.snapshotKey = snapshotKey
+        if let key = snapshotKey, let saved = VMSnapshotStore.load(key: key) {
+            snapshot = saved.image
+            snapshotDate = saved.date
+        }
     }
 
     /// Fetches the address and password, then connects. Does nothing while already running.
@@ -128,6 +174,7 @@ final class VMPreviewModel: ObservableObject {
 
     /// Ends everything and releases the picture. Safe to call repeatedly.
     func stop() {
+        saveSnapshot(force: true)
         generation += 1
         startTask?.cancel()
         startTask = nil
@@ -186,6 +233,18 @@ final class VMPreviewModel: ObservableObject {
     private func handle(_ frame: RFBConnection.Frame) {
         self.frame = frame.image
         framebufferSize = CGSize(width: frame.width, height: frame.height)
+        saveSnapshot(force: false)
+    }
+
+    /// Keeps the newest live picture on disk: at most every 20 s while live, and once more on stop.
+    private func saveSnapshot(force: Bool) {
+        guard let key = snapshotKey, let image = frame else { return }
+        let now = Date()
+        guard force || now.timeIntervalSince(lastSnapshotSave) >= 20 else { return }
+        lastSnapshotSave = now
+        snapshot = image
+        snapshotDate = now
+        VMSnapshotStore.save(image, key: key)
     }
 
     // MARK: Input (the window's view calls these only while view-only is off)

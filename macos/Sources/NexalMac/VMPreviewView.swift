@@ -17,11 +17,12 @@ struct VMPreviewThumbnail: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack {
                 Color.black
-                if let frame = preview.frame {
+                if let frame = preview.displayImage {
                     Image(decorative: frame, scale: 1)
                         .resizable()
                         .interpolation(.medium)
                         .aspectRatio(contentMode: .fit)
+                        .opacity(preview.frame == nil ? 0.45 : 1)
                 }
                 overlay
             }
@@ -43,17 +44,21 @@ struct VMPreviewThumbnail: View {
                 .multilineTextAlignment(.center)
                 .padding(10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(preview.frame == nil ? 0 : 0.6))
-        case .connecting where preview.frame == nil, .idle:
+                .background(Color.black.opacity(preview.displayImage == nil ? 0 : 0.6))
+        case .connecting where preview.frame == nil && preview.snapshot == nil, .idle where preview.snapshot == nil:
             VStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Connecting…").font(.caption).foregroundStyle(.white.opacity(0.8))
             }
-        case .live where preview.frame == nil:
+        case .live where preview.displayImage == nil:
             Text("Waiting for the first picture…").font(.caption).foregroundStyle(.white.opacity(0.8))
         default:
             EmptyView()
         }
+    }
+
+    static func relative(_ date: Date) -> String {
+        RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
     }
 
     private var caption: String {
@@ -61,7 +66,11 @@ struct VMPreviewThumbnail: View {
         case .live: return "Live. Click the row to open a bigger view."
         case .closed: return "Preview paused. Click the row to open a live view."
         case .unavailable: return "Screen Sharing is still available from Connect."
-        case .connecting, .idle: return "Looking at the screen…"
+        case .connecting, .idle:
+            if preview.frame == nil, let seen = preview.snapshotDate {
+                return "Last seen \(Self.relative(seen)). Connecting…"
+            }
+            return "Looking at the screen…"
         }
     }
 }
@@ -87,7 +96,7 @@ final class VMLiveWindowController: NSObject, NSWindowDelegate {
             NSApp.activate()
             return
         }
-        let model = VMPreviewModel(mode: .window, fetchEndpoint: target.fetchEndpoint)
+        let model = VMPreviewModel(mode: .window, fetchEndpoint: target.fetchEndpoint, snapshotKey: target.id)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
@@ -125,7 +134,7 @@ struct VMLiveView: View {
         VStack(spacing: 0) {
             ZStack {
                 Color.black
-                VMScreenSurface(image: model.frame, inputEnabled: !model.viewOnly,
+                VMScreenSurface(image: model.displayImage, inputEnabled: !model.viewOnly,
                                 onKey: { sym, down in model.sendKey(keysym: sym, down: down) },
                                 onPointer: { buttons, x, y in model.sendPointer(buttons: buttons, x: x, y: y) })
                 overlay
@@ -161,12 +170,12 @@ struct VMLiveView: View {
                     .font(.caption).foregroundStyle(.white.opacity(0.7))
             }
             .padding(20)
-        case .connecting where model.frame == nil, .idle where model.frame == nil:
+        case .connecting where model.displayImage == nil, .idle where model.displayImage == nil:
             VStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Connecting…").font(.callout).foregroundStyle(.white.opacity(0.8))
             }
-        case .live where model.frame == nil:
+        case .live where model.displayImage == nil:
             Text("Waiting for the first picture…").font(.callout).foregroundStyle(.white.opacity(0.8))
         default:
             EmptyView()
@@ -183,6 +192,9 @@ struct VMLiveView: View {
     private var statusLine: String {
         switch model.status {
         case .idle, .connecting:
+            if model.frame == nil, let seen = model.snapshotDate {
+                return "Showing the last picture, seen \(RelativeDateTimeFormatter().localizedString(for: seen, relativeTo: Date())). Connecting…"
+            }
             return "Connecting…"
         case .live:
             let size = model.framebufferSize

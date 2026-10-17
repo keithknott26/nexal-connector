@@ -365,6 +365,18 @@ UNIT
   done
 }
 
+# apt_install runs apt-get install with retries, keeping the output in a file; when it still fails,
+# the last lines go to the console so the reason is visible without logging in.
+apt_install() {
+  APTLOG=/var/log/nexal-apt.log
+  mkdir -p /var/log
+  retry apt-get install -y -qq "$@" >>"$APTLOG" 2>&1 && return 0
+  tail -n 6 "$APTLOG" | while IFS= read -r l; do log "apt: $(printf '%s' "$l" | cut -c1-160)"; done
+  df -h / 2>/dev/null | tail -n 1 | while IFS= read -r l; do log "disk: $l"; done
+  free -m 2>/dev/null | sed -n 2p | while IFS= read -r l; do log "memory: $l"; done
+  return 1
+}
+
 # Plain-language progress for the log: "step N/T: what is happening now. Next: what follows."
 plan() { log "step $1/$2: $3. Next: $4."; }
 
@@ -553,7 +565,7 @@ kali)
     KALI_PKGS="kali-linux-headless"
   fi
   # shellcheck disable=SC2086
-  retry apt-get install -y -qq --no-install-recommends -t kali-rolling $KALI_PKGS || rc=$?
+  apt_install --no-install-recommends -t kali-rolling $KALI_PKGS || rc=$?
   kill "$hb" 2>/dev/null || true
   wait "$hb" 2>/dev/null || true
   if [ "$rc" -ne 0 ]; then
@@ -578,7 +590,7 @@ desktop)
   step app-download 30
   plan 2 3 "installing the XFCE desktop and VNC server, usually a few minutes" "start the remote desktop"
   # shellcheck disable=SC2086
-  retry apt-get install -y -qq --no-install-recommends xfce4 xfce4-terminal xorg dbus-x11 tigervnc-standalone-server tigervnc-tools || fail "installing the desktop packages"
+  apt_install --no-install-recommends xfce4 xfce4-terminal xorg dbus-x11 tigervnc-standalone-server tigervnc-tools || fail "installing the desktop packages"
   step app-start 80
   plan 3 3 "starting the remote desktop" "connect with Desktop"
   setup_vnc

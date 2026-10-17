@@ -178,7 +178,8 @@ func TestRenderUserDataDesktopProfile(t *testing.T) {
 	for _, want := range []string{
 		"NEXAL_APP_PROFILE=desktop\n",
 		"NEXAL_VNC_PASSWORD=pw123456\n",
-		"xfce4 xfce4-terminal xorg dbus-x11 tigervnc-standalone-server",
+		"apt_install --no-install-recommends xfce4 xfce4-terminal xorg dbus-x11 tigervnc-standalone-server",
+		"log \"apt: ",
 		"-interface $IP -rfbauth /home/nexal/.vnc/passwd",
 		"  - [ systemctl, start, --no-block, nexal-app.service ]\n",
 	} {

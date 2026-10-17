@@ -104,6 +104,10 @@ type Manager struct {
 	inflight  map[string]bool // task ids being handled
 	recovered bool
 
+	// appLast is the newest app-setup step per running VM. A plain "running" report clears progress at the
+	// coordinator, so every running report sent while the install is still going carries this step too.
+	appLast map[string]AppProgress
+
 	// stoppedWarned: the "coordinator rejected stopped" warning was logged already.
 	stoppedWarned bool
 
@@ -446,6 +450,13 @@ func (m *Manager) report(r StateReport) {
 	m.mu.Unlock()
 	if coord == nil || hostID == "" {
 		return
+	}
+	if r.State == StateRunning && r.Step == "" {
+		m.mu.Lock()
+		if p, ok := m.appLast[r.SandboxID]; ok {
+			r.Step, r.Percent = p.Step, p.Percent
+		}
+		m.mu.Unlock()
 	}
 	// 600: a dev container failure carries the sidecar's own reason and log tail;
 	// 200 used to cut it off right after the generic prefix.

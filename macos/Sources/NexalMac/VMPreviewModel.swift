@@ -136,8 +136,10 @@ final class VMPreviewModel: ObservableObject {
     private var lastSnapshotSave = Date.distantPast
 
     /// The connector says "pending" while the guest is still setting the password: wait and ask again.
-    private static let pendingAttempts = 5
-    private static let pendingDelay: UInt64 = 2_000_000_000
+    // The coordinator waits ~8 s per ask and the host looks for the request every 30 s: six asks back to
+    // back (about 50 s) always span one look, and the same waiting password answers all of them.
+    private static let pendingAttempts = 6
+    private static let pendingDelay: UInt64 = 250_000_000
 
     init(mode: RFBConnection.Mode, fetchEndpoint: @escaping @MainActor () async throws -> VNCEndpoint,
          snapshotKey: String? = nil) {

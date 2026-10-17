@@ -77,6 +77,7 @@ func (m *Manager) watchAppSetup(id string) {
 		alive := r != nil && r.State == StateRunning
 		m.mu.Unlock()
 		if !alive {
+			m.setAppLast(id, nil)
 			return
 		}
 		text, err := readTail(m.consoleLog(id), 256<<10)
@@ -90,14 +91,34 @@ func (m *Manager) watchAppSetup(id string) {
 		last = p
 		switch {
 		case p.Ready:
+			m.setAppLast(id, nil)
 			m.report(StateReport{SandboxID: id, State: StateRunning})
 			return
 		case p.Failed:
 			m.opts.Logger.Warn("app setup failed in the guest", "sandbox", id, "reason", p.Reason)
+			m.setAppLast(id, &AppProgress{Step: "app-failed"})
 			m.report(StateReport{SandboxID: id, State: StateRunning, Step: "app-failed", Percent: 0})
 			return
 		default:
+			m.setAppLast(id, &p)
 			m.report(StateReport{SandboxID: id, State: StateRunning, Step: p.Step, Percent: p.Percent})
 		}
 	}
+	// The watch window ended without a ready or failed line: stop showing a stale step.
+	m.setAppLast(id, nil)
+	m.report(StateReport{SandboxID: id, State: StateRunning})
+}
+
+// setAppLast remembers (or, with nil, forgets) the newest app-setup step of one running VM.
+func (m *Manager) setAppLast(id string, p *AppProgress) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p == nil {
+		delete(m.appLast, id)
+		return
+	}
+	if m.appLast == nil {
+		m.appLast = map[string]AppProgress{}
+	}
+	m.appLast[id] = *p
 }

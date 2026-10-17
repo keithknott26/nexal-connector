@@ -625,9 +625,21 @@ final class ThrowawayHosting: ObservableObject {
         guard Self.validID(box.id) else {
             throw ThrowawayConnectError.unusable("This host has no usable identifier.")
         }
-        let data = try await model.sandbox(action: "connect", id: box.id, kind: "vnc")
-        let reply = try JSONDecoder().decode(SandboxConnectReply.self, from: data)
-        return try Self.vncEndpoint(from: reply)
+        // The host only polls for its one-time password every 30 s, and the coordinator holds each
+        // request ~8 s waiting for the acknowledgement, so ask again right away (a few times, ~40 s
+        // in all) until the host has set it: connecting earlier would authenticate with the wrong one.
+        var attempt = 0
+        while true {
+            let data = try await model.sandbox(action: "connect", id: box.id, kind: "vnc")
+            let reply = try JSONDecoder().decode(SandboxConnectReply.self, from: data)
+            do {
+                return try Self.vncEndpoint(from: reply)
+            } catch ThrowawayConnectError.pending {
+                attempt += 1
+                if attempt >= 5 { throw ThrowawayConnectError.pending }
+                try Task.checkCancellation()
+            }
+        }
     }
 
     // MARK: Connect helpers (pure enough to unit test)

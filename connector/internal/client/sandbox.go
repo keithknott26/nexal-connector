@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"time"
 
+	"nexal/connector/internal/observability"
 	"nexal/connector/internal/sandbox"
 )
 
@@ -124,10 +126,29 @@ func (c *Client) ConnectSandbox(ctx context.Context, hostID, id, kind, publicKey
 		body["publicKey"] = publicKey
 	}
 	var out json.RawMessage
-	if err := c.callLenient(ctx, "POST", p, body, &out); err != nil {
+	// A vnc connect holds the response while the coordinator waits (up to 8 s) for the runner to
+	// acknowledge the one-time password, which is longer than the ordinary 8 s response-header
+	// limit: that race surfaced as "coordinator request failed [timeout]" in the live view.
+	api := c.withLongTimeout(20 * time.Second)
+	if err := api.callLenient(ctx, "POST", p, body, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// withLongTimeout returns a copy of the client whose request and response-header limits are d,
+// keeping the validated transport's origin, TLS and proxy policy.
+func (c *Client) withLongTimeout(d time.Duration) *Client {
+	api := *c
+	httpClient := *c.http
+	httpClient.Timeout = d
+	if transport, ok := observability.Underlying(httpClient.Transport).(*http.Transport); ok {
+		clone := transport.Clone()
+		clone.ResponseHeaderTimeout = d
+		httpClient.Transport = observability.Transport{Base: clone}
+	}
+	api.http = &httpClient
+	return &api
 }
 
 // DeleteSandbox is DELETE /api/v2/hosts/:hostId/sandboxes/:id: remove an instance of the

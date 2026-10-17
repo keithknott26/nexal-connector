@@ -552,7 +552,14 @@ kali)
   rm -f /tmp/kali-archive-key.asc
   chmod 644 "$KALI_KEYRING"
   printf 'deb [signed-by=%s] http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware\n' "$KALI_KEYRING" >/etc/apt/sources.list.d/kali.list
-  printf 'Package: *\nPin: release o=Kali\nPin-Priority: 100\n' >/etc/apt/preferences.d/kali
+  # Kali's tools need newer builds of many shared libraries than Debian 13 ships, so mixing the two
+  # repositories cannot resolve (tried: low pin, -t kali-rolling). Kali becomes the only source, as in
+  # Kali's own Debian migration; Debian's list is kept aside in /root/apt-debian.
+  mkdir -p /root/apt-debian
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/debian.list; do
+    if [ -e "$f" ]; then mv "$f" /root/apt-debian/; fi
+  done
+  rm -f /etc/apt/preferences.d/kali
   retry apt-get update -qq || fail "apt-get update (Kali)"
   step app-download 25
   plan 3 5 "installing Kali Linux and its tools, a large download (several GB), usually 10 to 30 minutes" "set up the remote desktop"
@@ -564,13 +571,28 @@ kali)
   else
     KALI_PKGS="kali-linux-headless"
   fi
+  # Debian's security updates (libexpat1 first) are newer than Kali's builds: apt must be allowed to
+  # downgrade them, and the libexpat1 downgrade has to be requested by name before the tool set.
+  # Nothing may start while packages install (apache2 and others would grab ports and fail), and the
+  # debconf questions (kismet, atftpd) get their defaults instead of a text prompt.
+  printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
+  chmod 755 /usr/sbin/policy-rc.d
+  printf 'atftpd atftpd/use_inetd boolean false\n' | debconf-set-selections 2>/dev/null || true
   # shellcheck disable=SC2086
-  apt_install --no-install-recommends -t kali-rolling $KALI_PKGS || rc=$?
+  apt_install --allow-downgrades libexpat1 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    # shellcheck disable=SC2086
+    apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?
+  fi
+  rm -f /usr/sbin/policy-rc.d
   kill "$hb" 2>/dev/null || true
   wait "$hb" 2>/dev/null || true
   if [ "$rc" -ne 0 ]; then
     fail "installing Kali packages"
   fi
+  # Tool packages bring web, TFTP and database servers with them; leave them stopped and disabled
+  # (start one when needed) instead of listening on the mesh address.
+  systemctl disable --now apache2.service apache-htcacheclean.service atftpd.service >/dev/null 2>&1 || true
   if [ "$WANT_DESKTOP" = "1" ]; then
     step app-start 80
     plan 4 5 "setting up the remote desktop" "check it answers"

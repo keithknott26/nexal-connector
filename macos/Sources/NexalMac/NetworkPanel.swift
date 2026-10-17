@@ -389,15 +389,23 @@ struct NetworkPanel: View {
                     VStack(spacing: 3) {
                         LatencyGauge(latencyMs: connected ? peer.latencyMs.map { ($0 * 2).rounded() / 2 } : nil, scale: 0.5)
                         Text("LATENCY").font(.system(size: 9, weight: .semibold)).tracking(0.8).foregroundStyle(.secondary)
-                        statTile("AVG", stats.map { milliseconds($0.avg) })
+                        HStack(spacing: 4) {
+                            Text("AVG").font(.system(size: 8, weight: .semibold)).tracking(0.6).foregroundStyle(.secondary)
+                            Text(stats.map { milliseconds($0.avg) } ?? "—")
+                                .font(.system(.caption, design: .rounded).weight(.semibold)).monospacedDigit()
+                        }
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     peerTrafficGraph(peer)
                         .frame(maxWidth: .infinity)
                 }
                 HStack(alignment: .center, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("\(lifecycleEmoji(peer.lifecycle)) \(lifecycleText(peer.lifecycle))")
-                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                            .font(.subheadline.weight(.semibold)).lineLimit(1).fixedSize()
+                        Text("·").foregroundStyle(.secondary)
                         routeSummary(peer).font(.caption).lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

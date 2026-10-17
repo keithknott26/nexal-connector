@@ -190,3 +190,17 @@ func TestRenderUserDataDesktopProfile(t *testing.T) {
 		t.Error("desktop must bind to the mesh address only")
 	}
 }
+
+func TestRenderUserDataInstallsGuestAgent(t *testing.T) {
+	u := RenderUserData(testSeed())
+	for _, want := range []string{
+		"path: /usr/local/sbin/nexal-guest-agent\n",
+		"DEV = \"/dev/hvc1\"",
+		"path: /etc/systemd/system/nexal-guest-agent.service\n",
+		"systemctl enable --now nexal-guest-agent.service",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("seed missing %q", want)
+		}
+	}
+}

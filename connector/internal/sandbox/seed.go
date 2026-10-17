@@ -229,6 +229,7 @@ func RenderUserData(p SeedParams) string {
 	}
 	renderMeshRuntime(&b, p.MeshImage)
 	renderAppProfile(&b, p)
+	renderGuestAgent(&b)
 	b.WriteString("  - path: /etc/systemd/system/nexal-drive.service\n")
 	b.WriteString("    owner: root:root\n")
 	b.WriteString("    permissions: \"0644\"\n")
@@ -251,6 +252,7 @@ func RenderUserData(p SeedParams) string {
 	b.WriteString("      [Install]\n")
 	b.WriteString("      WantedBy=multi-user.target\n")
 	b.WriteString("runcmd:\n")
+	b.WriteString("  - [ sh, -c, \"systemctl daemon-reload; systemctl enable --now nexal-guest-agent.service || true\" ]\n")
 	b.WriteString("  - [ mkdir, -p, /mnt/nexal-drive ]\n")
 	b.WriteString("  - [ sh, -c, \"systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true\" ]\n")
 	// A pre-baked neXal-ready image ships /usr/local/sbin/nexal-first-boot; the

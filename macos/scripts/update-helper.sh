@@ -60,6 +60,9 @@ sudo install -m 755 "$ROOT/macos/scripts/install-vmnet.sh" "$APP/Contents/Resour
 # docker, devpod). package-app.sh ships it; this update path must too.
 sudo install -m 755 "$ROOT/macos/Resources/install-container-runtime.sh" "$APP/Contents/Resources/install-container-runtime.sh"
 sudo install -m 644 "$ROOT/macos/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# The icon is named in Info.plist (CFBundleIconFile): an install made before that key existed keeps a
+# blank icon unless the plist is refreshed too. Then ask Launch Services and the Dock to look again.
+sudo install -m 644 "$ROOT/macos/Resources/Info.plist" "$APP/Contents/Info.plist"
 # Official OS logos (macos/Resources/os-logos/os-*.png), shown on VM and dev container rows.
 for logo in "$ROOT"/macos/Resources/os-logos/os-*.png; do
   [ -f "$logo" ] && sudo install -m 644 "$logo" "$APP/Contents/Resources/$(basename "$logo")"
@@ -82,6 +85,9 @@ codesign -d --entitlements - "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | 
   || { echo "nexal-vmhost is missing the virtualization entitlement"; exit 1; }
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
+touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" >/dev/null 2>&1 || true
+killall Dock 2>/dev/null || true
 if [ -f "$SUPPORT_BIN" ]; then
   cp "$SUPPORT_BIN" "$OUT/nexal.support.previous"
   install -m 755 "$APP/Contents/Helpers/nexal" "$SUPPORT_BIN"

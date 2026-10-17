@@ -132,7 +132,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Start as a menu-bar app; the main window promotes it to a regular app
         // for as long as the window is open.
         NSApp.setActivationPolicy(.accessory)
+        // Windows (Settings, the panel) never come back by themselves at launch.
+        UserDefaults.standard.set(false, forKey: "NSQuitAlwaysKeepsWindows")
     }
+
+    func application(_ app: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool { false }
+    func application(_ app: NSApplication, shouldSaveSecureApplicationState coder: NSCoder) -> Bool { false }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
@@ -143,10 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if preferences.showSplash {
             showSplash { [weak self] in
                 self?.launchFinished = true
+                self?.showFirstLaunchHint()
             }
         } else {
             // Keep launch-time reopen events from opening a main window.
-            DispatchQueue.main.async { [weak self] in self?.launchFinished = true }
+            DispatchQueue.main.async { [weak self] in
+                self?.launchFinished = true
+                self?.showFirstLaunchHint()
+            }
         }
     }
 
@@ -187,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setContentSize(Self.panelSize)
         window.title = "neXal@home"
         window.isReleasedWhenClosed = false
+        window.isRestorable = false
         window.tabbingMode = .disallowed
         window.collectionBehavior.insert(.fullScreenNone)
         window.setFrameAutosaveName("neXalConnectorMain")
@@ -331,7 +341,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// not a request from the owner, so it is ignored until the splash has finished; Settings then only opens
     /// from the menu, the panel or the keyboard shortcut.
     func showSettingsFromScene() {
-        guard launchFinished else { return }
+        let userEvents: [NSEvent.EventType] = [.keyDown, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp]
+        guard launchFinished, let type = NSApp.currentEvent?.type, userEvents.contains(type) else { return }
         showSettings()
     }
 
@@ -346,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.styleMask = [.titled, .closable]
             window.title = "neXal@home Settings"
             window.isReleasedWhenClosed = false
+            window.isRestorable = false
             window.center()
             settingsWindow = window
         }
@@ -370,6 +382,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItemIsOnScreen: Bool {
         guard let item = statusItem, item.isVisible, let buttonWindow = item.button?.window else { return false }
         return buttonWindow.occlusionState.contains(.visible) && buttonWindow.screen != nil
+    }
+
+    /// The first time the app ever starts, once the splash is gone: point at the menu-bar icon so it is
+    /// clear the app now lives up there. Later launches stay quiet.
+    private func showFirstLaunchHint() {
+        guard !UserDefaults.standard.bool(forKey: Self.hintShownKey) else { return }
+        showMenuBarHintIfNeeded()
     }
 
     private func showMenuBarHintIfNeeded() {

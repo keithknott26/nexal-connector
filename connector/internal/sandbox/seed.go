@@ -617,7 +617,7 @@ kali)
   fi
   # Tool packages bring web, TFTP and database servers with them; leave them stopped and disabled
   # (start one when needed) instead of listening on the mesh address.
-  systemctl disable --now apache2.service apache-htcacheclean.service atftpd.service >/dev/null 2>&1 || true
+  systemctl disable --now apache2.service apache-htcacheclean.service atftpd.service nginx.service >/dev/null 2>&1 || true
   if [ "$WANT_DESKTOP" = "1" ]; then
     step app-start 80
     plan 4 5 "setting up the remote desktop" "check it answers"

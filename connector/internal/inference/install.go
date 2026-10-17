@@ -86,6 +86,9 @@ type Installer struct {
 	Client       *HFClient
 	// Preflight returns the engine report for THIS host (memory verdicts, disk).
 	Preflight func(ctx context.Context) (Report, error)
+	// LocalOnly is simple mode: the model runs on THIS Mac for its owner, so the donation cap and reserve
+	// (which limit work done for other Macs) do not apply. The model must still fit this Mac's memory.
+	LocalOnly bool
 	Emit      func(ev any)
 	Now       func() time.Time
 	// ProgressEvery throttles progress events (default 250ms; negative = every
@@ -163,7 +166,13 @@ func (in *Installer) Install(ctx context.Context, id string) (rc Receipt, err er
 	if perr != nil {
 		return rc, errf("preflight_failed", "run `nexal inference preflight` and fix what it reports", "the host check failed: %v", perr)
 	}
-	self, herr := checkHostFit(report, *entry)
+	var self MachineReport
+	var herr *Error
+	if in.LocalOnly {
+		self, herr = checkLocalFit(report, *entry)
+	} else {
+		self, herr = checkHostFit(report, *entry)
+	}
 	if herr != nil {
 		return rc, herr
 	}
@@ -377,6 +386,30 @@ func checkHostFit(r Report, e CatalogEntry) (MachineReport, *Error) {
 		return *self, errf("does_not_fit", "run the install on "+v.HostName+", or choose a smaller model", "%s fits %s but not this Mac", e.DisplayName, v.HostName)
 	}
 	return *self, nil
+}
+
+// localMemoryFraction is how much of this Mac's physical memory a locally run model may need.
+const localMemoryFraction = 0.80
+
+// checkLocalFit is the simple-mode check: the model's estimated need against this Mac's physical memory.
+func checkLocalFit(r Report, e CatalogEntry) (MachineReport, *Error) {
+	for _, m := range r.Machines {
+		if !m.IsSelf {
+			continue
+		}
+		need, err := e.Estimate.Total()
+		if err != nil {
+			return m, errf("internal", "", "the memory estimate for %s is invalid", e.ID)
+		}
+		if m.TotalMemoryBytes == 0 {
+			return m, errf("host_unknown", "open the neXal app so the connector can report this Mac, then try again", "this Mac's memory is not known")
+		}
+		if float64(need) > float64(m.TotalMemoryBytes)*localMemoryFraction {
+			return m, errf("does_not_fit", "choose a smaller model", "%s needs about %s and this Mac has %s", e.DisplayName, gib(int64(need)), gib(int64(m.TotalMemoryBytes)))
+		}
+		return m, nil
+	}
+	return MachineReport{}, errf("host_unknown", "open the neXal app so the connector can report this Mac, then try again", "this Mac's facts are not available (is the connector running?)")
 }
 
 // checkDisk requires need bytes plus the owner's free-disk floor.

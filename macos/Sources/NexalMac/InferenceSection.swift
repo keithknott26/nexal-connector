@@ -208,13 +208,14 @@ struct InferenceSection: View {
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 10) {
+                InferenceQuickStartView(installedIDs: installedModelIDs) { installed.refresh(model) }
                 Text(InferencePresentation.intro)
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button { check.run(model) } label: {
-                        Label(InferencePresentation.buttonTitle, systemImage: "cpu")
+                        Label("Check readiness (advanced)", systemImage: "cpu")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(check.phase == .checking || installer.phase.isActive)
                     .accessibilityIdentifier("add-ai-inference-model")
@@ -222,7 +223,6 @@ struct InferenceSection: View {
                 }
                 Text(InferenceInstallText.unavailableLine)
                     .font(.caption2).foregroundStyle(.tertiary)
-                InferenceQuickStartView(installedIDs: installedModelIDs) { installed.refresh(model) }
                 installState
                 switch check.phase {
                 case .idle:

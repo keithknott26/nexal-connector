@@ -66,7 +66,7 @@ final class InferenceQuickStart: ObservableObject {
                     var progress = InstallProgress(modelId: id)
                     var failure: (code: String, message: String)?
                     phase = .working(model: id, step: "Downloading the model…", fraction: nil)
-                    let result = try await stream(.inferenceInstall(modelId: id), model: model) { [self] line in
+                    let result = try await stream(.inferenceInstallLocal(modelId: id), model: model) { [self] line in
                         guard let event = try? InferenceInstallEvent.decode(line: line) else { return }
                         if case let .error(code, message, _) = event { failure = (code, message) }
                         progress.apply(event)

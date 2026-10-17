@@ -70,6 +70,8 @@ enum CLICommand {
     /// `nexal inference install <id> --json`: downloads and verifies a model, printing
     /// NDJSON events. Long-running, so it is run by `ConnectorProcess.stream`, not `execute`.
     case inferenceInstall(modelId: String)
+    /// `nexal inference install <id> --local --json`: simple mode, checked against this Mac's memory only.
+    case inferenceInstallLocal(modelId: String)
     /// `nexal inference status --json`: the installed models.
     case inferenceStatus
     /// `nexal inference verify <id> --json`: re-hash an installed model's files.
@@ -99,6 +101,7 @@ enum CLICommand {
         if case .inferencePreflight = self { return 45 }
         // A model download is many GB: the limit is a backstop against a hung child, not a pace.
         if case .inferenceInstall = self { return 6 * 3600 }
+        if case .inferenceInstallLocal = self { return 6 * 3600 }
         // Re-hashes every file of a multi-GB model.
         if case .inferenceVerify = self { return 300 }
         if case .inferenceRemove = self { return 60 }
@@ -179,6 +182,8 @@ enum CLICommand {
             command = ["inference", "preflight", "--json"]
         case let .inferenceInstall(modelId):
             command = ["inference", "install", modelId, "--json"]
+        case let .inferenceInstallLocal(modelId):
+            command = ["inference", "install", modelId, "--local", "--json"]
         case .inferenceStatus:
             command = ["inference", "status", "--json"]
         case let .inferenceVerify(modelId):

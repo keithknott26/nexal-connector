@@ -171,9 +171,10 @@ func inferencePin(ctx context.Context, args []string) error {
 // ---- install ----
 
 func inferenceInstall(ctx context.Context, args []string) error {
-	var asJSON *bool
+	var asJSON, local *bool
 	id, _, path, err := parseModelArgs("install", args, true, func(f *flag.FlagSet) {
 		asJSON = f.Bool("json", false, "print newline-delimited JSON events")
+		local = f.Bool("local", false, "simple mode: check the model against this Mac's memory, not the donation cap")
 	})
 	if err != nil {
 		return err
@@ -200,7 +201,7 @@ func inferenceInstall(ctx context.Context, args []string) error {
 	}
 	enc := json.NewEncoder(os.Stdout)
 	pr := &plainInstall{w: os.Stdout}
-	in := &inference.Installer{InferenceDir: infDir, Catalog: catalog, Client: client, Preflight: preflight,
+	in := &inference.Installer{InferenceDir: infDir, Catalog: catalog, Client: client, Preflight: preflight, LocalOnly: *local,
 		Emit: func(ev any) {
 			if *asJSON {
 				_ = enc.Encode(ev)

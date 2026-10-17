@@ -43,6 +43,9 @@ final class AppModel: ObservableObject {
     private var polling = false
     private var consecutivePollFailures = 0
     private static let pollFailuresBeforeOffline = 3
+    /// The notice set when polls failed, so it can be removed once polls succeed again (and nothing else is).
+    private var connectorErrorText: String?
+    private static let waitingForStatusMessage = "Connector started. Waiting for its local status…"
     private var peerSmoother = PeerSmoother()
     private var latencyProbedAt = Date.distantPast
     @Published private(set) var busy = false
@@ -546,14 +549,21 @@ final class AppModel: ObservableObject {
             try process.run()
             child = process
             processOwned = true
-            message = "Connector started. Waiting for its local status…"
+            message = Self.waitingForStatusMessage
             try await Task.sleep(for: .milliseconds(750))
             try await updateStatus()
-        } catch { message = error.localizedDescription }
+        } catch {
+            message = error.localizedDescription
+            connectorErrorText = message
+        }
     }
 
     private func updateStatus() async throws {
         status = peerSmoother.smooth(try ConnectorStatus.decode(try await invoke(.status)))
+        // The connector answers: a "not running" notice (or the "waiting for its status" one) from before is stale.
+        if let stale = connectorErrorText, message == stale { message = nil }
+        connectorErrorText = nil
+        if message == Self.waitingForStatusMessage { message = nil }
         // Paired again after leaving: the "Left the network" notice is stale.
         if leavePhase == .left, isLinked { leavePhase = nil }
         enrollmentPresentation.observeHost(status?.hostId, for: selectedConfig)
@@ -644,6 +654,7 @@ final class AppModel: ObservableObject {
                 // extending instead of implying continued measurement.
                 observe(nil)
                 message = error.localizedDescription
+                connectorErrorText = message
             }
             return
         }

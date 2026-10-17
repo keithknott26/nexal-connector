@@ -59,6 +59,7 @@ sudo install -m 755 "$ROOT/macos/scripts/install-vmnet.sh" "$APP/Contents/Resour
 # The container-runtime installer behind Settings › Virtual Machine Hosting › Set up (Colima,
 # docker, devpod). package-app.sh ships it; this update path must too.
 sudo install -m 755 "$ROOT/macos/Resources/install-container-runtime.sh" "$APP/Contents/Resources/install-container-runtime.sh"
+sudo install -m 644 "$ROOT/macos/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 # Official OS logos (macos/Resources/os-logos/os-*.png), shown on VM and dev container rows.
 for logo in "$ROOT"/macos/Resources/os-logos/os-*.png; do
   [ -f "$logo" ] && sudo install -m 644 "$logo" "$APP/Contents/Resources/$(basename "$logo")"

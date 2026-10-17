@@ -79,6 +79,7 @@ python3 "$ROOT/scripts/verify-runtime.py" source "$NEXAL_MESH_RUNTIME_ARTIFACT"
 install -m 755 "$NEXAL_MESH_RUNTIME_ARTIFACT" "$CANDIDATE/Contents/Helpers/nexal-network"
 install -m 644 "$ROOT/Resources/THIRD-PARTY-NOTICES.txt" "$CANDIDATE/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 install -m 644 "$ROOT/Resources/Info.plist" "$CANDIDATE/Contents/Info.plist"
+install -m 644 "$ROOT/Resources/AppIcon.icns" "$CANDIDATE/Contents/Resources/AppIcon.icns"
 # Translations: one <lang>.lproj/Localizable.strings per language (i18n/README.md).
 for LPROJ in "$ROOT"/Resources/*.lproj; do
   [ -d "$LPROJ" ] && cp -R "$LPROJ" "$CANDIDATE/Contents/Resources/"

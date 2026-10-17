@@ -7,7 +7,7 @@ enum InstanceFamily {
     static func of(imageId: String?, imageName: String?, appProfile: String?, template: String?) -> String {
         if let appProfile, appProfile != "none" { return appProfile }
         let text = [template, imageId, imageName].compactMap { $0?.lowercased() }.joined(separator: " ")
-        for known in ["ubuntu", "debian", "fedora", "alpine", "home-assistant", "jellyfin", "rocky", "arch"] where text.contains(known) { return known }
+        for known in ["ubuntu", "debian", "fedora", "alpine", "home-assistant", "jellyfin", "rocky", "arch", "kali"] where text.contains(known) { return known }
         if text.contains("home assistant") { return "home-assistant" }
         if text.contains("devcontainer") || text.contains("dev container") { return "devcontainer" }
         return "linux"
@@ -57,7 +57,7 @@ struct InstanceIcon: View {
         case "home-assistant": return "house.fill"
         case "jellyfin": return "play.tv.fill"
         case "devcontainer": return "shippingbox.fill"
-        case "ubuntu", "debian", "fedora", "alpine", "rocky", "arch": return "server.rack"
+        case "ubuntu", "debian", "fedora", "alpine", "rocky", "arch", "kali": return "server.rack"
         default: return "terminal.fill"
         }
     }
@@ -70,6 +70,7 @@ struct InstanceIcon: View {
         case "alpine": return .teal
         case "rocky": return .green
         case "arch": return .cyan
+        case "kali": return .blue
         case "devcontainer": return .indigo
         default: return .gray
         }

@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -29,7 +31,8 @@ class ParseTests(unittest.TestCase):
 class ExtractTests(unittest.TestCase):
     def lit(self, swift):
         with tempfile.TemporaryDirectory() as d:
-            open(os.path.join(d, "V.swift"), "w").write(swift)
+            with open(os.path.join(d, "V.swift"), "w") as f:
+                f.write(swift)
             return l10n.extract_swift([d], d)
 
     def test_finds_ui_literals_and_skips_non_ui(self):
@@ -59,7 +62,8 @@ class ExtractTests(unittest.TestCase):
     def test_tests_and_thirdparty_dirs_skipped(self):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "Tests"))
-            open(os.path.join(d, "Tests", "T.swift"), "w").write('Text("Only in tests")')
+            with open(os.path.join(d, "Tests", "T.swift"), "w") as f:
+                f.write('Text("Only in tests")')
             self.assertEqual(l10n.extract_swift([d], d), {})
 
 
@@ -97,7 +101,8 @@ class CheckTests(unittest.TestCase):
             self.make(d, "en", [("A", "A", ""), ("B", "B", "")])
             self.make(d, "es", [("A", "Á", "")])
             t = {"strings": d, "plist": None}
-            l10n.sync_target("t", t)
+            with contextlib.redirect_stdout(io.StringIO()):
+                l10n.sync_target("t", t)
             entries = {k: (v, c) for k, v, c in l10n.read_strings(l10n.lproj(t, "es"))}
             self.assertEqual(entries["B"], ("B", l10n.TODO))
             self.assertEqual(entries["A"], ("Á", ""))

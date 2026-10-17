@@ -213,7 +213,8 @@ def extract_swift(roots, base):
     found = {}
     for path in sorted(swift_files(roots)):
         try:
-            src = open(path, encoding="utf-8").read()
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
         except (OSError, UnicodeDecodeError):
             continue
         for rx in (CALL_RE, LOCALIZED_RE):
@@ -366,7 +367,8 @@ def check_target(name, t, langs):
             warnings.append(f"{name}/{code}: {todo} of {len(en)} strings still marked {TODO}")
     plist = t.get("plist")
     if plist and os.path.isfile(os.path.join(ROOT, plist)):
-        text = open(os.path.join(ROOT, plist), encoding="utf-8").read()
+        with open(os.path.join(ROOT, plist), encoding="utf-8") as f:
+            text = f.read()
         for code in sorted(declared):
             if f"<string>{code}</string>" not in text:
                 errors.append(f"{name}: {plist} CFBundleLocalizations is missing '{code}'")

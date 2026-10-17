@@ -28,7 +28,9 @@
     <string>vi</string>
   </array>
   <key>CFBundleIdentifier</key><string>systems.nexal.connector</string>
-  <key>CFBundleExecutable</key><string>NexalMac</string>
+  <key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleExecutable</key><string>NexalMac</string>
   <key>CFBundleName</key><string>neXal@home</string>
   <key>CFBundleDisplayName</key><string>neXal@home</string>
   <key>CFBundlePackageType</key><string>APPL</string>

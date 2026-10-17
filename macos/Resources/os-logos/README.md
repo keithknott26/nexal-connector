@@ -9,7 +9,7 @@ background), named exactly:
 | `os-debian.png` | Debian |
 | `os-home-assistant.png` | Home Assistant |
 | `os-jellyfin.png` | Jellyfin |
-| `os-fedora.png`, `os-alpine.png`, `os-rocky.png`, `os-arch.png` | those systems, if offered |
+| `os-fedora.png`, `os-alpine.png`, `os-rocky.png`, `os-arch.png`, `os-kali.png` | those systems, if offered |
 | `os-devcontainer.png` | generic dev containers |
 
 Get them from each project's official brand/press page and follow its trademark guidelines.

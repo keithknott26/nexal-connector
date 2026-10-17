@@ -272,7 +272,7 @@ class DependencyGateTests(LocalFixture):
         value = {
             "schema_version": 1, "macos_hardware_smoke_passed": True,
             "python_version": "3.11.9",
-            "packages": {"mlx": "0.29.3", "mlx-lm": "0.28.4", "transformers": "4.57.6", "example-dependency": "1.2.3"},
+            "packages": {"mlx": "0.29.4", "mlx-lm": "0.28.4", "transformers": "4.57.6", "example-dependency": "1.2.3"},
             "requirements_lock_sha256": "a" * 64,
             "wheel_sha256": {"mlx": "b" * 64, "mlx-lm": "c" * 64, "transformers": "e" * 64, "example-dependency": "d" * 64},
         }
@@ -283,7 +283,7 @@ class DependencyGateTests(LocalFixture):
     def verify_receipt(self, config, extra=()):
         installed = [
             SimpleNamespace(metadata={"Name": name}, version=version)
-            for name, version in (("mlx", "0.29.3"), ("mlx-lm", "0.28.4"),
+            for name, version in (("mlx", "0.29.4"), ("mlx-lm", "0.28.4"),
                                   ("transformers", "4.57.6"), ("example-dependency", "1.2.3"), *extra)
         ]
         with patch.object(runtime.platform, "system", return_value="Darwin"), \
@@ -296,7 +296,7 @@ class DependencyGateTests(LocalFixture):
         self.verify_receipt(self.receipt())
 
     def test_extra_or_duplicate_installed_distribution_refused(self):
-        for extra in ((("unexpected", "1.0"),), (("mlx", "0.29.3"),)):
+        for extra in ((("unexpected", "1.0"),), (("mlx", "0.29.4"),)):
             with self.subTest(extra=extra), self.assertRaises(Rejected):
                 self.verify_receipt(self.receipt(), extra)
 

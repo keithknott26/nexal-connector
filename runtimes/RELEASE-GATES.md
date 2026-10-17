@@ -9,9 +9,9 @@ performance release gates. Keep production approval false until those pass.
 
 
 `requirements.in` pins **candidate top-level versions only**:
-`mlx==0.29.3`, `mlx-lm==0.28.4`, and `transformers==4.57.6`. These releases exist; that does not prove their
+`mlx==0.29.4`, `mlx-lm==0.28.4`, and `transformers==4.57.6`. These releases exist; that does not prove their
 combination works on every macOS/Python target
-([MLX 0.29.3](https://pypi.org/project/mlx/0.29.3/),
+([MLX 0.29.4](https://pypi.org/project/mlx/0.29.4/),
 [MLX-LM 0.28.4](https://pypi.org/project/mlx-lm/0.28.4/)).
 No complete transitive lock was fabricated on Linux. Inference and network
 smoke are blocked until the owner supplies a reviewed, hash-pinned receipt of
@@ -81,7 +81,7 @@ visible to the isolated interpreter, not merely the top-level packages.
   "macos_hardware_smoke_passed": false,
   "python_version": "EXACT_REVIEWED_PATCH_VERSION",
   "packages": {
-    "mlx": "0.29.3",
+    "mlx": "0.29.4",
     "mlx-lm": "0.28.4",
     "transformers": "4.57.6",
     "EVERY_OTHER_INSTALLED_DISTRIBUTION": "EXACT_VERSION"

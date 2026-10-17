@@ -43,7 +43,7 @@ func main() {
 	}{{"q4", "4-bit group-64", "-4bit", 4.5}, {"q8", "8-bit group-64", "-8bit", 8.5}}
 	out := map[string]any{
 		"schemaVersion": 1, "runtime": "nexal_mlx 0.2.0 (qwen3/phi3 profile)",
-		"mlxVersion": "0.29.3", "mlxLmVersion": "0.28.4",
+		"mlxVersion": "0.29.4", "mlxLmVersion": "0.28.4",
 		"runtimeMaxInputTokens": inference.RuntimeMaxInputTokens, "runtimeMaxOutputTokens": inference.RuntimeMaxOutputTokens,
 		"estimateLabel": "ESTIMATE: derived from parameter count and bits per weight, not measured on hardware.",
 		"formula":       "weights=params*bpw/8; kv=2*layers*kvHeads*headDim*4608*2B; activations=4608*(6*hidden+2*intermediate)*2B+vocab*4B; temporary=0.10*weights (+4*4608*hidden*2B comm buffers per rank when sharded); safety=max(1GiB,0.10*subtotal). See memory.go.",

@@ -241,7 +241,7 @@ final class InferenceReportTests: XCTestCase {
     "state": "healthy",
     "detail": "ok",
     "version": "0.2.0",
-    "mlxVersion": "0.29.3",
+    "mlxVersion": "0.29.4",
     "mlxLmVersion": "0.28.4",
     "distributedExecution": "disabled",
     "verified": true

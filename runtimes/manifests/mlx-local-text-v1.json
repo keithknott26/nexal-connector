@@ -20,7 +20,7 @@
   "max_context_tokens": 4096,
   "max_prompt_bytes": 16384,
   "candidate_dependencies": {
-    "mlx": "0.29.3",
+    "mlx": "0.29.4",
     "mlx-lm": "0.28.4",
     "transformers": "4.57.6"
   },

@@ -11,7 +11,7 @@ func TestCatalogLoadsAndIsHonest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.MLXVersion != "0.29.3" || c.MLXLMVersion != "0.28.4" {
+	if c.MLXVersion != "0.29.4" || c.MLXLMVersion != "0.28.4" {
 		t.Errorf("versions %s/%s", c.MLXVersion, c.MLXLMVersion)
 	}
 	families := map[string]int{}

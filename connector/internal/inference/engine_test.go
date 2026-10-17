@@ -27,7 +27,7 @@ type fakeRuntime struct{ p RuntimeProbe }
 
 func (f fakeRuntime) Probe(context.Context) RuntimeProbe { return f.p }
 
-var healthy = RuntimeProbe{State: RuntimeHealthy, Detail: "ok", RuntimeVersion: "0.2.0", MLXVersion: "0.29.3", MLXLMVersion: "0.28.4", DistributedExecution: "disabled"}
+var healthy = RuntimeProbe{State: RuntimeHealthy, Detail: "ok", RuntimeVersion: "0.2.0", MLXVersion: "0.29.4", MLXLMVersion: "0.28.4", DistributedExecution: "disabled"}
 
 func selfMac(totalGiB, availGiB, capGiB, reserveGiB uint64) Host {
 	return Host{ID: "self", Name: "MacBook", IsSelf: true, Online: true, Chip: "Apple M4 Max", OS: "macOS 26.2",

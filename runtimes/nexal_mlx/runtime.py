@@ -20,7 +20,7 @@ from .security import (
 )
 
 RUNTIME_VERSION = "0.2.0"
-CANDIDATE_PINS = {"mlx": "0.29.3", "mlx-lm": "0.28.4", "transformers": "4.57.6"}
+CANDIDATE_PINS = {"mlx": "0.29.4", "mlx-lm": "0.28.4", "transformers": "4.57.6"}
 
 
 def probe(*, load_backend: bool = False) -> dict:

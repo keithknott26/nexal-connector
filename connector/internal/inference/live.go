@@ -178,7 +178,7 @@ func (s *StatusSource) Links(ctx context.Context) ([]Link, error) {
 // ---- MLX runtime probe -------------------------------------------------------
 
 // Candidate pins, mirroring runtimes/nexal_mlx/runtime.py CANDIDATE_PINS.
-var runtimePins = map[string]string{"mlx": "0.29.3", "mlx-lm": "0.28.4", "transformers": "4.57.6"}
+var runtimePins = map[string]string{"mlx": "0.29.4", "mlx-lm": "0.28.4", "transformers": "4.57.6"}
 
 var digestRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 

@@ -643,7 +643,7 @@ func runtimeBlocker(rt RuntimeReport) *Blocker {
 		b.Fix = "Install the pinned packages (mlx, mlx-lm, transformers) in the approved environment as runtimes/RELEASE-GATES.md describes."
 	case RuntimeVersionMismatch:
 		b.Title = "The MLX packages are not the pinned versions"
-		b.Fix = "Reinstall the exact versions the runtime pins (mlx 0.29.3, mlx-lm 0.28.4, transformers 4.57.6) in the approved environment."
+		b.Fix = "Reinstall the exact versions the runtime pins (mlx 0.29.4, mlx-lm 0.28.4, transformers 4.57.6) in the approved environment."
 	default:
 		b.Title = "The MLX runtime probe did not run"
 		b.Fix = "Run `python3 -I /ABSOLUTE/APPROVED/nexal_mlx_entry.py probe` by hand and fix what it reports."

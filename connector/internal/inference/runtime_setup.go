@@ -18,7 +18,7 @@ import (
 
 // Pinned runtime packages (the same versions runtimes/requirements.in and catalog.json name).
 const (
-	RuntimeMLXVersion          = "0.29.3"
+	RuntimeMLXVersion          = "0.29.4"
 	RuntimeMLXLMVersion        = "0.28.4"
 	RuntimeTransformersVersion = "4.57.6"
 

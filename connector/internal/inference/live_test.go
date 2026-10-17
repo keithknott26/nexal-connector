@@ -107,7 +107,7 @@ func runnerReturning(out string, err error) Runner {
 	return func(context.Context, string, string) ([]byte, error) { return []byte(out), err }
 }
 
-const probeHealthy = `{"schema_version":1,"runtime_version":"0.2.0","system":"Darwin","machine":"arm64","packages":{"mlx":"0.29.3","mlx-lm":"0.28.4","transformers":"4.57.6"},"distributed_execution":"disabled"}`
+const probeHealthy = `{"schema_version":1,"runtime_version":"0.2.0","system":"Darwin","machine":"arm64","packages":{"mlx":"0.29.4","mlx-lm":"0.28.4","transformers":"4.57.6"},"distributed_execution":"disabled"}`
 
 func TestFileProber(t *testing.T) {
 	tests := []struct {
@@ -167,7 +167,7 @@ func TestFileProber(t *testing.T) {
 			if got.State != tc.want {
 				t.Errorf("state = %s (%s), want %s", got.State, got.Detail, tc.want)
 			}
-			if got.State == RuntimeHealthy && (got.MLXVersion != "0.29.3" || got.DistributedExecution != "disabled") {
+			if got.State == RuntimeHealthy && (got.MLXVersion != "0.29.4" || got.DistributedExecution != "disabled") {
 				t.Errorf("probe = %+v", got)
 			}
 		})

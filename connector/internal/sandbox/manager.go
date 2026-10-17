@@ -693,11 +693,8 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		r.LAN = nic.LANMAC != ""
 	}
 	m.mu.Unlock()
-	appProfile := t.Image.AppProfile
-	if t.Desktop && (appProfile == "" || appProfile == AppProfileNone) {
-		// Stock cloud images have no VNC server; install one so the live screen has something to reach.
-		appProfile = AppProfileDesktop
-	}
+	// Stock cloud images have no VNC server; a desktop request installs one so the live screen has something to reach.
+	appProfile := effectiveAppProfile(t)
 	seed := SeedParams{SandboxID: id, InstanceID: fmt.Sprintf("%s-%d", id, m.opts.Now().Unix()),
 		Hostname: t.Hostname, SetupKey: t.SetupKey, VNCPassword: t.VNCPassword,
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
@@ -758,7 +755,20 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 	}
 	m.report(StateReport{SandboxID: id, State: StateRunning, MeshIP: fb.MeshIP, LanIP: fb.LanIP, HostKeyFingerprint: fb.HostKeyFingerprint, HostKey: fb.HostKey,
 		AckTaskID: ackIf(t.ackRejoin, t.TaskID)})
+	if effectiveAppProfile(t) != "" && effectiveAppProfile(t) != AppProfileNone {
+		go m.watchAppSetup(id) // the app installs after the mesh join; follow and report it
+	}
 	return nil
+}
+
+// effectiveAppProfile is the profile the guest installs after joining the mesh: the image's own, or the
+// desktop add-on for a plain image that was asked for a desktop.
+func effectiveAppProfile(t Task) string {
+	ap := t.Image.AppProfile
+	if t.Desktop && (ap == "" || ap == AppProfileNone) {
+		return AppProfileDesktop
+	}
+	return ap
 }
 
 func (m *Manager) diskCheck(ctx context.Context, imageBytes uint64) error {

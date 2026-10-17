@@ -228,7 +228,7 @@ func RenderUserData(p SeedParams) string {
 		w("      NEXAL_DRIVE_TOKEN=%s\n", p.DriveToken)
 	}
 	renderMeshRuntime(&b, p.MeshImage)
-	renderAppProfile(&b, p.AppProfile)
+	renderAppProfile(&b, p)
 	b.WriteString("  - path: /etc/systemd/system/nexal-drive.service\n")
 	b.WriteString("    owner: root:root\n")
 	b.WriteString("    permissions: \"0644\"\n")
@@ -470,8 +470,9 @@ kali)
   # password; no display manager runs. It is a large download, so progress is reported as it goes.
   export DEBIAN_FRONTEND=noninteractive
   KALI_KEYRING=/usr/share/keyrings/kali-archive-keyring.gpg
-  VNCPW=$(sed -n 's/^NEXAL_VNC_PASSWORD=//p' /etc/nexal/first-boot.env 2>/dev/null | head -n 1)
-  WANT_DESKTOP=$(sed -n 's/^NEXAL_DESKTOP=//p' /etc/nexal/first-boot.env 2>/dev/null | head -n 1)
+  # The desktop flag and VNC password come from app.env (first-boot.env is gone by now).
+  VNCPW=${NEXAL_VNC_PASSWORD:-}
+  WANT_DESKTOP=${NEXAL_DESKTOP:-0}
   log "installing Kali Linux"
   step app-packages 5
   plan 1 5 "updating the package list" "add the Kali package source"
@@ -486,7 +487,7 @@ kali)
   printf 'deb [signed-by=%s] http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware\n' "$KALI_KEYRING" >/etc/apt/sources.list.d/kali.list
   printf 'Package: *\nPin: release o=Kali\nPin-Priority: 100\n' >/etc/apt/preferences.d/kali
   retry apt-get update -qq || fail "apt-get update (Kali)"
-  step app-install 25
+  step app-download 25
   plan 3 5 "installing Kali Linux and its tools, a large download (several GB), usually 10 to 30 minutes" "set up the remote desktop"
   ( s=0; while sleep 60; do s=$((s + 60)); log "still installing Kali ($((s / 60)) min)"; done ) &
   hb=$!
@@ -504,7 +505,7 @@ kali)
     fail "installing Kali packages"
   fi
   if [ "$WANT_DESKTOP" = "1" ]; then
-    step app-desktop 80
+    step app-start 80
     plan 4 5 "setting up the remote desktop" "check it answers"
     systemctl disable --now lightdm.service >/dev/null 2>&1 || true
     systemctl set-default multi-user.target >/dev/null 2>&1 || true
@@ -513,6 +514,7 @@ kali)
     printf '%s' "$VNCPW" | vncpasswd -f >/home/nexal/.vnc/passwd || fail "setting the VNC password"
     chown nexal:nexal /home/nexal/.vnc/passwd
     chmod 600 /home/nexal/.vnc/passwd
+    sed -i '/^NEXAL_VNC_PASSWORD=/d' /etc/nexal/app.env
     cat >/etc/systemd/system/nexal-vnc.service <<UNIT
 [Unit]
 Description=neXal remote desktop (TigerVNC)
@@ -597,15 +599,26 @@ func writeIndented(b *strings.Builder, text string) {
 
 // renderAppProfile adds the app-profile env file, installer and unit to write_files.
 // It renders nothing for a plain image.
-func renderAppProfile(b *strings.Builder, profile string) {
+func renderAppProfile(b *strings.Builder, p SeedParams) {
+	profile := p.AppProfile
 	if profile == "" || profile == AppProfileNone {
 		return
 	}
+	// The first-boot script deletes first-boot.env once it has joined the mesh, so a profile that
+	// needs the desktop flag or the VNC password gets its own copy here (root-only, and the
+	// profile removes the password line after use).
+	perms := "0644"
+	extra := ""
+	if profile == AppProfileKali {
+		perms = "0600"
+		extra = "      NEXAL_DESKTOP=" + boolDigit(p.Desktop) + "\n      NEXAL_VNC_PASSWORD=" + p.VNCPassword + "\n"
+	}
 	b.WriteString("  - path: /etc/nexal/app.env\n")
 	b.WriteString("    owner: root:root\n")
-	b.WriteString("    permissions: \"0644\"\n")
+	b.WriteString("    permissions: \"" + perms + "\"\n")
 	b.WriteString("    content: |\n")
 	b.WriteString("      NEXAL_APP_PROFILE=" + profile + "\n")
+	b.WriteString(extra)
 	b.WriteString("  - path: /usr/local/sbin/nexal-app-setup\n")
 	b.WriteString("    owner: root:root\n")
 	b.WriteString("    permissions: \"0755\"\n")

@@ -146,6 +146,21 @@ func TestRenderUserDataKaliProfile(t *testing.T) {
 			t.Errorf("rendered user-data is missing %q", want)
 		}
 	}
+	// first-boot.env is deleted by the first-boot script, so the Kali profile carries its own copy of
+	// the desktop flag and VNC password in a root-only app.env, and the installer reads it from there.
+	i := strings.Index(u, "  - path: /etc/nexal/app.env\n")
+	if i < 0 {
+		t.Fatal("app.env not rendered")
+	}
+	appEnv := u[i : i+400]
+	for _, want := range []string{"permissions: \"0600\"", "NEXAL_DESKTOP=1\n", "NEXAL_VNC_PASSWORD=" + p.VNCPassword + "\n"} {
+		if !strings.Contains(appEnv, want) {
+			t.Errorf("app.env is missing %q:\n%s", want, appEnv)
+		}
+	}
+	if strings.Contains(u, "/etc/nexal/first-boot.env 2>/dev/null") {
+		t.Error("the Kali installer must not read first-boot.env (it is deleted after first boot)")
+	}
 	if strings.Contains(u, "-localhost no") || strings.Contains(u, "-interface 0.0.0.0") {
 		t.Error("the Kali desktop must be bound to the mesh address only")
 	}

@@ -808,6 +808,11 @@ func (m *Manager) awaitFirstBoot(ctx context.Context, id string, h Handle) (Firs
 				return fb, nil
 			}
 			if failed {
+				if strings.TrimSpace(reason) == "" {
+					// A report split by console interleaving can arrive with no reason: say what the
+					// guest last printed instead of an empty message.
+					reason = "no reason given (last console output: " + consoleSnippet(text) + ")"
+				}
 				return FirstBoot{}, fmt.Errorf("guest first-boot failed: %s", reason)
 			}
 		}

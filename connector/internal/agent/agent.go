@@ -120,6 +120,7 @@ type Agent struct {
 	// minutes and samples traffic per minute, so sending it on every 15 s beat only
 	// multiplied writes.
 	lastTunnelReport    time.Time
+	lastTunnelWarn      time.Time
 	lastTunnelLifecycle string
 	// serverHeartbeatInterval is the coordinator's suggested heartbeat cadence,
 	// returned in the heartbeat response. Zero means the coordinator did not
@@ -1075,6 +1076,19 @@ func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) er
 				a.mu.Lock()
 				a.lastTunnelReport, a.lastTunnelLifecycle = time.Now(), tunnelLifecycle
 				a.mu.Unlock()
+			} else {
+				// Visible by default: a coordinator that keeps rejecting these reports leaves the
+				// Mac looking offline in every app while its heartbeats still arrive.
+				a.mu.Lock()
+				quiet := time.Since(a.lastTunnelWarn) < 5*time.Minute
+				if !quiet {
+					a.lastTunnelWarn = time.Now()
+				}
+				a.mu.Unlock()
+				if !quiet {
+					a.logger.Warn("coordinator rejected the tunnel status report; this Mac may show as offline in the apps",
+						"error", tunnelErr.Error(), "peers", len(meshStatus.Peers))
+				}
 			}
 		}
 	}

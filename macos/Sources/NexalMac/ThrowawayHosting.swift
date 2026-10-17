@@ -1411,6 +1411,9 @@ struct NewSandboxSheet: View {
         if selectedImage?.appProfile == "jellyfin" {
             return "A Jellyfin media server on \(place), on your private network only. Your shared drive is its media library; open it from Connect, or in the Jellyfin app at the address shown."
         }
+        if selectedImage?.appProfile == "kali" {
+            return "A Kali Linux virtual machine on \(place), with the XFCE desktop and the standard Kali tools, on your private network only. Setup downloads several GB and takes 10 to 30 minutes; give it 8 GB of memory or more. Connect with Screen Sharing, or SSH as nexal."
+        }
         return "A Linux virtual machine on \(place). Kept until you remove it."
     }
 

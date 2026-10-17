@@ -463,6 +463,100 @@ jellyfin)
   done
   log "jellyfin ready http://$IP:8096$(lan_url 8096)"
   ;;
+kali)
+  # Kali Linux on the Debian 13 base: the Kali rolling repository is added at low pin priority
+  # (Debian stays the default), then the Kali tool set and the XFCE desktop are installed from it.
+  # The desktop is a TigerVNC session on the mesh address (port 5900) with the sandbox's VNC
+  # password; no display manager runs. It is a large download, so progress is reported as it goes.
+  export DEBIAN_FRONTEND=noninteractive
+  KALI_KEYRING=/usr/share/keyrings/kali-archive-keyring.gpg
+  VNCPW=$(sed -n 's/^NEXAL_VNC_PASSWORD=//p' /etc/nexal/first-boot.env 2>/dev/null | head -n 1)
+  WANT_DESKTOP=$(sed -n 's/^NEXAL_DESKTOP=//p' /etc/nexal/first-boot.env 2>/dev/null | head -n 1)
+  log "installing Kali Linux"
+  step app-packages 5
+  plan 1 5 "updating the package list" "add the Kali package source"
+  retry apt-get update -qq || fail "apt-get update"
+  retry apt-get install -y -qq --no-install-recommends ca-certificates curl gnupg || fail "installing curl and gnupg"
+  step app-packages 12
+  plan 2 5 "adding the Kali package source" "install the Kali tools and desktop"
+  retry curl -fsSL -o /tmp/kali-archive-key.asc https://archive.kali.org/archive-key.asc || fail "downloading the Kali archive key"
+  gpg --dearmor </tmp/kali-archive-key.asc >"$KALI_KEYRING" || fail "reading the Kali archive key"
+  rm -f /tmp/kali-archive-key.asc
+  chmod 644 "$KALI_KEYRING"
+  printf 'deb [signed-by=%s] http://http.kali.org/kali kali-rolling main contrib non-free non-free-firmware\n' "$KALI_KEYRING" >/etc/apt/sources.list.d/kali.list
+  printf 'Package: *\nPin: release o=Kali\nPin-Priority: 100\n' >/etc/apt/preferences.d/kali
+  retry apt-get update -qq || fail "apt-get update (Kali)"
+  step app-install 25
+  plan 3 5 "installing Kali Linux and its tools, a large download (several GB), usually 10 to 30 minutes" "set up the remote desktop"
+  ( s=0; while sleep 60; do s=$((s + 60)); log "still installing Kali ($((s / 60)) min)"; done ) &
+  hb=$!
+  rc=0
+  if [ "$WANT_DESKTOP" = "1" ]; then
+    KALI_PKGS="kali-linux-default kali-desktop-xfce xorg dbus-x11 tigervnc-standalone-server tigervnc-tools"
+  else
+    KALI_PKGS="kali-linux-headless"
+  fi
+  # shellcheck disable=SC2086
+  retry apt-get install -y -qq --no-install-recommends -t kali-rolling $KALI_PKGS || rc=$?
+  kill "$hb" 2>/dev/null || true
+  wait "$hb" 2>/dev/null || true
+  if [ "$rc" -ne 0 ]; then
+    fail "installing Kali packages"
+  fi
+  if [ "$WANT_DESKTOP" = "1" ]; then
+    step app-desktop 80
+    plan 4 5 "setting up the remote desktop" "check it answers"
+    systemctl disable --now lightdm.service >/dev/null 2>&1 || true
+    systemctl set-default multi-user.target >/dev/null 2>&1 || true
+    [ -n "$VNCPW" ] || fail "no VNC password in the seed"
+    install -d -o nexal -g nexal -m 700 /home/nexal/.vnc
+    printf '%s' "$VNCPW" | vncpasswd -f >/home/nexal/.vnc/passwd || fail "setting the VNC password"
+    chown nexal:nexal /home/nexal/.vnc/passwd
+    chmod 600 /home/nexal/.vnc/passwd
+    cat >/etc/systemd/system/nexal-vnc.service <<UNIT
+[Unit]
+Description=neXal remote desktop (TigerVNC)
+After=network-online.target nexal-mesh.service
+[Service]
+User=nexal
+Environment=HOME=/home/nexal
+ExecStart=/usr/bin/Xtigervnc :0 -rfbport 5900 -interface $IP -rfbauth /home/nexal/.vnc/passwd -SecurityTypes VncAuth -geometry 1600x900 -depth 24 -AlwaysShared
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+UNIT
+    cat >/etc/systemd/system/nexal-desktop.service <<UNIT
+[Unit]
+Description=neXal Kali XFCE session
+After=nexal-vnc.service
+Requires=nexal-vnc.service
+[Service]
+User=nexal
+Environment=HOME=/home/nexal
+Environment=DISPLAY=:0
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/startxfce4
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now nexal-vnc.service nexal-desktop.service || fail "starting the remote desktop"
+    tries=0
+    until ss -ltn 2>/dev/null | grep -q "$IP:5900"; do
+      tries=$((tries + 1))
+      if [ "$tries" -ge 30 ]; then
+        fail "the remote desktop did not start on $IP:5900"
+      fi
+      sleep 2
+    done
+  fi
+  step app-start 95
+  plan 5 5 "Kali Linux is ready" "connect with Desktop, or SSH as nexal"
+  log "kali ready desktop vnc://$IP:5900 (user nexal; the VNC password is shown in the app)"
+  ;;
 *)
   fail "unknown app profile"
   ;;

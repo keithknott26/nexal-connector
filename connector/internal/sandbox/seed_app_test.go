@@ -125,3 +125,28 @@ func TestRenderUserDataJellyfinProfile(t *testing.T) {
 		t.Error("Jellyfin must be bound to the mesh address only")
 	}
 }
+
+// Kali is an app profile with a desktop: the installer must be the Kali one, the desktop is
+// bound to the mesh address only, and the profile is one this runner accepts.
+func TestRenderUserDataKaliProfile(t *testing.T) {
+	p := testSeed()
+	p.AppProfile = AppProfileKali
+	if err := ValidateSeed(p); err != nil {
+		t.Fatalf("kali must be a known profile: %v", err)
+	}
+	u := RenderUserData(p)
+	for _, want := range []string{
+		"NEXAL_APP_PROFILE=kali\n",
+		"kali-rolling main contrib non-free non-free-firmware",
+		"kali-linux-default kali-desktop-xfce",
+		"-interface $IP -rfbauth /home/nexal/.vnc/passwd",
+		"  - [ systemctl, start, --no-block, nexal-app.service ]\n",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("rendered user-data is missing %q", want)
+		}
+	}
+	if strings.Contains(u, "-localhost no") || strings.Contains(u, "-interface 0.0.0.0") {
+		t.Error("the Kali desktop must be bound to the mesh address only")
+	}
+}

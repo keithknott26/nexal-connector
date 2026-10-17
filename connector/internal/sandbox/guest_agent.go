@@ -23,7 +23,10 @@ def set_vnc_password(pw):
     if not os.path.isdir(VNC_DIR) or not os.path.exists("/usr/bin/vncpasswd"):
         return {"ok": False, "error": "desktop not ready"}
     try:
-        out = subprocess.run(["/usr/bin/vncpasswd", "-f"], input=pw.encode(), capture_output=True, timeout=10, check=True).stdout
+        r = subprocess.run(["/usr/bin/vncpasswd", "-f"], input=pw.encode(), capture_output=True, timeout=10)
+        if r.returncode != 0:
+            return {"ok": False, "error": ("vncpasswd exit %d: " % r.returncode) + r.stderr.decode("utf-8", "replace").replace(pw, "***")[:120]}
+        out = r.stdout
         path = VNC_DIR + "/passwd"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as f:
@@ -31,8 +34,8 @@ def set_vnc_password(pw):
         u = pwd.getpwnam("nexal")
         os.chown(path, u.pw_uid, u.pw_gid)
         return {"ok": True}
-    except Exception:
-        return {"ok": False, "error": "could not set the password"}
+    except Exception as e:
+        return {"ok": False, "error": ("could not set the password: %s %s" % (type(e).__name__, e)).replace(pw, "***")[:150]}
 
 
 def handle(line):

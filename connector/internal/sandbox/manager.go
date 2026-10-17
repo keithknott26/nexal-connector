@@ -693,12 +693,17 @@ func (m *Manager) boot(ctx context.Context, t Task, reset bool) error {
 		r.LAN = nic.LANMAC != ""
 	}
 	m.mu.Unlock()
+	appProfile := t.Image.AppProfile
+	if t.Desktop && (appProfile == "" || appProfile == AppProfileNone) {
+		// Stock cloud images have no VNC server; install one so the live screen has something to reach.
+		appProfile = AppProfileDesktop
+	}
 	seed := SeedParams{SandboxID: id, InstanceID: fmt.Sprintf("%s-%d", id, m.opts.Now().Unix()),
 		Hostname: t.Hostname, SetupKey: t.SetupKey, VNCPassword: t.VNCPassword,
 		SSHPublicKeys: t.SSHPublicKeys, Desktop: t.Desktop,
 		DriveWritable: driveWritable(t), SSHCAPublicKey: t.SSHCAPublicKey, DriveToken: t.DriveToken,
 		Lifecycle: lifecycleOf(t), ManagementURL: t.ManagementURL, DriveURL: t.DriveURL,
-		AppProfile: t.Image.AppProfile,
+		AppProfile: appProfile,
 		// Stock cloud images carry no neXal runtime: the seed's first-boot script
 		// pulls it from the same pinned sidecar image dev containers run.
 		MeshImage: ResolveMeshImage(os.Getenv(MeshImageEnv)),

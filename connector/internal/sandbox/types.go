@@ -99,13 +99,15 @@ const (
 	AppProfileHomeAssistant = "home-assistant"
 	AppProfileJellyfin      = "jellyfin"
 	AppProfileKali          = "kali"
+	// AppProfileDesktop is internal: the runner applies it to a desktop VM whose image has no app profile.
+	AppProfileDesktop = "desktop"
 )
 
 // KnownAppProfile reports whether the profile is one this runner can install.
 // The empty string means a plain image, as does "none".
 func KnownAppProfile(p string) bool {
 	switch p {
-	case "", AppProfileNone, AppProfileHomeAssistant, AppProfileJellyfin, AppProfileKali:
+	case "", AppProfileNone, AppProfileHomeAssistant, AppProfileJellyfin, AppProfileKali, AppProfileDesktop:
 		return true
 	}
 	return false

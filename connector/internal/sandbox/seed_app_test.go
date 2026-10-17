@@ -165,3 +165,28 @@ func TestRenderUserDataKaliProfile(t *testing.T) {
 		t.Error("the Kali desktop must be bound to the mesh address only")
 	}
 }
+
+func TestRenderUserDataDesktopProfile(t *testing.T) {
+	p := testSeed()
+	p.AppProfile = AppProfileDesktop
+	p.Desktop = true
+	p.VNCPassword = "pw123456"
+	if err := ValidateSeed(p); err != nil {
+		t.Fatal(err)
+	}
+	u := RenderUserData(p)
+	for _, want := range []string{
+		"NEXAL_APP_PROFILE=desktop\n",
+		"NEXAL_VNC_PASSWORD=pw123456\n",
+		"xfce4 xfce4-terminal xorg dbus-x11 tigervnc-standalone-server",
+		"-interface $IP -rfbauth /home/nexal/.vnc/passwd",
+		"  - [ systemctl, start, --no-block, nexal-app.service ]\n",
+	} {
+		if !strings.Contains(u, want) {
+			t.Errorf("desktop seed missing %q", want)
+		}
+	}
+	if strings.Contains(u, "0.0.0.0") {
+		t.Error("desktop must bind to the mesh address only")
+	}
+}

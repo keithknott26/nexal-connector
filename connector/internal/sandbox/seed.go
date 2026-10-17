@@ -310,6 +310,59 @@ retry() {
   return 0
 }
 
+# setup_vnc starts a TigerVNC + XFCE session on the mesh address (port 5900) with the sandbox's VNC
+# password from app.env; no display manager runs. Shared by the kali and desktop profiles.
+setup_vnc() {
+  VNCPW=${NEXAL_VNC_PASSWORD:-}
+  systemctl disable --now lightdm.service >/dev/null 2>&1 || true
+  systemctl set-default multi-user.target >/dev/null 2>&1 || true
+  [ -n "$VNCPW" ] || fail "no VNC password in the seed"
+  install -d -o nexal -g nexal -m 700 /home/nexal/.vnc
+  printf '%s' "$VNCPW" | vncpasswd -f >/home/nexal/.vnc/passwd || fail "setting the VNC password"
+  chown nexal:nexal /home/nexal/.vnc/passwd
+  chmod 600 /home/nexal/.vnc/passwd
+  sed -i '/^NEXAL_VNC_PASSWORD=/d' /etc/nexal/app.env
+  cat >/etc/systemd/system/nexal-vnc.service <<UNIT
+[Unit]
+Description=neXal remote desktop (TigerVNC)
+After=network-online.target nexal-mesh.service
+[Service]
+User=nexal
+Environment=HOME=/home/nexal
+ExecStart=/usr/bin/Xtigervnc :0 -rfbport 5900 -interface $IP -rfbauth /home/nexal/.vnc/passwd -SecurityTypes VncAuth -geometry 1600x900 -depth 24 -AlwaysShared
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+UNIT
+  cat >/etc/systemd/system/nexal-desktop.service <<UNIT
+[Unit]
+Description=neXal Kali XFCE session
+After=nexal-vnc.service
+Requires=nexal-vnc.service
+[Service]
+User=nexal
+Environment=HOME=/home/nexal
+Environment=DISPLAY=:0
+ExecStartPre=/bin/sleep 2
+ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/startxfce4
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now nexal-vnc.service nexal-desktop.service || fail "starting the remote desktop"
+  tries=0
+  until ss -ltn 2>/dev/null | grep -q "$IP:5900"; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 30 ]; then
+      fail "the remote desktop did not start on $IP:5900"
+    fi
+    sleep 2
+  done
+}
+
 # Plain-language progress for the log: "step N/T: what is happening now. Next: what follows."
 plan() { log "step $1/$2: $3. Next: $4."; }
 
@@ -507,57 +560,28 @@ kali)
   if [ "$WANT_DESKTOP" = "1" ]; then
     step app-start 80
     plan 4 5 "setting up the remote desktop" "check it answers"
-    systemctl disable --now lightdm.service >/dev/null 2>&1 || true
-    systemctl set-default multi-user.target >/dev/null 2>&1 || true
-    [ -n "$VNCPW" ] || fail "no VNC password in the seed"
-    install -d -o nexal -g nexal -m 700 /home/nexal/.vnc
-    printf '%s' "$VNCPW" | vncpasswd -f >/home/nexal/.vnc/passwd || fail "setting the VNC password"
-    chown nexal:nexal /home/nexal/.vnc/passwd
-    chmod 600 /home/nexal/.vnc/passwd
-    sed -i '/^NEXAL_VNC_PASSWORD=/d' /etc/nexal/app.env
-    cat >/etc/systemd/system/nexal-vnc.service <<UNIT
-[Unit]
-Description=neXal remote desktop (TigerVNC)
-After=network-online.target nexal-mesh.service
-[Service]
-User=nexal
-Environment=HOME=/home/nexal
-ExecStart=/usr/bin/Xtigervnc :0 -rfbport 5900 -interface $IP -rfbauth /home/nexal/.vnc/passwd -SecurityTypes VncAuth -geometry 1600x900 -depth 24 -AlwaysShared
-Restart=always
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-UNIT
-    cat >/etc/systemd/system/nexal-desktop.service <<UNIT
-[Unit]
-Description=neXal Kali XFCE session
-After=nexal-vnc.service
-Requires=nexal-vnc.service
-[Service]
-User=nexal
-Environment=HOME=/home/nexal
-Environment=DISPLAY=:0
-ExecStartPre=/bin/sleep 2
-ExecStart=/usr/bin/dbus-launch --exit-with-session /usr/bin/startxfce4
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-UNIT
-    systemctl daemon-reload
-    systemctl enable --now nexal-vnc.service nexal-desktop.service || fail "starting the remote desktop"
-    tries=0
-    until ss -ltn 2>/dev/null | grep -q "$IP:5900"; do
-      tries=$((tries + 1))
-      if [ "$tries" -ge 30 ]; then
-        fail "the remote desktop did not start on $IP:5900"
-      fi
-      sleep 2
-    done
+    setup_vnc
   fi
   step app-start 95
   plan 5 5 "Kali Linux is ready" "connect with Desktop, or SSH as nexal"
   log "kali ready desktop vnc://$IP:5900 (user nexal; the VNC password is shown in the app)"
+  ;;
+desktop)
+  # A plain Ubuntu/Debian VM that asked for a desktop: XFCE over TigerVNC on the mesh address.
+  export DEBIAN_FRONTEND=noninteractive
+  log "installing the remote desktop"
+  step app-packages 10
+  plan 1 3 "updating the package list" "install the desktop"
+  retry apt-get update -qq || fail "apt-get update"
+  step app-download 30
+  plan 2 3 "installing the XFCE desktop and VNC server, usually a few minutes" "start the remote desktop"
+  # shellcheck disable=SC2086
+  retry apt-get install -y -qq --no-install-recommends xfce4 xfce4-terminal xorg dbus-x11 tigervnc-standalone-server tigervnc-tools || fail "installing the desktop packages"
+  step app-start 80
+  plan 3 3 "starting the remote desktop" "connect with Desktop"
+  setup_vnc
+  step app-start 95
+  log "desktop ready vnc://$IP:5900 (user nexal; the VNC password is shown in the app)"
   ;;
 *)
   fail "unknown app profile"
@@ -609,7 +633,7 @@ func renderAppProfile(b *strings.Builder, p SeedParams) {
 	// profile removes the password line after use).
 	perms := "0644"
 	extra := ""
-	if profile == AppProfileKali {
+	if profile == AppProfileKali || profile == AppProfileDesktop {
 		perms = "0600"
 		extra = "      NEXAL_DESKTOP=" + boolDigit(p.Desktop) + "\n      NEXAL_VNC_PASSWORD=" + p.VNCPassword + "\n"
 	}

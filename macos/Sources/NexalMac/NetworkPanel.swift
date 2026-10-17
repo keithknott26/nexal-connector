@@ -11,6 +11,9 @@ struct NetworkPanel: View {
     /// Names people gave peers (shared with the iPhone app); redraws when one changes.
     @ObservedObject private var peerNames = PeerNames.shared
     @ObservedObject private var hosting = ThrowawayHosting.shared
+    @State private var machinesOpen = false
+    @State private var inferenceOpen = false
+    @State private var graphsOpen = false
     /// Sharing services listening on this Mac, checked when its row is opened.
     @State private var localServices: LocalServiceProbe.Result?
 
@@ -147,6 +150,7 @@ struct NetworkPanel: View {
             } else {
                 connectedHero
             }
+            statusNote
             MeshRuntimeBanner()
             UpdateBanner()
             VStack(alignment: .leading, spacing: 12) {
@@ -174,9 +178,9 @@ struct NetworkPanel: View {
             }
             }
             .panelCard()
-            ThrowawayHostsSection().panelCard()
-            InferenceSection().panelCard()
-            activityGraphs.panelCard()
+            ThrowawayHostsSection(expanded: $machinesOpen).panelCard().expandsOnClick($machinesOpen)
+            InferenceSection(expanded: $inferenceOpen).panelCard().expandsOnClick($inferenceOpen)
+            activityGraphs.panelCard().expandsOnClick($graphsOpen)
 			if let report = model.timeMachine, report.timeMachine.enabled {
 				timeMachine(report).panelCard()
 			}
@@ -1052,7 +1056,7 @@ struct NetworkPanel: View {
     }
 
     private var activityGraphs: some View {
-        DisclosureGroup("Activity graphs") {
+        DisclosureGroup("Activity graphs", isExpanded: $graphsOpen) {
             let traffic = windowed(model.history.trafficPoints)
             VStack(alignment: .leading, spacing: 14) {
                 ChartCard(title: "Total traffic in / out (KB/s)", caption: ConnectorHistory.trafficCaption,
@@ -1268,8 +1272,27 @@ struct NetworkPanel: View {
         }
     }
 
+    private var isLinkedScreen: Bool {
+        if case .linked = model.networkScreen { return true }
+        return false
+    }
+
+    /// Server name and the connector note, right under the connection banner (they used to sit below every card).
+    @ViewBuilder private var statusNote: some View {
+        let note = model.pairingProblem ?? model.message
+        let server = model.coordinatorMismatch == nil ? model.configuredCoordinator.map { URL(string: $0)?.host ?? $0 } : nil
+        if (note?.isEmpty == false) || server != nil {
+            VStack(alignment: .leading, spacing: 2) {
+                if let server { Text("Server: \(server)") }
+                if let note, !note.isEmpty { Text(note).textSelection(.enabled) }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder private var message: some View {
-        if let text = model.pairingProblem ?? model.message, !text.isEmpty {
+        if !isLinkedScreen, let text = model.pairingProblem ?? model.message, !text.isEmpty {
             Divider()
             Text(text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
@@ -1291,7 +1314,7 @@ struct NetworkPanel: View {
                 Label("This Mac's saved settings point to a neXal server this version does not use (\(stale)). Remove config.json, then pair again.",
                       systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-            } else if let origin = model.configuredCoordinator {
+            } else if !isLinkedScreen, let origin = model.configuredCoordinator {
                 Text("Server: \(URL(string: origin)?.host ?? origin)").foregroundStyle(.secondary)
             }
             footerButtons

@@ -846,6 +846,7 @@ struct ThrowawayHostingSettingsView: View {
 // MARK: - Panel section
 
 struct ThrowawayHostsSection: View {
+    @Binding var expanded: Bool
     @ObservedObject private var hosting = ThrowawayHosting.shared
     @ObservedObject private var peerNames = PeerNames.shared
     @EnvironmentObject private var model: AppModel
@@ -865,7 +866,7 @@ struct ThrowawayHostsSection: View {
 
     var body: some View {
         Group {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $expanded) {
                 VStack(alignment: .leading, spacing: 10) {
                     if hosting.local.isEmpty && hosting.networkElsewhere.isEmpty {
                         emptyState

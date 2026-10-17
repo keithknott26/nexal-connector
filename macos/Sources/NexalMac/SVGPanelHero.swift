@@ -106,6 +106,15 @@ struct PanelCardModifier: ViewModifier {
 }
 extension View { func panelCard() -> some View { modifier(PanelCardModifier()) } }
 
+extension View {
+    /// A collapsed card opens when it is clicked anywhere, not only on its arrow or title. Once open,
+    /// clicks go to the controls inside it as usual.
+    func expandsOnClick(_ expanded: Binding<Bool>) -> some View {
+        contentShape(Rectangle())
+            .onTapGesture { if !expanded.wrappedValue { withAnimation { expanded.wrappedValue = true } } }
+    }
+}
+
 /// A titled card whose body can be collapsed. The header is a plain button with the state
 /// spoken to VoiceOver; the body is simply not built while collapsed.
 struct CollapsibleCard<Content: View>: View {

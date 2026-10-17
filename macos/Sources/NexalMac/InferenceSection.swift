@@ -197,6 +197,7 @@ extension InferenceInstallOffer: Identifiable {
 /// section. The decoding and every sentence live in InferencePresentation and
 /// InferenceInstall.swift.
 struct InferenceSection: View {
+    @Binding var expanded: Bool
     @StateObject private var check = InferencePreflight()
     @StateObject private var installer = InferenceInstaller()
     @StateObject private var installed = InstalledInferenceModels()
@@ -205,7 +206,7 @@ struct InferenceSection: View {
     @State private var pendingRemoval: PendingRemoval?
 
     var body: some View {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(InferencePresentation.intro)
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

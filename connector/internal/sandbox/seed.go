@@ -371,6 +371,10 @@ apt_install() {
   APTLOG=/var/log/nexal-apt.log
   mkdir -p /var/log
   retry apt-get install -y -qq "$@" >>"$APTLOG" 2>&1 && return 0
+  # The reason for the failure is near the top of apt's message, not the end: show its error and
+  # dependency lines first, then the last few lines.
+  grep -aE '^E:|Unsatisfied|unmet|held broken|Not considered|is not installable' "$APTLOG" | head -n 8 \
+    | while IFS= read -r l; do log "apt-why: $(printf '%s' "$l" | cut -c1-160)"; done
   tail -n 6 "$APTLOG" | while IFS= read -r l; do log "apt: $(printf '%s' "$l" | cut -c1-160)"; done
   df -h / 2>/dev/null | tail -n 1 | while IFS= read -r l; do log "disk: $l"; done
   free -m 2>/dev/null | sed -n 2p | while IFS= read -r l; do log "memory: $l"; done
@@ -608,6 +612,20 @@ kali)
       | awk '{gsub(",", "", $1); m = ($2 == "G") ? 1073741824 : ($2 == "M") ? 1048576 : 1024; printf "%d\n", $1 * m}' >/run/nexal-apt-total 2>/dev/null || true
     # shellcheck disable=SC2086
     apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      # Kali rolling moves ahead of the Debian base image: bring the base packages to Kali's versions
+      # first (the usual way to convert a Debian system), then try the tool set again.
+      log "the tool set did not resolve; syncing the base system with Kali, then retrying"
+      for pkg in libexpat1 libexpat1-dev; do
+        apt-cache policy "$pkg" 2>/dev/null | sed -n '1,3p' | while IFS= read -r l; do log "policy: $(printf '%s' "$l" | cut -c1-120)"; done
+      done
+      step app-download 30
+      rc=0
+      apt_install --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f || true
+      apt-get -y -qq --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade >>/var/log/nexal-apt.log 2>&1 || true
+      # shellcheck disable=SC2086
+      apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?
+    fi
   fi
   rm -f /usr/sbin/policy-rc.d
   kill "$hb" 2>/dev/null || true

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,12 +127,19 @@ func (r *Runner) Run(ctx context.Context, provider mesh.Provider) {
 	}
 }
 
+// runsServer reports whether a peer can answer a bandwidth test: gateways and phones run no
+// bandwidth server, so testing them only logs a timeout every cycle.
+func runsServer(p mesh.Peer) bool {
+	n := strings.ToLower(p.Name)
+	return !mesh.IsGatewayPeer(n) && !strings.Contains(n, "iphone") && !strings.Contains(n, "ipad")
+}
+
 // hasUnmeasuredPeer reports whether a connected peer with a tunnel address has no fresh
 // reading.
 func (r *Runner) hasUnmeasuredPeer(provider mesh.Provider) bool {
 	for _, peer := range mesh.SanitizeSnapshot(provider.Snapshot()).Peers {
 		if (peer.Lifecycle == mesh.LifecycleConnected || peer.Lifecycle == mesh.LifecycleDegraded) &&
-			peer.TunnelAddress != "" && r.PeerBandwidth(peer.ID) == 0 {
+			peer.TunnelAddress != "" && runsServer(peer) && r.PeerBandwidth(peer.ID) == 0 {
 			return true
 		}
 	}
@@ -149,7 +157,7 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider, onlyM
 		if peer.Lifecycle != mesh.LifecycleConnected && peer.Lifecycle != mesh.LifecycleDegraded {
 			continue
 		}
-		if peer.TunnelAddress == "" {
+		if peer.TunnelAddress == "" || !runsServer(peer) {
 			continue
 		}
 		if onlyMissing && r.PeerBandwidth(peer.ID) > 0 {

@@ -6,9 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"hash/fnv"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/http"
 	"os"
@@ -1286,9 +1286,9 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 	}()
 	defer func() { <-killDone }()
 	const (
-		sandboxPollInterval    = 30 * time.Second
-		sandboxBackoffMin      = 30 * time.Second
-		sandboxBackoffMax      = 5 * time.Minute
+		sandboxPollInterval = 30 * time.Second
+		sandboxBackoffMin   = 30 * time.Second
+		sandboxBackoffMax   = 5 * time.Minute
 	)
 	t := time.NewTicker(sandboxPollInterval)
 	defer t.Stop()

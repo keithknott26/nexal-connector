@@ -24,7 +24,7 @@ type fakeAPI struct {
 func (f *fakeAPI) Heartbeat(context.Context, string, client.Heartbeat) (client.HeartbeatResponse, error) {
 	return client.HeartbeatResponse{}, nil
 }
-func (f *fakeAPI) Next(context.Context, string) (*client.Attempt, error)     { return nil, nil }
+func (f *fakeAPI) Next(context.Context, string) (*client.Attempt, error) { return nil, nil }
 func (f *fakeAPI) SelfTest(context.Context, string) (bool, *client.Attempt, error) {
 	return false, nil, nil
 }

@@ -600,33 +600,40 @@ kali)
   printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d
   chmod 755 /usr/sbin/policy-rc.d
   printf 'atftpd atftpd/use_inetd boolean false\n' | debconf-set-selections 2>/dev/null || true
-  # Plain "libexpat1" is "already the newest version" to apt, so the downgrade names Kali's exact version.
-  EXPAT=$(apt-cache madison libexpat1 2>/dev/null | awk '/kali/ {print $3; exit}')
-  if [ -n "$EXPAT" ]; then
-    apt_install --allow-downgrades "libexpat1=$EXPAT" || rc=$?
+  # Kali is the only source, so its candidate version of a library is the one to be on, even when the
+  # Debian image shipped a newer build. apt's solver does not downgrade a package on its own: each one
+  # has to be named with its exact version on the command line. libexpat1 is the first known case; any
+  # other the solver reports ("X=1.2 is selected as a downgrade") is added the same way and the install
+  # is tried again, so a library that Kali rolled back does not stop the install.
+  PINS=""
+  EXPAT=$(apt-cache policy libexpat1 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+  if [ -n "$EXPAT" ] && [ "$EXPAT" != "(none)" ]; then
+    PINS="libexpat1=$EXPAT libexpat1-dev=$EXPAT"
   fi
-  if [ "$rc" -eq 0 ]; then
+  # shellcheck disable=SC2086
+  apt-get install -s -y --no-install-recommends --allow-downgrades $PINS $KALI_PKGS 2>/dev/null \
+    | sed -n 's/^Need to get \([0-9,.]*\) \([kMG]\)B.*/\1 \2/p' | head -n 1 \
+    | awk '{gsub(",", "", $1); m = ($2 == "G") ? 1073741824 : ($2 == "M") ? 1048576 : 1024; printf "%d\n", $1 * m}' >/run/nexal-apt-total 2>/dev/null || true
+  tries=0
+  while :; do
+    : >/var/log/nexal-apt.log
+    rc=0
     # shellcheck disable=SC2086
-    apt-get install -s -y --no-install-recommends --allow-downgrades $KALI_PKGS 2>/dev/null \
-      | sed -n 's/^Need to get \([0-9,.]*\) \([kMG]\)B.*/\1 \2/p' | head -n 1 \
-      | awk '{gsub(",", "", $1); m = ($2 == "G") ? 1073741824 : ($2 == "M") ? 1048576 : 1024; printf "%d\n", $1 * m}' >/run/nexal-apt-total 2>/dev/null || true
-    # shellcheck disable=SC2086
-    apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?
-    if [ "$rc" -ne 0 ]; then
-      # Kali rolling moves ahead of the Debian base image: bring the base packages to Kali's versions
-      # first (the usual way to convert a Debian system), then try the tool set again.
-      log "the tool set did not resolve; syncing the base system with Kali, then retrying"
-      for pkg in libexpat1 libexpat1-dev; do
-        apt-cache policy "$pkg" 2>/dev/null | sed -n '1,3p' | while IFS= read -r l; do log "policy: $(printf '%s' "$l" | cut -c1-120)"; done
-      done
-      step app-download 30
-      rc=0
-      apt_install --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -f || true
-      apt-get -y -qq --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade >>/var/log/nexal-apt.log 2>&1 || true
-      # shellcheck disable=SC2086
-      apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $KALI_PKGS || rc=$?
-    fi
-  fi
+    apt_install --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $PINS $KALI_PKGS || rc=$?
+    if [ "$rc" -eq 0 ]; then break; fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 5 ]; then break; fi
+    NEWPINS=$(grep -aoE '[a-z0-9][a-z0-9.+-]*(:[a-z0-9]+)?=[^ ]+ is selected as a downgrade' /var/log/nexal-apt.log \
+      | sed -E 's/:[a-z0-9]+=/=/; s/ is selected as a downgrade//' | sort -u)
+    ADDED=""
+    for pin in $NEWPINS; do
+      case " $PINS " in *" $pin "*) ;; *) ADDED="$ADDED $pin" ;; esac
+    done
+    if [ -z "$ADDED" ]; then break; fi
+    PINS="$PINS$ADDED"
+    log "downgrading to Kali's versions:$ADDED; retrying the install"
+    step app-download 28
+  done
   rm -f /usr/sbin/policy-rc.d
   kill "$hb" 2>/dev/null || true
   wait "$hb" 2>/dev/null || true

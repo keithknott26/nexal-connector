@@ -45,26 +45,6 @@ type Facts struct {
 	WakeForNetwork string
 }
 
-// LANKey is hex(sha256(<sorted, deduplicated IPv4 prefixes joined by ",">)).
-//
-// WHY THIS SHAPE. Two Macs can relay a wake to each other only if a broadcast
-// from one reaches the other, i.e. they share a layer-2 segment. The local
-// IPv4 network prefix is the best cheap proxy for that. The prefixes are sorted
-// so interface enumeration order cannot change the key, and hashed so the
-// coordinator stores an equality token rather than this Mac's internal
-// addressing plan.
-//
-// The key alone is NOT unique — half the homes on earth are 192.168.1.0/24 —
-// and deliberately so: the coordinator salts it with the source IP it observes
-// on the PUT /api/v2/hosts/wake-info request, which is what separates one
-// household's 192.168.1.0/24 from the neighbour's. The connector does not mix
-// in a public address itself, because the only one it could know is the one
-// peer discovery learns after an advertise, and two Macs on one LAN that
-// differed in whether discovery had run would then disagree on the key.
-//
-// A multi-homed Mac whose interfaces straddle two LANs puts all its prefixes in
-// one key, so it matches neither LAN's single-homed Macs; that is a known,
-// accepted limitation.
 // PrefixKeys returns hex(sha256("nexal-lan-prefix|" + prefix)) for each
 // distinct prefix, sorted. Unlike LANKey these match on ANY shared prefix, which
 // survives a Mac with an extra physical network or one whose coordinator traffic
@@ -94,6 +74,26 @@ const MaxLANAddresses = 8
 // MaxPrefixKeys is the coordinator's limit on reported prefix fingerprints.
 const MaxPrefixKeys = 16
 
+// LANKey is hex(sha256(<sorted, deduplicated IPv4 prefixes joined by ",">)).
+//
+// WHY THIS SHAPE. Two Macs can relay a wake to each other only if a broadcast
+// from one reaches the other, i.e. they share a layer-2 segment. The local
+// IPv4 network prefix is the best cheap proxy for that. The prefixes are sorted
+// so interface enumeration order cannot change the key, and hashed so the
+// coordinator stores an equality token rather than this Mac's internal
+// addressing plan.
+//
+// The key alone is NOT unique — half the homes on earth are 192.168.1.0/24 —
+// and deliberately so: the coordinator salts it with the source IP it observes
+// on the PUT /api/v2/hosts/wake-info request, which is what separates one
+// household's 192.168.1.0/24 from the neighbour's. The connector does not mix
+// in a public address itself, because the only one it could know is the one
+// peer discovery learns after an advertise, and two Macs on one LAN that
+// differed in whether discovery had run would then disagree on the key.
+//
+// A multi-homed Mac whose interfaces straddle two LANs puts all its prefixes in
+// one key, so it matches neither LAN's single-homed Macs; that is a known,
+// accepted limitation.
 func LANKey(prefixes []string) string {
 	if len(prefixes) == 0 {
 		return ""

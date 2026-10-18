@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -76,7 +77,7 @@ func (r *Runner) init() {
 		r.Poll = 15 * time.Second
 	}
 	if r.ReadyAfter == 0 {
-		r.ReadyAfter = 3 * time.Minute
+		r.ReadyAfter = 6 * time.Minute
 	}
 	if r.Port == 0 {
 		r.Port = 8080
@@ -223,13 +224,14 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		case <-time.After(2 * time.Second):
 		}
-		if up(ctx, endpoint) {
+		ok, why := up(ctx, endpoint)
+		if ok {
 			break
 		}
 		if time.Now().After(deadline) {
 			cancel()
 			r.drop(t.ID)
-			r.fail(ctx, t, "serve", "The model did not start answering in time.")
+			r.fail(ctx, t, "serve", fmt.Sprintf("The model did not start answering at %s (%s). Server output: %s", endpoint, clean(why, 80), clean(lastLine(tail.String(), errors.New("none")), 120)))
 			return
 		}
 	}
@@ -323,16 +325,16 @@ func (r *Runner) stopAll() {
 	}
 }
 
-func up(ctx context.Context, endpoint string) bool {
+func up(ctx context.Context, endpoint string) (bool, string) {
 	c, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(c, http.MethodGet, endpoint+"/models", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false
+		return false, err.Error()
 	}
 	resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return resp.StatusCode == http.StatusOK, fmt.Sprintf("HTTP %d", resp.StatusCode)
 }
 
 // clean makes text safe for the coordinator's single-line fields.

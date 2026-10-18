@@ -465,6 +465,23 @@ func lastLine(out string, err error) string {
 	return err.Error()
 }
 
+// lastLines is the last n non-empty lines of out joined with " | ", or "none".
+func lastLines(out string, n int) string {
+	var keep []string
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			keep = append(keep, l)
+		}
+	}
+	if len(keep) == 0 {
+		return "none"
+	}
+	if len(keep) > n {
+		keep = keep[len(keep)-n:]
+	}
+	return strings.Join(keep, " | ")
+}
+
 // lineTail keeps the end of a process's output.
 type lineTail struct {
 	mu sync.Mutex
@@ -601,7 +618,7 @@ func (r *Runner) pool(ctx context.Context, t Task, addr string) {
 		if !ready && time.Now().After(deadline) {
 			cancel()
 			r.drop(t.ID)
-			r.fail(ctx, t, "serve", "The pool did not start answering in time. Server output: "+clean(lastLine(tail.String(), errors.New("none")), 160))
+			r.fail(ctx, t, "serve", "The pool did not start answering in time. Server output: "+clean(lastLines(tail.String(), 4), 280))
 			return
 		}
 	}

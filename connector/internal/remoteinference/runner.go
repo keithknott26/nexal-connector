@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os/exec"
@@ -535,6 +536,12 @@ func (r *Runner) current(id string) (Task, bool) {
 
 // pool runs this Mac's share of a model spread over several Macs. Each member says where it listens,
 // waits until the coordinator has everyone's address, then starts its rank; rank 0 answers the API.
+// poolExit says how a pool server ended, with the last lines it printed: a crash alone ("segmentation
+// fault") does not say what went wrong before it.
+func poolExit(out string, err error) string {
+	return clean(err.Error()+". Server output: "+lastLines(out, 6), 280)
+}
+
 func (r *Runner) pool(ctx context.Context, t Task, addr string) {
 	ringPort, err := r.freePort(addr)
 	if err != nil {
@@ -596,13 +603,15 @@ func (r *Runner) pool(ctx context.Context, t Task, addr string) {
 	r.mu.Unlock()
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
+	started := time.Now()
 	deadline = time.Now().Add(r.ReadyAfter)
+	lastSaid := started
 	for ready := false; !ready; {
 		select {
 		case err := <-exited:
 			r.drop(t.ID)
 			if ctx.Err() == nil {
-				r.fail(ctx, t, "serve", lastLine(tail.String(), err))
+				r.fail(ctx, t, "serve", poolExit(tail.String(), err))
 			}
 			return
 		case <-ctx.Done():
@@ -611,9 +620,17 @@ func (r *Runner) pool(ctx context.Context, t Task, addr string) {
 		case <-time.After(2 * time.Second):
 		}
 		if leader {
-			ready, _ = up(ctx, endpoint)
+			// This Mac cannot connect to its own neXal address; the server also answers on loopback.
+			ready, _ = up(ctx, fmt.Sprintf("http://127.0.0.1:%d/v1", apiPort))
 		} else if cur, ok := r.current(t.ID); ok {
 			ready = cur.PoolEndpoint != ""
+		}
+		if !ready && time.Since(lastSaid) >= 5*time.Second {
+			// Loading takes minutes and has no real measure, so creep from 90% towards 99% instead of
+			// sitting still: the bar shows the pool is alive.
+			lastSaid = time.Now()
+			el := time.Since(started)
+			say("running", "serve", fmt.Sprintf("Loading the model across the pool (%ds)", int(el.Seconds())), "", 0.9+0.09*(1-math.Exp(-el.Seconds()/90)))
 		}
 		if !ready && time.Now().After(deadline) {
 			cancel()
@@ -630,6 +647,6 @@ func (r *Runner) pool(ctx context.Context, t Task, addr string) {
 	err = <-exited
 	r.drop(t.ID)
 	if ctx.Err() == nil && sctx.Err() == nil {
-		r.fail(ctx, t, "serve", lastLine(tail.String(), err))
+		r.fail(ctx, t, "serve", poolExit(tail.String(), err))
 	}
 }

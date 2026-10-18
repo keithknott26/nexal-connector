@@ -6,10 +6,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"nexal/connector/internal/inference"
@@ -68,7 +70,13 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 	}
 	infDir := inferenceDirOf(*path)
 	hostfile := filepath.Join(infDir, fmt.Sprintf("pool-%s-rank%d.json", id, *rank))
-	name, argv, env, serr := inference.PoolServeCommand(infDir, id, *rank, strings.Split(*hosts, ","), *apiHost, *apiPort, hostfile)
+	// Rank 0's server listens on loopback and is forwarded to the neXal address below: this Mac cannot
+	// connect to its own neXal address, so it could not otherwise tell that the server answers.
+	listenHost := *apiHost
+	if *rank == 0 {
+		listenHost = "127.0.0.1"
+	}
+	name, argv, env, serr := inference.PoolServeCommand(infDir, id, *rank, strings.Split(*hosts, ","), listenHost, *apiPort, hostfile)
 	if serr != nil {
 		return coded(serr)
 	}
@@ -91,7 +99,19 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 	} else {
 		writeLine(os.Stdout, "Pool rank %d working for rank 0 on %s", *rank, id)
 	}
-	if err := cmd.Run(); err != nil && ctx.Err() == nil {
+	if err := cmd.Start(); err != nil {
+		return &codedError{code: "server_stopped", err: fmt.Errorf("the pool server did not start: %w", err)}
+	}
+	if *rank == 0 {
+		fctx, stop := context.WithCancel(ctx)
+		defer stop()
+		if err := inference.ForwardAPI(fctx, net.JoinHostPort(*apiHost, strconv.Itoa(*apiPort)), net.JoinHostPort(listenHost, strconv.Itoa(*apiPort))); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return &codedError{code: "server_stopped", err: fmt.Errorf("could not answer on %s:%d: %w", *apiHost, *apiPort, err)}
+		}
+	}
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the pool server stopped: %w", err)}
 	}
 	return nil

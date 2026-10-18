@@ -80,8 +80,10 @@ func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*Rem
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"model": res.Model, "stream": true, "max_tokens": 64, "temperature": 0,
-		"messages": []map[string]string{{"role": "user", "content": "What is 17 + 25? Answer with just the number."}},
+		"model": res.Model, "stream": true, "max_tokens": 256, "temperature": 0,
+		// Thinking models (Qwen3) would spend the budget reasoning; ask for a direct answer.
+		"chat_template_kwargs": map[string]any{"enable_thinking": false},
+		"messages":             []map[string]string{{"role": "user", "content": "What is 17 + 25? Answer with just the number."}},
 	})
 	t1 := time.Now()
 	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))
@@ -110,11 +112,17 @@ func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*Rem
 		var ch struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content          string `json:"content"`
+					Reasoning        string `json:"reasoning"`
+					ReasoningContent string `json:"reasoning_content"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
-		if json.Unmarshal([]byte(data), &ch) != nil || len(ch.Choices) == 0 || ch.Choices[0].Delta.Content == "" {
+		if json.Unmarshal([]byte(data), &ch) != nil || len(ch.Choices) == 0 {
+			continue
+		}
+		d := ch.Choices[0].Delta
+		if d.Content == "" && d.Reasoning == "" && d.ReasoningContent == "" {
 			continue
 		}
 		now := time.Now()
@@ -123,7 +131,7 @@ func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*Rem
 		}
 		last = now
 		res.Tokens++
-		reply.WriteString(ch.Choices[0].Delta.Content)
+		reply.WriteString(d.Content) // reasoning counts as speed but is not the answer
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("reading the reply: %w", err)

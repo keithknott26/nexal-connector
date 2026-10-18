@@ -123,7 +123,7 @@ func PoolServeCommand(inferenceDir, id string, rank int, hosts []string, apiHost
 	if e := os.WriteFile(hostfilePath, data, 0o600); e != nil {
 		return "", nil, nil, e
 	}
-	args = []string{"-I", "-m", "mlx_lm.server", "--model", dir, "--pipeline", "--host", apiHost, "--port", strconv.Itoa(apiPort)}
+	args = []string{"-I", "-m", "mlx_lm", "server", "--model", dir, "--pipeline", "--host", apiHost, "--port", strconv.Itoa(apiPort)}
 	env = []string{"MLX_RANK=" + strconv.Itoa(rank), "MLX_HOSTFILE=" + hostfilePath, "HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "MLX_RING_VERBOSE=1", "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }

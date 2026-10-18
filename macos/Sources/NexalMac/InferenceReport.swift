@@ -98,6 +98,8 @@ struct InferenceReport: Decodable, Equatable {
         let name: String
         let isSelf: Bool
         let online: Bool
+        /// The organization host id used to ask this Mac to serve a model; nil when presence has not reported it.
+        let hostId: String?
         let chip: String?
         let os: String?
         let totalMemoryBytes: UInt64

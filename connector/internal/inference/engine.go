@@ -269,7 +269,7 @@ func (e Engine) Run(ctx context.Context) (Report, error) {
 	// Machines and links.
 	var peersSeen int
 	for _, n := range nodes {
-		m := MachineReport{ID: n.host.ID, Name: n.host.Name, IsSelf: n.host.IsSelf, Online: n.host.Online,
+		m := MachineReport{ID: n.host.ID, Name: n.host.Name, IsSelf: n.host.IsSelf, Online: n.host.Online, HostID: n.host.CoordinatorHostID,
 			Chip: n.host.Chip, OS: n.host.OS, TotalMemoryBytes: n.host.TotalMemoryBytes,
 			AvailableMemoryBytes: n.host.AvailableMemoryBytes, ApprovedMemoryBytes: n.approved,
 			OwnerReserveBytes: n.reserve, HeadroomBytes: n.headroom, UsableBytes: n.usable, AdmissionSource: n.source,

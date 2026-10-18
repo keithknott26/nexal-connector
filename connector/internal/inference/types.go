@@ -87,6 +87,8 @@ type MachineReport struct {
 	Name   string `json:"name"`
 	IsSelf bool   `json:"isSelf"`
 	Online bool   `json:"online"`
+	// HostID is the coordinator host id, used to ask this Mac to serve a model. Empty when unknown.
+	HostID string `json:"hostId,omitempty"`
 	Chip   string `json:"chip,omitempty"`
 	OS     string `json:"os,omitempty"`
 

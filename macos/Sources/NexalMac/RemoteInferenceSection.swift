@@ -55,7 +55,7 @@ final class RemoteInferenceModel: ObservableObject {
         Task {
             do {
                 let report = try InferenceReport.decode(try await app.inferencePreflight())
-                machines = report.machines.filter { !$0.isSelf }
+                machines = report.machines.filter { !$0.isSelf && $0.hostId?.isEmpty == false }
             } catch { problem = "Could not list your other Macs: \(error.localizedDescription)" }
         }
     }
@@ -113,7 +113,7 @@ struct RemoteInferenceSection: View {
     @State private var hostId = ""
     @State private var modelId = InferenceQuickStart.models.first?.id ?? "qwen3-4b-q4"
 
-    private func name(_ id: String) -> String { remote.machines.first { $0.id == id }?.name ?? id }
+    private func name(_ id: String) -> String { remote.machines.first { $0.hostId == id }?.name ?? id }
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
@@ -125,7 +125,7 @@ struct RemoteInferenceSection: View {
                 } else {
                     HStack {
                         Picker("Mac", selection: $hostId) {
-                            ForEach(remote.machines) { Text($0.name + ($0.online ? "" : " (offline)")).tag($0.id) }
+                            ForEach(remote.machines) { Text($0.name + ($0.online ? "" : " (offline)")).tag($0.hostId ?? "") }
                         }.labelsHidden().frame(maxWidth: 180)
                         Picker("Model", selection: $modelId) {
                             ForEach(InferenceQuickStart.models) { Text($0.title).tag($0.id) }
@@ -145,8 +145,10 @@ struct RemoteInferenceSection: View {
                 remote.loadMachines(app)
                 remote.startPolling(app)
             }
-            .onChange(of: remote.machines) { list in
-                if hostId.isEmpty || !list.contains(where: { $0.id == hostId }) { hostId = list.first(where: { $0.online })?.id ?? list.first?.id ?? "" }
+            .onChange(of: remote.machines) { _, list in
+                if hostId.isEmpty || !list.contains(where: { $0.hostId == hostId }) {
+                    hostId = (list.first(where: { $0.online }) ?? list.first)?.hostId ?? ""
+                }
             }
             .onDisappear { remote.stopPolling() }
         } label: {

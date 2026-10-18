@@ -12,6 +12,8 @@ type Host struct {
 	Name   string
 	IsSelf bool
 	Online bool
+	// CoordinatorHostID is the organization host id presence reported for this peer ("" when unknown).
+	CoordinatorHostID string
 
 	Chip       string // "Apple M4 Pro"
 	OS         string // "macOS 27.0 (27A5218g)"

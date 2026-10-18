@@ -120,7 +120,7 @@ func (s *StatusSource) Extras() StatusExtras {
 }
 
 func (s *StatusSource) Hosts(ctx context.Context) ([]Host, error) {
-	self := Host{ID: s.doc.HostID, Name: s.local.Name, IsSelf: true, Online: true, Chip: s.local.Chip, OS: s.local.OS,
+	self := Host{ID: s.doc.HostID, CoordinatorHostID: s.doc.HostID, Name: s.local.Name, IsSelf: true, Online: true, Chip: s.local.Chip, OS: s.local.OS,
 		DiskFreeBytes: s.local.DiskFreeBytes, DiskKnown: s.local.DiskKnown, TotalMemoryBytes: s.local.MemoryBytes}
 	if self.ID == "" {
 		self.ID = "this-mac"
@@ -147,6 +147,7 @@ func (s *StatusSource) Hosts(ctx context.Context) ([]Host, error) {
 		h := Host{ID: p.ID, Name: p.Name, Online: p.Lifecycle == "connected" || p.Lifecycle == "degraded"}
 		for _, ph := range s.doc.Presence.Hosts {
 			if p.TunnelAddress != "" && ph.Info.TunnelAddress == p.TunnelAddress {
+				h.CoordinatorHostID = ph.HostID
 				h.Chip, h.OS, h.TotalMemoryBytes = ph.Info.Chip, ph.Info.OS, ph.Info.MemoryBytes
 				if ph.Info.MemoryAvailableBytes != nil && ph.Info.MemoryBytes > 0 {
 					h.AvailableMemoryBytes, h.MemoryKnown = *ph.Info.MemoryAvailableBytes, true

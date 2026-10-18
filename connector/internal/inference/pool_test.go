@@ -59,3 +59,25 @@ func TestPoolServeCommandRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestOrphanPoolServers(t *testing.T) {
+	d := "/Users/k/Library/Application Support/Nexal/inference"
+	m := modelsRoot(d) + "/qwen3-4b-q4"
+	ps := strings.Join([]string{
+		"  101     1 /opt/py/Python -I -m mlx_lm.server --model " + m + " --pipeline --host 100.86.1.1 --port 8004", // old form, orphaned
+		"  102     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1 --port 8004", // new form, orphaned
+		"  103  5000 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1 --port 8004", // its helper is alive
+		"  104     1 /opt/py/Python -I -m mlx_lm server --model /elsewhere/models/x --pipeline --host 1.1.1.1",        // another directory
+		"  105     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --host 100.86.1.1 --port 8001",              // not a pool server
+		"  106     1 /usr/bin/vim notes " + m + " --pipeline",                                                         // not mlx_lm
+		"  107     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1",               // this process itself
+		"garbage",
+	}, "\n")
+	got := orphanPoolServers(ps, d, 107)
+	if len(got) != 2 || got[0] != 101 || got[1] != 102 {
+		t.Fatalf("picked %v, want [101 102]", got)
+	}
+	if len(orphanPoolServers("", d, 1)) != 0 {
+		t.Fatal("empty input")
+	}
+}

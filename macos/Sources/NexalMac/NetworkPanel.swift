@@ -15,6 +15,7 @@ struct NetworkPanel: View {
     @State private var openPeers: Set<String> = []
     @State private var thisMacOpen = false
     @State private var inferenceOpen = false
+    @State private var remoteInferenceOpen = false
     @State private var graphsOpen = false
     /// Sharing services listening on this Mac, checked when its row is opened.
     @State private var localServices: LocalServiceProbe.Result?
@@ -182,6 +183,7 @@ struct NetworkPanel: View {
             .panelCard()
             ThrowawayHostsSection(expanded: $machinesOpen).panelCard().expandsOnClick($machinesOpen)
             InferenceSection(expanded: $inferenceOpen).panelCard().expandsOnClick($inferenceOpen)
+            RemoteInferenceSection(expanded: $remoteInferenceOpen).panelCard().expandsOnClick($remoteInferenceOpen)
             activityGraphs.panelCard().expandsOnClick($graphsOpen)
 			if let report = model.timeMachine, report.timeMachine.enabled {
 				timeMachine(report).panelCard()

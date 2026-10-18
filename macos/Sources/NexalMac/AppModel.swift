@@ -407,6 +407,21 @@ final class AppModel: ObservableObject {
         }.value
     }
 
+    /// Remote AI inference (`nexal inference remote-*`). Ids and endpoints are validated here before they reach a command line.
+    func remoteInference(_ command: CLICommand) async throws -> Data {
+        switch command {
+        case let .remoteInferenceServe(modelId, hostId):
+            guard InferenceModelID.isValid(modelId), RemoteInferenceID.isValid(hostId) else { throw InferenceInstallError.invalidModelID }
+        case let .remoteInferenceStop(id):
+            guard RemoteInferenceID.isValid(id) else { throw InferenceInstallError.invalidModelID }
+        case let .remoteInferenceTest(endpoint):
+            guard RemoteInferenceID.isMeshEndpoint(endpoint) else { throw InferenceInstallError.invalidModelID }
+        case .remoteInferenceList: break
+        default: preconditionFailure("not a remote inference command")
+        }
+        return try await invoke(command)
+    }
+
     func peerNames(action: String, address: String? = nil, input: Data? = nil) async throws -> Data {
         try await invoke(.peerNames(action: action, address: address), input: input)
     }

@@ -84,3 +84,33 @@ func inferenceServe(ctx context.Context, args []string) error {
 	}
 	return nil
 }
+
+// inferenceRemoteTest is `nexal inference remote-test <endpoint> [--json]`: it measures a model served by
+// another Mac (reachability, time to first token, tokens per second) and checks it can answer a simple
+// question. The endpoint must be a neXal mesh address or loopback.
+func inferenceRemoteTest(ctx context.Context, args []string) error {
+	var asJSON *bool
+	endpoint, _, _, err := parseModelArgs("remote-test", args, true, func(f *flag.FlagSet) {
+		asJSON = f.Bool("json", false, "print the result as one JSON document")
+	})
+	if err != nil {
+		return err
+	}
+	res, err := inference.RemoteTest(ctx, endpoint, nil)
+	if err != nil {
+		return &codedError{code: "remote_test_failed", err: err}
+	}
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(res)
+	}
+	writeLine(os.Stdout, "%s (%s)", res.Endpoint, res.Model)
+	writeLine(os.Stdout, "  reachable:    %.0f ms", res.ReachableMs)
+	writeLine(os.Stdout, "  first token:  %.0f ms", res.FirstTokenMs)
+	writeLine(os.Stdout, "  speed:        %.1f tokens/s (%d tokens in %.1f s)", res.TokensPerSec, res.Tokens, res.TotalMs/1000)
+	ok := "no - the model did not answer 17 + 25 correctly"
+	if res.CapabilityOK {
+		ok = "yes - answered 17 + 25 correctly"
+	}
+	writeLine(os.Stdout, "  capability:   %s", ok)
+	return nil
+}

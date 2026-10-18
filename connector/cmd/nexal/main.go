@@ -32,6 +32,7 @@ import (
 	"nexal/connector/internal/observability"
 	"nexal/connector/internal/presence"
 	"nexal/connector/internal/privateruntime"
+	"nexal/connector/internal/remoteinference"
 	"nexal/connector/internal/sysinfo"
 	"nexal/connector/internal/tunnel"
 	"nexal/connector/internal/wol"
@@ -710,6 +711,13 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	}()
 	go func() { defer wg.Done(); results <- a.Serve(ctx, admin) }()
 	go func() { defer wg.Done(); results <- a.Run(ctx) }()
+	// Another Mac on this network can ask this one to install and serve an AI model (coordinator
+	// remote-inference queue). It runs the same local `nexal inference` commands under this Mac's owner policy.
+	if exe, exeErr := os.Executable(); exeErr == nil {
+		ri := &remoteinference.Runner{Coord: api, HostID: c.HostID, Exe: exe, BaseArgs: []string{"--config", *path},
+			Address: func() string { return meshProvider.Snapshot().SelfTunnelAddress }, Logger: logger.With("component", "remote-inference")}
+		go ri.Run(ctx)
+	}
 	// Version-2 enrollment uses the embedded peer-to-peer mesh runtime. Older
 	// installations may still carry a cloudflared tunnel block in config.json;
 	// starting that legacy supervisor as well makes a missing old token abort the

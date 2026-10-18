@@ -84,6 +84,14 @@ enum CLICommand {
     case inferencePinLatest(modelId: String)
     /// `nexal inference serve <id> --host 127.0.0.1 --port N`: runs the local chat server until stopped.
     case inferenceServe(modelId: String, port: Int)
+    /// `nexal inference remote-serve <id> --to <host> --json`: asks another Mac on this network to install and serve a model.
+    case remoteInferenceServe(modelId: String, hostId: String)
+    /// `nexal inference remote-list --json`: recent remote-serve requests (one JSON object per line).
+    case remoteInferenceList
+    /// `nexal inference remote-stop <request> --json`: cancels a request and the server it started.
+    case remoteInferenceStop(requestId: String)
+    /// `nexal inference remote-test <endpoint> --json`: reachability, first-token time, speed and a capability probe.
+    case remoteInferenceTest(endpoint: String)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination: it may wait up to 90 s for the
@@ -109,6 +117,7 @@ enum CLICommand {
         if case .inferenceSetup = self { return 3600 }
         if case .inferencePinLatest = self { return 3600 }
         if case .inferenceServe = self { return 7 * 24 * 3600 }
+        if case .remoteInferenceTest = self { return 240 }
         return 20
     }
 
@@ -196,6 +205,14 @@ enum CLICommand {
             command = ["inference", "pin", modelId, "--latest", "--json"]
         case let .inferenceServe(modelId, port):
             command = ["inference", "serve", modelId, "--host", "127.0.0.1", "--port", String(port)]
+        case let .remoteInferenceServe(modelId, hostId):
+            command = ["inference", "remote-serve", modelId, "--to", hostId, "--json"]
+        case .remoteInferenceList:
+            command = ["inference", "remote-list", "--json"]
+        case let .remoteInferenceStop(requestId):
+            command = ["inference", "remote-stop", requestId, "--json"]
+        case let .remoteInferenceTest(endpoint):
+            command = ["inference", "remote-test", endpoint, "--json"]
         }
         return command + ["--config", config.path]
     }

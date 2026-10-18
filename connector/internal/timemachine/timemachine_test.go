@@ -89,6 +89,19 @@ func TestSambaStanzaIsFruitCapableQuotaBoundAndMeshOnly(t *testing.T) {
 	}
 }
 
+func TestSambaStanzaRefusesDisabledOrInvalidConfig(t *testing.T) {
+	disabled := validConfig()
+	disabled.Enabled = false
+	if b, err := RenderSambaShare(disabled); err == nil || b != "" {
+		t.Fatalf("disabled config rendered a share: %q, %v", b, err)
+	}
+	invalid := validConfig()
+	invalid.MeshCIDRs = []string{"8.8.8.0/24"}
+	if b, err := RenderSambaShare(invalid); err == nil || b != "" {
+		t.Fatalf("public mesh CIDR rendered a share: %q, %v", b, err)
+	}
+}
+
 func TestDeployedCoordinatorShapeAcceptsDefaultShareAndRejectsTraversal(t *testing.T) {
 	w := CoordinatorConfig{Enabled: true, NetworkID: "23027787-ec10-462d-aeac-c87ac011f7da", Protocol: "smb", Port: 445, QuotaBytes: 100 << 30, RefreshAfterSeconds: 60}
 	w.Bonjour.ServiceType = "_adisk._tcp"

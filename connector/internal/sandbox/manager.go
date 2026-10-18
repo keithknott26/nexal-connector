@@ -1142,5 +1142,27 @@ func (m *Manager) recover() {
 	sort.Strings(ids)
 	for _, id := range ids {
 		m.reconcile(ctx, id, 0)
+		m.resumeAppWatch(id)
+	}
+}
+
+// resumeAppWatch follows an app install that was under way when the connector restarted: the watcher
+// is otherwise started only at the guest's first boot, so a restart (an update, a crash) left the app
+// without progress for the rest of the install. A console with no app lines, or an install already
+// finished, needs nothing.
+func (m *Manager) resumeAppWatch(id string) {
+	m.mu.Lock()
+	r := m.boxes[id]
+	running := r != nil && r.State == StateRunning
+	m.mu.Unlock()
+	if !running {
+		return
+	}
+	text, err := readTail(m.consoleLog(id), 256<<10)
+	if err != nil {
+		return
+	}
+	if p, ok := ParseAppProgress(text); ok && !p.Ready {
+		go m.watchAppSetup(id)
 	}
 }

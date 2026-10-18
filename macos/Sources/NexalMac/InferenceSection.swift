@@ -209,6 +209,9 @@ struct InferenceSection: View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 10) {
                 InferenceQuickStartView(installedIDs: installedModelIDs) { installed.refresh(model) }
+                Divider()
+                RemoteInferenceContent()
+                Divider()
                 Text(InferencePresentation.intro)
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {

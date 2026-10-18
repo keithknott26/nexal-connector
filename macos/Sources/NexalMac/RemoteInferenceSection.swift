@@ -111,8 +111,9 @@ final class RemoteInferenceModel: ObservableObject {
     }
 }
 
-struct RemoteInferenceSection: View {
-    @Binding var expanded: Bool
+/// The "on other Macs" half of the AI inference card: pick a Mac and a model, watch it install and serve.
+/// It sits inside `InferenceSection`, under the one-click "this Mac" quick start.
+struct RemoteInferenceContent: View {
     @EnvironmentObject private var app: AppModel
     @StateObject private var remote = RemoteInferenceModel()
     @State private var hostId = ""
@@ -124,44 +125,40 @@ struct RemoteInferenceSection: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Run an AI model on another one of your Macs and use it from here over the neXal network. The other Mac downloads the model and keeps it private to your network.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if remote.machines.isEmpty {
-                    Text("No other Macs found on your network yet.").font(.caption).foregroundStyle(.secondary)
-                } else {
-                    HStack {
-                        Picker("Mac", selection: $hostId) {
-                            ForEach(remote.machines) { Text($0.name + ($0.online ? "" : " (offline)")).tag($0.hostId ?? "") }
-                        }.labelsHidden().frame(maxWidth: 180)
-                        Picker("Model", selection: $modelId) {
-                            ForEach(InferenceQuickStart.models) { Text($0.title).tag($0.id) }
-                        }.labelsHidden().frame(maxWidth: 160)
-                        Button("Run there") { remote.serve(modelId: modelId, hostId: hostId, app: app) }
-                            .buttonStyle(.borderedProminent).controlSize(.small)
-                            .disabled(remote.busy || hostId.isEmpty)
-                    }
-                }
-                if let p = remote.problem {
-                    Label(p, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
-                }
-                ForEach(remote.requests.filter { $0.state != "cancelled" }) { r in row(r) }
-            }
-            .padding(.top, 6)
-            .task {
-                remote.loadMachines(app)
-                remote.startPolling(app)
-            }
-            .onChange(of: remote.machines) { _, list in
-                if hostId.isEmpty || !list.contains(where: { $0.hostId == hostId }) {
-                    hostId = (list.first(where: { $0.online }) ?? list.first)?.hostId ?? ""
+        VStack(alignment: .leading, spacing: 10) {
+            Text("RUN A MODEL ON ANOTHER MAC").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+            Text("Run a model on one of your other Macs and use it from here over the neXal network. That Mac downloads the model and keeps it private to your network.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if remote.machines.isEmpty {
+                Text("No other Macs found on your network yet.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Picker("Mac", selection: $hostId) {
+                        ForEach(remote.machines) { Text($0.name + ($0.online ? "" : " (offline)")).tag($0.hostId ?? "") }
+                    }.labelsHidden().frame(maxWidth: 180)
+                    Picker("Model", selection: $modelId) {
+                        ForEach(InferenceQuickStart.models) { Text($0.title).tag($0.id) }
+                    }.labelsHidden().frame(maxWidth: 160)
+                    Button("Run there") { remote.serve(modelId: modelId, hostId: hostId, app: app) }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                        .disabled(remote.busy || hostId.isEmpty)
                 }
             }
-            .onDisappear { remote.stopPolling() }
-        } label: {
-            Text("AI on other Macs").font(.subheadline.weight(.semibold))
+            if let p = remote.problem {
+                Label(p, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
+            }
+            ForEach(remote.requests.filter { $0.state != "cancelled" }) { r in row(r) }
         }
+        .task {
+            remote.loadMachines(app)
+            remote.startPolling(app)
+        }
+        .onChange(of: remote.machines) { _, list in
+            if hostId.isEmpty || !list.contains(where: { $0.hostId == hostId }) {
+                hostId = (list.first(where: { $0.online }) ?? list.first)?.hostId ?? ""
+            }
+        }
+        .onDisappear { remote.stopPolling() }
     }
 
     @ViewBuilder private func row(_ r: RemoteInferenceRequest) -> some View {

@@ -38,4 +38,14 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertTrue(rows[0].isDone)
         XCTAssertEqual(rows[2].detail, "model not pinned")
     }
+
+    func testStagesFollowTheStepsTheOtherMacReports() {
+        XCTAssertEqual(RemoteInferenceStages.all.count, 5)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "setup"), 0)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "install"), 2)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "verify"), 3)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
+        XCTAssertNil(RemoteInferenceStages.index(of: "network"))
+        XCTAssertNil(RemoteInferenceStages.index(of: nil))
+    }
 }

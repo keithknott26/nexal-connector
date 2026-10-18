@@ -146,8 +146,14 @@ func (r *Runner) Once(ctx context.Context) {
 }
 
 func (r *Runner) report(ctx context.Context, t Task, state, step, detail, endpoint string) {
+	r.reportP(ctx, t, state, step, detail, endpoint, nil)
+}
+
+// reportP is report with the overall progress (0..1) of the whole request: runtime, check, download,
+// verify, start. The app draws one bar from it, so every step moves it, not only the download.
+func (r *Runner) reportP(ctx context.Context, t Task, state, step, detail, endpoint string, progress *float64) {
 	detail = clean(detail, 280)
-	if err := r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: state, Step: step, Detail: detail, Endpoint: endpoint}); err != nil {
+	if err := r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: state, Step: step, Detail: detail, Endpoint: endpoint, Progress: progress}); err != nil {
 		r.Logger.Debug("remote inference report failed", "error", err.Error())
 	}
 }
@@ -174,13 +180,15 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	}
 	for _, step := range []struct {
 		name, label string
+		start       float64 // overall progress when the step begins
 		args        []string
 	}{
-		{"setup", "Preparing the AI runtime", []string{"setup"}},
-		{"pin", "Checking " + t.ModelID, []string{"pin", t.ModelID, "--latest"}},
-		{"install", "Downloading " + t.ModelID, []string{"install", t.ModelID, "--local"}},
+		{"setup", "Preparing the AI runtime", 0.02, []string{"setup"}},
+		{"pin", "Checking " + t.ModelID, 0.08, []string{"pin", t.ModelID, "--latest"}},
+		{"install", "Downloading " + t.ModelID, 0.12, []string{"install", t.ModelID, "--local"}},
 	} {
-		r.report(ctx, t, "running", step.name, step.label, "")
+		start := step.start
+		r.reportP(ctx, t, "running", step.name, step.label, "", &start)
 		if step.name == "install" {
 			if msg := r.install(ctx, t, step.args); msg != "" {
 				r.fail(ctx, t, step.name, msg)
@@ -193,7 +201,8 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		}
 	}
-	r.report(ctx, t, "running", "serve", "Starting the model server", "")
+	serveStart := 0.9
+	r.reportP(ctx, t, "running", "serve", "Starting the model server (loading it into memory)", "", &serveStart)
 	sctx, cancel := context.WithCancel(ctx)
 	cmd := r.command(sctx, "serve", t.ModelID, "--host", addr, "--port", strconv.Itoa(r.Port))
 	var tail lineTail
@@ -235,7 +244,8 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		}
 	}
-	r.report(ctx, t, "ready", "serve", "Serving "+t.ModelID, endpoint)
+	done := 1.0
+	r.reportP(ctx, t, "ready", "serve", "Serving "+t.ModelID, endpoint, &done)
 	// Keep watching: if the server dies later, say so.
 	err := <-exited
 	r.drop(t.ID)
@@ -259,6 +269,7 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 	}
 	var failure string
 	var last time.Time
+	verifying := false
 	sc := bufio.NewScanner(out)
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
 	for sc.Scan() {
@@ -276,15 +287,25 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 		case "error":
 			failure = ev.Message
 		case "progress":
-			if ev.OverallTotal <= 0 || time.Since(last) < 2*time.Second {
+			if ev.OverallTotal <= 0 {
+				continue
+			}
+			// The download fills 12%..82% of the whole request; verifying and starting take the rest.
+			if ev.OverallBytes >= ev.OverallTotal {
+				if !verifying {
+					verifying = true
+					v := 0.85
+					r.reportP(ctx, t, "running", "verify", "Verifying the downloaded files", "", &v)
+				}
+				continue
+			}
+			if time.Since(last) < 2*time.Second {
 				continue
 			}
 			last = time.Now()
 			f := float64(ev.OverallBytes) / float64(ev.OverallTotal)
-			if f > 1 {
-				f = 1
-			}
-			r.reportProgress(ctx, t, f, fmt.Sprintf("Downloading %s: %d%% (%s of %s)", t.ModelID, int(f*100), size(ev.OverallBytes), size(ev.OverallTotal)))
+			overall := 0.12 + 0.70*f
+			r.reportP(ctx, t, "running", "install", fmt.Sprintf("Downloading %s: %d%% (%s of %s)", t.ModelID, int(f*100), size(ev.OverallBytes), size(ev.OverallTotal)), "", &overall)
 		}
 	}
 	if err := cmd.Wait(); err != nil {
@@ -294,12 +315,6 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 		return lastLine(errTail.String(), err)
 	}
 	return ""
-}
-
-func (r *Runner) reportProgress(ctx context.Context, t Task, f float64, detail string) {
-	if err := r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: "running", Step: "install", Detail: clean(detail, 280), Progress: &f}); err != nil {
-		r.Logger.Debug("remote inference report failed", "error", err.Error())
-	}
 }
 
 func size(b int64) string {

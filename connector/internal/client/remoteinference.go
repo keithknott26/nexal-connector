@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/url"
 
 	"nexal/connector/internal/remoteinference"
@@ -66,7 +67,15 @@ func (c *Client) ReportRemoteInference(ctx context.Context, hostID string, r rem
 	if err != nil {
 		return err
 	}
-	return c.callLenient(ctx, "POST", p, r, nil)
+	err = c.callLenient(ctx, "POST", p, r, nil)
+	// A coordinator older than the progress column refuses the unknown key (400 invalid_schema) and
+	// would drop every report that carries it: resend without it so the step still shows.
+	var se *StatusError
+	if r.Progress != nil && errors.As(err, &se) && se.Status == http.StatusBadRequest {
+		r.Progress = nil
+		err = c.callLenient(ctx, "POST", p, r, nil)
+	}
+	return err
 }
 
 // CancelRemoteInference stops a request (and the server it started).

@@ -172,9 +172,17 @@ struct RemoteInferenceContent: View {
                 default: ProgressView().controlSize(.small)
                 }
             }
-            if r.state == "running", r.step == "install" {
-                if let f = r.progress { ProgressView(value: min(max(f, 0), 1)) } else { ProgressView().progressViewStyle(.linear) }
+            if r.state == "running" || r.state == "pending" {
+                if let f = r.progress, r.state == "running" {
+                    HStack(spacing: 6) {
+                        ProgressView(value: min(max(f, 0), 1))
+                        Text("\(Int(min(max(f, 0), 1) * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
             }
+            if r.state != "ready" && r.state != "pending" { stepsView(r) }
             if let d = r.detail, r.state != "ready" { Text(d).font(.caption2).foregroundStyle(r.state == "failed" ? .red : .secondary).textSelection(.enabled) }
             if r.state == "pending" { Text("Waiting for that Mac to pick this up…").font(.caption2).foregroundStyle(.secondary) }
             if r.state == "ready", let e = r.endpoint {
@@ -197,6 +205,27 @@ struct RemoteInferenceContent: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
     }
 
+    /// The stages of a request, in order. `RemoteInferenceStages.index(of:)` maps the step the other Mac reports.
+    @ViewBuilder private func stepsView(_ r: RemoteInferenceRequest) -> some View {
+        let current = RemoteInferenceStages.index(of: r.step)
+        let failed = r.state == "failed"
+        HStack(spacing: 10) {
+            ForEach(Array(RemoteInferenceStages.all.enumerated()), id: \.offset) { i, title in
+                HStack(spacing: 3) {
+                    if let c = current, i < c {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    } else if current == i {
+                        Image(systemName: failed ? "xmark.circle.fill" : "circle.dotted").foregroundStyle(failed ? .red : .accentColor)
+                    } else {
+                        Image(systemName: "circle").foregroundStyle(.tertiary)
+                    }
+                    Text(title).foregroundStyle(current == i ? .primary : .secondary)
+                }
+            }
+        }
+        .font(.caption2)
+    }
+
     private func resultView(_ t: RemoteInferenceTestResult) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(String(format: "Reachable in %.0f ms · first word in %.0f ms · %.1f words/s", t.reachableMs, t.firstTokenMs, t.tokensPerSec))
@@ -205,4 +234,11 @@ struct RemoteInferenceContent: View {
                 .foregroundStyle(t.capabilityOk ? .green : .orange)
         }.font(.caption2)
     }
+}
+
+/// The stages the other Mac goes through, matching the steps its connector reports.
+enum RemoteInferenceStages {
+    static let all = ["Runtime", "Check", "Download", "Verify", "Start"]
+    private static let keys = ["setup", "pin", "install", "verify", "serve"]
+    static func index(of step: String?) -> Int? { step.flatMap { keys.firstIndex(of: $0) } }
 }

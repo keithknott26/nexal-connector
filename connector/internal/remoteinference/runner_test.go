@@ -71,8 +71,21 @@ func TestRunsSetupInstallServeThenReportsEndpoint(t *testing.T) {
 	defer cancel()
 	r.Once(ctx)
 	wait(t, func() bool { return c.last().State == "ready" })
-	if got := c.last(); got.Endpoint != "http://127.0.0.1:"+port+"/v1" {
+	if got := c.last(); got.Endpoint != "http://127.0.0.1:"+port+"/v1" || got.Progress == nil || *got.Progress != 1 {
 		t.Fatalf("%+v", got)
+	}
+	steps := map[string]bool{}
+	c.mu.Lock()
+	for _, rp := range c.reports {
+		if rp.Progress != nil {
+			steps[rp.Step] = true
+		}
+	}
+	c.mu.Unlock()
+	for _, want := range []string{"setup", "pin", "install", "serve"} {
+		if !steps[want] {
+			t.Fatalf("no progress reported for step %q: %v", want, steps)
+		}
 	}
 	// Cancelled request: the server is stopped.
 	c.mu.Lock()
@@ -109,6 +122,7 @@ func TestInstallReportsProgress(t *testing.T) {
 	exe := script(t, `if [ "$2" = install ]; then
 echo '{"event":"start","modelId":"m","totalBytes":1000}'
 echo '{"event":"progress","file":"a","bytes":500,"total":1000,"overallBytes":500,"overallTotal":1000}'
+echo '{"event":"progress","file":"a","bytes":1000,"total":1000,"overallBytes":1000,"overallTotal":1000}'
 echo '{"event":"done"}'
 fi; exit 0`)
 	c := &fakeCoord{tasks: []Task{{ID: "rinf_4", ModelID: "m"}}}
@@ -119,8 +133,14 @@ fi; exit 0`)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.reports) != 1 || c.reports[0].Progress == nil || *c.reports[0].Progress != 0.5 {
+	if len(c.reports) != 2 {
 		t.Fatalf("%+v", c.reports)
+	}
+	if p := c.reports[0].Progress; p == nil || *p < 0.46 || *p > 0.48 || c.reports[0].Step != "install" {
+		t.Fatalf("download report %+v", c.reports[0])
+	}
+	if p := c.reports[1].Progress; p == nil || *p != 0.85 || c.reports[1].Step != "verify" {
+		t.Fatalf("verify report %+v", c.reports[1])
 	}
 }
 

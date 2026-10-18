@@ -188,6 +188,12 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		{"install", "Downloading " + t.ModelID, 0.12, []string{"install", t.ModelID, "--local"}},
 	} {
 		start := step.start
+		// A model already on this Mac needs neither a new pin (which would re-read every file) nor a download.
+		if (step.name == "pin" || step.name == "install") && r.installed(ctx, t.ModelID) {
+			have := 0.85
+			r.reportP(ctx, t, "running", step.name, t.ModelID+" is already on this Mac", "", &have)
+			continue
+		}
 		r.reportP(ctx, t, "running", step.name, step.label, "", &start)
 		if step.name == "install" {
 			if msg := r.install(ctx, t, step.args); msg != "" {
@@ -268,6 +274,7 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 		return err.Error()
 	}
 	var failure string
+	alreadyThere := false
 	var last time.Time
 	verifying := false
 	sc := bufio.NewScanner(out)
@@ -275,6 +282,7 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 	for sc.Scan() {
 		var ev struct {
 			Event        string `json:"event"`
+			Code         string `json:"code"`
 			Message      string `json:"message"`
 			OverallBytes int64  `json:"overallBytes"`
 			OverallTotal int64  `json:"overallTotal"`
@@ -285,6 +293,10 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 		}
 		switch ev.Event {
 		case "error":
+			if ev.Code == "already_installed" {
+				alreadyThere = true
+				continue
+			}
 			failure = ev.Message
 		case "progress":
 			if ev.OverallTotal <= 0 {
@@ -309,6 +321,9 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 		}
 	}
 	if err := cmd.Wait(); err != nil {
+		if alreadyThere && failure == "" {
+			return "" // a race with another install of the same model: it is there, which is what we wanted
+		}
 		if failure != "" {
 			return failure
 		}
@@ -323,6 +338,28 @@ func size(b int64) string {
 		return fmt.Sprintf("%.1f GB", float64(b)/g)
 	}
 	return fmt.Sprintf("%d MB", b/m)
+}
+
+// installed reports whether `nexal inference status` lists the model as installed on this Mac.
+func (r *Runner) installed(ctx context.Context, modelID string) bool {
+	out, err := r.command(ctx, "status", "--json").Output()
+	if err != nil {
+		return false
+	}
+	var st struct {
+		Models []struct {
+			ModelID string `json:"modelId"`
+		} `json:"models"`
+	}
+	if json.Unmarshal(out, &st) != nil {
+		return false
+	}
+	for _, m := range st.Models {
+		if m.ModelID == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runner) drop(id string) {

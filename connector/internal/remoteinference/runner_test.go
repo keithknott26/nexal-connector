@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,6 +150,44 @@ func TestInstallFailureUsesTheErrorEvent(t *testing.T) {
 	r := &Runner{Coord: &fakeCoord{}, HostID: "h", Exe: exe}
 	r.init()
 	if msg := r.install(context.Background(), Task{ID: "x", ModelID: "m"}, []string{"install", "m"}); msg != "not enough disk space" {
+		t.Fatal(msg)
+	}
+}
+
+func TestAlreadyInstalledModelSkipsPinAndDownload(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "calls")
+	exe := script(t, `echo "$2" >> `+log+`
+if [ "$2" = status ]; then echo '{"models":[{"modelId":"qwen3-4b-q4"}]}'; fi
+[ "$2" = serve ] && exec sleep 30
+exit 0`)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p)); err == nil {
+			go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"data":[]}`)) }))
+		}
+	}()
+	c := &fakeCoord{tasks: []Task{{ID: "rinf_5", ModelID: "qwen3-4b-q4"}}}
+	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1" }, Port: p, ReadyAfter: 10 * time.Second}
+	r.Once(context.Background())
+	wait(t, func() bool { return c.last().State == "ready" })
+	b, _ := os.ReadFile(log)
+	calls := string(b)
+	if strings.Contains(calls, "pin") || strings.Contains(calls, "install") || !strings.Contains(calls, "serve") {
+		t.Fatalf("calls:\n%s", calls)
+	}
+}
+
+func TestInstallTreatsAlreadyInstalledAsSuccess(t *testing.T) {
+	exe := script(t, `echo '{"event":"error","code":"already_installed","message":"qwen3-4b-q4 is already installed"}'; exit 1`)
+	r := &Runner{Coord: &fakeCoord{}, HostID: "h", Exe: exe}
+	r.init()
+	if msg := r.install(context.Background(), Task{ID: "x", ModelID: "m"}, []string{"install", "m"}); msg != "" {
 		t.Fatal(msg)
 	}
 }

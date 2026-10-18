@@ -407,7 +407,12 @@ func (m *Manager) restartVM(ctx context.Context, id string) (GuestReply, error) 
 		return GuestReply{}, errors.New("sandbox unknown")
 	}
 	old, size, host, desktop, lan := rec.Handle, rec.Size, rec.Hostname, rec.Boot.Desktop, rec.LAN
+	// A restart of an existing disk answers within a minute or two; do not hold the app on "Starting"
+	// (and the delete button off) for the whole first-boot allowance when the guest never comes back.
 	timeout := m.caps.FirstBootTimeout
+	if timeout > 4*time.Minute {
+		timeout = 4 * time.Minute
+	}
 	m.mu.Unlock()
 	if _, err := os.Stat(m.diskPath(id)); err != nil {
 		return GuestReply{}, errors.New("the persistent disk is missing")

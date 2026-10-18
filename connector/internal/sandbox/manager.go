@@ -365,10 +365,17 @@ func (m *Manager) Start(id string) error {
 		if err != nil {
 			m.opts.Logger.Warn("start failed; sandbox stays stopped", "sandbox", id, "error", err.Error())
 			m.mu.Lock()
+			var h Handle
 			if r := m.boxes[id]; r != nil {
+				h = r.Handle
 				_ = m.setStateLocked(r, StateStopped)
 			}
 			m.mu.Unlock()
+			// The VM may be booted even though the guest agent never answered: stop it, so nothing is left
+			// running that the app shows as stopped.
+			if h.Label != "" {
+				_ = m.opts.Hypervisor.Kill(m.ctx, h)
+			}
 			return
 		}
 		if rep.Connected {

@@ -84,7 +84,9 @@ func TestDiagnosticsBundleRedactsSecrets(t *testing.T) {
 			return wol.Facts{MACs: []string{secrets["mac"]}, Prefixes: []string{secrets["prefix"]}, LANKey: secrets["lanKey"],
 				WakeForNetwork: wol.WakeEnabled}
 		},
-		Host:   func(context.Context) sysinfo.Info { return sysinfo.Info{OS: "macOS 27.0", Model: "Mac mini", Chip: "Apple M4"} },
+		Host: func(context.Context) sysinfo.Info {
+			return sysinfo.Info{OS: "macOS 27.0", Model: "Mac mini", Chip: "Apple M4"}
+		},
 		LogDir: logs,
 	}
 	out := buildDiagnosticsBundle(context.Background(), cfg, src)

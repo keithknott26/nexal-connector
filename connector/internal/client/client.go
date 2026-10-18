@@ -71,6 +71,7 @@ type Identity struct {
 	HostID string `json:"hostId"`
 	Token  string `json:"token"`
 }
+
 // HeartbeatResponse carries the coordinator's response to a heartbeat,
 // including an optional server-suggested polling interval.
 type HeartbeatResponse struct {

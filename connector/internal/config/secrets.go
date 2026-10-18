@@ -168,7 +168,9 @@ func (k Keychain) Delete(ctx context.Context, name string) error {
 	cmd := exec.CommandContext(ctx, "/usr/bin/security", "delete-generic-password", "-s", k.Service, "-a", name)
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 { return nil }
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 44 {
+			return nil
+		}
 		return errors.New("Keychain credential removal failed or access denied")
 	}
 	return nil

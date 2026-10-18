@@ -114,7 +114,9 @@ func withFakes(t *testing.T, ifaces []ifaceV4, raw []net.Interface, udp *fakeUDP
 	systemHardwarePorts = func(context.Context) []string { return nil }
 	systemInterfaces = func() ([]ifaceV4, []net.Interface, error) { return ifaces, raw, nil }
 	openUDP = func() (udpSender, error) { return udp, nil }
-	t.Cleanup(func() { systemInterfaces, openUDP, bindPerInterface, systemHardwarePorts = oldIf, oldUDP, oldBind, oldPorts })
+	t.Cleanup(func() {
+		systemInterfaces, openUDP, bindPerInterface, systemHardwarePorts = oldIf, oldUDP, oldBind, oldPorts
+	})
 }
 
 func TestSend(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"strings"
 	"time"
 
 	"nexal/connector/internal/client"
@@ -23,11 +24,12 @@ import (
 // The coordinator only queues the request. The other Mac's connector installs and serves the model with its
 // own `nexal inference` commands, under its own owner policy, on its neXal address only.
 func inferenceRemote(ctx context.Context, args []string) error {
-	var to *string
+	var to, pool *string
 	var wait, asJSON *bool
 	needID := args[0] != "remote-list"
 	id, _, path, err := parseModelArgs(args[0], args[1:], needID, func(f *flag.FlagSet) {
 		to = f.String("to", "", "host id of the Mac that should serve the model")
+		pool = f.String("pool", "", "comma-separated host ids that serve the model together, the first one answering (instead of --to)")
 		wait = f.Bool("wait", false, "wait until the model is being served or fails")
 		asJSON = f.Bool("json", false, "print JSON")
 	})
@@ -75,8 +77,11 @@ func inferenceRemote(ctx context.Context, args []string) error {
 			return &codedError{code: "remote_failed", err: err}
 		}
 	case "remote-serve":
+		if *pool != "" {
+			return servePool(ctx, api, c.HostID, id, strings.Split(*pool, ","), *wait, show)
+		}
 		if *to == "" {
-			return &codedError{code: "invalid_arguments", err: errors.New("--to <host-id> is required")}
+			return &codedError{code: "invalid_arguments", err: errors.New("--to <host-id> (or --pool a,b) is required")}
 		}
 		t, err := api.CreateRemoteInference(ctx, c.HostID, *to, id)
 		if err != nil {
@@ -103,6 +108,45 @@ func inferenceRemote(ctx context.Context, args []string) error {
 		if t.State == "failed" {
 			return &codedError{code: "remote_failed", err: errors.New(t.Detail)}
 		}
+	}
+	return nil
+}
+
+// servePool asks several Macs to serve one model together (the first listed answers) and, with --wait,
+// follows the pool until it answers or fails.
+func servePool(ctx context.Context, api *client.Client, self, model string, hosts []string, wait bool, show func(remoteinference.Task)) error {
+	tasks, err := api.CreateRemoteInferencePool(ctx, self, hosts, model)
+	if err != nil {
+		return &codedError{code: "remote_failed", err: err}
+	}
+	for _, t := range tasks {
+		show(t)
+	}
+	for wait {
+		lead := tasks[0]
+		if lead.State == "ready" || lead.State == "failed" || lead.State == "cancelled" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+		all, err := api.AllRemoteInference(ctx, self)
+		if err != nil {
+			return &codedError{code: "remote_failed", err: err}
+		}
+		for _, n := range all {
+			for i, old := range tasks {
+				if n.ID == old.ID && (n.State != old.State || n.Step != old.Step || n.Detail != old.Detail) {
+					tasks[i] = n
+					show(n)
+				}
+			}
+		}
+	}
+	if tasks[0].State == "failed" {
+		return &codedError{code: "remote_failed", err: errors.New(tasks[0].Detail)}
 	}
 	return nil
 }

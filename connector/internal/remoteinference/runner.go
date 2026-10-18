@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -29,8 +30,15 @@ type Task struct {
 	Step            string `json:"step,omitempty"`
 	Detail          string `json:"detail,omitempty"`
 	Endpoint        string `json:"endpoint,omitempty"`
-	CreatedAt       string `json:"createdAt,omitempty"`
-	UpdatedAt       string `json:"updatedAt,omitempty"`
+	// Pooling: this Mac is member PoolRank of PoolSize. PoolRing lists every member's ring address in
+	// rank order once all have said where they listen; PoolEndpoint is rank 0's API once it answers.
+	PoolID       string   `json:"poolId,omitempty"`
+	PoolRank     int      `json:"poolRank,omitempty"`
+	PoolSize     int      `json:"poolSize,omitempty"`
+	PoolRing     []string `json:"poolRing,omitempty"`
+	PoolEndpoint string   `json:"poolEndpoint,omitempty"`
+	CreatedAt    string   `json:"createdAt,omitempty"`
+	UpdatedAt    string   `json:"updatedAt,omitempty"`
 }
 
 // Report is the body of POST /api/v2/hosts/:id/remote-inference-state.
@@ -40,6 +48,8 @@ type Report struct {
 	Step     string `json:"step,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
+	// RingAddress is where this pool member listens for the other members (ip:port).
+	RingAddress string `json:"ringAddress,omitempty"`
 	// Progress is 0..1 while a download is under way; nil otherwise.
 	Progress *float64 `json:"progress,omitempty"`
 }
@@ -57,14 +67,18 @@ type Runner struct {
 	Exe        string   // the nexal binary
 	BaseArgs   []string // e.g. --config <path>, appended to every inference command
 	Address    func() string
-	Port       int
+	Port       int // first port to try for a server (default 8001)
+	MaxPort    int // last port (default 8099): the neXal network only opens 8001-8099 between Macs
 	Poll       time.Duration
 	ReadyAfter time.Duration
+	PoolWait   time.Duration // how long to wait for the other pool members (default 10 minutes)
 	Logger     *slog.Logger
 
 	mu      sync.Mutex
 	serving map[string]*serve // task id -> server
 	working map[string]bool
+	latest  map[string]Task // the last poll's requests for this Mac
+	used    map[int]bool
 }
 
 type serve struct {
@@ -80,13 +94,21 @@ func (r *Runner) init() {
 		r.ReadyAfter = 6 * time.Minute
 	}
 	if r.Port == 0 {
-		r.Port = 8080
+		r.Port = 8001
+	}
+	if r.PoolWait == 0 {
+		r.PoolWait = 10 * time.Minute
+	}
+	if r.MaxPort == 0 {
+		r.MaxPort = 8099
 	}
 	if r.Logger == nil {
 		r.Logger = slog.Default()
 	}
 	r.serving = map[string]*serve{}
 	r.working = map[string]bool{}
+	r.latest = map[string]Task{}
+	r.used = map[int]bool{}
 }
 
 // Run blocks until ctx ends, then stops every server it started.
@@ -117,6 +139,13 @@ func (r *Runner) Once(ctx context.Context) {
 		return
 	}
 	live := map[string]bool{}
+	snapshot := map[string]Task{}
+	for _, t := range tasks {
+		snapshot[t.ID] = t
+	}
+	r.mu.Lock()
+	r.latest = snapshot
+	r.mu.Unlock()
 	for _, t := range tasks {
 		live[t.ID] = true
 		r.mu.Lock()
@@ -178,12 +207,16 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		r.fail(ctx, t, "network", "This Mac is not connected to the neXal network yet.")
 		return
 	}
+	setup := "setup"
+	if t.PoolID != "" {
+		setup = "pool-setup"
+	}
 	for _, step := range []struct {
 		name, label string
 		start       float64 // overall progress when the step begins
 		args        []string
 	}{
-		{"setup", "Preparing the AI runtime", 0.02, []string{"setup"}},
+		{"setup", "Preparing the AI runtime", 0.02, []string{setup}},
 		{"pin", "Checking " + t.ModelID, 0.08, []string{"pin", t.ModelID, "--latest"}},
 		{"install", "Downloading " + t.ModelID, 0.12, []string{"install", t.ModelID, "--local"}},
 	} {
@@ -207,10 +240,20 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		}
 	}
+	if t.PoolID != "" {
+		r.pool(ctx, t, addr)
+		return
+	}
+	port, perr := r.freePort(addr)
+	if perr != nil {
+		r.fail(ctx, t, "serve", perr.Error())
+		return
+	}
+	defer r.release(port)
 	serveStart := 0.9
 	r.reportP(ctx, t, "running", "serve", "Starting the model server (loading it into memory)", "", &serveStart)
 	sctx, cancel := context.WithCancel(ctx)
-	cmd := r.command(sctx, "serve", t.ModelID, "--host", addr, "--port", strconv.Itoa(r.Port))
+	cmd := r.command(sctx, "serve", t.ModelID, "--host", addr, "--port", strconv.Itoa(port))
 	var tail lineTail
 	cmd.Stdout, cmd.Stderr = &tail, &tail
 	if err := cmd.Start(); err != nil {
@@ -224,7 +267,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	r.mu.Unlock()
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	endpoint := fmt.Sprintf("http://%s:%d/v1", addr, r.Port)
+	endpoint := fmt.Sprintf("http://%s:%d/v1", addr, port)
 	deadline := time.Now().Add(r.ReadyAfter)
 	for {
 		select {
@@ -432,3 +475,137 @@ func (l *lineTail) Write(p []byte) (int, error) {
 }
 
 func (l *lineTail) String() string { l.mu.Lock(); defer l.mu.Unlock(); return string(l.b) }
+
+// freePort reserves the first port in [Port, MaxPort] that nothing on addr is using.
+func (r *Runner) freePort(addr string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for p := r.Port; p <= r.MaxPort; p++ {
+		if r.used[p] {
+			continue
+		}
+		l, err := net.Listen("tcp", net.JoinHostPort(addr, strconv.Itoa(p)))
+		if err != nil {
+			continue
+		}
+		l.Close()
+		r.used[p] = true
+		return p, nil
+	}
+	return 0, fmt.Errorf("no free port between %d and %d on this Mac", r.Port, r.MaxPort)
+}
+
+func (r *Runner) release(port int) {
+	r.mu.Lock()
+	delete(r.used, port)
+	r.mu.Unlock()
+}
+
+// current is the latest poll's view of a request; ok is false once it was cancelled or removed.
+func (r *Runner) current(id string) (Task, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.latest[id]
+	return t, ok
+}
+
+// pool runs this Mac's share of a model spread over several Macs. Each member says where it listens,
+// waits until the coordinator has everyone's address, then starts its rank; rank 0 answers the API.
+func (r *Runner) pool(ctx context.Context, t Task, addr string) {
+	ringPort, err := r.freePort(addr)
+	if err != nil {
+		r.fail(ctx, t, "pool", err.Error())
+		return
+	}
+	defer r.release(ringPort)
+	ringAddr := net.JoinHostPort(addr, strconv.Itoa(ringPort))
+	leader := t.PoolRank == 0
+	say := func(state, step, detail, endpoint string, p float64) {
+		_ = r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: state, Step: step, Detail: clean(detail, 280), Endpoint: endpoint, RingAddress: ringAddr, Progress: &p})
+	}
+	say("running", "pool", fmt.Sprintf("Waiting for the other Macs (%d in the pool)", t.PoolSize), "", 0.88)
+	var ring []string
+	deadline := time.Now().Add(r.PoolWait)
+	for ring == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+		cur, ok := r.current(t.ID)
+		if !ok {
+			return // cancelled
+		}
+		if len(cur.PoolRing) == t.PoolSize {
+			ring = cur.PoolRing
+		} else if time.Now().After(deadline) {
+			r.fail(ctx, t, "pool", "The other Macs in the pool did not get ready in time.")
+			return
+		}
+	}
+	apiPort := 0
+	endpoint := ""
+	if leader {
+		if apiPort, err = r.freePort(addr); err != nil {
+			r.fail(ctx, t, "pool", err.Error())
+			return
+		}
+		defer r.release(apiPort)
+		endpoint = fmt.Sprintf("http://%s:%d/v1", addr, apiPort)
+	}
+	say("running", "serve", "Starting this Mac's share of the model", "", 0.9)
+	sctx, cancel := context.WithCancel(ctx)
+	args := []string{"pool-serve", t.ModelID, "--rank", strconv.Itoa(t.PoolRank), "--hosts", strings.Join(ring, ","), "--api-host", addr}
+	if leader {
+		args = append(args, "--api-port", strconv.Itoa(apiPort))
+	}
+	cmd := r.command(sctx, args...)
+	var tail lineTail
+	cmd.Stdout, cmd.Stderr = &tail, &tail
+	if err := cmd.Start(); err != nil {
+		cancel()
+		r.fail(ctx, t, "serve", err.Error())
+		return
+	}
+	r.mu.Lock()
+	r.serving[t.ID] = &serve{cmd: cmd, cancel: cancel}
+	r.mu.Unlock()
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	deadline = time.Now().Add(r.ReadyAfter)
+	for ready := false; !ready; {
+		select {
+		case err := <-exited:
+			r.drop(t.ID)
+			if ctx.Err() == nil {
+				r.fail(ctx, t, "serve", lastLine(tail.String(), err))
+			}
+			return
+		case <-ctx.Done():
+			cancel()
+			return
+		case <-time.After(2 * time.Second):
+		}
+		if leader {
+			ready, _ = up(ctx, endpoint)
+		} else if cur, ok := r.current(t.ID); ok {
+			ready = cur.PoolEndpoint != ""
+		}
+		if !ready && time.Now().After(deadline) {
+			cancel()
+			r.drop(t.ID)
+			r.fail(ctx, t, "serve", "The pool did not start answering in time. Server output: "+clean(lastLine(tail.String(), errors.New("none")), 160))
+			return
+		}
+	}
+	if leader {
+		say("ready", "serve", "Serving "+t.ModelID+" with "+strconv.Itoa(t.PoolSize)+" Macs", endpoint, 1)
+	} else {
+		say("ready", "serve", fmt.Sprintf("Sharing %s with the pool (Mac %d of %d)", t.ModelID, t.PoolRank+1, t.PoolSize), "", 1)
+	}
+	err = <-exited
+	r.drop(t.ID)
+	if ctx.Err() == nil && sctx.Err() == nil {
+		r.fail(ctx, t, "serve", lastLine(tail.String(), err))
+	}
+}

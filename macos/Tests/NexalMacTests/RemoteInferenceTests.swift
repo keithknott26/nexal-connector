@@ -7,6 +7,8 @@ final class RemoteInferenceTests: XCTestCase {
         let config = URL(fileURLWithPath: "/tmp/c.json")
         XCTAssertEqual(CLICommand.remoteInferenceServe(modelId: "qwen3-4b-q4", hostId: "host_1").arguments(config: config),
                        ["inference", "remote-serve", "qwen3-4b-q4", "--to", "host_1", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.remoteInferencePool(modelId: "big-30b", hostIds: ["h1", "h2"]).arguments(config: config),
+                       ["inference", "remote-serve", "big-30b", "--pool", "h1,h2", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceList.arguments(config: config), ["inference", "remote-list", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceStop(requestId: "rinf_1").arguments(config: config),
                        ["inference", "remote-stop", "rinf_1", "--json", "--config", "/tmp/c.json"])
@@ -47,5 +49,40 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
         XCTAssertNil(RemoteInferenceStages.index(of: "network"))
         XCTAssertNil(RemoteInferenceStages.index(of: nil))
+    }
+
+    func testPoolRequestsBecomeOneCard() {
+        let data = Data("""
+        {"id":"r1","targetHostId":"h1","modelId":"big","state":"running","step":"serve","progress":0.9,"poolId":"p1","poolRank":0,"poolSize":2}
+        {"id":"r2","targetHostId":"h2","modelId":"big","state":"running","step":"install","progress":0.3,"poolId":"p1","poolRank":1,"poolSize":2}
+        {"id":"r3","targetHostId":"h3","modelId":"small","state":"ready","step":"serve","endpoint":"http://100.1.2.3:8001/v1"}
+
+        """.utf8)
+        let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(data))
+        XCTAssertEqual(cards.map(\.id), ["r1", "r3"])
+        XCTAssertTrue(cards[0].isPool)
+        XCTAssertEqual(cards[0].step, "install")  // the slowest Mac sets the pace
+        XCTAssertEqual(cards[0].state, "running")
+        XCTAssertEqual(cards[0].progress ?? 0, 0.6, accuracy: 0.001)
+        XCTAssertFalse(cards[1].isPool)
+        XCTAssertEqual(cards[1].endpoint, "http://100.1.2.3:8001/v1")
+    }
+
+    func testPoolFailureShowsTheFailedMac() {
+        let data = Data("""
+        {"id":"r1","targetHostId":"h1","modelId":"big","state":"failed","step":"pool","detail":"Another Mac in the pool could not take part.","poolId":"p1","poolRank":0,"poolSize":2}
+        {"id":"r2","targetHostId":"h2","modelId":"big","state":"failed","step":"install","detail":"download failed","poolId":"p1","poolRank":1,"poolSize":2}
+
+        """.utf8)
+        let card = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(data))[0]
+        XCTAssertEqual(card.state, "failed")
+        XCTAssertEqual(card.detail, "download failed")
+        XCTAssertEqual(card.step, "install")
+    }
+
+    func testPoolStageIndex() {
+        XCTAssertEqual(RemoteInferenceStages.index(of: "pool"), 3)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
+        XCTAssertEqual(RemoteInferenceStages.label("running", "pool"), "waiting for the others")
     }
 }

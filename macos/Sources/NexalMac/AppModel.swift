@@ -412,6 +412,8 @@ final class AppModel: ObservableObject {
         switch command {
         case let .remoteInferenceServe(modelId, hostId):
             guard InferenceModelID.isValid(modelId), RemoteInferenceID.isValid(hostId) else { throw InferenceInstallError.invalidModelID }
+        case let .remoteInferencePool(modelId, hostIds):
+            guard InferenceModelID.isValid(modelId), hostIds.count >= 2, hostIds.count <= 8, hostIds.allSatisfy(RemoteInferenceID.isValid) else { throw InferenceInstallError.invalidModelID }
         case let .remoteInferenceStop(id):
             guard RemoteInferenceID.isValid(id) else { throw InferenceInstallError.invalidModelID }
         case let .remoteInferenceTest(endpoint):

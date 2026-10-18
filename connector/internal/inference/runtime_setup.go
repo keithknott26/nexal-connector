@@ -92,6 +92,8 @@ func ExecCommander(ctx context.Context, name string, args ...string) ([]byte, er
 
 // RuntimeSetup creates the environment.
 type RuntimeSetup struct {
+	// Pool sets up the separate, newer environment that multi-Mac pooling needs.
+	Pool         bool
 	InferenceDir string
 	GOOS, GOARCH string
 	Run          Commander
@@ -137,7 +139,7 @@ func (s *RuntimeSetup) Setup(ctx context.Context) (err error) {
 	if err := os.MkdirAll(s.InferenceDir, 0o700); err != nil {
 		return err
 	}
-	py := VenvPython(s.InferenceDir)
+	py := s.python()
 	check := func() error {
 		out, err := run(ctx, py, "-c", "import mlx.core, mlx_lm; print(mlx_lm.__version__)")
 		if err != nil {
@@ -145,7 +147,7 @@ func (s *RuntimeSetup) Setup(ctx context.Context) (err error) {
 		}
 		return nil
 	}
-	if CheckRuntime(s.InferenceDir).Ready && check() == nil {
+	if s.status().Ready && check() == nil {
 		s.step("ready", "The AI runtime is already set up")
 		s.emit(SetupEvent{Event: "done"})
 		return nil
@@ -179,13 +181,13 @@ func (s *RuntimeSetup) Setup(ctx context.Context) (err error) {
 	}
 
 	s.step("venv", "Creating the private environment")
-	_ = os.RemoveAll(VenvDir(s.InferenceDir))
-	if out, err := run(ctx, base, "-m", "venv", VenvDir(s.InferenceDir)); err != nil {
+	_ = os.RemoveAll(s.venv())
+	if out, err := run(ctx, base, "-m", "venv", s.venv()); err != nil {
 		return errf("venv_failed", "check free disk space and try again", "could not create the environment: %s", tail(out))
 	}
 
 	s.step("packages", "Downloading MLX (about 200 MB)")
-	args := append([]string{"-m", "pip", "install", "--disable-pip-version-check", "--no-input", "--only-binary=:all:"}, RuntimePackages()...)
+	args := append([]string{"-m", "pip", "install", "--disable-pip-version-check", "--no-input", "--only-binary=:all:"}, s.packages()...)
 	if out, err := run(ctx, py, args...); err != nil {
 		return errf("pip_failed", "check the internet connection and try again", "installing the MLX packages failed: %s", tail(out))
 	}
@@ -194,8 +196,8 @@ func (s *RuntimeSetup) Setup(ctx context.Context) (err error) {
 	if err := check(); err != nil {
 		return errf("runtime_broken", "set it up again; if this repeats, send a diagnostics report", "MLX was installed but does not load: %v", err)
 	}
-	marker, _ := json.Marshal(map[string]string{"MLX": RuntimeMLXVersion, "MLXLM": RuntimeMLXLMVersion, "Transformers": RuntimeTransformersVersion, "Python": base})
-	if err := os.WriteFile(runtimeMarker(s.InferenceDir), marker, 0o600); err != nil {
+	marker, _ := json.Marshal(s.versions(base))
+	if err := os.WriteFile(s.markerPath(), marker, 0o600); err != nil {
 		return err
 	}
 	s.emit(SetupEvent{Event: "done"})

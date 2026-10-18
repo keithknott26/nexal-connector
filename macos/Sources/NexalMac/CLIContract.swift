@@ -86,6 +86,8 @@ enum CLICommand {
     case inferenceServe(modelId: String, port: Int)
     /// `nexal inference remote-serve <id> --to <host> --json`: asks another Mac on this network to install and serve a model.
     case remoteInferenceServe(modelId: String, hostId: String)
+    /// `nexal inference remote-serve <id> --pool a,b --json`: several Macs serve one model together; the first answers.
+    case remoteInferencePool(modelId: String, hostIds: [String])
     /// `nexal inference remote-list --json`: recent remote-serve requests (one JSON object per line).
     case remoteInferenceList
     /// `nexal inference remote-stop <request> --json`: cancels a request and the server it started.
@@ -207,6 +209,8 @@ enum CLICommand {
             command = ["inference", "serve", modelId, "--host", "127.0.0.1", "--port", String(port)]
         case let .remoteInferenceServe(modelId, hostId):
             command = ["inference", "remote-serve", modelId, "--to", hostId, "--json"]
+        case let .remoteInferencePool(modelId, hostIds):
+            command = ["inference", "remote-serve", modelId, "--pool", hostIds.joined(separator: ","), "--json"]
         case .remoteInferenceList:
             command = ["inference", "remote-list", "--json"]
         case let .remoteInferenceStop(requestId):

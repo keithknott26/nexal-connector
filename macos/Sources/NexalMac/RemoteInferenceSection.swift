@@ -24,6 +24,10 @@ struct RemoteInferenceRequest: Decodable, Identifiable, Equatable {
     let endpoint: String?
     /// 0...1 while the model downloads on the other Mac.
     let progress: Double?
+    /// Set when several Macs serve the model together; rank 0 answers.
+    let poolId: String?
+    let poolRank: Int?
+    let poolSize: Int?
 
     var isDone: Bool { state == "ready" || state == "failed" || state == "cancelled" }
     static func decodeLines(_ data: Data) -> [RemoteInferenceRequest] {
@@ -41,6 +45,46 @@ struct RemoteInferenceTestResult: Decodable, Equatable {
     let tokensPerSec: Double
     let reply: String
     let capabilityOk: Bool
+}
+
+/// What the list shows: one request to one Mac, or a pool (several requests with the same pool id) as a single card.
+struct RemoteInferenceCard: Identifiable, Equatable {
+    struct Member: Equatable { let hostId: String; let state: String; let step: String?; let detail: String? }
+    /// The request to stop or test: the single request, or rank 0 of a pool (stopping it stops the whole pool).
+    let id: String
+    let modelId: String
+    let state: String
+    let step: String?
+    let detail: String?
+    let endpoint: String?
+    let progress: Double?
+    let members: [Member]
+    var isPool: Bool { members.count > 1 }
+
+    static func cards(_ requests: [RemoteInferenceRequest]) -> [RemoteInferenceCard] {
+        var order: [String] = []
+        var groups: [String: [RemoteInferenceRequest]] = [:]
+        for r in requests where r.state != "cancelled" {
+            let key = r.poolId ?? r.id
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(r)
+        }
+        return order.compactMap { key -> RemoteInferenceCard? in
+            guard let group = groups[key]?.sorted(by: { ($0.poolRank ?? 0) < ($1.poolRank ?? 0) }), let lead = group.first else { return nil }
+            let members = group.map { Member(hostId: $0.targetHostId, state: $0.state, step: $0.step, detail: $0.detail) }
+            if group.count == 1 {
+                return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: lead.state, step: lead.step, detail: lead.detail, endpoint: lead.endpoint, progress: lead.progress, members: members)
+            }
+            // Show the Mac that really failed, not the others that stopped because of it.
+            let failed = group.first { $0.state == "failed" && $0.step != "pool" } ?? group.first { $0.state == "failed" }
+            // The slowest Mac sets the pace: show its step and detail.
+            let slowest = group.filter { !$0.isDone }.min { (RemoteInferenceStages.index(of: $0.step) ?? -1) < (RemoteInferenceStages.index(of: $1.step) ?? -1) }
+            let state = failed != nil ? "failed" : lead.state == "ready" ? "ready" : group.allSatisfy { $0.state == "pending" } ? "pending" : "running"
+            let progress = group.map { $0.progress ?? ($0.state == "ready" ? 1 : 0) }.reduce(0, +) / Double(group.count)
+            return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: state, step: (failed ?? slowest)?.step, detail: (failed ?? slowest)?.detail,
+                                       endpoint: lead.endpoint, progress: state == "running" ? progress : nil, members: members)
+        }
+    }
 }
 
 @MainActor
@@ -91,21 +135,37 @@ final class RemoteInferenceModel: ObservableObject {
         }
     }
 
-    func stop(_ r: RemoteInferenceRequest, app: AppModel) {
+    /// Online Macs that can join a pool, the one with the most memory first (it answers).
+    var poolMembers: [InferenceReport.Machine] {
+        allMachines.filter { $0.online && $0.hostId?.isEmpty == false }.sorted { $0.totalMemoryBytes > $1.totalMemoryBytes }
+    }
+
+    func servePool(modelId: String, app: AppModel) {
+        let ids = poolMembers.compactMap(\.hostId)
+        guard ids.count >= 2 else { problem = "A pool needs at least two Macs that are online."; return }
+        busy = true; problem = nil
         Task {
-            do { _ = try await app.remoteInference(.remoteInferenceStop(requestId: r.id)); await refresh(app) }
+            defer { busy = false }
+            do { _ = try await app.remoteInference(.remoteInferencePool(modelId: modelId, hostIds: Array(ids.prefix(8)))); await refresh(app) }
+            catch { problem = "Could not start the pool: \(error.localizedDescription)" }
+        }
+    }
+
+    func stop(_ id: String, app: AppModel) {
+        Task {
+            do { _ = try await app.remoteInference(.remoteInferenceStop(requestId: id)); await refresh(app) }
             catch { problem = "Could not stop it: \(error.localizedDescription)" }
         }
     }
 
-    func test(_ r: RemoteInferenceRequest, app: AppModel) {
-        guard let endpoint = r.endpoint else { return }
-        testing.insert(r.id); problem = nil
+    func test(id: String, endpoint: String?, app: AppModel) {
+        guard let endpoint else { return }
+        testing.insert(id); problem = nil
         Task {
-            defer { testing.remove(r.id) }
+            defer { testing.remove(id) }
             do {
                 let data = try await app.remoteInference(.remoteInferenceTest(endpoint: endpoint))
-                results[r.id] = try JSONDecoder().decode(RemoteInferenceTestResult.self, from: data)
+                results[id] = try JSONDecoder().decode(RemoteInferenceTestResult.self, from: data)
             } catch { problem = "The test failed: \(error.localizedDescription)" }
         }
     }
@@ -122,6 +182,23 @@ struct RemoteInferenceContent: View {
     private func name(_ id: String) -> String {
         guard let m = remote.allMachines.first(where: { $0.hostId == id }) else { return "another Mac" }
         return m.isSelf ? "this Mac" : m.name
+    }
+
+    @ViewBuilder private var poolControls: some View {
+        let members = remote.poolMembers
+        if members.count >= 2 {
+            let running = RemoteInferenceCard.cards(remote.requests).contains { $0.isPool && $0.modelId == modelId && $0.state != "failed" }
+            let memory = ByteCountFormatter.string(fromByteCount: Int64(members.reduce(UInt64(0)) { $0 + $1.totalMemoryBytes }), countStyle: .memory)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("POOL YOUR MACS").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
+                Text("Spread one model over \(members.count) online Macs (\(members.map(\.name).joined(separator: ", ")); \(memory) memory together). Worth it for a model too big for one Mac; each word is slower than on a single Mac.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Pool \(members.count) Macs") { remote.servePool(modelId: modelId, app: app) }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .disabled(remote.busy || running)
+                    .help(running ? "This model is already running on a pool." : "Run the selected model on all online Macs together.")
+            }
+        }
     }
 
     var body: some View {
@@ -144,10 +221,11 @@ struct RemoteInferenceContent: View {
                         .disabled(remote.busy || hostId.isEmpty)
                 }
             }
+            poolControls
             if let p = remote.problem {
                 Label(p, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
-            ForEach(remote.requests.filter { $0.state != "cancelled" }) { r in row(r) }
+            ForEach(RemoteInferenceCard.cards(remote.requests)) { c in row(c) }
         }
         .task {
             remote.loadMachines(app)
@@ -161,58 +239,79 @@ struct RemoteInferenceContent: View {
         .onDisappear { remote.stopPolling() }
     }
 
-    @ViewBuilder private func row(_ r: RemoteInferenceRequest) -> some View {
+    @ViewBuilder private func row(_ c: RemoteInferenceCard) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("\(r.modelId) on \(name(r.targetHostId))").font(.caption.weight(.semibold))
+                Text(title(c)).font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                switch r.state {
+                switch c.state {
                 case "ready": Label("Serving", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
                 case "failed": Label("Failed", systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)
                 default: ProgressView().controlSize(.small)
                 }
             }
-            if r.state == "running" || r.state == "pending" {
-                if let f = r.progress, r.state == "running" {
+            if c.state == "running" || c.state == "pending" {
+                if let f = c.progress, c.state == "running" {
                     HStack(spacing: 6) {
                         ProgressView(value: min(max(f, 0), 1))
                         Text("\(Int(min(max(f, 0), 1) * 100))%").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Progress")
+                    .accessibilityValue("\(Int(min(max(f, 0), 1) * 100)) percent")
                 } else {
                     ProgressView().progressViewStyle(.linear)
                 }
             }
-            if r.state != "ready" && r.state != "pending" { stepsView(r) }
-            if let d = r.detail, r.state != "ready" { Text(d).font(.caption2).foregroundStyle(r.state == "failed" ? .red : .secondary).textSelection(.enabled) }
-            if r.state == "pending" { Text("Waiting for that Mac to pick this up…").font(.caption2).foregroundStyle(.secondary) }
-            if r.state == "ready", let e = r.endpoint {
+            if c.state != "ready" && c.state != "pending" { stepsView(c) }
+            if let d = c.detail, c.state != "ready" { Text(d).font(.caption2).foregroundStyle(c.state == "failed" ? .red : .secondary).textSelection(.enabled) }
+            if c.state == "pending" { Text(c.isPool ? "Waiting for the Macs in the pool to pick this up…" : "Waiting for that Mac to pick this up…").font(.caption2).foregroundStyle(.secondary) }
+            if c.isPool && c.state != "ready" { memberLines(c) }
+            if c.state == "ready", let e = c.endpoint {
                 HStack {
                     Text(e).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
                     Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(e, forType: .string) }
                         .buttonStyle(.link).font(.caption2)
                 }
                 HStack {
-                    Button(remote.testing.contains(r.id) ? "Testing…" : "Test speed & capability") { remote.test(r, app: app) }
-                        .controlSize(.small).disabled(remote.testing.contains(r.id))
-                    if remote.testing.contains(r.id) { ProgressView().controlSize(.small) }
+                    Button(remote.testing.contains(c.id) ? "Testing…" : "Test speed & capability") { remote.test(id: c.id, endpoint: c.endpoint, app: app) }
+                        .controlSize(.small).disabled(remote.testing.contains(c.id))
+                    if remote.testing.contains(c.id) { ProgressView().controlSize(.small) }
                 }
-                if let t = remote.results[r.id] { resultView(t) }
+                if let t = remote.results[c.id] { resultView(t) }
             }
-            Button(r.state == "failed" ? "Dismiss" : "Stop", role: .destructive) { remote.stop(r, app: app) }
+            Button(c.state == "failed" ? "Dismiss" : (c.isPool ? "Stop pool" : "Stop"), role: .destructive) { remote.stop(c.id, app: app) }
                 .controlSize(.small)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
     }
 
+    private func title(_ c: RemoteInferenceCard) -> String {
+        c.isPool ? "\(c.modelId) across \(c.members.map { name($0.hostId) }.joined(separator: ", "))" : "\(c.modelId) on \(name(c.members[0].hostId))"
+    }
+
+    /// One line per Mac in a pool while it is coming up, so a slow or failed Mac is easy to spot.
+    @ViewBuilder private func memberLines(_ c: RemoteInferenceCard) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(Array(c.members.enumerated()), id: \.offset) { _, m in
+                HStack(spacing: 4) {
+                    Image(systemName: m.state == "failed" ? "xmark.circle.fill" : m.state == "ready" ? "checkmark.circle.fill" : "circle.dotted")
+                        .foregroundStyle(m.state == "failed" ? .red : m.state == "ready" ? .green : .secondary)
+                    Text("\(name(m.hostId)): \(RemoteInferenceStages.label(m.state, m.step))").foregroundStyle(.secondary)
+                }
+            }
+        }.font(.caption2)
+    }
+
     /// The stages of a request, in order. `RemoteInferenceStages.index(of:)` maps the step the other Mac reports.
-    @ViewBuilder private func stepsView(_ r: RemoteInferenceRequest) -> some View {
-        let current = RemoteInferenceStages.index(of: r.step)
-        let failed = r.state == "failed"
+    @ViewBuilder private func stepsView(_ c: RemoteInferenceCard) -> some View {
+        let current = RemoteInferenceStages.index(of: c.step)
+        let failed = c.state == "failed"
         HStack(spacing: 10) {
-            ForEach(Array(RemoteInferenceStages.all.enumerated()), id: \.offset) { i, title in
+            ForEach(Array((c.isPool ? RemoteInferenceStages.pool : RemoteInferenceStages.all).enumerated()), id: \.offset) { i, title in
                 HStack(spacing: 3) {
-                    if let c = current, i < c {
+                    if let cur = current, i < cur {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                     } else if current == i {
                         Image(systemName: failed ? "xmark.circle.fill" : "circle.dotted").foregroundStyle(failed ? .red : .accentColor)
@@ -239,6 +338,22 @@ struct RemoteInferenceContent: View {
 /// The stages the other Mac goes through, matching the steps its connector reports.
 enum RemoteInferenceStages {
     static let all = ["Runtime", "Check", "Download", "Verify", "Start"]
+    /// A pool waits for the other Macs where a single Mac verifies.
+    static let pool = ["Runtime", "Check", "Download", "Join pool", "Start"]
     private static let keys = ["setup", "pin", "install", "verify", "serve"]
-    static func index(of step: String?) -> Int? { step.flatMap { keys.firstIndex(of: $0) } }
+    /// A short phrase for what one Mac in a pool is doing.
+    static func label(_ state: String, _ step: String?) -> String {
+        if state == "ready" { return "ready" }
+        if state == "failed" { return "failed" }
+        if state == "pending" { return "waiting" }
+        switch step {
+        case "setup": return "preparing the runtime"
+        case "pin": return "checking the model"
+        case "install": return "downloading"
+        case "pool": return "waiting for the others"
+        case "serve": return "loading the model"
+        default: return "working"
+        }
+    }
+    static func index(of step: String?) -> Int? { step == "pool" ? 3 : step.flatMap { keys.firstIndex(of: $0) } }
 }

@@ -33,7 +33,7 @@ type RemoteTestResult struct {
 func ValidateRemoteEndpoint(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return nil, errors.New("endpoint must look like http://<neXal address>:8080/v1")
+		return nil, errors.New("endpoint must look like http://<neXal address>:8001/v1")
 	}
 	ip := net.ParseIP(u.Hostname())
 	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")

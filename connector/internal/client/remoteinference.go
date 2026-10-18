@@ -61,6 +61,24 @@ func (c *Client) CreateRemoteInference(ctx context.Context, hostID, targetHostID
 	return &out, nil
 }
 
+// CreateRemoteInferencePool asks several Macs to serve modelID together; the first one answers.
+func (c *Client) CreateRemoteInferencePool(ctx context.Context, hostID string, targetHostIDs []string, modelID string) ([]remoteinference.Task, error) {
+	p, err := remoteInferencePath(hostID, "remote-inference")
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Tasks []remoteinference.Task `json:"tasks"`
+	}
+	if err := c.callLenient(ctx, "POST", p, map[string]any{"targetHostIds": targetHostIDs, "modelId": modelID}, &out); err != nil {
+		return nil, err
+	}
+	if len(out.Tasks) == 0 {
+		return nil, errors.New("the coordinator did not return the pool")
+	}
+	return out.Tasks, nil
+}
+
 // ReportRemoteInference is POST .../remote-inference-state (the target Mac only).
 func (c *Client) ReportRemoteInference(ctx context.Context, hostID string, r remoteinference.Report) error {
 	p, err := remoteInferencePath(hostID, "remote-inference-state")

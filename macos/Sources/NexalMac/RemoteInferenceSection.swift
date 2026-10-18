@@ -94,6 +94,8 @@ final class RemoteInferenceModel: ObservableObject {
     @Published var allMachines: [InferenceReport.Machine] = []
     @Published var requests: [RemoteInferenceRequest] = []
     @Published var problem: String?
+    /// Models that install with one click on this build; nil until known.
+    @Published var reviewed: Set<String>?
     @Published var busy = false
     @Published var testing: Set<String> = []
     @Published var results: [String: RemoteInferenceTestResult] = [:]
@@ -101,6 +103,7 @@ final class RemoteInferenceModel: ObservableObject {
 
     func loadMachines(_ app: AppModel) {
         Task {
+            reviewed = await app.reviewedModelIDs()
             do {
                 let report = try InferenceReport.decode(try await app.inferencePreflight())
                 allMachines = report.machines
@@ -201,6 +204,11 @@ struct RemoteInferenceContent: View {
         }
     }
 
+    private var models: [QuickStartModel] {
+        guard let reviewed = remote.reviewed else { return InferenceQuickStart.models }
+        return InferenceQuickStart.models.filter { reviewed.contains($0.id) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("RUN A MODEL ON ANOTHER MAC").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
@@ -214,7 +222,7 @@ struct RemoteInferenceContent: View {
                         ForEach(remote.machines) { Text($0.name + ($0.online ? "" : " (offline)")).tag($0.hostId ?? "") }
                     }.labelsHidden().frame(maxWidth: 180)
                     Picker("Model", selection: $modelId) {
-                        ForEach(InferenceQuickStart.models) { Text($0.title).tag($0.id) }
+                        ForEach(models) { Text($0.title).tag($0.id) }
                     }.labelsHidden().frame(maxWidth: 160)
                     Button("Run there") { remote.serve(modelId: modelId, hostId: hostId, app: app) }
                         .buttonStyle(.borderedProminent).controlSize(.small)
@@ -230,6 +238,9 @@ struct RemoteInferenceContent: View {
         .task {
             remote.loadMachines(app)
             remote.startPolling(app)
+        }
+        .onChange(of: remote.reviewed) { _, _ in
+            if !models.contains(where: { $0.id == modelId }), let first = models.first { modelId = first.id }
         }
         .onChange(of: remote.machines) { _, list in
             if hostId.isEmpty || !list.contains(where: { $0.hostId == hostId }) {

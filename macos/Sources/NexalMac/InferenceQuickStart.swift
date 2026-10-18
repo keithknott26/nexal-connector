@@ -59,10 +59,8 @@ final class InferenceQuickStart: ObservableObject {
                 if stopping { phase = .idle; return }
 
                 if !installedIDs.contains(id) {
-                    phase = .working(model: id, step: "Checking the model files (this reads every file once)…", fraction: nil)
-                    try await step(.inferencePinLatest(modelId: id), model: model) { _ in }
-                    if stopping { phase = .idle; return }
-
+                    // The app ships a reviewed commit and file hashes for each model, so there is nothing to pin:
+                    // the download is checked against them as it arrives.
                     var progress = InstallProgress(modelId: id)
                     var failure: (code: String, message: String)?
                     phase = .working(model: id, step: "Downloading the model…", fraction: nil)
@@ -74,6 +72,7 @@ final class InferenceQuickStart: ObservableObject {
                     }
                     if stopping { phase = .idle; return }
                     if result.status != 0 && failure?.code != "already_installed" {
+                        if failure?.code == "not_installable" { throw QuickStartError(Self.notReviewed) }
                         throw QuickStartError(failure?.message ?? result.reason ?? "The download stopped without saying why.")
                     }
                 }
@@ -87,6 +86,8 @@ final class InferenceQuickStart: ObservableObject {
             }
         }
     }
+
+    static let notReviewed = "This model has not been reviewed for this version of neXal yet. Update neXal, or pick another model."
 
     // MARK: Plumbing
 
@@ -136,6 +137,13 @@ struct InferenceQuickStartView: View {
     @EnvironmentObject private var model: AppModel
     let installedIDs: Set<String>
     let refresh: () -> Void
+    /// Models with a reviewed commit in this build; nil until known (then every model is shown).
+    @State private var reviewed: Set<String>? = nil
+
+    private var shown: [QuickStartModel] {
+        guard let reviewed else { return InferenceQuickStart.models }
+        return InferenceQuickStart.models.filter { reviewed.contains($0.id) || installedIDs.contains($0.id) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -169,7 +177,11 @@ struct InferenceQuickStartView: View {
             case .idle:
                 EmptyView()
             }
-            ForEach(InferenceQuickStart.models) { item in
+            if shown.isEmpty {
+                Text("No model has been reviewed for this version of neXal yet. Update neXal to get the next set.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(shown) { item in
                 HStack {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(item.title).font(.callout)
@@ -184,5 +196,6 @@ struct InferenceQuickStartView: View {
                 }
             }
         }
+        .task { reviewed = await model.reviewedModelIDs() }
     }
 }

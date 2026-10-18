@@ -27,7 +27,7 @@ import (
 // All of the logic lives in internal/inference, where it is tested with fake
 // sources; this file only wires the real ones. See CLI-CONTRACT.md.
 func inferenceCommand(ctx context.Context, args []string) error {
-	const usage = "usage: nexal inference preflight|setup|pin|install|serve|status|verify|remove|remote-serve|remote-list|remote-stop|remote-test|pool-setup|pool-serve (see connector/CLI-CONTRACT.md)"
+	const usage = "usage: nexal inference preflight|setup|pin|install|serve|status|verify|remove|remote-serve|remote-list|remote-stop|remote-test|pool-setup|pool-serve|reviewed|review-latest|review (see connector/CLI-CONTRACT.md)"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -48,6 +48,12 @@ func inferenceCommand(ctx context.Context, args []string) error {
 		return inferenceVerify(ctx, args[1:])
 	case "remote-serve", "remote-list", "remote-stop":
 		return inferenceRemote(ctx, args)
+	case "review-latest":
+		return inferenceReviewLatest(ctx, args[1:])
+	case "review":
+		return inferenceReview(ctx, args[1:])
+	case "reviewed":
+		return inferenceReviewed(ctx, args[1:])
 	case "pool-setup":
 		return inferencePoolSetup(ctx, args[1:])
 	case "pool-serve":

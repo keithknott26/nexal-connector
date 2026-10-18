@@ -217,12 +217,16 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		args        []string
 	}{
 		{"setup", "Preparing the AI runtime", 0.02, []string{setup}},
-		{"pin", "Checking " + t.ModelID, 0.08, []string{"pin", t.ModelID, "--latest"}},
+		{"pin", "Checking " + t.ModelID, 0.08, nil}, // the reviewed version ships with the app: nothing to pin
 		{"install", "Downloading " + t.ModelID, 0.12, []string{"install", t.ModelID, "--local"}},
 	} {
 		start := step.start
 		// A model already on this Mac needs neither a new pin (which would re-read every file) nor a download.
-		if (step.name == "pin" || step.name == "install") && r.installed(ctx, t.ModelID) {
+		if step.name == "pin" {
+			r.reportP(ctx, t, "running", step.name, "Using the reviewed version of "+t.ModelID, "", &start)
+			continue
+		}
+		if step.name == "install" && r.installed(ctx, t.ModelID) {
 			have := 0.85
 			r.reportP(ctx, t, "running", step.name, t.ModelID+" is already on this Mac", "", &have)
 			continue
@@ -341,6 +345,9 @@ func (r *Runner) install(ctx context.Context, t Task, args []string) string {
 				continue
 			}
 			failure = ev.Message
+			if ev.Code == "not_installable" {
+				failure = "This model has not been reviewed for this version of neXal yet. Update neXal on that Mac, or pick another model."
+			}
 		case "progress":
 			if ev.OverallTotal <= 0 {
 				continue

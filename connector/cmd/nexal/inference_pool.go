@@ -93,3 +93,30 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 	}
 	return nil
 }
+
+// inferenceReviewed is `nexal inference reviewed [--json]`: the models this build can install with one
+// click, because a reviewed commit and file hashes ship with it (or the owner pinned them).
+func inferenceReviewed(ctx context.Context, args []string) error {
+	var asJSON *bool
+	_, _, path, err := parseModelArgs("reviewed", args, false, func(f *flag.FlagSet) {
+		asJSON = f.Bool("json", false, "print one JSON document")
+	})
+	if err != nil {
+		return err
+	}
+	c, err := inference.LoadCatalogWithPins(inferenceDirOf(*path))
+	if err != nil {
+		return coded(err)
+	}
+	models := inference.ReviewedModels(c)
+	if *asJSON {
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"schemaVersion": 1, "models": models})
+	}
+	if len(models) == 0 {
+		writeLine(os.Stdout, "No model has been reviewed for this version yet.")
+	}
+	for _, m := range models {
+		writeLine(os.Stdout, "%s  %s  %s", m.ID, m.Revision, m.DisplayName)
+	}
+	return nil
+}

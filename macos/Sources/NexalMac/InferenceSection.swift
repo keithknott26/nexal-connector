@@ -211,6 +211,7 @@ struct InferenceSection: View {
                 InferenceQuickStartView(installedIDs: installedModelIDs) { installed.refresh(model) }
                 Divider()
                 RemoteInferenceContent()
+                ModelReviewView()
                 Divider()
                 Text(InferencePresentation.intro)
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

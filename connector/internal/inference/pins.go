@@ -160,12 +160,20 @@ func MergePins(c CatalogFile, p *PinsFile) (CatalogFile, error) {
 	return out, nil
 }
 
-// LoadCatalogWithPins loads the embedded catalog and merges
-// <inferenceDir>/pins.json over it.
+// LoadCatalogWithPins loads the embedded catalog, merges the reviewed pins shipped with the app, then
+// <inferenceDir>/pins.json over them.
 func LoadCatalogWithPins(inferenceDir string) (CatalogFile, error) {
 	c, err := LoadCatalog()
 	if err != nil {
 		return CatalogFile{}, err
+	}
+	// The reviewed pins shipped with the app first, then the owner's own pins.json over them.
+	rev, err := ReviewedPins()
+	if err != nil {
+		return CatalogFile{}, fmt.Errorf("reviewed pins: %w", err)
+	}
+	if c, err = MergePins(c, rev); err != nil {
+		return CatalogFile{}, fmt.Errorf("reviewed pins: %w", err)
 	}
 	p, err := LoadPins(PinsPath(inferenceDir))
 	if err != nil {

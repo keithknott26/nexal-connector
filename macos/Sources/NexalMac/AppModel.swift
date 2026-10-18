@@ -355,6 +355,34 @@ final class AppModel: ObservableObject {
     }
 
     /// `nexal inference status --json`. Decode with `InferenceInstalledReport.decode`.
+    /// Maintainers: the commit a model's repository points at now, and what the build already ships for it.
+    func reviewLatest(modelId: String) async throws -> Data {
+        guard InferenceModelID.isValid(modelId) else { throw InferenceInstallError.invalidModelID }
+        return try await invoke(.inferenceReviewLatest(modelId: modelId))
+    }
+
+    /// The commit the build ships for each reviewed model, by model id. Nil when the list cannot be read.
+    func reviewedRevisions() async -> [String: String]? {
+        struct List: Decodable { struct M: Decodable { let id: String; let revision: String }; let models: [M] }
+        guard let data = try? await invoke(.inferenceReviewed), let list = try? JSONDecoder().decode(List.self, from: data) else { return nil }
+        return Dictionary(list.models.map { ($0.id, $0.revision) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The command for reviewing one commit, validated: a full lowercase 40-hex commit and the reviewed-pins.json to update.
+    func reviewCommand(modelId: String, revision: String, out: String) throws -> CLICommand {
+        let hex = Set("0123456789abcdef")
+        guard InferenceModelID.isValid(modelId), revision.count == 40, revision.allSatisfy({ hex.contains($0) }),
+              out.hasSuffix("/reviewed-pins.json"), FileManager.default.fileExists(atPath: out) else { throw InferenceInstallError.invalidModelID }
+        return .inferenceReview(modelId: modelId, revision: revision, out: out)
+    }
+
+    /// The ids of the models that install with one click in this build. Nil when the list cannot be read.
+    func reviewedModelIDs() async -> Set<String>? {
+        struct List: Decodable { struct M: Decodable { let id: String }; let models: [M] }
+        guard let data = try? await invoke(.inferenceReviewed), let list = try? JSONDecoder().decode(List.self, from: data) else { return nil }
+        return Set(list.models.map(\.id))
+    }
+
     func inferenceStatus() async throws -> Data {
         try await invoke(.inferenceStatus)
     }

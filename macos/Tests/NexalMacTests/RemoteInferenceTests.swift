@@ -9,6 +9,10 @@ final class RemoteInferenceTests: XCTestCase {
                        ["inference", "remote-serve", "qwen3-4b-q4", "--to", "host_1", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferencePool(modelId: "big-30b", hostIds: ["h1", "h2"]).arguments(config: config),
                        ["inference", "remote-serve", "big-30b", "--pool", "h1,h2", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.inferenceReviewed.arguments(config: config), ["inference", "reviewed", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.inferenceReviewLatest(modelId: "qwen3-4b-q4").arguments(config: config), ["inference", "review-latest", "qwen3-4b-q4", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.inferenceReview(modelId: "qwen3-4b-q4", revision: String(repeating: "a", count: 40), out: "/r/reviewed-pins.json").arguments(config: config),
+                       ["inference", "review", "qwen3-4b-q4", "--revision", String(repeating: "a", count: 40), "--out", "/r/reviewed-pins.json", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceList.arguments(config: config), ["inference", "remote-list", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceStop(requestId: "rinf_1").arguments(config: config),
                        ["inference", "remote-stop", "rinf_1", "--json", "--config", "/tmp/c.json"])
@@ -84,5 +88,13 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(RemoteInferenceStages.index(of: "pool"), 3)
         XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
         XCTAssertEqual(RemoteInferenceStages.label("running", "pool"), "waiting for the others")
+    }
+
+    func testReviewLatestDecodesAndOnlyOpensHuggingFace() throws {
+        let json = #"{"modelId":"m","hfRepo":"a/b","revision":"abc","license":"apache-2.0","gated":false,"commitUrl":"https://huggingface.co/a/b/commit/abc","reviewedRevision":"","upToDate":false}"#
+        let l = try JSONDecoder().decode(ReviewLatest.self, from: Data(json.utf8))
+        XCTAssertEqual(l.commitPage?.host, "huggingface.co")
+        let evil = json.replacingOccurrences(of: "https://huggingface.co", with: "https://evil.example")
+        XCTAssertNil(try JSONDecoder().decode(ReviewLatest.self, from: Data(evil.utf8)).commitPage)
     }
 }

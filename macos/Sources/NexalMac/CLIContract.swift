@@ -74,6 +74,12 @@ enum CLICommand {
     case inferenceInstallLocal(modelId: String)
     /// `nexal inference status --json`: the installed models.
     case inferenceStatus
+    /// `nexal inference reviewed --json`: the models this build installs with one click (a reviewed commit ships with the app).
+    case inferenceReviewed
+    /// `nexal inference review-latest <id> --json`: the commit a model's repository points at now (maintainers).
+    case inferenceReviewLatest(modelId: String)
+    /// `nexal inference review <id> --revision <sha> --out <reviewed-pins.json> --json`: hash that commit and add it to the shipped list.
+    case inferenceReview(modelId: String, revision: String, out: String)
     /// `nexal inference verify <id> --json`: re-hash an installed model's files.
     case inferenceVerify(modelId: String)
     /// `nexal inference remove <id> --yes --json`: delete an installed model's files.
@@ -118,6 +124,7 @@ enum CLICommand {
         // pip downloads about 200 MB; hashing a multi-GB pin reads every file; serving runs until stopped.
         if case .inferenceSetup = self { return 3600 }
         if case .inferencePinLatest = self { return 3600 }
+        if case .inferenceReview = self { return 3600 }
         if case .inferenceServe = self { return 7 * 24 * 3600 }
         if case .remoteInferenceTest = self { return 240 }
         return 20
@@ -197,6 +204,12 @@ enum CLICommand {
             command = ["inference", "install", modelId, "--local", "--json"]
         case .inferenceStatus:
             command = ["inference", "status", "--json"]
+        case .inferenceReviewed:
+            command = ["inference", "reviewed", "--json"]
+        case let .inferenceReviewLatest(modelId):
+            command = ["inference", "review-latest", modelId, "--json"]
+        case let .inferenceReview(modelId, revision, out):
+            command = ["inference", "review", modelId, "--revision", revision, "--out", out, "--json"]
         case let .inferenceVerify(modelId):
             command = ["inference", "verify", modelId, "--json"]
         case let .inferenceRemove(modelId):

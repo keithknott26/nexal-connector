@@ -244,3 +244,27 @@ func TestInstallTreatsAlreadyInstalledAsSuccess(t *testing.T) {
 		t.Fatal(msg)
 	}
 }
+
+func TestUnreviewedModelGetsAPlainMessage(t *testing.T) {
+	exe := script(t, `[ "$2" = install ] && { echo '{"event":"error","code":"not_installable","message":"x cannot be installed: not pinned: missing revision"}'; exit 1; }; exit 0`)
+	c := &fakeCoord{tasks: []Task{{ID: "rinf_u", ModelID: "x"}}}
+	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1" }}
+	r.Once(context.Background())
+	wait(t, func() bool { return c.last().State == "failed" })
+	if d := c.last().Detail; !strings.Contains(d, "not been reviewed") || strings.Contains(d, "pinned") {
+		t.Fatal(d)
+	}
+}
+
+func TestPinStepNeverRunsAPinCommand(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "calls")
+	exe := script(t, `echo "$2" >> `+log+`; [ "$2" = install ] && exit 1; exit 0`)
+	c := &fakeCoord{tasks: []Task{{ID: "rinf_n", ModelID: "x"}}}
+	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1" }}
+	r.Once(context.Background())
+	wait(t, func() bool { return c.last().State == "failed" })
+	b, _ := os.ReadFile(log)
+	if strings.Contains(string(b), "pin") {
+		t.Fatalf("calls:\n%s", b)
+	}
+}

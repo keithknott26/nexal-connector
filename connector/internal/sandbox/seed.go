@@ -606,9 +606,12 @@ kali)
   # other the solver reports ("X=1.2 is selected as a downgrade") is added the same way and the install
   # is tried again, so a library that Kali rolled back does not stop the install.
   PINS=""
-  EXPAT=$(apt-cache policy libexpat1 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
-  if [ -n "$EXPAT" ] && [ "$EXPAT" != "(none)" ]; then
+  # Not "apt-cache policy": its Candidate is the newer installed Debian build, which is the problem.
+  # madison lists every version with its source; the Kali line is the one to pin.
+  EXPAT=$(apt-cache madison libexpat1 2>/dev/null | awk '$5 ~ /kali/ || $0 ~ /kali\.org/ {print $3; exit}')
+  if [ -n "$EXPAT" ]; then
     PINS="libexpat1=$EXPAT libexpat1-dev=$EXPAT"
+    log "pinning libexpat1 to Kali's $EXPAT (installed: $(dpkg-query -W -f='${Version}' libexpat1 2>/dev/null))"
   fi
   # shellcheck disable=SC2086
   apt-get install -s -y --no-install-recommends --allow-downgrades $PINS $KALI_PKGS 2>/dev/null \

@@ -1,13 +1,16 @@
-/* macos/Sources/NexalMac/NetworkPanel.swift:563 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:578 */
 "%@ (this Mac)" = "%@ (this Mac)";
 
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:101 */
 "%@ alert%@ waiting to be sent" = "%@ alert%@ waiting to be sent";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1228 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:154 */
+"%@ is running" = "%@ is running";
+
+/* macos/Sources/NexalMac/NetworkPanel.swift:1244 */
 "%@ total" = "%@ total";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:305 */
+/* macos/Sources/NexalMac/InferenceSection.swift:315 */
 "%lld %lld verified" = "%lld %lld verified";
 
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:234 */
@@ -16,22 +19,22 @@
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:89 */
 "%lld · port %lld" = "%lld · port %lld";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1351 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1352 */
 "1 day" = "1 day";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1351 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1352 */
 "1 hour" = "1 hour";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1352 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1353 */
 "1 week" = "1 week";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1352 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1353 */
 "3 days" = "3 days";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:192 */
 "30 minutes" = "30 minutes";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1351 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1352 */
 "4 hours" = "4 hours";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:191 */
@@ -40,10 +43,13 @@
 /* macos/Sources/NexalMac/CanarySettingsView.swift:55 */
 "A decoy file changed. This is a warning sign, not a malware diagnosis. Check this Mac with your own security software, make sure it is up to date, and follow its advice." = "A decoy file changed. This is a warning sign, not a malware diagnosis. Check this Mac with your own security software, make sure it is up to date, and follow its advice.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:66 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:393 */
+"AVG" = "AVG";
+
+/* macos/Sources/NexalMac/NetworkPanel.swift:71 */
 "About neXal@home" = "About neXal@home";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:846 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:862 */
 "About post-quantum protection" = "About post-quantum protection";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:178 */
@@ -52,7 +58,7 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:188 */
 "Activity" = "Activity";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1055 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1071 */
 "Activity graphs" = "Activity graphs";
 
 /* macos/Sources/NexalMac/SharingServicesSettingsView.swift:77 */
@@ -85,46 +91,46 @@
 /* macos/Sources/NexalMac/L10n.swift:70 */
 "App language" = "App language";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:733 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:749 */
 "As reported by that computer. neXal does not separately check where traffic leaves the network." = "As reported by that computer. neXal does not separately check where traffic leaves the network.";
 
 /* macos/Sources/NexalMac/GuestAccess.swift:40 */
 "Ask %@ for a new invitation code to reconnect." = "Ask %@ for a new invitation code to reconnect.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1283 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1318 */
 "Asks for your Mac password once. Required for this Mac to join your network." = "Asks for your Mac password once. Required for this Mac to join your network.";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:146 */
 "Automatically start the connector when you sign in to your Mac." = "Automatically start the connector when you sign in to your Mac.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:716 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:732 */
 "Average runnable system workload over 1, 5 and 15 minutes. Compare with the computer’s core count; this is not CPU percent." = "Average runnable system workload over 1, 5 and 15 minutes. Compare with the computer’s core count; this is not CPU percent.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:474 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:489 */
 "Avg %@" = "Avg %@";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1103 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1119 */
 "Backing up to neXal" = "Backing up to neXal";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:931 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:947 */
 "Backing up to neXal Storage. Open Time Machine settings" = "Backing up to neXal Storage. Open Time Machine settings";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1080 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1096 */
 "Backup destination" = "Backup destination";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:531 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:546 */
 "Based on this Mac's link to neXal storage." = "Based on this Mac's link to neXal storage.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:334 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:339 */
 "Can be used as an exit node" = "Can be used as an exit node";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1355 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1356 */
 "Can reach" = "Can reach";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:288 */
 "Cancel" = "Cancel";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:308 */
+/* macos/Sources/NexalMac/InferenceSection.swift:318 */
 "Cancel download" = "Cancel download";
 
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:204 */
@@ -136,11 +142,14 @@
 /* macos/Sources/NexalMac/NetworkSetupCheck.swift:114 */
 "Check VM networking" = "Check VM networking";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1100 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1116 */
 "Check again" = "Check again";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:354 */
 "Check for updates automatically" = "Check for updates automatically";
+
+/* macos/Sources/NexalMac/InferenceSection.swift:219 */
+"Check readiness (advanced)" = "Check readiness (advanced)";
 
 /* macos/Sources/NexalMac/TimeMachineCredentialWindow.swift:60 */
 "Check that backup is turned on and this Mac is online, then close this window and try again." = "Check that backup is turned on and this Mac is online, then close this window and try again.";
@@ -151,22 +160,22 @@
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:793 */
 "Checking the dev-container runtime…" = "Checking the dev-container runtime…";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:414 */
+/* macos/Sources/NexalMac/InferenceSection.swift:424 */
 "Checking…" = "Checking…";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:356 */
 "Checks every few hours and asks before downloading or installing anything." = "Checks every few hours and asks before downloading or installing anything.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:966 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:967 */
 "Clear" = "Clear";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:185 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:191 */
 "Clear failed pairing and start over" = "Clear failed pairing and start over";
 
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:237 */
 "Close" = "Close";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:968 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:984 */
 "Connect" = "Connect";
 
 /* macos/Sources/NexalMac/TimeMachineCredentialWindow.swift:99 */
@@ -181,22 +190,22 @@
 /* macos/Sources/NexalMac/L10n.swift:4 */
 "Connected" = "Connected";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:208 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:214 */
 "Connected to the neXal@home network. %lld of %lld computers online." = "Connected to the neXal@home network. %lld of %lld computers online.";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:50 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:51 */
 "Connecting…" = "Connecting…";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:260 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:265 */
 "Connection unstable (%@ path changes in the last hour)" = "Connection unstable (%@ path changes in the last hour)";
 
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:98 */
 "Connections detected: %@ · Last: %@" = "Connections detected: %@ · Last: %@";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:72 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:77 */
 "Connector menu" = "Connector menu";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:449 */
+/* macos/Sources/NexalMac/InferenceSection.swift:459 */
 "Copy" = "Copy";
 
 /* macos/Sources/NexalMac/TimeMachineCredentialWindow.swift:129 */
@@ -214,7 +223,7 @@
 /* macos/Sources/NexalMac/TimeMachineCredentialWindow.swift:59 */
 "Could not retrieve credentials" = "Could not retrieve credentials";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:97 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:102 */
 "Could not show a pairing code. %@" = "Could not show a pairing code. %@";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:192 */
@@ -226,16 +235,16 @@
 /* macos/Sources/NexalMac/AppUpdate.swift:248 */
 "Couldn't open the downloaded disk image." = "Couldn't open the downloaded disk image.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:893 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:894 */
 "Create a virtual machine or development container" = "Create a virtual machine or development container";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1316 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1317 */
 "Create on" = "Create on";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1014 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1015 */
 "Delete (erases its disk)" = "Delete (erases its disk)";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1350 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1351 */
 "Delete after" = "Delete after";
 
 /* macos/Sources/NexalMac/SandboxInfo.swift:226 */
@@ -250,7 +259,7 @@
 /* macos/Sources/NexalMac/CoordinatorChoice.swift:17 */
 "Development" = "Development";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1328 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1329 */
 "Development container" = "Development container";
 
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:19 */
@@ -259,10 +268,10 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:200 */
 "Diagnostics" = "Diagnostics";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:419 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:436 */
 "Direct" = "Direct";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:322 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:166 */
 "Dismiss" = "Dismiss";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:176 */
@@ -274,13 +283,13 @@
 /* macos/Sources/NexalMac/PeerNames.swift:99 */
 "Double-click to rename" = "Double-click to rename";
 
-/* macos/Sources/NexalMac/SVGPanelHero.swift:135 */
+/* macos/Sources/NexalMac/SVGPanelHero.swift:144 */
 "Double-tap to %@" = "Double-tap to %@";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:480 */
+/* macos/Sources/NexalMac/InferenceSection.swift:490 */
 "Download and install" = "Download and install";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:339 */
+/* macos/Sources/NexalMac/InferenceSection.swift:349 */
 "Download cancelled. Nothing was installed; a partial download is kept so it can resume, and can be removed below." = "Download cancelled. Nothing was installed; a partial download is kept so it can resume, and can be removed below.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:324 */
@@ -298,13 +307,16 @@
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:33 */
 "Export diagnostics…" = "Export diagnostics…";
 
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:249 */
+"Failed" = "Failed";
+
 /* macos/Sources/NexalMac/MeshStatusView.swift:59 */
 "File Sharing: %@" = "File Sharing: %@";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1101 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1102 */
 "Files (SFTP)" = "Files (SFTP)";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:331 */
+/* macos/Sources/NexalMac/InferenceSection.swift:341 */
 "Fix: " = "Fix: ";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:169 */
@@ -313,13 +325,13 @@
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:210 */
 "Follow" = "Follow";
 
-/* macos/Sources/NexalMac/NexalMacApp.swift:462 */
+/* macos/Sources/NexalMac/NexalMacApp.swift:489 */
 "Fri 9:41" = "Fri 9:41";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:69 */
 "General" = "General";
 
-/* macos/Sources/NexalMac/NexalMacApp.swift:441 */
+/* macos/Sources/NexalMac/NexalMacApp.swift:468 */
 "Got it" = "Got it";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:190 */
@@ -349,34 +361,34 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:194 */
 "How much history the connector panel's activity graphs show. Remembered across launches." = "How much history the connector panel's activity graphs show. Remembered across launches.";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:551 */
+/* macos/Sources/NexalMac/InferenceSection.swift:561 */
 "How to use it" = "How to use it";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:351 */
+/* macos/Sources/NexalMac/InferenceSection.swift:361 */
 "INSTALLED MODELS" = "INSTALLED MODELS";
 
 /* macos/Sources/NexalMac/FullDiskAccessHelpView.swift:21 */
 "If neXal is missing, drag its icon into the list and enable it. Already enabled? Quit and reopen neXal, then retry." = "If neXal is missing, drag its icon into the list and enable it. Already enabled? Quit and reopen neXal, then retry.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:120 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:125 */
 "If scanning does not work, tap Pair manually on your iPhone and enter this code." = "If scanning does not work, tap Pair manually on your iPhone and enter this code.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1333 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1334 */
 "Image" = "Image";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:108 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:113 */
 "In neXal@home on your iPhone, choose “Pair a computer” and scan this code." = "In neXal@home on your iPhone, choose “Pair a computer” and scan this code.";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:472 */
+/* macos/Sources/NexalMac/InferenceSection.swift:482 */
 "Install %@?" = "Install %@?";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:200 */
 "Install and Relaunch" = "Install and Relaunch";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1278 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1313 */
 "Install secure networking service" = "Install secure networking service";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:475 */
+/* macos/Sources/NexalMac/InferenceSection.swift:485 */
 "Installing does not run the model. After the download this app tells you exactly what state it is in." = "Installing does not run the model. After the download this app tells you exactly what state it is in.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:328 */
@@ -385,25 +397,25 @@
 /* macos/Sources/NexalMac/GuestAccess.swift:46 */
 "Invitation code" = "Invitation code";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1311 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1312 */
 "It joins your private network like your other devices." = "It joins your private network like your other devices.";
 
 /* macos/Sources/NexalMac/GuestAccess.swift:49 */
 "Join with invitation" = "Join with invitation";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:379 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:391 */
 "LATENCY" = "LATENCY";
 
 /* macos/Sources/NexalMac/L10n.swift:68 */
 "Language" = "Language";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1347 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1348 */
 "Large · 8 CPU, 16 GB" = "Large · 8 CPU, 16 GB";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:471 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:486 */
 "Last 5 min" = "Last 5 min";
 
-/* macos/Sources/NexalMac/LatencyGauge.swift:58 */
+/* macos/Sources/NexalMac/LatencyGauge.swift:60 */
 "Latency" = "Latency";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:201 */
@@ -424,31 +436,37 @@
 /* macos/Sources/NexalMac/SandboxInfo.swift:245 */
 "Logs · %@" = "Logs · %@";
 
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:213 */
+"Mac" = "Mac";
+
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:253 */
 "Manage membership" = "Manage membership";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:284 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:289 */
 "Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your computers." = "Managed by neXal: encrypted storage that holds this network's Time Machine backups. Reachable only for backups (SMB), never into your computers.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:119 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:124 */
 "Manual pairing code %@" = "Manual pairing code %@";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:475 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:490 */
 "Max %@" = "Max %@";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1346 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1347 */
 "Medium · 4 CPU, 8 GB" = "Medium · 4 CPU, 8 GB";
 
 /* macos/Sources/NexalMac/MeshRuntimeCheck.swift:53 */
 "Mesh runtime out of date" = "Mesh runtime out of date";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:473 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:488 */
 "Min %@" = "Min %@";
+
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:216 */
+"Model" = "Model";
 
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:773 */
 "Most hosts at once: %@" = "Most hosts at once: %@";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1356 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1357 */
 "My computers" = "My computers";
 
 /* macos/Sources/NexalMac/NexalSplashView.swift:127 */
@@ -466,46 +484,49 @@
 /* macos/Sources/NexalMac/MacNetworkTopologyView.swift:36 */
 "Network topology" = "Network topology";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1310 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1311 */
 "New Virtual Machine or Development Container" = "New Virtual Machine or Development Container";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:130 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:135 */
 "New code" = "New code";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:888 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:889 */
 "New…" = "New…";
 
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:767 */
 "No limit on hosts at once" = "No limit on hosts at once";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:477 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:492 */
 "No measurements yet." = "No measurements yet.";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:359 */
+/* macos/Sources/NexalMac/InferenceSection.swift:369 */
 "No models installed." = "No models installed.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:158 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:210 */
+"No other Macs found on your network yet." = "No other Macs found on your network yet.";
+
+/* macos/Sources/NexalMac/NetworkPanel.swift:165 */
 "No other connections yet." = "No other connections yet.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:179 */
 "No releases are published yet." = "No releases are published yet.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1357 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1358 */
 "Nothing (isolated)" = "Nothing (isolated)";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:948 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:949 */
 "Nothing running" = "Nothing running";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:182 */
 "On (default): tasks from your network, including capability tests, also run while you work. Off: they run only after this Mac has been idle for a while. Memory, disk, battery and temperature limits always apply, so your own apps keep priority." = "On (default): tasks from your network, including capability tests, also run while you work. Off: they run only after this Mac has been idle for a while. Memory, disk, battery and temperature limits always apply, so your own apps keep priority.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:924 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:940 */
 "Open" = "Open";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1091 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1092 */
 "Open %@" = "Open %@";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1093 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1094 */
 "Open %@ (home network)" = "Open %@ (home network)";
 
 /* macos/Sources/NexalMac/NetworkSetupCheck.swift:125 */
@@ -517,7 +538,7 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:151 */
 "Open Login Items Settings" = "Open Login Items Settings";
 
-/* macos/Sources/NexalMac/NexalMacApp.swift:433 */
+/* macos/Sources/NexalMac/NexalMacApp.swift:460 */
 "Open Menu Bar Settings" = "Open Menu Bar Settings";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:72 */
@@ -529,16 +550,16 @@
 /* macos/Sources/NexalMac/TimeMachineCredentialWindow.swift:104 */
 "Open Time Machine" = "Open Time Machine";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1106 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1122 */
 "Open Time Machine Settings" = "Open Time Machine Settings";
 
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:28 */
 "Open diagnostic log" = "Open diagnostic log";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:145 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:154 */
 "Open in Screen Sharing" = "Open in Screen Sharing";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1216 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1217 */
 "Open live view" = "Open live view";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:63 */
@@ -547,16 +568,19 @@
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:71 */
 "Opens fake services on this Mac. Nothing legitimate should ever connect, so any connection from another computer is reported as an alert. It never runs commands or accepts logins." = "Opens fake services on this Mac. Nothing legitimate should ever connect, so any connection from another computer is reported as an alert. It never runs commands or accepts logins.";
 
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:193 */
+"POOL YOUR MACS" = "POOL YOUR MACS";
+
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:244 */
 "Paid membership unlocks priority relay infrastructure, expanded VM hosting quotas, advanced analytics, and dedicated network support." = "Paid membership unlocks priority relay infrastructure, expanded VM hosting quotas, advanced analytics, and dedicated network support.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:117 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:122 */
 "Pair manually" = "Pair manually";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:110 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:115 */
 "Paired computers can process your de-identified work if available." = "Paired computers can process your de-identified work if available.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:896 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:897 */
 "Paused while this Mac sleeps" = "Paused while this Mac sleeps";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:220 */
@@ -565,49 +589,61 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:168 */
 "Play a sound after successful pairing" = "Play a sound after successful pairing";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:942 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:196 */
+"Pool %lld Macs" = "Pool %lld Macs";
+
+/* macos/Sources/NexalMac/NetworkPanel.swift:958 */
 "Prepare a backup disk on neXal Storage and add it to Time Machine on this Mac" = "Prepare a backup disk on neXal Storage and add it to Time Machine on this Mac";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:41 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:42 */
 "Preview unavailable: %@" = "Preview unavailable: %@";
 
 /* macos/Sources/NexalMac/CoordinatorChoice.swift:18 */
 "Production" = "Production";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:812 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:260 */
+"Progress" = "Progress";
+
+/* macos/Sources/NexalMac/NetworkPanel.swift:828 */
 "Protected" = "Protected";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:569 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:584 */
 "Public IP · Private IP · Location" = "Public IP · Private IP · Location";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:22 */
 "Quantum type" = "Quantum type";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:564 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:579 */
 "Quantum-safe link to neXal storage" = "Quantum-safe link to neXal storage";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1305 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1340 */
 "Quit" = "Quit";
+
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:206 */
+"RUN A MODEL ON ANOTHER MAC" = "RUN A MODEL ON ANOTHER MAC";
+
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:142 */
+"RUN A MODEL ON THIS MAC" = "RUN A MODEL ON THIS MAC";
 
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:105 */
 "Recent connections" = "Recent connections";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:963 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:964 */
 "Recent failures" = "Recent failures";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:596 */
+/* macos/Sources/NexalMac/InferenceSection.swift:606 */
 "Recommended" = "Recommended";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:143 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:152 */
 "Reconnect" = "Reconnect";
 
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:24 */
 "Records detailed connection, post-quantum, wake, coordinator and service events in diagnostics.log so you can see what went wrong. The connector switches within a few seconds, with no restart. Passwords, keys and tokens are never logged." = "Records detailed connection, post-quantum, wake, coordinator and service events in diagnostics.log so you can see what went wrong. The connector switches within a few seconds, with no restart. Passwords, keys and tokens are never logged.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1303 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1338 */
 "Refresh" = "Refresh";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:317 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:322 */
 "Refresh %@ status" = "Refresh %@ status";
 
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:120 */
@@ -625,16 +661,16 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:114 */
 "Remote Login (SSH), Screen Sharing and File Sharing turned on here are opened automatically to your other computers and your iPhone on the private network. On the same Wi-Fi, your iPhone connects to this Mac's local address first." = "Remote Login (SSH), Screen Sharing and File Sharing turned on here are opened automatically to your other computers and your iPhone on the private network. On the same Wi-Fi, your iPhone connects to this Mac's local address first.";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:257 */
+/* macos/Sources/NexalMac/InferenceSection.swift:262 */
 "Remove" = "Remove";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:252 */
+/* macos/Sources/NexalMac/InferenceSection.swift:257 */
 "Remove %@?" = "Remove %@?";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:968 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:969 */
 "Remove these failures from the list" = "Remove these failures from the list";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:382 */
+/* macos/Sources/NexalMac/InferenceSection.swift:392 */
 "Remove…" = "Remove…";
 
 /* macos/Sources/NexalMac/PeerNames.swift:103 */
@@ -646,8 +682,14 @@
 /* macos/Sources/NexalMac/TimeMachineCredentialWindow.swift:37 */
 "Retrieving your backup credentials…" = "Retrieving your backup credentials…";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1075 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1091 */
 "Reveal credentials…" = "Reveal credentials…";
+
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:207 */
+"Run a model on one of your other Macs and use it from here over the neXal network. That Mac downloads the model and keeps it private to your network." = "Run a model on one of your other Macs and use it from here over the neXal network. That Mac downloads the model and keeps it private to your network.";
+
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:219 */
+"Run there" = "Run there";
 
 /* macos/Sources/NexalMac/L10n.swift:71 */
 "Same as macOS" = "Same as macOS";
@@ -658,13 +700,13 @@
 /* macos/Sources/NexalMac/MacNetworkTopologyView.swift:44 */
 "Save the map as an SVG file" = "Save the map as an SVG file";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:107 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:112 */
 "Scan to connect this Mac" = "Scan to connect this Mac";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1099 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1100 */
 "Screen Sharing" = "Screen Sharing";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:160 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:169 */
 "Screen Sharing is still available from the button below." = "Screen Sharing is still available from the button below.";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:69 */
@@ -679,22 +721,25 @@
 /* macos/Sources/NexalMac/CoordinatorChoice.swift:16 */
 "Server" = "Server";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1295 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1298 */
 "Server: %@" = "Server: %@";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:936 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:248 */
+"Serving" = "Serving";
+
+/* macos/Sources/NexalMac/NetworkPanel.swift:952 */
 "Set up" = "Set up";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1095 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1111 */
 "Set up Time Machine" = "Set up Time Machine";
 
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:818 */
 "Setting up the home-network bridge…" = "Setting up the home-network bridge…";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:65 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:70 */
 "Settings…" = "Settings…";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1251 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1267 */
 "Setup needs attention" = "Setup needs attention";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:111 */
@@ -703,7 +748,7 @@
 /* macos/Sources/NexalMac/FullDiskAccessHelpView.swift:26 */
 "Show in Finder" = "Show in Finder";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:85 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:90 */
 "Show pairing code" = "Show pairing code";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:157 */
@@ -712,13 +757,13 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:158 */
 "Show the neXal logo for two seconds before continuing in the menu bar. Applies next launch." = "Show the neXal logo for two seconds before continuing in the menu bar. Applies next launch.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1077 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1093 */
 "Show this Mac's SMB username and password for manual Time Machine setup" = "Show this Mac's SMB username and password for manual Time Machine setup";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:958 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:974 */
 "Signs in as %@ with neXal's one-time credentials." = "Signs in as %@ with neXal's one-time credentials.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1344 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1345 */
 "Size" = "Size";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:320 */
@@ -727,7 +772,7 @@
 /* macos/Sources/NexalMac/AppUpdate.swift:202 */
 "Skip This Version" = "Skip This Version";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1345 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1346 */
 "Small · 2 CPU, 2 GB" = "Small · 2 CPU, 2 GB";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:352 */
@@ -736,7 +781,10 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:166 */
 "Sound & menu bar" = "Sound & menu bar";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1004 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:194 */
+"Spread one model over %lld online Macs (%@; %@ memory together). Worth it for a model too big for one Mac; each word is slower than on a single Mac." = "Spread one model over %lld online Macs (%@; %@ memory together). Worth it for a model too big for one Mac; each word is slower than on a single Mac.";
+
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1005 */
 "Start" = "Start";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:142 */
@@ -748,13 +796,16 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:140 */
 "Startup" = "Startup";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1079 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1095 */
 "Status" = "Status";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1008 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:159 */
+"Stop" = "Stop";
+
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1009 */
 "Stop (keeps its disk)" = "Stop (keeps its disk)";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1081 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1097 */
 "Storage limit" = "Storage limit";
 
 /* macos/Sources/NexalMac/CanarySettingsView.swift:47 */
@@ -763,19 +814,19 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:127 */
 "Subscription" = "Subscription";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:757 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:773 */
 "System details are not available yet. They appear once that computer runs the latest neXal@home." = "System details are not available yet. They appear once that computer runs the latest neXal@home.";
 
 /* macos/Sources/NexalMac/L10n.swift:80 */
 "Takes effect the next time neXal@home opens." = "Takes effect the next time neXal@home opens.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:23 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:28 */
 "Temporary access until %@" = "Temporary access until %@";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1097 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1098 */
 "Terminal (SSH)" = "Terminal (SSH)";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1375 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1376 */
 "That Mac isn't set up to host instances. Turn on hosting in Settings › Virtual Machine Hosting." = "That Mac isn't set up to host instances. Turn on hosting in Settings › Virtual Machine Hosting.";
 
 /* macos/Sources/NexalMac/SandboxInfo.swift:203 */
@@ -786,6 +837,9 @@
 
 /* macos/Sources/NexalMac/AppUpdate.swift:243 */
 "The download failed its checksum check, so it was not installed." = "The download failed its checksum check, so it was not installed.";
+
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:158 */
+"The first answer can take a minute while the model loads into memory." = "The first answer can take a minute while the model loads into memory.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:258 */
 "The new version failed its signature check, so it was not installed." = "The new version failed its signature check, so it was not installed.";
@@ -799,46 +853,46 @@
 /* macos/Sources/NexalMac/AppUpdate.swift:179 */
 "The update server answered %lld." = "The update server answered %lld.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:141 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:146 */
 "This Mac needs to be paired again" = "This Mac needs to be paired again";
 
 /* macos/Sources/NexalMac/MeshRuntimeCheck.swift:55 */
 "This Mac runs %@; the network expects %@. Links may stay at Limited (no Level 5) until it is updated. In the neXal-connector folder run:" = "This Mac runs %@; the network expects %@. Links may stay at Limited (no Level 5) until it is updated. In the neXal-connector folder run:";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1291 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1326 */
 "This Mac's saved settings point to a neXal server this version does not use (%@). Remove config.json, then pair again." = "This Mac's saved settings point to a neXal server this version does not use (%@). Remove config.json, then pair again.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:237 */
 "This release has no checksum file, so it was not installed." = "This release has no checksum file, so it was not installed.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1072 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1088 */
 "Time Machine" = "Time Machine";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:918 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:934 */
 "Time Machine backup" = "Time Machine backup";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:329 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:334 */
 "Time Machine backup location" = "Time Machine backup location";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:456 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:472 */
 "Traffic" = "Traffic";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1254 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1270 */
 "Try again" = "Try again";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:137 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:146 */
 "Turn off to type and click in the virtual machine" = "Turn off to type and click in the virtual machine";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:27 */
 "Turn these on in Settings › Security. neXal does not scan files for malware. If you see an alert, check the Mac with your own security software." = "Turn these on in Settings › Security. neXal does not scan files for malware. If you see an alert, check the Mac with your own security software.";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1327 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1328 */
 "Type" = "Type";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:746 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:762 */
 "Unknown" = "Unknown";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:988 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1004 */
 "Unstable link: session may pause during path changes" = "Unstable link: session may pause during path changes";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:313 */
@@ -859,7 +913,7 @@
 /* macos/Sources/NexalMac/SharingServicesSettingsView.swift:118 */
 "Use if viewers get “Screen Sharing is not permitted”, or the switch in System Settings disagrees with this row. Stops Screen Sharing and clears the state an earlier command-line start left behind; then turn it on in System Settings." = "Use if viewers get “Screen Sharing is not permitted”, or the switch in System Settings disagrees with this row. Stops Screen Sharing and clears the state an earlier command-line start left behind; then turn it on in System Settings.";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:380 */
+/* macos/Sources/NexalMac/InferenceSection.swift:390 */
 "Verify" = "Verify";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:326 */
@@ -877,7 +931,7 @@
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:29 */
 "View log…" = "View log…";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:135 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:144 */
 "View only" = "View only";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:106 */
@@ -886,22 +940,22 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:96 */
 "Virtual Machines & Development Containers" = "Virtual Machines & Development Containers";
 
-/* macos/Sources/NexalMac/ThrowawayHosting.swift:1329 */
+/* macos/Sources/NexalMac/ThrowawayHosting.swift:1330 */
 "Virtual machine" = "Virtual machine";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:992 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1008 */
 "Waiting for its address" = "Waiting for its address";
 
-/* macos/Sources/NexalMac/VMPreviewView.swift:53 */
+/* macos/Sources/NexalMac/VMPreviewView.swift:54 */
 "Waiting for the first picture…" = "Waiting for the first picture…";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1011 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1027 */
 "Wake this computer using another neXal computer on the same local network" = "Wake this computer using another neXal computer on the same local network";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1007 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1023 */
 "Wake up" = "Wake up";
 
-/* macos/Sources/NexalMac/InferenceSection.swift:520 */
+/* macos/Sources/NexalMac/InferenceSection.swift:530 */
 "What this check could not see" = "What this check could not see";
 
 /* macos/Sources/NexalMac/PanelViews.swift:72 */
@@ -925,13 +979,13 @@
 /* macos/Sources/NexalMac/AppUpdate.swift:315 */
 "You have %@. neXal@home will quit and reopen to finish." = "You have %@. neXal@home will quit and reopen to finish.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:1089 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:1105 */
 "Your backup disk is ready. Set up opens Time Machine settings so you can add it." = "Your backup disk is ready. Set up opens Time Machine settings so you can add it.";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:153 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:160 */
 "Your connections" = "Your connections";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:332 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:337 */
 "Your internet traffic exits here" = "Your internet traffic exits here";
 
 /* macos/Sources/NexalMac/ExitNodeCheckbox.swift:41 */
@@ -946,9 +1000,6 @@
 /* macos/Sources/NexalMac/GuestAccess.swift:38 */
 "Your temporary network access has expired" = "Your temporary network access has expired";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:394 */
-"last 5 min" = "last 5 min";
-
 /* macos/Sources/NexalMac/NexalSplashView.swift:121 */
 "neXal" = "neXal";
 
@@ -958,10 +1009,10 @@
 /* macos/Sources/NexalMac/CanarySettingsView.swift:56 */
 "neXal does not scan for malware or confirm cleanup. Replacing the watermark does not resolve this alert." = "neXal does not scan for malware or confirm cleanup. Replacing the watermark does not resolve this alert.";
 
-/* macos/Sources/NexalMac/NexalMacApp.swift:458 */
+/* macos/Sources/NexalMac/NexalMacApp.swift:485 */
 "neXal icon" = "neXal icon";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:143 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:148 */
 "neXal no longer accepts this Mac's credential. It was removed from the network or its pairing expired. Leave the network below, then pair it again from your iPhone." = "neXal no longer accepts this Mac's credential. It was removed from the network or its pairing expired. Leave the network below, then pair it again from your iPhone.";
 
 /* macos/Sources/NexalMac/NexalSplashView.swift:31 */
@@ -976,7 +1027,7 @@
 /* macos/Sources/NexalMac/AppUpdate.swift:188 */
 "neXal@home %@ is up to date." = "neXal@home %@ is up to date.";
 
-/* macos/Sources/NexalMac/NexalMacApp.swift:423 */
+/* macos/Sources/NexalMac/NexalMacApp.swift:450 */
 "neXal@home is still running" = "neXal@home is still running";
 
 /* macos/Sources/NexalMac/NexalSplashView.swift:126 */
@@ -985,26 +1036,26 @@
 /* macos/Sources/NexalMac/NexalSplashView.swift:123 */
 "systems" = "systems";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:337 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:342 */
 "· Offline" = "· Offline";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:855 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:871 */
 "· local network" = "· local network";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:856 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:872 */
 "· via router's public address" = "· via router's public address";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:564 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:579 */
 "· 🔐 Encrypted - Level 5" = "· 🔐 Encrypted - Level 5";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:51 */
 "↑ %@ B  ↓ %@ B" = "↑ %@ B  ↓ %@ B";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:853 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:869 */
 "⚡️ Direct" = "⚡️ Direct";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:744 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:760 */
 "🌡️ Normal" = "🌡️ Normal";
 
-/* macos/Sources/NexalMac/NetworkPanel.swift:745 */
+/* macos/Sources/NexalMac/NetworkPanel.swift:761 */
 "🔥 Throttling (hot)" = "🔥 Throttling (hot)";

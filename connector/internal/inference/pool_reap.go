@@ -7,7 +7,7 @@ import (
 )
 
 // orphanPoolServers picks, from `ps -axo pid=,ppid=,command=` output, the pool servers that a
-// previous run left behind: mlx_lm servers started with --pipeline for a model under this
+// previous run left behind: pool servers (`-m mlx_lm server`, or any --pipeline server) for a model under this
 // inference directory whose parent is gone (a Mac that quits or kills the helper cannot stop its
 // child on exit, so the server is re-parented to launchd, pid 1). A server whose helper is still
 // alive has that helper as parent and is never picked, and neither is anything outside this
@@ -26,7 +26,7 @@ func orphanPoolServers(ps, inferenceDir string, self int) []int {
 			continue
 		}
 		cmd := strings.Join(f[2:], " ")
-		if strings.Contains(cmd, " -m mlx_lm") && strings.Contains(cmd, " --pipeline") && strings.Contains(cmd, models) {
+		if strings.Contains(cmd, models) && (strings.Contains(cmd, " -m mlx_lm server ") || (strings.Contains(cmd, " -m mlx_lm") && strings.Contains(cmd, " --pipeline"))) {
 			pids = append(pids, pid)
 		}
 	}

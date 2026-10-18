@@ -24,7 +24,7 @@ func TestPoolServeCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != PoolPython(d) || !strings.Contains(strings.Join(args, " "), "--pipeline") {
+	if name != PoolPython(d) || strings.Contains(strings.Join(args, " "), "--pipeline") {
 		t.Fatalf("%s %v", name, args)
 	}
 	if !strings.Contains(strings.Join(env, " "), "MLX_RANK=1") {
@@ -67,17 +67,45 @@ func TestOrphanPoolServers(t *testing.T) {
 		"  101     1 /opt/py/Python -I -m mlx_lm.server --model " + m + " --pipeline --host 100.86.1.1 --port 8004", // old form, orphaned
 		"  102     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1 --port 8004", // new form, orphaned
 		"  103  5000 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1 --port 8004", // its helper is alive
-		"  104     1 /opt/py/Python -I -m mlx_lm server --model /elsewhere/models/x --pipeline --host 1.1.1.1",        // another directory
-		"  105     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --host 100.86.1.1 --port 8001",              // not a pool server
-		"  106     1 /usr/bin/vim notes " + m + " --pipeline",                                                         // not mlx_lm
-		"  107     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1",               // this process itself
+		"  104     1 /opt/py/Python -I -m mlx_lm server --model /elsewhere/models/x --pipeline --host 1.1.1.1",      // another directory
+		"  105     1 /opt/py/Python -I -m mlx_lm.server --model " + m + " --host 100.86.1.1 --port 8001",            // a single-Mac server, not a pool one
+		"  108     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --host 100.86.1.1 --port 8004",            // tensor-parallel pool server, orphaned
+		"  106     1 /usr/bin/vim notes " + m + " --pipeline",                                                       // not mlx_lm
+		"  107     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline --host 100.86.1.1",             // this process itself
 		"garbage",
 	}, "\n")
 	got := orphanPoolServers(ps, d, 107)
-	if len(got) != 2 || got[0] != 101 || got[1] != 102 {
-		t.Fatalf("picked %v, want [101 102]", got)
+	if len(got) != 3 || got[0] != 101 || got[1] != 102 || got[2] != 108 {
+		t.Fatalf("picked %v, want [101 102 108]", got)
 	}
 	if len(orphanPoolServers("", d, 1)) != 0 {
 		t.Fatal("empty input")
+	}
+}
+
+func TestPoolUsesPipeline(t *testing.T) {
+	d := poolDir(t)
+	cfg := func(modelType string) {
+		os.WriteFile(filepath.Join(ModelDir(d, "m1"), "config.json"), []byte(`{"model_type":"`+modelType+`"}`), 0o600)
+	}
+	hf := filepath.Join(d, "h.json")
+	run := func() string {
+		_, args, _, err := PoolServeCommand(d, "m1", 0, []string{"100.64.0.1:8010", "100.64.0.2:8010"}, "100.64.0.1", 8001, hf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(args, " ")
+	}
+	cfg("qwen3") // dense Qwen3 has no pipeline stages in mlx-lm, only tensor parallelism
+	if got := run(); strings.Contains(got, "--pipeline") || !strings.Contains(got, "-m mlx_lm server --model") {
+		t.Fatal(got)
+	}
+	cfg("qwen3_moe")
+	if got := run(); !strings.Contains(got, "--pipeline") {
+		t.Fatal(got)
+	}
+	os.Remove(filepath.Join(ModelDir(d, "m1"), "config.json")) // unreadable: tensor parallelism
+	if got := run(); strings.Contains(got, "--pipeline") {
+		t.Fatal(got)
 	}
 }

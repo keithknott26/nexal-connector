@@ -8,13 +8,36 @@ import (
 	"strconv"
 )
 
-// Pooling one model across several Macs needs `mlx_lm.server --pipeline`, which only newer mlx-lm
-// releases have. It lives in its own environment so the single-Mac runtime keeps its older pins.
+// Pooling one model across several Macs needs the distributed server in newer mlx-lm releases. It
+// lives in its own environment so the single-Mac runtime keeps its older pins.
 const (
 	PoolMLXVersion          = "0.32.2"
 	PoolMLXLMVersion        = "0.32.2"
 	PoolTransformersVersion = "5.7.0"
 )
+
+// poolPipelined is every model_type whose mlx-lm model can be split into pipeline stages at
+// PoolMLXLMVersion (the model class derives from PipelineMixin or defines pipeline). Any other model is
+// pooled by tensor parallelism, mlx-lm's default, which most dense models support through shard().
+// Regenerate when PoolMLXLMVersion changes: grep models/ for PipelineMixin and `def pipeline`.
+var poolPipelined = map[string]bool{
+	"bailing_hybrid": true, "deepseek_v2": true, "deepseek_v3": true, "deepseek_v32": true, "deepseek_v41": true,
+	"glm4_moe": true, "glm4_moe_lite": true, "kimi_k3": true, "minimax_m3_vl": true, "ministral3": true,
+	"mistral4": true, "muse_spark": true, "qwen2": true, "qwen3_5": true, "qwen3_moe": true, "qwen3_next": true,
+}
+
+// poolUsesPipeline reports whether the installed model at dir should be served with --pipeline. A
+// model whose config.json cannot be read falls back to tensor parallelism.
+func poolUsesPipeline(dir string) bool {
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return false
+	}
+	var c struct {
+		ModelType string `json:"model_type"`
+	}
+	return json.Unmarshal(data, &c) == nil && poolPipelined[c.ModelType]
+}
 
 // PoolPackages are the exact pip requirements of the pooling environment.
 func PoolPackages() []string {
@@ -123,7 +146,11 @@ func PoolServeCommand(inferenceDir, id string, rank int, hosts []string, apiHost
 	if e := os.WriteFile(hostfilePath, data, 0o600); e != nil {
 		return "", nil, nil, e
 	}
-	args = []string{"-I", "-m", "mlx_lm", "server", "--model", dir, "--pipeline", "--host", apiHost, "--port", strconv.Itoa(apiPort)}
+	args = []string{"-I", "-m", "mlx_lm", "server", "--model", dir}
+	if poolUsesPipeline(dir) {
+		args = append(args, "--pipeline")
+	}
+	args = append(args, "--host", apiHost, "--port", strconv.Itoa(apiPort))
 	env = []string{"MLX_RANK=" + strconv.Itoa(rank), "MLX_HOSTFILE=" + hostfilePath, "HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "MLX_RING_VERBOSE=1", "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }

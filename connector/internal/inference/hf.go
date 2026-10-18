@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // This file is the ONLY place in the package that opens network connections,
@@ -52,6 +53,10 @@ type HFClient struct {
 	base  *url.URL
 	http  *http.Client
 	allow func(string) bool
+	// retryBase is the pause between download attempts; zero means the default (tests shorten it).
+	retryBase time.Duration
+	// attempts is how many times a file is tried when the network fails; zero means downloadAttempts.
+	attempts int
 }
 
 // HFHostAllowed is the production host rule: huggingface.co or *.hf.co, https
@@ -441,7 +446,39 @@ func (c *HFClient) DownloadFile(ctx context.Context, repo, rev string, f PinFile
 			return err
 		}
 	}
-	return c.fetchPart(ctx, u, f, part, final, onBytes, true)
+	// A dropped connection or a CDN address that does not answer is routine on a multi-GB download, and the
+	// .part file is resumed with a Range request: try again a few times before giving up. Only network
+	// failures are retried; a hash or size error never is.
+	tries := c.attempts
+	if tries <= 0 {
+		tries = downloadAttempts
+	}
+	for attempt := 0; attempt < tries; attempt++ {
+		if err = c.fetchPart(ctx, u, f, part, final, onBytes, true); err == nil {
+			return nil
+		}
+		var e *Error
+		if !errors.As(err, &e) || e.Code != "network" || ctx.Err() != nil || attempt == tries-1 {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Duration(attempt+1) * c.retryWait()):
+		}
+	}
+	return err
+}
+
+// downloadAttempts is how many times one file is tried when the network fails.
+const downloadAttempts = 5
+
+// retryWait is the base pause between attempts (tests shorten it).
+func (c *HFClient) retryWait() time.Duration {
+	if c.retryBase > 0 {
+		return c.retryBase
+	}
+	return 3 * time.Second
 }
 
 func (c *HFClient) fetchPart(ctx context.Context, u *url.URL, f PinFile, part, final string, onBytes func(int64), canRestart bool) error {

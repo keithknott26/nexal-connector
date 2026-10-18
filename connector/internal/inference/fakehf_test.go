@@ -80,6 +80,7 @@ func (f *fakeHF) client() *HFClient {
 	if err != nil {
 		f.t.Fatal(err)
 	}
+	c.attempts = 1 // tests that exercise a dropped connection expect the first failure; retries have their own tests
 	return c
 }
 

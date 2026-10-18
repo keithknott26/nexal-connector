@@ -445,3 +445,62 @@ func TestDownloadStatusErrors(t *testing.T) {
 	delete(f3.files, "config.json")
 	wantCode(t, f3.client().DownloadFile(context.Background(), testRepo, testRev, pf, dir, nil), "file_not_found")
 }
+
+// flakyTransport fails the first n requests the way a CDN address that does not answer does.
+type flakyTransport struct {
+	next  http.RoundTripper
+	fails atomic.Int32
+	seen  atomic.Int32
+}
+
+func (f *flakyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.seen.Add(1)
+	if f.fails.Add(-1) >= 0 {
+		return nil, errors.New("dial tcp 3.168.73.111:443: i/o timeout")
+	}
+	return f.next.RoundTrip(r)
+}
+
+func TestDownloadRetriesNetworkFailures(t *testing.T) {
+	f := newFakeHF(t)
+	c := f.client()
+	c.attempts = 0 // the default: retry
+	c.retryBase = time.Millisecond
+	ft := &flakyTransport{next: c.http.Transport}
+	ft.fails.Store(2)
+	c.http.Transport = ft
+	pf := pinOf(f, "model.safetensors")
+	if err := c.DownloadFile(context.Background(), testRepo, testRev, pf, t.TempDir(), nil); err != nil {
+		t.Fatalf("two failed attempts should be retried: %v", err)
+	}
+}
+
+func TestDownloadGivesUpAfterRepeatedNetworkFailures(t *testing.T) {
+	f := newFakeHF(t)
+	c := f.client()
+	c.attempts = 0 // the default: retry
+	c.retryBase = time.Millisecond
+	ft := &flakyTransport{next: c.http.Transport}
+	ft.fails.Store(100)
+	c.http.Transport = ft
+	err := c.DownloadFile(context.Background(), testRepo, testRev, pinOf(f, "model.safetensors"), t.TempDir(), nil)
+	wantCode(t, err, "network")
+	if got := ft.seen.Load(); got != downloadAttempts {
+		t.Fatalf("tried %d times, want %d", got, downloadAttempts)
+	}
+}
+
+func TestDownloadDoesNotRetryAHashMismatch(t *testing.T) {
+	f := newFakeHF(t)
+	c := f.client()
+	c.attempts = 0 // the default: retry
+	c.retryBase = time.Millisecond
+	ft := &flakyTransport{next: c.http.Transport}
+	c.http.Transport = ft
+	pf := pinOf(f, "model.safetensors")
+	pf.SHA256 = strings.Repeat("0", 64)
+	wantCode(t, c.DownloadFile(context.Background(), testRepo, testRev, pf, t.TempDir(), nil), "hash_mismatch")
+	if got := ft.seen.Load(); got > 3 { // one fetch plus its redirect hops, never five attempts
+		t.Fatalf("hash mismatch was retried (%d requests)", got)
+	}
+}

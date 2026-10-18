@@ -22,6 +22,8 @@ struct RemoteInferenceRequest: Decodable, Identifiable, Equatable {
     let step: String?
     let detail: String?
     let endpoint: String?
+    /// 0...1 while the model downloads on the other Mac.
+    let progress: Double?
 
     var isDone: Bool { state == "ready" || state == "failed" || state == "cancelled" }
     static func decodeLines(_ data: Data) -> [RemoteInferenceRequest] {
@@ -44,6 +46,8 @@ struct RemoteInferenceTestResult: Decodable, Equatable {
 @MainActor
 final class RemoteInferenceModel: ObservableObject {
     @Published var machines: [InferenceReport.Machine] = []
+    /// Every Mac in the report, this one included, for naming the target of a request.
+    @Published var allMachines: [InferenceReport.Machine] = []
     @Published var requests: [RemoteInferenceRequest] = []
     @Published var problem: String?
     @Published var busy = false
@@ -55,6 +59,7 @@ final class RemoteInferenceModel: ObservableObject {
         Task {
             do {
                 let report = try InferenceReport.decode(try await app.inferencePreflight())
+                allMachines = report.machines
                 machines = report.machines.filter { !$0.isSelf && $0.hostId?.isEmpty == false }
             } catch { problem = "Could not list your other Macs: \(error.localizedDescription)" }
         }
@@ -113,7 +118,10 @@ struct RemoteInferenceSection: View {
     @State private var hostId = ""
     @State private var modelId = InferenceQuickStart.models.first?.id ?? "qwen3-4b-q4"
 
-    private func name(_ id: String) -> String { remote.machines.first { $0.hostId == id }?.name ?? id }
+    private func name(_ id: String) -> String {
+        guard let m = remote.allMachines.first(where: { $0.hostId == id }) else { return "another Mac" }
+        return m.isSelf ? "this Mac" : m.name
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
@@ -166,6 +174,9 @@ struct RemoteInferenceSection: View {
                 case "failed": Label("Failed", systemImage: "xmark.octagon.fill").font(.caption).foregroundStyle(.red)
                 default: ProgressView().controlSize(.small)
                 }
+            }
+            if r.state == "running", r.step == "install" {
+                if let f = r.progress { ProgressView(value: min(max(f, 0), 1)) } else { ProgressView().progressViewStyle(.linear) }
             }
             if let d = r.detail, r.state != "ready" { Text(d).font(.caption2).foregroundStyle(r.state == "failed" ? .red : .secondary).textSelection(.enabled) }
             if r.state == "pending" { Text("Waiting for that Mac to pick this up…").font(.caption2).foregroundStyle(.secondary) }

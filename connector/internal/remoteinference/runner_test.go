@@ -104,3 +104,31 @@ func TestNoAddressFails(t *testing.T) {
 	r.Once(context.Background())
 	wait(t, func() bool { return c.last().State == "failed" })
 }
+
+func TestInstallReportsProgress(t *testing.T) {
+	exe := script(t, `if [ "$2" = install ]; then
+echo '{"event":"start","modelId":"m","totalBytes":1000}'
+echo '{"event":"progress","file":"a","bytes":500,"total":1000,"overallBytes":500,"overallTotal":1000}'
+echo '{"event":"done"}'
+fi; exit 0`)
+	c := &fakeCoord{tasks: []Task{{ID: "rinf_4", ModelID: "m"}}}
+	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "" }}
+	r.init()
+	if msg := r.install(context.Background(), c.tasks[0], []string{"install", "m"}); msg != "" {
+		t.Fatal(msg)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.reports) != 1 || c.reports[0].Progress == nil || *c.reports[0].Progress != 0.5 {
+		t.Fatalf("%+v", c.reports)
+	}
+}
+
+func TestInstallFailureUsesTheErrorEvent(t *testing.T) {
+	exe := script(t, `echo '{"event":"error","code":"x","message":"not enough disk space"}'; exit 1`)
+	r := &Runner{Coord: &fakeCoord{}, HostID: "h", Exe: exe}
+	r.init()
+	if msg := r.install(context.Background(), Task{ID: "x", ModelID: "m"}, []string{"install", "m"}); msg != "not enough disk space" {
+		t.Fatal(msg)
+	}
+}

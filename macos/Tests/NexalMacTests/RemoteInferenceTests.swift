@@ -28,12 +28,14 @@ final class RemoteInferenceTests: XCTestCase {
     func testDecodesRequestLines() {
         let data = Data("""
         {"id":"rinf_1","requesterHostId":"a","targetHostId":"b","modelId":"m","state":"ready","step":"serve","endpoint":"http://100.1.2.3:8001/v1"}
+        {"id":"rinf_3","requesterHostId":"a","targetHostId":"b","modelId":"m","state":"running","step":"install","progress":0.42}
         {"id":"rinf_2","requesterHostId":"a","targetHostId":"b","modelId":"m","state":"failed","detail":"model not pinned"}
 
         """.utf8)
         let rows = RemoteInferenceRequest.decodeLines(data)
-        XCTAssertEqual(rows.map(\.id), ["rinf_1", "rinf_2"])
+        XCTAssertEqual(rows.map(\.id), ["rinf_1", "rinf_3", "rinf_2"])
+        XCTAssertEqual(rows[1].progress, 0.42)
         XCTAssertTrue(rows[0].isDone)
-        XCTAssertEqual(rows[1].detail, "model not pinned")
+        XCTAssertEqual(rows[2].detail, "model not pinned")
     }
 }

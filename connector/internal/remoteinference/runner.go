@@ -5,7 +5,9 @@
 package remoteinference
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,6 +39,8 @@ type Report struct {
 	Step     string `json:"step,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
+	// Progress is 0..1 while a download is under way; nil otherwise.
+	Progress *float64 `json:"progress,omitempty"`
 }
 
 // Coordinator is the part of the API the runner uses.
@@ -176,6 +180,13 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		{"install", "Downloading " + t.ModelID, []string{"install", t.ModelID, "--local"}},
 	} {
 		r.report(ctx, t, "running", step.name, step.label, "")
+		if step.name == "install" {
+			if msg := r.install(ctx, t, step.args); msg != "" {
+				r.fail(ctx, t, step.name, msg)
+				return
+			}
+			continue
+		}
 		if out, err := r.command(ctx, step.args...).CombinedOutput(); err != nil {
 			r.fail(ctx, t, step.name, lastLine(string(out), err))
 			return
@@ -229,6 +240,72 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	if ctx.Err() == nil && sctx.Err() == nil {
 		r.fail(ctx, t, "serve", lastLine(tail.String(), err))
 	}
+}
+
+// install runs `inference install --json` and reports the download's progress as it goes. It returns a
+// failure message, or "" on success.
+func (r *Runner) install(ctx context.Context, t Task, args []string) string {
+	cmd := r.command(ctx, append(args, "--json")...)
+	var errTail lineTail
+	cmd.Stderr = &errTail
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err.Error()
+	}
+	if err := cmd.Start(); err != nil {
+		return err.Error()
+	}
+	var failure string
+	var last time.Time
+	sc := bufio.NewScanner(out)
+	sc.Buffer(make([]byte, 64*1024), 1<<20)
+	for sc.Scan() {
+		var ev struct {
+			Event        string `json:"event"`
+			Message      string `json:"message"`
+			OverallBytes int64  `json:"overallBytes"`
+			OverallTotal int64  `json:"overallTotal"`
+		}
+		if json.Unmarshal(sc.Bytes(), &ev) != nil {
+			_, _ = errTail.Write(append(append([]byte{}, sc.Bytes()...), '\n'))
+			continue
+		}
+		switch ev.Event {
+		case "error":
+			failure = ev.Message
+		case "progress":
+			if ev.OverallTotal <= 0 || time.Since(last) < 2*time.Second {
+				continue
+			}
+			last = time.Now()
+			f := float64(ev.OverallBytes) / float64(ev.OverallTotal)
+			if f > 1 {
+				f = 1
+			}
+			r.reportProgress(ctx, t, f, fmt.Sprintf("Downloading %s: %d%% (%s of %s)", t.ModelID, int(f*100), size(ev.OverallBytes), size(ev.OverallTotal)))
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if failure != "" {
+			return failure
+		}
+		return lastLine(errTail.String(), err)
+	}
+	return ""
+}
+
+func (r *Runner) reportProgress(ctx context.Context, t Task, f float64, detail string) {
+	if err := r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: "running", Step: "install", Detail: clean(detail, 280), Progress: &f}); err != nil {
+		r.Logger.Debug("remote inference report failed", "error", err.Error())
+	}
+}
+
+func size(b int64) string {
+	const g, m = 1 << 30, 1 << 20
+	if b >= g {
+		return fmt.Sprintf("%.1f GB", float64(b)/g)
+	}
+	return fmt.Sprintf("%d MB", b/m)
 }
 
 func (r *Runner) drop(id string) {

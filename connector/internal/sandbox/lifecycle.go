@@ -493,9 +493,27 @@ func (m *Manager) reconcile(ctx context.Context, id string, gap time.Duration) {
 	m.mu.Unlock()
 	switch st {
 	case StateProvisioning:
-		if !await {
-			m.failRecord(id, "connector restarted during provisioning")
+		if await {
+			return
 		}
+		// A persistent VM that already finished its first boot (it has a host key) and was only being
+		// started again keeps its disk: stop it and return it to Stopped. failRecord would delete the disk.
+		m.mu.Lock()
+		restart := rec.Lifecycle == LifecyclePersistent && rec.Boot != nil && rec.HostKey != ""
+		m.mu.Unlock()
+		if restart {
+			if _, err := os.Stat(m.diskPath(id)); err == nil {
+				m.killVM(h)
+				m.mu.Lock()
+				if r := m.boxes[id]; r != nil && CanTransition(r.State, StateStopped) {
+					r.Handle = Handle{}
+					_ = m.setStateLocked(r, StateStopped)
+				}
+				m.mu.Unlock()
+				return
+			}
+		}
+		m.failRecord(id, "connector restarted during provisioning")
 		return
 	case StateStopping:
 		m.failRecord(id, "connector restarted during stopping")

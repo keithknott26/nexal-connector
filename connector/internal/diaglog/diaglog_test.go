@@ -130,3 +130,47 @@ func TestTailStartsAtLineBoundary(t *testing.T) {
 		t.Fatal("missing file must yield empty tail")
 	}
 }
+
+func TestSetEnabledIsIdempotentAndCreatesDirectory(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "nested", "config.json")
+	if Enabled(cfg) {
+		t.Fatal("flag must start off")
+	}
+	for range 2 {
+		if err := SetEnabled(cfg, true); err != nil {
+			t.Fatal(err)
+		}
+		if !Enabled(cfg) {
+			t.Fatal("flag not set")
+		}
+	}
+	st, err := os.Stat(FlagPath(cfg))
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("flag file perm = %v, err = %v", st, err)
+	}
+	for range 2 {
+		if err := SetEnabled(cfg, false); err != nil {
+			t.Fatal(err)
+		}
+		if Enabled(cfg) {
+			t.Fatal("flag not cleared")
+		}
+	}
+}
+
+func TestTailReturnsWholeSmallFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "a.log")
+	if err := os.WriteFile(p, []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Tail(p, 1024); got != "one\ntwo\n" {
+		t.Fatalf("Tail = %q", got)
+	}
+}
+
+func TestRedactLeavesOrdinaryLogTextAlone(t *testing.T) {
+	in := `{"level":"INFO","msg":"peer connected","tokenCount":3,"host":"m4.nexal:7443"}`
+	if out := Redact(in); out != in {
+		t.Fatalf("ordinary text changed:\n%s", out)
+	}
+}

@@ -118,6 +118,9 @@ func TestRecoveryModeIsTimeBoxedAndZeroesTheImageKey(t *testing.T) {
 }
 
 func TestRecoveryModeRefusesToStartWhenItCannotCleanUpOrKeyIsUnusable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so a read-only directory cannot simulate a cleanup failure")
+	}
 	now := time.Now()
 	good := make([]byte, 32)
 	for i := range good {

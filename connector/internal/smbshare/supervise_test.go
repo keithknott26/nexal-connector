@@ -201,6 +201,9 @@ func TestShareThatNeverAnswersIsStopped(t *testing.T) {
 }
 
 func TestRunRefusesToStartWithoutAGuaranteedCleanupPath(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions, so a read-only directory cannot simulate a cleanup failure")
+	}
 	f := fixture(t, "waiting for connections")
 	// A private directory this process cannot write is a private directory whose
 	// state it could not remove afterwards either, which §9 makes a refusal.

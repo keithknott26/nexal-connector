@@ -319,3 +319,21 @@ func TestExpiredInvitationIsNotRestored(t *testing.T) {
 		t.Fatal("an expired invitation was still accepted after a restart")
 	}
 }
+
+func TestPathSitsBesideTheConfigFile(t *testing.T) {
+	got := Path(filepath.Join("support", "nexal", "config.json"))
+	want := filepath.Join("support", "nexal", "peers.json")
+	if got != want {
+		t.Fatalf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestSaveRefusesANilRegistry(t *testing.T) {
+	path := filepath.Join(privateDir(t), "peers.json")
+	if err := Save(path, nil); err == nil {
+		t.Fatal("Save(nil) = nil error, want a refusal")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Save(nil) left a file behind: %v", err)
+	}
+}

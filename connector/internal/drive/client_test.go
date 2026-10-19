@@ -271,3 +271,63 @@ func errorAs(err error, target any) bool {
 	}
 	return false
 }
+
+func TestUsageAndListDecodeCoordinatorViews(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/drive/usage":
+			io.WriteString(w, `{"tier":"pro","ceilingBytes":100,"usedBytes":7,"objectCount":2,"extra":"ignored"}`)
+		case "/api/drive/objects":
+			gotQuery = r.URL.RawQuery
+			io.WriteString(w, `{"objects":[{"id":"a","key":"k/1","sizeBytes":5}],"nextCursor":"n/x"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL, "host-token", true)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client.http = server.Client()
+
+	usage, err := client.Usage(context.Background())
+	if err != nil || usage.Tier != "pro" || usage.UsedBytes != 7 || usage.ObjectCount != 2 {
+		t.Fatalf("Usage = %+v, %v", usage, err)
+	}
+	objects, next, err := client.List(context.Background(), "c/ur sor", 10)
+	if err != nil || len(objects) != 1 || objects[0].Key != "k/1" || next != "n/x" {
+		t.Fatalf("List = %+v, %q, %v", objects, next, err)
+	}
+	if gotQuery != "limit=10&cursor=c%2Fur%20sor" {
+		t.Fatalf("query was %q", gotQuery)
+	}
+}
+
+func TestControlPlaneErrorsDoNotLeakTheOriginOrToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/drive/usage" {
+			io.WriteString(w, `not json`)
+			return
+		}
+		refuse(w, http.StatusForbidden, "forbidden", "no")
+	}))
+	client, err := NewClient(server.URL, "host-token", true)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	client.http = server.Client()
+
+	if _, err := client.Usage(context.Background()); err == nil || !strings.Contains(err.Error(), "invalid coordinator response") {
+		t.Fatalf("malformed body error = %v", err)
+	}
+	if _, _, err := client.List(context.Background(), "", 0); err == nil {
+		t.Fatal("expected a refusal")
+	}
+	server.Close()
+	_, err = client.Usage(context.Background())
+	if err == nil || strings.Contains(err.Error(), server.URL) || strings.Contains(err.Error(), "host-token") {
+		t.Fatalf("transport error leaked or was nil: %v", err)
+	}
+}

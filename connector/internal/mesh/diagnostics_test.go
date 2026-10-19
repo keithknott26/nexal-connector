@@ -1,8 +1,10 @@
 package mesh
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"testing"
@@ -92,5 +94,76 @@ func TestRouteOutputEnforcesLimit(t *testing.T) {
 	}
 	if b.Len() != maxExitStatusBytes {
 		t.Fatalf("buffer grew past limit: %d", b.Len())
+	}
+}
+
+// captureDiag installs a debug-level logger writing to a buffer and restores
+// the global diagnostic state when the test ends.
+func captureDiag(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	SetDiagnosticLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { SetDiagnosticLogger(nil) })
+	return &buf
+}
+
+func TestNoteRuntimeFailureLogsFirstAtInfoThenDebug(t *testing.T) {
+	buf := captureDiag(t)
+	err := errors.New("boom")
+	noteRuntimeFailure(err)
+	noteRuntimeFailure(err)
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 log lines, got %d: %q", len(lines), buf.String())
+	}
+	if !strings.Contains(lines[0], "level=INFO") || strings.Contains(lines[0], "repeat") {
+		t.Fatalf("first failure should be Info without repeat: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "level=DEBUG") || !strings.Contains(lines[1], "repeat=true") {
+		t.Fatalf("repeat failure should be Debug repeat=true: %s", lines[1])
+	}
+}
+
+func TestNoteRuntimeStatusLogsChangesOnly(t *testing.T) {
+	buf := captureDiag(t)
+	now := time.Now()
+	first := []byte(`{"management":{"connected":true},"netbirdIp":"100.64.0.1/16","daemonVersion":"1.0",
+		"peers":{"details":[{"fqdn":"a.example","status":"Connected","connectionType":"p2p"}]}}`)
+
+	noteRuntimeFailure(errors.New("boom"))
+	buf.Reset()
+	noteRuntimeStatus(first, now)
+	got := buf.String()
+	for _, want := range []string{"readable again", "mesh runtime version", "mesh service state", "mesh routes", "mesh peer added", "mesh peer pq state"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("first poll missing %q in:\n%s", want, got)
+		}
+	}
+
+	buf.Reset()
+	noteRuntimeStatus(first, now)
+	if buf.Len() != 0 {
+		t.Fatalf("identical poll must log nothing, got:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	noteRuntimeStatus([]byte(`{"management":{"connected":true},"netbirdIp":"100.64.0.1/16","daemonVersion":"1.0","peers":{"details":[]}}`), now)
+	if !strings.Contains(buf.String(), "mesh peer removed") || !strings.Contains(buf.String(), "a.example") {
+		t.Fatalf("removed peer not logged:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	noteRuntimeStatus([]byte("not json"), now)
+	if !strings.Contains(buf.String(), "mesh runtime status unreadable") {
+		t.Fatalf("unreadable status not logged:\n%s", buf.String())
+	}
+}
+
+func TestNoteRuntimeWithoutLoggerIsNoop(t *testing.T) {
+	SetDiagnosticLogger(nil)
+	noteRuntimeFailure(errors.New("boom"))
+	noteRuntimeStatus([]byte(`{}`), time.Now())
+	if diag.last != nil || diag.lastFailure != "" {
+		t.Fatalf("no logger must leave state untouched: %+v %q", diag.last, diag.lastFailure)
 	}
 }

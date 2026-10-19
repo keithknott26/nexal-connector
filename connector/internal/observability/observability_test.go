@@ -190,3 +190,34 @@ func TestCapacityAndThreatScanLifecycles(t *testing.T) {
 		}
 	}
 }
+
+func TestUnderlyingUnwrapsOnlyObservabilityTransport(t *testing.T) {
+	base := roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, nil })
+	if _, ok := Underlying(Transport{Base: base}).(roundTripFunc); !ok {
+		t.Fatal("wrapped transport was not unwrapped")
+	}
+	if _, ok := Underlying(base).(roundTripFunc); !ok {
+		t.Fatal("unwrapped transport was altered")
+	}
+}
+
+func TestPeerReaderPassesDataThrough(t *testing.T) {
+	r := PeerReader{Reader: strings.NewReader("payload"), Context: context.Background()}
+	got, err := io.ReadAll(r)
+	if err != nil || string(got) != "payload" {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+}
+
+func TestPeerTransferIgnoresInvalidInput(t *testing.T) {
+	ctx := context.Background()
+	PeerTransfer(ctx, "sent", 10)
+	PeerTransfer(ctx, "received", 0)
+	PeerTransfer(ctx, "bogus", 10)
+}
+
+func TestComputeCompletionFuncIsCallable(t *testing.T) {
+	done := Compute(context.Background())
+	done(true)
+	Compute(context.Background())(false)
+}

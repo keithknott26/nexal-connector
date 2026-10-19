@@ -241,3 +241,22 @@ func TestSortedServicesIsStable(t *testing.T) {
 		}
 	}
 }
+
+func TestControlDelegatesToStatusAndEnable(t *testing.T) {
+	s := &stub{open: map[string]bool{"22": true}, uid: 0, goos: "darwin"}
+	install(t, s)
+	var c Control
+	state, err := c.Status(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state[SecureShell] || state[ScreenSharing] {
+		t.Fatalf("Control.Status = %v, want only %s on", state, SecureShell)
+	}
+	if err := c.Enable(context.Background(), FileSharing); !errors.Is(err, ErrFileSharingManual) {
+		t.Fatalf("Control.Enable(file sharing) = %v, want ErrFileSharingManual", err)
+	}
+	if err := c.Enable(context.Background(), SecureShell); err != nil {
+		t.Fatalf("Control.Enable on an already-listening service = %v, want nil", err)
+	}
+}

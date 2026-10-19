@@ -4,7 +4,13 @@ import (
 	"log/slog"
 	"testing"
 	"time"
+
+	"nexal/connector/internal/mesh"
 )
+
+type staticProvider struct{ status mesh.Status }
+
+func (p staticProvider) Snapshot() mesh.Status { return p.status }
 
 func TestPeerBandwidthExpiry(t *testing.T) {
 	r := NewRunner(slog.Default())
@@ -117,5 +123,53 @@ func TestNextDelayRetriesSoonThenBacksOff(t *testing.T) {
 		if got := nextDelay(true, i); got != w {
 			t.Errorf("retry %d: %v, want %v", i, got, w)
 		}
+	}
+}
+
+func TestRunsServerSkipsGatewaysAndPhones(t *testing.T) {
+	cases := map[string]bool{
+		"studio":       true,
+		"gw-sfo":       false,
+		"GW-nyc":       false,
+		"Keith-iPhone": false,
+		"family-iPad":  false,
+	}
+	for name, want := range cases {
+		if got := runsServer(mesh.Peer{Name: name}); got != want {
+			t.Errorf("runsServer(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestHasUnmeasuredPeer(t *testing.T) {
+	r := NewRunner(slog.Default())
+	peer := func(id, name string, lc mesh.Lifecycle, addr string) mesh.Peer {
+		return mesh.Peer{ID: id, Name: name, Lifecycle: lc, TunnelAddress: addr}
+	}
+	has := func(peers ...mesh.Peer) bool {
+		return r.hasUnmeasuredPeer(staticProvider{mesh.Status{Peers: peers}})
+	}
+
+	if has() {
+		t.Error("no peers: want false")
+	}
+	// Ineligible peers never count as unmeasured.
+	if has(
+		peer("a", "studio", mesh.LifecycleOffline, "100.64.0.2"),
+		peer("b", "studio2", mesh.LifecycleConnected, ""),
+		peer("c", "gw-sfo", mesh.LifecycleConnected, "100.64.0.3"),
+		peer("d", "my-iPhone", mesh.LifecycleConnected, "100.64.0.4"),
+	) {
+		t.Error("ineligible peers: want false")
+	}
+	if !has(peer("e", "studio", mesh.LifecycleConnected, "100.64.0.5")) {
+		t.Error("connected peer without reading: want true")
+	}
+
+	r.mu.Lock()
+	r.results["e"] = Result{PeerID: "e", DownloadMbps: 10, MeasuredAt: time.Now()}
+	r.mu.Unlock()
+	if has(peer("e", "studio", mesh.LifecycleConnected, "100.64.0.5")) {
+		t.Error("fresh reading: want false")
 	}
 }

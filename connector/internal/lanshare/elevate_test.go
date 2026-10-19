@@ -165,3 +165,57 @@ func TestDestinationURLOmitsThePassword(t *testing.T) {
 		t.Error("accepted a hostile share name")
 	}
 }
+
+type failingElevator struct{}
+
+func (failingElevator) Elevate(context.Context, []string) (string, error) {
+	return "", errors.New("user canceled")
+}
+
+// A privileged step goes through the Elevator, never the plain runner, unless
+// this process is already root.
+func TestApplyElevatesPrivilegedSteps(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; steps run directly")
+	}
+	runner := &fakeRunner{out: map[string]string{}}
+	elevator := &countingElevator{}
+	plan := Plan{Steps: []Step{{Name: "create-share", Argv: []string{SharingPath, "-a", "/x"}, NeedsRoot: true}}}
+	done, err := Apply(context.Background(), plan, runner, elevator)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(done) != 1 || elevator.calls != 1 || len(runner.calls) != 0 {
+		t.Fatalf("done=%v elevations=%d plain runs=%v", done, elevator.calls, runner.calls)
+	}
+}
+
+// Declining the authorization dialog is a failure that still shows the command.
+func TestApplyReportsAnElevationFailureWithTheCommand(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root; steps run directly")
+	}
+	plan := Plan{Steps: []Step{{Name: "create-share", Argv: []string{SharingPath, "-a", "/x"}, NeedsRoot: true}}}
+	done, err := Apply(context.Background(), plan, &fakeRunner{out: map[string]string{}}, failingElevator{})
+	if err == nil {
+		t.Fatal("a canceled elevation was reported as success")
+	}
+	if len(done) != 0 {
+		t.Fatalf("completed steps were %v", done)
+	}
+	if !strings.Contains(err.Error(), "user canceled") || !strings.Contains(err.Error(), "sudo "+SharingPath) {
+		t.Errorf("error lacks the cause or the runnable command: %v", err)
+	}
+}
+
+func TestPlanNeedsRootOnlyWhenAStepDoes(t *testing.T) {
+	if (Plan{}).NeedsRoot() {
+		t.Error("an empty plan claims to need root")
+	}
+	if (Plan{Steps: []Step{{Name: "a"}}}).NeedsRoot() {
+		t.Error("an unprivileged plan claims to need root")
+	}
+	if !(Plan{Steps: []Step{{Name: "a"}, {Name: "b", NeedsRoot: true}}}).NeedsRoot() {
+		t.Error("a plan with a privileged step does not need root")
+	}
+}

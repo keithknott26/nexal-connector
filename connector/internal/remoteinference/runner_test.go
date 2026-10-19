@@ -188,54 +188,6 @@ exit 0`)
 	}
 }
 
-func TestPoolMemberWaitsForRingThenServes(t *testing.T) {
-	log := filepath.Join(t.TempDir(), "calls")
-	exe := script(t, `echo "$@" >> `+log+`
-if [ "$2" = status ]; then echo '{"models":[{"modelId":"big"}]}'; fi
-[ "$2" = pool-serve ] && exec sleep 30
-exit 0`)
-	l, _ := net.Listen("tcp", "127.0.0.1:0")
-	ap := l.Addr().(*net.TCPAddr).Port
-	l.Close()
-	// Answer on whichever API port the runner hands to pool-serve.
-	go func() {
-		for i := 0; i < 200; i++ {
-			time.Sleep(100 * time.Millisecond)
-			b, _ := os.ReadFile(log)
-			_, rest, ok := strings.Cut(string(b), "--api-port ")
-			if !ok {
-				continue
-			}
-			if l, err := net.Listen("tcp", "127.0.0.1:"+strings.Fields(rest)[0]); err == nil {
-				go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"data":[]}`)) }))
-			}
-			return
-		}
-	}()
-	task := Task{ID: "rinf_p", ModelID: "big", PoolID: "pool_1", PoolRank: 0, PoolSize: 2}
-	c := &fakeCoord{tasks: []Task{task}}
-	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1" }, Port: ap, MaxPort: ap + 1, ReadyAfter: 20 * time.Second, PoolWait: 20 * time.Second}
-	r.Once(context.Background())
-	wait(t, func() bool { return c.last().RingAddress != "" })
-	ringAddr := c.last().RingAddress
-	if !strings.HasPrefix(ringAddr, "127.0.0.1:") {
-		t.Fatal(ringAddr)
-	}
-	// The coordinator now knows everyone: the next poll carries the ring.
-	c.mu.Lock()
-	c.tasks[0].PoolRing = []string{ringAddr, "127.0.0.1:9"}
-	c.mu.Unlock()
-	r.Once(context.Background())
-	wait(t, func() bool { return c.last().State == "ready" })
-	b, _ := os.ReadFile(log)
-	if !strings.Contains(string(b), "pool-serve big --rank 0 --hosts "+ringAddr+",127.0.0.1:9") {
-		t.Fatalf("calls:\n%s", b)
-	}
-	if !strings.Contains(c.last().Endpoint, "http://127.0.0.1:") {
-		t.Fatal(c.last())
-	}
-}
-
 func TestInstallTreatsAlreadyInstalledAsSuccess(t *testing.T) {
 	exe := script(t, `echo '{"event":"error","code":"already_installed","message":"qwen3-4b-q4 is already installed"}'; exit 1`)
 	r := &Runner{Coord: &fakeCoord{}, HostID: "h", Exe: exe}

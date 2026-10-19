@@ -83,7 +83,10 @@ struct RemoteInferenceCard: Identifiable, Equatable {
             // Nothing reported yet means no figure (an indeterminate bar), not 0%.
             let reported = group.contains { $0.progress != nil || $0.state == "ready" }
             let progress: Double? = reported ? group.map { $0.progress ?? ($0.state == "ready" ? 1 : 0) }.reduce(0, +) / Double(group.count) : nil
-            return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: state, step: (failed ?? slowest)?.step, detail: (failed ?? slowest)?.detail,
+            // Once the Mac that answers is serving (alone, or with the others), its message is the news: "serving on this
+            // Mac alone", "the pool lost a member". Before that, the slowest Mac sets the pace.
+            let shown = failed ?? (lead.state == "ready" || lead.step == "serve" ? lead : slowest)
+            return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: state, step: shown?.step, detail: shown?.detail,
                                        endpoint: lead.endpoint, progress: state == "running" ? progress : nil, members: members)
         }
     }
@@ -277,9 +280,11 @@ struct RemoteInferenceContent: View {
                 }
             }
             if c.state != "ready" && c.state != "pending" { stepsView(c) }
-            if let d = c.detail, c.state != "ready" { Text(d).font(.caption2).foregroundStyle(c.state == "failed" ? .red : .secondary).textSelection(.enabled) }
+            if let d = c.detail, c.state != "ready" || c.isPool {
+                Text(d).font(.caption2).foregroundStyle(c.state == "failed" ? .red : RemoteInferenceStages.isWarning(d) ? .orange : .secondary).textSelection(.enabled)
+            }
             if c.state == "pending" { Text(c.isPool ? "Waiting for the Macs in the pool to pick this up…" : "Waiting for that Mac to pick this up…").font(.caption2).foregroundStyle(.secondary) }
-            if c.isPool && c.state != "ready" { memberLines(c) }
+            if c.isPool { memberLines(c) }
             if c.state == "ready", let e = c.endpoint {
                 HStack {
                     Text(e).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
@@ -363,10 +368,12 @@ enum RemoteInferenceStages {
         case "setup": return "preparing the runtime"
         case "pin": return "checking the model"
         case "install": return "downloading"
-        case "pool": return "waiting for the others"
+        case "pool": return "waiting for the pool"
         case "serve": return "loading the model"
         default: return "working"
         }
     }
+    /// Pool notices worth the owner's attention: a Mac dropped out, or the pool could not form.
+    static func isWarning(_ detail: String) -> Bool { detail.contains("lost a member") || detail.contains("Could not form") || detail.contains("Left the pool") }
     static func index(of step: String?) -> Int? { step == "pool" ? 3 : step.flatMap { keys.firstIndex(of: $0) } }
 }

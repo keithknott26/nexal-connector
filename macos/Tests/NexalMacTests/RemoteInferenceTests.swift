@@ -84,10 +84,23 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(card.step, "install")
     }
 
+    func testReadyPoolShowsTheMacThatAnswersAndItsNotice() {
+        let lines = """
+        {"id":"r1","targetHostId":"h1","modelId":"big","state":"ready","step":"pool","detail":"The pool lost a member (a Mac went quiet or left), so it is serving from this Mac alone.","endpoint":"http://100.86.0.1:8001/v1","poolId":"p1","poolRank":0,"poolSize":2}
+        {"id":"r2","targetHostId":"h2","modelId":"big","state":"running","step":"pool","detail":"Ready to share the load.","poolId":"p1","poolRank":1,"poolSize":2}
+        """
+        let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(Data(lines.utf8)))
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(cards[0].state, "ready")
+        XCTAssertTrue(cards[0].detail?.contains("lost a member") == true)
+        XCTAssertTrue(RemoteInferenceStages.isWarning(cards[0].detail ?? ""))
+        XCTAssertFalse(RemoteInferenceStages.isWarning("Serving big with 2 Macs sharing the load."))
+    }
+
     func testPoolStageIndex() {
         XCTAssertEqual(RemoteInferenceStages.index(of: "pool"), 3)
         XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
-        XCTAssertEqual(RemoteInferenceStages.label("running", "pool"), "waiting for the others")
+        XCTAssertEqual(RemoteInferenceStages.label("running", "pool"), "waiting for the pool")
     }
 
     func testReviewLatestDecodesAndOnlyOpensHuggingFace() throws {

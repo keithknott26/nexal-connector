@@ -6,12 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"nexal/connector/internal/inference"
@@ -21,6 +19,7 @@ import (
 //
 //	nexal inference pool-setup [--json]
 //	nexal inference pool-serve <model-id> --rank N --hosts ip:port,ip:port --api-host IP [--api-port N]
+//	nexal inference pool-serve <model-id> --solo --api-host IP [--api-port N]
 //
 // pool-setup builds the separate environment pooling needs. pool-serve runs this Mac's share of the
 // pool; run it with the same --hosts on every member, each with its own rank. Rank 0 answers the
@@ -59,28 +58,31 @@ func inferencePoolSetup(ctx context.Context, args []string) error {
 func inferencePoolServe(ctx context.Context, args []string) error {
 	var rank, apiPort *int
 	var hosts, apiHost *string
+	var solo *bool
 	id, _, path, err := parseModelArgs("pool-serve", args, true, func(f *flag.FlagSet) {
 		rank = f.Int("rank", -1, "this Mac's position in --hosts (0 answers the API)")
 		hosts = f.String("hosts", "", "every member's ring address, comma separated, in rank order (ip:port)")
-		apiHost = f.String("api-host", "", "the one IP address rank 0 answers on (its neXal address)")
+		apiHost = f.String("api-host", "", "the one IP address rank 0 answers on")
 		apiPort = f.Int("api-port", inference.DefaultServePort, "TCP port rank 0 answers on")
+		solo = f.Bool("solo", false, "serve the whole model on this Mac alone (no ring), on --api-host:--api-port")
 	})
 	if err != nil {
 		return err
 	}
 	infDir := inferenceDirOf(*path)
-	hostfile := filepath.Join(infDir, fmt.Sprintf("pool-%s-rank%d.json", id, *rank))
-	// Rank 0's server listens on loopback and is forwarded to the neXal address below: this Mac cannot
-	// connect to its own neXal address, so it could not otherwise tell that the server answers.
-	listenHost := *apiHost
-	if *rank == 0 {
-		listenHost = "127.0.0.1"
+	var name string
+	var argv, env []string
+	var serr error
+	if *solo {
+		name, argv, env, serr = inference.SoloServeCommand(infDir, id, *apiHost, *apiPort)
+	} else {
+		hostfile := filepath.Join(infDir, fmt.Sprintf("pool-%s-rank%d.json", id, *rank))
+		name, argv, env, serr = inference.PoolServeCommand(infDir, id, *rank, strings.Split(*hosts, ","), *apiHost, *apiPort, hostfile)
+		defer os.Remove(hostfile)
 	}
-	name, argv, env, serr := inference.PoolServeCommand(infDir, id, *rank, strings.Split(*hosts, ","), listenHost, *apiPort, hostfile)
 	if serr != nil {
 		return coded(serr)
 	}
-	defer os.Remove(hostfile)
 	if left := inference.ReapOrphanPoolServers(infDir); len(left) > 0 {
 		writeLine(os.Stdout, "Stopped %d pool server(s) left over from an earlier run", len(left))
 	}
@@ -94,24 +96,15 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, name, argv...)
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if *rank == 0 {
+	switch {
+	case *solo:
+		writeLine(os.Stdout, "Serving %s on this Mac alone at http://%s:%d/v1", id, *apiHost, *apiPort)
+	case *rank == 0:
 		writeLine(os.Stdout, "Pool rank 0 serving %s on http://%s:%d/v1", id, *apiHost, *apiPort)
-	} else {
+	default:
 		writeLine(os.Stdout, "Pool rank %d working for rank 0 on %s", *rank, id)
 	}
-	if err := cmd.Start(); err != nil {
-		return &codedError{code: "server_stopped", err: fmt.Errorf("the pool server did not start: %w", err)}
-	}
-	if *rank == 0 {
-		fctx, stop := context.WithCancel(ctx)
-		defer stop()
-		if err := inference.ForwardAPI(fctx, net.JoinHostPort(*apiHost, strconv.Itoa(*apiPort)), net.JoinHostPort(listenHost, strconv.Itoa(*apiPort))); err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			return &codedError{code: "server_stopped", err: fmt.Errorf("could not answer on %s:%d: %w", *apiHost, *apiPort, err)}
-		}
-	}
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the pool server stopped: %w", err)}
 	}
 	return nil

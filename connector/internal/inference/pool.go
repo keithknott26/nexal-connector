@@ -154,3 +154,26 @@ func PoolServeCommand(inferenceDir, id string, rank int, hosts []string, apiHost
 	env = []string{"MLX_RANK=" + strconv.Itoa(rank), "MLX_HOSTFILE=" + hostfilePath, "HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "MLX_RING_VERBOSE=1", "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }
+
+// SoloServeCommand builds the command that runs the whole model in one pool-runtime server on
+// apiHost:apiPort, with no ring. A pool starts this first so the model answers at once, and moves to the
+// ring only when every member is ready.
+func SoloServeCommand(inferenceDir, id, apiHost string, apiPort int) (name string, args []string, env []string, err error) {
+	if !entryIDs.MatchString(id) {
+		return "", nil, nil, errf("invalid_arguments", "use an id from `nexal inference status`", "invalid model id")
+	}
+	if ip := net.ParseIP(apiHost); ip == nil || ip.IsUnspecified() {
+		return "", nil, nil, errf("invalid_arguments", "pass one specific IP address", "--api-host must be one specific IP address")
+	}
+	rt := CheckPoolRuntime(inferenceDir)
+	if !rt.Ready {
+		return "", nil, nil, errf("runtime_not_set_up", "run `nexal inference pool-setup` first", "%s", rt.Reason)
+	}
+	dir := ModelDir(inferenceDir, id)
+	if st, e := os.Stat(dir); e != nil || !st.IsDir() {
+		return "", nil, nil, errf("not_installed", "run `nexal inference install "+id+"` first", "%s is not installed", id)
+	}
+	args = []string{"-I", "-m", "mlx_lm", "server", "--model", dir, "--host", apiHost, "--port", strconv.Itoa(apiPort)}
+	env = []string{"HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "PATH=/usr/bin:/bin"}
+	return rt.Python, args, env, nil
+}

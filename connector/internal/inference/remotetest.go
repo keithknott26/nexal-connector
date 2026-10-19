@@ -57,8 +57,14 @@ func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*Rem
 	if client == nil {
 		client = &http.Client{Timeout: 3 * time.Minute}
 	}
+	shown := u.String()
+	// A Mac cannot connect to its own neXal address, so when the Mac serving the model is this one, the
+	// pool server answers on loopback too: test there.
+	if ownAddress(u.Hostname()) {
+		u.Host = net.JoinHostPort("127.0.0.1", u.Port())
+	}
 	base := u.String()
-	res := &RemoteTestResult{Endpoint: base}
+	res := &RemoteTestResult{Endpoint: shown}
 
 	t0 := time.Now()
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
@@ -150,3 +156,21 @@ func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*Rem
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+
+// ownAddress reports whether host is an address of one of this Mac's network interfaces.
+func ownAddress(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() {
+		return false
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}

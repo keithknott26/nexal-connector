@@ -101,3 +101,17 @@ func TestMaterialIgnoresSamplingNoise(t *testing.T) {
 		t.Fatal("metric availability transition suppressed")
 	}
 }
+
+func TestLimitedOutputRejectsWritesPastCap(t *testing.T) {
+	var out limitedOutput
+	if n, err := out.Write(make([]byte, 256<<10)); err != nil || n != 256<<10 {
+		t.Fatalf("write at cap = %d, %v; want full write", n, err)
+	}
+	n, err := out.Write([]byte("x"))
+	if err == nil || n != 0 {
+		t.Fatalf("write past cap = %d, %v; want 0 and an error", n, err)
+	}
+	if out.Len() != 256<<10 {
+		t.Fatalf("buffer grew past cap: %d", out.Len())
+	}
+}

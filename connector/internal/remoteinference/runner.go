@@ -539,7 +539,11 @@ func (r *Runner) current(id string) (Task, bool) {
 // poolExit says how a pool server ended, with the last lines it printed: a crash alone ("segmentation
 // fault") does not say what went wrong before it.
 func poolExit(out string, err error) string {
-	return clean(err.Error()+". Server output: "+lastLines(out, 6), 280)
+	s := []rune(clean(err.Error()+". Server output: "+lastLines(out, 6), 1<<20))
+	if len(s) > 280 {
+		s = append([]rune("..."), s[len(s)-277:]...) // the end of the output says what went wrong
+	}
+	return string(s)
 }
 
 func (r *Runner) pool(ctx context.Context, t Task, addr string) {

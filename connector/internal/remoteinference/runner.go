@@ -31,6 +31,8 @@ type Task struct {
 	Step            string `json:"step,omitempty"`
 	Detail          string `json:"detail,omitempty"`
 	Endpoint        string `json:"endpoint,omitempty"`
+	// Progress is the overall progress (0..1) the Mac doing the work last reported; nil before it has.
+	Progress *float64 `json:"progress,omitempty"`
 	// Pooling: this Mac is member PoolRank of PoolSize. PoolRing lists every member's ring address in
 	// rank order once all have said where they listen; PoolEndpoint is rank 0's API once it answers.
 	PoolID       string   `json:"poolId,omitempty"`

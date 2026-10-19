@@ -80,7 +80,9 @@ struct RemoteInferenceCard: Identifiable, Equatable {
             // The slowest Mac sets the pace: show its step and detail.
             let slowest = group.filter { !$0.isDone }.min { (RemoteInferenceStages.index(of: $0.step) ?? -1) < (RemoteInferenceStages.index(of: $1.step) ?? -1) }
             let state = failed != nil ? "failed" : lead.state == "ready" ? "ready" : group.allSatisfy { $0.state == "pending" } ? "pending" : "running"
-            let progress = group.map { $0.progress ?? ($0.state == "ready" ? 1 : 0) }.reduce(0, +) / Double(group.count)
+            // Nothing reported yet means no figure (an indeterminate bar), not 0%.
+            let reported = group.contains { $0.progress != nil || $0.state == "ready" }
+            let progress: Double? = reported ? group.map { $0.progress ?? ($0.state == "ready" ? 1 : 0) }.reduce(0, +) / Double(group.count) : nil
             return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: state, step: (failed ?? slowest)?.step, detail: (failed ?? slowest)?.detail,
                                        endpoint: lead.endpoint, progress: state == "running" ? progress : nil, members: members)
         }

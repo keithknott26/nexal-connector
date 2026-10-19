@@ -54,6 +54,13 @@ type Runner struct {
 	// tests in this session, so the UI can set a gauge max that reflects the
 	// real link speed rather than a hardcoded value.
 	observedMax float64
+
+	// On-demand port state (ondemand.go): the run context and snapshot source, the
+	// coordinator call that asks a peer to open its port, and when we last opened ours.
+	ctx      context.Context
+	provider mesh.Provider
+	opener   func(context.Context, string) error
+	lastOpen time.Time
 }
 
 // NewRunner creates a bandwidth test runner.
@@ -82,15 +89,10 @@ func (r *Runner) Run(ctx context.Context, provider mesh.Provider) {
 	case <-time.After(StartupDelay):
 	}
 
-	// Start server on our tunnel address.
-	status := provider.Snapshot()
-	if status.SelfTunnelAddress != "" {
-		if err := r.server.Start(ctx, status.SelfTunnelAddress); err != nil {
-			r.logger.Warn("bandwidth server start failed", "error", err.Error(), "addr", status.SelfTunnelAddress)
-		} else {
-			r.logger.Info("bandwidth server started", "addr", r.server.Addr())
-		}
-	}
+	// The port is not held open between tests: a peer opens it on request (ondemand.go).
+	r.mu.Lock()
+	r.ctx, r.provider = ctx, provider
+	r.mu.Unlock()
 	defer r.server.Stop()
 
 	// Run initial test, then periodically. A cycle that leaves a connected peer without a
@@ -111,13 +113,6 @@ func (r *Runner) Run(ctx context.Context, provider mesh.Provider) {
 		case <-ctx.Done():
 			return
 		case <-time.After(delay):
-		}
-		// Re-check tunnel address in case it changed or was not known at startup.
-		status = provider.Snapshot()
-		if status.SelfTunnelAddress != "" && r.server.Addr() == "" {
-			if err := r.server.Start(ctx, status.SelfTunnelAddress); err != nil {
-				r.logger.Debug("bandwidth server restart failed", "error", err.Error())
-			}
 		}
 		full := time.Since(lastFull) >= TestInterval
 		r.testAllPeers(ctx, provider, !full)
@@ -166,7 +161,7 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider, onlyM
 
 		r.logger.Debug("bandwidth test starting", "peer", peer.Name, "addr", peer.TunnelAddress)
 		testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		result := TestPeer(testCtx, peer.ID, peer.Name, peer.TunnelAddress)
+		result := r.measure(testCtx, peer)
 		cancel()
 
 		// One retry on failure — transient TCP or timeout errors are common on slow links.
@@ -178,7 +173,7 @@ func (r *Runner) testAllPeers(ctx context.Context, provider mesh.Provider, onlyM
 			case <-time.After(3 * time.Second):
 			}
 			testCtx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-			result = TestPeer(testCtx2, peer.ID, peer.Name, peer.TunnelAddress)
+			result = r.measure(testCtx2, peer)
 			cancel2()
 		}
 

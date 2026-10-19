@@ -75,19 +75,50 @@ func NewServer() *Server {
 // Start begins listening on the given tunnel address. It is safe to call from
 // any goroutine. If already listening, Stop is called first.
 func (s *Server) Start(ctx context.Context, tunnelAddr string) error {
+	_, err := s.start(ctx, tunnelAddr, false)
+	return err
+}
+
+// StartOnce listens for one measurement. The listener closes as soon as one test payload
+// has been fully served, or after window if none is, whichever comes first. This is the
+// on-demand mode: the port is open only while a peer is measuring against it.
+func (s *Server) StartOnce(ctx context.Context, tunnelAddr string, window time.Duration) error {
+	ln, err := s.start(ctx, tunnelAddr, true)
+	if err != nil {
+		return err
+	}
+	time.AfterFunc(window, func() { s.stopIf(ln) })
+	return nil
+}
+
+func (s *Server) start(ctx context.Context, tunnelAddr string, once bool) (net.Listener, error) {
 	s.Stop()
 	listenAddr := net.JoinHostPort(tunnelAddr, fmt.Sprintf("%d", Port))
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", listenAddr)
 	if err != nil {
-		return fmt.Errorf("bandwidth server: %w", err)
+		return nil, fmt.Errorf("bandwidth server: %w", err)
 	}
 	s.mu.Lock()
 	s.listener = ln
 	s.addr = listenAddr
 	s.mu.Unlock()
-	go s.serve(ctx, ln)
-	return nil
+	go s.serve(ctx, ln, once)
+	return ln, nil
+}
+
+// stopIf closes ln only if it is still the current listener, so a stale timer from an
+// earlier window cannot close a newer one.
+func (s *Server) stopIf(ln net.Listener) {
+	s.mu.Lock()
+	if s.listener != ln {
+		s.mu.Unlock()
+		return
+	}
+	s.listener = nil
+	s.addr = ""
+	s.mu.Unlock()
+	_ = ln.Close()
 }
 
 // Stop shuts down the listener. Idempotent.
@@ -109,7 +140,7 @@ func (s *Server) Addr() string {
 	return s.addr
 }
 
-func (s *Server) serve(ctx context.Context, ln net.Listener) {
+func (s *Server) serve(ctx context.Context, ln net.Listener, once bool) {
 	// Reusable buffer of random bytes. Re-randomising per connection is
 	// unnecessary: the purpose is to defeat compression, not to be
 	// cryptographically unpredictable.
@@ -135,12 +166,16 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) {
 		}
 		go func() {
 			defer func() { <-sem }()
-			s.handleConn(conn, buf)
+			s.handleConn(conn, buf, func() {
+				if once {
+					s.stopIf(ln)
+				}
+			})
 		}()
 	}
 }
 
-func (s *Server) handleConn(conn net.Conn, buf []byte) {
+func (s *Server) handleConn(conn net.Conn, buf []byte, done func()) {
 	defer conn.Close()
 	// 30 s deadline for the entire exchange; matches the client side so slow links can complete.
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
@@ -167,6 +202,9 @@ func (s *Server) handleConn(conn net.Conn, buf []byte) {
 		if err != nil {
 			return
 		}
+	}
+	if done != nil {
+		done()
 	}
 }
 

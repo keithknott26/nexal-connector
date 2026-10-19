@@ -81,6 +81,7 @@ type HeartbeatResponse struct {
 
 type API interface {
 	Heartbeat(context.Context, string, Heartbeat) (HeartbeatResponse, error)
+	RequestBandwidthOpen(context.Context, string) error
 	Next(context.Context, string) (*Attempt, error)
 	SelfTest(context.Context, string) (bool, *Attempt, error)
 	Renew(context.Context, string) (Renewal, error)

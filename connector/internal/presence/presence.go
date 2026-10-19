@@ -138,6 +138,9 @@ type Options struct {
 	// (and therefore the dashboard) gets fresh PQ, memory and tunnel state.
 	// Nil disables the nudge; the host still heartbeats on its own cadence.
 	StatusRefresh func()
+	// BandwidthOpen is called when the coordinator asks this host to open its bandwidth
+	// port for a peer's test. Nil disables it.
+	BandwidthOpen func(requestID, requesterHostID string)
 	// Info returns this Mac's details for the host.info frame; nil disables it.
 	Info func(ctx context.Context) sysinfo.Info
 	// InfoEvery overrides InfoCheckInterval (tests).
@@ -437,6 +440,8 @@ type event struct {
 	TargetHostID string   `json:"targetHostId"`
 	MACs         []string `json:"macs"`
 	JobID        string   `json:"jobId"`
+	// RequesterHostID names the peer that wants this host's bandwidth port (bandwidth.request).
+	RequesterHostID string `json:"requesterHostId"`
 	// Info is one host's details (host.info); Infos is the snapshot's map.
 	Info  *sysinfo.Info           `json:"info"`
 	Infos map[string]sysinfo.Info `json:"infos"`
@@ -508,6 +513,11 @@ func (c *Client) handle(data []byte) bool {
 		c.mu.Unlock()
 	case "wake.request":
 		c.relayWake(e)
+	case "bandwidth.request":
+		if c.opts.BandwidthOpen != nil && client.ValidID(e.RequestID) && client.ValidID(e.RequesterHostID) &&
+			e.RequesterHostID != c.opts.HostID {
+			c.opts.BandwidthOpen(e.RequestID, e.RequesterHostID)
+		}
 	case "selftest.request":
 		if client.ValidID(e.TargetHostID) && e.TargetHostID == c.opts.HostID && c.opts.SelfTest != nil {
 			c.opts.SelfTest()

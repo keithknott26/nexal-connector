@@ -599,7 +599,8 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 				agentRef.WakeHeartbeat()
 			}
 		},
-		Logger: logger.With("component", "presence"),
+		BandwidthOpen: bwRunner.HandleRequest,
+		Logger:        logger.With("component", "presence"),
 		Info: func(ctx context.Context) sysinfo.Info {
 			info := hostInfo.Collect(ctx)
 			info.ExitNodeStatus = mesh.ReadExitNodeStatus(ctx)

@@ -253,6 +253,9 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 	for _, opt := range opts {
 		opt(a)
 	}
+	if a.bandwidthRunner != nil && a.api != nil {
+		a.bandwidthRunner.SetOpener(a.api.RequestBandwidthOpen)
+	}
 	b, err := config.ReadPrivate(a.journalPath(), 8<<20)
 	if err == nil {
 		if err = json.Unmarshal(b, &a.records); err != nil || a.records == nil {

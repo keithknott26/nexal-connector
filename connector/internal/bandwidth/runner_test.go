@@ -238,3 +238,33 @@ func TestTestAllPeersStopsWhenCancelled(t *testing.T) {
 		t.Error("no result expected")
 	}
 }
+
+func TestTestAllPeersRecordsSuccessfulMeasurement(t *testing.T) {
+	srv := NewServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := srv.Start(ctx, "127.0.0.1"); err != nil {
+		t.Skipf("cannot bind bandwidth port on loopback: %v", err)
+	}
+	defer srv.Stop()
+
+	r := NewRunner(slog.Default())
+	provider := staticProvider{mesh.Status{Peers: []mesh.Peer{
+		{ID: "p1", Name: "studio", Lifecycle: mesh.LifecycleConnected, TunnelAddress: "127.0.0.1"},
+	}}}
+	r.testAllPeers(ctx, provider, false)
+
+	res, ok := r.Results()["p1"]
+	if !ok {
+		t.Fatal("expected a recorded result for the reachable peer")
+	}
+	if res.DownloadMbps <= 0 || res.PeerName != "studio" || res.Error != "" {
+		t.Errorf("unexpected result: %+v", res)
+	}
+	if r.PeerBandwidth("p1") != res.DownloadMbps {
+		t.Error("PeerBandwidth should reflect the recorded result")
+	}
+	if r.ObservedMax() < res.DownloadMbps {
+		t.Errorf("ObservedMax %v below measured %v", r.ObservedMax(), res.DownloadMbps)
+	}
+}

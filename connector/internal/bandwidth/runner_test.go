@@ -1,6 +1,7 @@
 package bandwidth
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -171,5 +172,69 @@ func TestHasUnmeasuredPeer(t *testing.T) {
 	r.mu.Unlock()
 	if has(peer("e", "studio", mesh.LifecycleConnected, "100.64.0.5")) {
 		t.Error("fresh reading: want false")
+	}
+}
+
+func TestRunnerServerAccessor(t *testing.T) {
+	r := NewRunner(slog.Default())
+	if r.Server() == nil || r.Server() != r.server {
+		t.Error("Server() should return the runner's server")
+	}
+}
+
+func TestRunReturnsWhenCancelledBeforeStartup(t *testing.T) {
+	r := NewRunner(slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		r.Run(ctx, staticProvider{})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after context cancellation")
+	}
+	if r.server.Addr() != "" {
+		t.Error("server must not start when cancelled before the startup delay")
+	}
+}
+
+func TestTestAllPeersSkipsIneligibleAndMeasured(t *testing.T) {
+	r := NewRunner(slog.Default())
+	r.mu.Lock()
+	r.results["m"] = Result{PeerID: "m", DownloadMbps: 10, MeasuredAt: time.Now()}
+	r.mu.Unlock()
+	provider := staticProvider{mesh.Status{Peers: []mesh.Peer{
+		{ID: "a", Name: "studio", Lifecycle: mesh.LifecycleOffline, TunnelAddress: "100.64.0.2"},
+		{ID: "b", Name: "studio2", Lifecycle: mesh.LifecycleConnected},
+		{ID: "c", Name: "gw-sfo", Lifecycle: mesh.LifecycleConnected, TunnelAddress: "100.64.0.3"},
+		{ID: "m", Name: "studio3", Lifecycle: mesh.LifecycleConnected, TunnelAddress: "100.64.0.4"},
+	}}}
+	start := time.Now()
+	r.testAllPeers(context.Background(), provider, true)
+	if time.Since(start) > time.Second {
+		t.Error("no peer is eligible; testAllPeers should return immediately")
+	}
+	if got := len(r.Results()); got != 1 {
+		t.Errorf("results = %d, want only the pre-existing one", got)
+	}
+}
+
+func TestTestAllPeersStopsWhenCancelled(t *testing.T) {
+	r := NewRunner(slog.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	provider := staticProvider{mesh.Status{Peers: []mesh.Peer{
+		{ID: "a", Name: "studio", Lifecycle: mesh.LifecycleConnected, TunnelAddress: "100.64.0.2"},
+	}}}
+	start := time.Now()
+	r.testAllPeers(ctx, provider, false)
+	if time.Since(start) > time.Second {
+		t.Error("cancelled context should abort before testing peers")
+	}
+	if len(r.Results()) != 0 {
+		t.Error("no result expected")
 	}
 }

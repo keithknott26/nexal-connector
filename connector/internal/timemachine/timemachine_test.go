@@ -122,3 +122,43 @@ func TestDeployedCoordinatorShapeAcceptsDefaultShareAndRejectsTraversal(t *testi
 		t.Fatal("path traversal network id accepted")
 	}
 }
+
+func TestUsageValidate(t *testing.T) {
+	now := time.Now().UTC()
+	ok := Usage{SampleID: "sample-0001", ObservedAt: now.Format(time.RFC3339Nano)}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("valid usage rejected: %v", err)
+	}
+	bad := map[string]Usage{
+		"short id":    {SampleID: "short", ObservedAt: ok.ObservedAt},
+		"long id":     {SampleID: strings.Repeat("a", 121), ObservedAt: ok.ObservedAt},
+		"whitespace":  {SampleID: "sample 0001", ObservedAt: ok.ObservedAt},
+		"bad time":    {SampleID: ok.SampleID, ObservedAt: "yesterday"},
+		"future time": {SampleID: ok.SampleID, ObservedAt: now.Add(time.Hour).Format(time.RFC3339Nano)},
+	}
+	for name, u := range bad {
+		if u.Validate() == nil {
+			t.Errorf("%s: expected rejection", name)
+		}
+	}
+}
+
+func TestCoordinatorStateMapsStatus(t *testing.T) {
+	cases := []struct {
+		in            Status
+		state, detail string
+	}{
+		{Status{State: "disabled", DetailCode: "ignored"}, "disabled", ""},
+		{Status{State: "ready"}, "advertising", ""},
+		{Status{State: "configuring", DetailCode: "mount_pending"}, "pending", "mount_pending"},
+		{Status{State: "action_required", DetailCode: "grant_access"}, "pending", "grant_access"},
+		{Status{State: "degraded", DetailCode: "smb_down"}, "error", "smb_down"},
+		{Status{State: "degraded"}, "error", "time_machine_unavailable"},
+	}
+	for _, c := range cases {
+		state, detail := CoordinatorState(c.in)
+		if state != c.state || detail != c.detail {
+			t.Errorf("%+v: got (%q,%q), want (%q,%q)", c.in, state, detail, c.state, c.detail)
+		}
+	}
+}

@@ -52,6 +52,9 @@ enum CLICommand {
     /// Reconnect an already-enrolled Mac to its secure network (after a
     /// reinstall, service restart or reboot). Harmless when not enrolled.
     case rejoinNetwork
+    /// Restart the secure-network connection so every peer repeats the
+    /// quantum-safe key exchange. Drops the tunnel for a few seconds.
+    case rekeyNetwork
     /// Ask the coordinator to wake a sleeping peer, named by its tunnel address.
     case wake(tunnelAddress: String)
     case exitRoute(tunnelAddress: String, enabled: Bool, targetDeviceID: String? = nil)
@@ -179,6 +182,8 @@ enum CLICommand {
             command = ["pair-v2", "--leave"]
         case .rejoinNetwork:
             command = ["pair-v2", "--rejoin"]
+        case .rekeyNetwork:
+            command = ["pair-v2", "--rekey"]
         case let .canary(action):
             command = ["canary", "--action", action]
         case let .honeypot(action):

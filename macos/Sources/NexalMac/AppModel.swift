@@ -632,6 +632,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var refreshingPeerID: String?
     @Published private(set) var peerRefreshErrors: [String: String] = [:]
     @Published private(set) var peerRefreshedAt: [String: Date] = [:]
+    private var lastRekeyAt: Date?
+    static let rekeyCooldown: TimeInterval = 60
+    static func mayRekey(last: Date?, now: Date = Date()) -> Bool {
+        guard let last else { return true }
+        return now.timeIntervalSince(last) >= rekeyCooldown
+    }
 
     /// Read live runtime evidence through the connector's existing status seam.
     /// A refresh never fabricates protection or restarts unrelated peer links.
@@ -643,6 +649,15 @@ final class AppModel: ObservableObject {
         activity = "Refreshing computer status…"
         defer { busy = false; refreshingPeerID = nil; activity = nil }
         do {
+            // A peer that is not quantum-safe protected gets a fresh key
+            // exchange: bounce this Mac's connection and join again. Limited to
+            // once a minute because it briefly drops the tunnel.
+            if peer.pq != "protected", peer.pq != "rekeying", Self.mayRekey(last: lastRekeyAt) {
+                lastRekeyAt = Date()
+                activity = "Renewing quantum-safe protection…"
+                _ = try await invoke(.rekeyNetwork)
+                try? await Task.sleep(for: .seconds(8))
+            }
             try await updateStatus()
             await updateTunnelEvidence()
             await updatePeers()

@@ -30,6 +30,7 @@ func pairV2Command(ctx context.Context, args []string) error {
 	resetLocal := f.Bool("reset-local", false, "clear an unfinished local enrollment")
 	leave := f.Bool("leave", false, "leave the current neXal network")
 	rejoin := f.Bool("rejoin", false, "reconnect an enrolled Mac to its secure network using the saved credential")
+	rekey := f.Bool("rekey", false, "restart this Mac's secure-network connection so every peer repeats the quantum-safe key exchange")
 	if err := parse(f, args, path); err != nil {
 		return err
 	}
@@ -52,8 +53,11 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *rejoin {
 		modes++
 	}
+	if *rekey {
+		modes++
+	}
 	if modes != 1 {
-		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, --reset-local, --leave, or --rejoin")
+		return errors.New("pair-v2 requires exactly one of --create, --status, --cancel, --reset-local, --leave, --rejoin, or --rekey")
 	}
 	if *create {
 		return createPairV2(ctx, *path)
@@ -70,7 +74,32 @@ func pairV2Command(ctx context.Context, args []string) error {
 	if *rejoin {
 		return rejoinPairV2(ctx, *path)
 	}
+	if *rekey {
+		return rekeyPairV2(ctx, *path)
+	}
 	return statusPairV2(ctx, *path, *statusID)
+}
+
+// rekeyPairV2 bounces the secure-network runtime and joins again, which makes
+// every peer repeat the quantum-safe key exchange. A peer left in the degraded
+// state (lease expired, or a key exchange that never completed) recovers this
+// way. It drops the tunnel for a few seconds, so the app only asks for it when
+// a peer is not already protected. A Mac that is not enrolled is left alone.
+func rekeyPairV2(ctx context.Context, path string) error {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return err
+	}
+	if cfg.Enrollment == nil || cfg.Enrollment.ManagementURL == "" ||
+		(cfg.Enrollment.Status != "joining" && cfg.Enrollment.Status != "paired") {
+		return emit(map[string]any{"rekeyed": false, "reason": "not_enrolled"})
+	}
+	// Stopping is best effort: a runtime that is already down still needs the join.
+	_ = (mesh.ExecRunner{}).Run(ctx, "nexal-network", "down")
+	if err := rejoinPairV2(ctx, path); err != nil {
+		return err
+	}
+	return emit(map[string]any{"rekeyed": true})
 }
 
 // rejoinPairV2 re-runs the network join for a Mac that already finished

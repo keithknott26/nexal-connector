@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +135,29 @@ func TestSerialFromProfiler(t *testing.T) {
 		if validSerial(bad) {
 			t.Fatalf("validSerial(%q) = true", bad)
 		}
+	}
+}
+
+func TestExecRunnerScrubsEnvAndReportsFailure(t *testing.T) {
+	t.Setenv("NEXAL_SYSINFO_LEAK", "secret")
+	out, err := execRunner(context.Background(), "/usr/bin/env")
+	if err != nil {
+		t.Skipf("/usr/bin/env unavailable: %v", err)
+	}
+	if strings.Contains(string(out), "NEXAL_SYSINFO_LEAK") {
+		t.Fatalf("environment leaked into child: %q", out)
+	}
+	if !strings.Contains(string(out), "LC_ALL=C") {
+		t.Fatalf("expected pinned locale in child env: %q", out)
+	}
+	if _, err := execRunner(context.Background(), "/nonexistent/nexal-binary"); err == nil {
+		t.Fatal("expected error for missing binary")
+	}
+}
+
+func TestNewCollectorWiresRealRunnerAndStatfs(t *testing.T) {
+	c := NewCollector()
+	if c.Run == nil || c.Statfs == nil {
+		t.Fatalf("NewCollector left hooks unset: %+v", c)
 	}
 }

@@ -81,6 +81,8 @@ type Runner struct {
 	FormWait   time.Duration // how long a new pool gets to start answering before it is given up (default 6 minutes)
 	StallAfter time.Duration // a request that gets no bytes for this long means the pool is stuck (default 2 minutes)
 	ProbeEvery time.Duration // how often an idle pool is asked for one token (default 10 s)
+	RingGrace  time.Duration // how long a Mac may be missing from the ring before the pool counts it lost (default 15 s)
+	WakeGrace  time.Duration // how long after waking from sleep ring and stall checks are held off (default 60 s)
 	Rejoin     time.Duration // how long a member that left the pool waits before offering to join again (default 5 s)
 	Logger     *slog.Logger
 
@@ -124,6 +126,12 @@ func (r *Runner) init() {
 	}
 	if r.ProbeEvery == 0 {
 		r.ProbeEvery = 10 * time.Second
+	}
+	if r.RingGrace == 0 {
+		r.RingGrace = 15 * time.Second
+	}
+	if r.WakeGrace == 0 {
+		r.WakeGrace = 60 * time.Second
 	}
 	if r.Rejoin == 0 {
 		r.Rejoin = 5 * time.Second

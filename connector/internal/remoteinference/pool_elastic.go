@@ -184,6 +184,9 @@ type leader struct {
 	failures     int
 	lastProbe    time.Time
 	probeFails   int
+	pooledAt     time.Time // when the current pool started answering
+	wake         wakeWatch
+	ringGone     persist
 }
 
 func (r *Runner) poolLeader(ctx context.Context, t Task, addr string) {
@@ -211,6 +214,11 @@ func (r *Runner) poolLeader(ctx context.Context, t Task, addr string) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		}
+		if l.wake.tick(time.Now(), r.PoolPoll, r.WakeGrace) {
+			r.Logger.Info("woke from sleep; giving the pool time to settle", "model", t.ModelID)
+			l.probeFails, l.lastProbe = 0, time.Now()
+			l.ringGone.ok()
 		}
 		cur, ok := r.fetch(ctx, t.ID)
 		if !ok {
@@ -384,10 +392,10 @@ func (l *leader) form(ctx context.Context, ring []string) {
 		if answering, _ := up(ctx, "http://"+hostPort+"/v1"); answering && healthy(ctx, hostPort, 90*time.Second) == nil {
 			old := l.solo
 			l.pooled, l.pooledPort, l.solo = p, port, nil
-			l.probeFails, l.lastProbe = 0, time.Now()
+			l.probeFails, l.lastProbe, l.pooledAt = 0, time.Now(), time.Now()
+			l.ringGone.ok()
 			l.fwd.SetUpstream(hostPort, "")
 			old.stop() // its memory is needed by the shared model
-			l.failures = 0
 			l.say(poolStatus{state: "ready", step: "pool", detail: fmt.Sprintf("Serving %s with %d Macs sharing the load.", t.ModelID, t.PoolSize), endpoint: l.endpoint, progress: 1, ring: l.status.ring})
 			return
 		}
@@ -403,11 +411,7 @@ func (l *leader) form(ctx context.Context, ring []string) {
 // abandon gives up one attempt to form a pool: the Mac keeps serving alone and tries again later.
 func (l *leader) abandon(reason string) {
 	l.failures++
-	wait := time.Duration(l.failures) * 30 * time.Second
-	if wait > 5*time.Minute {
-		wait = 5 * time.Minute
-	}
-	l.nextTry = time.Now().Add(wait)
+	l.nextTry = time.Now().Add(poolBackoff(l.failures))
 	l.leaveRing()
 	l.say(poolStatus{state: "ready", step: "pool", detail: "Could not form the pool (" + tailText(reason, 150) + "). Serving on this Mac alone; will try again.", endpoint: l.endpoint, progress: 1, ring: l.status.ring})
 }
@@ -417,25 +421,33 @@ func (l *leader) abandon(reason string) {
 func (l *leader) watch(ctx context.Context, cur Task) bool {
 	r := l.r
 	reason := ""
-	switch {
-	case !l.pooled.alive():
+	now := time.Now()
+	settling := l.wake.settling(now)
+	if !l.pooled.alive() {
 		reason = "the pool server stopped: " + l.pooled.exit()
-	case !ringHas(cur.PoolRing, 0, l.ringAddr):
-		reason = "a Mac went quiet or left"
-	default:
-		inflight, quiet := l.fwd.Busy()
-		if inflight > 0 {
-			if quiet > r.StallAfter {
-				reason = "a request stopped getting answers"
-			}
-		} else if time.Since(l.lastProbe) >= r.ProbeEvery {
-			l.lastProbe = time.Now()
-			if err := healthy(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(l.pooledPort)), 30*time.Second); err != nil {
-				if l.probeFails++; l.probeFails >= 2 {
-					reason = "the pool stopped answering (" + tailText(err.Error(), 80) + ")"
+	} else {
+		// A Mac missing from the ring for a moment (a coordinator hiccup, a lease that lapsed during sleep)
+		// is not a lost member; one that stays missing is.
+		if ringHas(cur.PoolRing, 0, l.ringAddr) || settling {
+			l.ringGone.ok()
+		} else if l.ringGone.bad(now, r.RingGrace) {
+			reason = "a Mac went quiet or left"
+		}
+		if reason == "" {
+			inflight, quiet := l.fwd.Busy()
+			if inflight > 0 {
+				if quiet > r.StallAfter && !settling {
+					reason = "a request stopped getting answers"
 				}
-			} else {
-				l.probeFails = 0
+			} else if time.Since(l.lastProbe) >= r.ProbeEvery {
+				l.lastProbe = time.Now()
+				if err := healthy(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(l.pooledPort)), 30*time.Second); err != nil {
+					if l.probeFails++; l.probeFails >= probeFailLimit {
+						reason = "the pool stopped answering (" + tailText(err.Error(), 80) + ")"
+					}
+				} else {
+					l.probeFails = 0
+				}
 			}
 		}
 	}
@@ -446,7 +458,11 @@ func (l *leader) watch(ctx context.Context, cur Task) bool {
 	l.fwd.SetUpstream("", "The pool lost a member and is restarting on one Mac. Try again in about a minute.")
 	l.pooled.stop()
 	l.pooled = nil
-	l.nextTry = time.Now().Add(30 * time.Second) // time for the other Macs to notice and get ready again
+	if time.Since(l.pooledAt) >= stableAfter {
+		l.failures = 0 // it ran well for a while, so this is a new problem, not a flap
+	}
+	l.failures++
+	l.nextTry = time.Now().Add(poolBackoff(l.failures)) // time for the other Macs to get ready; longer if it keeps failing
 	l.leaveRing()
 	if ctx.Err() != nil {
 		return false
@@ -526,6 +542,8 @@ func (r *Runner) waitForRing(ctx context.Context, t Task, rank int, mine string,
 // superviseRank runs until this member's server stops or the ring it joined changes; it says why.
 func (r *Runner) superviseRank(ctx context.Context, t Task, p *proc, ring []string, st poolStatus) string {
 	last := time.Now()
+	var wake wakeWatch
+	var changed persist
 	for {
 		select {
 		case <-ctx.Done():
@@ -538,11 +556,17 @@ func (r *Runner) superviseRank(ctx context.Context, t Task, p *proc, ring []stri
 		if !ok {
 			return "the request ended"
 		}
-		if !sameRing(cur.PoolRing, ring) {
+		now := time.Now()
+		if wake.tick(now, r.PoolPoll, r.WakeGrace) {
+			changed.ok()
+		}
+		if sameRing(cur.PoolRing, ring) || wake.settling(now) {
+			changed.ok()
+		} else if changed.bad(now, r.RingGrace) {
 			return "the pool changed"
 		}
 		if time.Since(last) >= r.Heartbeat {
-			last = time.Now()
+			last = now
 			r.poolReport(ctx, t, st)
 		}
 	}

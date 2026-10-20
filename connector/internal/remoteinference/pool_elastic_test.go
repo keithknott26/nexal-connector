@@ -25,7 +25,7 @@ exit 0`)
 	l.Close()
 	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1" }, Port: ap, MaxPort: ap + 20,
 		ReadyAfter: 20 * time.Second, PoolPoll: 100 * time.Millisecond, Heartbeat: 200 * time.Millisecond, FormWait: 10 * time.Second,
-		StallAfter: 5 * time.Second, ProbeEvery: 100 * time.Millisecond, Rejoin: 100 * time.Millisecond}
+		StallAfter: 5 * time.Second, ProbeEvery: 100 * time.Millisecond, Rejoin: 100 * time.Millisecond, RingGrace: 300 * time.Millisecond, WakeGrace: 500 * time.Millisecond}
 	return r, log
 }
 

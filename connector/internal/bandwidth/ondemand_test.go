@@ -94,6 +94,49 @@ func TestMeasureReportsOpenRequestFailure(t *testing.T) {
 	}
 }
 
+// HandleRequest opens this Mac's port on the published tunnel address, ignores requests
+// that arrive before the runner has a context or without a tunnel address, and drops
+// repeats that come faster than minOpenSpacing.
+func TestHandleRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	provider := staticProvider{mesh.Status{SelfTunnelAddress: "127.0.0.1"}}
+
+	t.Run("ignored before Run sets the context", func(t *testing.T) {
+		r := NewRunner(slog.New(slog.DiscardHandler))
+		r.HandleRequest("req-1", "peer-a")
+		if r.server.Addr() != "" {
+			t.Fatal("port opened without a run context")
+		}
+	})
+
+	t.Run("ignored without a tunnel address", func(t *testing.T) {
+		r := NewRunner(slog.New(slog.DiscardHandler))
+		r.ctx, r.provider = ctx, staticProvider{}
+		r.HandleRequest("req-2", "peer-a")
+		if r.server.Addr() != "" {
+			t.Fatal("port opened without a tunnel address")
+		}
+	})
+
+	t.Run("opens once and rate-limits repeats", func(t *testing.T) {
+		r := NewRunner(slog.New(slog.DiscardHandler))
+		r.ctx, r.provider = ctx, provider
+		r.HandleRequest("req-3", "peer-a")
+		if r.server.Addr() == "" {
+			t.Fatal("port should be open after a request")
+		}
+		if _, _, err := Measure(ctx, "127.0.0.1", 64<<10); err != nil {
+			t.Fatalf("Measure: %v", err)
+		}
+		waitClosed(t, r.server, 2*time.Second)
+		r.HandleRequest("req-4", "peer-a") // within minOpenSpacing of req-3
+		if r.server.Addr() != "" {
+			t.Fatal("a repeat request inside minOpenSpacing should be ignored")
+		}
+	})
+}
+
 func waitClosed(t *testing.T, srv *Server, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -85,5 +86,17 @@ func TestProvisioningScriptConsumesThePinFile(t *testing.T) {
 		if strings.Contains(s, forbidden) {
 			t.Errorf("script contains %q: it must not launch cloudflared, and a token must never be a command argument", forbidden)
 		}
+	}
+}
+
+// PinnedMatchesHost must agree with the field it summarises, so a caller that
+// trusts it never disagrees with Validate()'s architecture check.
+func TestPinnedMatchesHostAgreesWithPinnedArchitecture(t *testing.T) {
+	p, err := Pinned()
+	if err != nil {
+		t.Fatalf("Pinned(): %v", err)
+	}
+	if got, want := PinnedMatchesHost(), p.Architecture == runtime.GOARCH; got != want {
+		t.Errorf("PinnedMatchesHost() = %v, want %v (pinned %q, host %q)", got, want, p.Architecture, runtime.GOARCH)
 	}
 }

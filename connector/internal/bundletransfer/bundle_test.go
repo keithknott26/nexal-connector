@@ -198,3 +198,94 @@ func TestRejectPublicEndpointAndBadCertificate(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRejectsMalformedConnectionJSON(t *testing.T) {
+	good, _, _ := fixture(t)
+	var base map[string]any
+	if err := json.Unmarshal(good["connection.json"], &base); err != nil {
+		t.Fatal(err)
+	}
+	with := func(edit func(m map[string]any)) []byte {
+		m := map[string]any{}
+		for k, v := range base {
+			m[k] = v
+		}
+		edit(m)
+		out, _ := json.Marshal(m)
+		return out
+	}
+	cases := map[string][]byte{
+		"wrong schema":     with(func(m map[string]any) { m["schemaVersion"] = 2 }),
+		"wrong pages":      with(func(m map[string]any) { m["pages"] = 32 }),
+		"expired":          with(func(m map[string]any) { m["expiresAt"] = time.Now().Add(-time.Minute).UTC() }),
+		"fingerprint":      with(func(m map[string]any) { m["caSHA256"] = strings.Repeat("0", 64) }),
+		"unknown field":    with(func(m map[string]any) { m["extra"] = true }),
+		"loopback":         with(func(m map[string]any) { m["endpoint"] = "127.0.0.1:9443" }),
+		"public":           with(func(m map[string]any) { m["endpoint"] = "8.8.8.8:9443" }),
+		"hostname":         with(func(m map[string]any) { m["endpoint"] = "example.local:9443" }),
+		"non-numeric port": with(func(m map[string]any) { m["endpoint"] = "192.168.1.20:https" }),
+		"port too large":   with(func(m map[string]any) { m["endpoint"] = "192.168.1.20:70000" }),
+		"trailing json":    append(append([]byte{}, good["connection.json"]...), []byte(` {}`)...),
+	}
+	for name, raw := range cases {
+		b := Bundle{}
+		for k, v := range good {
+			b[k] = v
+		}
+		b["connection.json"] = raw
+		if err := Validate(b); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if err := Validate(good); err != nil {
+		t.Fatalf("baseline rejected: %v", err)
+	}
+}
+
+func TestValidateRejectsMissingOrOversizeFiles(t *testing.T) {
+	good, _, _ := fixture(t)
+	for _, name := range Names {
+		b := Bundle{}
+		for k, v := range good {
+			b[k] = v
+		}
+		b[name] = nil
+		if Validate(b) == nil {
+			t.Errorf("empty %s accepted", name)
+		}
+		b[name] = make([]byte, MaxPlaintext+1)
+		if Validate(b) == nil {
+			t.Errorf("oversize %s accepted", name)
+		}
+	}
+}
+
+func TestInstallAndReadRejectUnsafeLocations(t *testing.T) {
+	b, _, _ := fixture(t)
+	open := t.TempDir()
+	os.Chmod(open, 0755)
+	if _, err := Install(open, b); err == nil {
+		t.Fatal("group/world-readable parent accepted")
+	}
+	if entries, _ := os.ReadDir(open); len(entries) != 0 {
+		t.Fatalf("rejected install left files behind: %v", entries)
+	}
+	if _, err := Install("relative/parent", b); err == nil {
+		t.Fatal("relative parent accepted")
+	}
+	if _, err := Install(filepath.Join(open, "missing"), b); err == nil {
+		t.Fatal("missing parent accepted")
+	}
+	if _, err := Read("relative/dir"); err == nil {
+		t.Fatal("relative bundle dir accepted")
+	}
+	bad := Bundle{"ca.pem": []byte("x")}
+	private := t.TempDir()
+	os.Chmod(private, 0700)
+	if _, err := Install(private, bad); err == nil {
+		t.Fatal("invalid bundle installed")
+	}
+	if entries, _ := os.ReadDir(private); len(entries) != 0 {
+		t.Fatalf("invalid bundle left files behind: %v", entries)
+	}
+}

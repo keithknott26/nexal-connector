@@ -16,6 +16,14 @@ const (
 	PoolTransformersVersion = "5.7.0"
 )
 
+// disableMPI keeps MLX off MPI. mx.distributed.init() with no backend tries nccl, then ring, then MPI. A server
+// without the ring environment (the solo server, which runs before a pool forms) falls through to MPI, and on a
+// Mac with Open MPI installed, Open MPI aborts the process ("Local abort before MPI_INIT completed", exit
+// status 14) instead of failing softly. MLX loads the MPI library named by MLX_MPI_LIBNAME; naming one that does
+// not exist makes MPI unavailable, so init returns no group and the server runs on its own. Ring members set it
+// too: the ring does not use MPI, and this keeps a failed ring from reaching it.
+const disableMPI = "MLX_MPI_LIBNAME=libmpi-disabled-by-nexal"
+
 // poolPipelined is every model_type whose mlx-lm model can be split into pipeline stages at
 // PoolMLXLMVersion (the model class derives from PipelineMixin or defines pipeline). Any other model is
 // pooled by tensor parallelism, mlx-lm's default, which most dense models support through shard().
@@ -151,7 +159,7 @@ func PoolServeCommand(inferenceDir, id string, rank int, hosts []string, apiHost
 		args = append(args, "--pipeline")
 	}
 	args = append(args, "--host", apiHost, "--port", strconv.Itoa(apiPort))
-	env = []string{"MLX_RANK=" + strconv.Itoa(rank), "MLX_HOSTFILE=" + hostfilePath, "HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "MLX_RING_VERBOSE=1", "PATH=/usr/bin:/bin"}
+	env = []string{"MLX_RANK=" + strconv.Itoa(rank), "MLX_HOSTFILE=" + hostfilePath, "HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "MLX_RING_VERBOSE=1", disableMPI, "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }
 
@@ -174,6 +182,6 @@ func SoloServeCommand(inferenceDir, id, apiHost string, apiPort int) (name strin
 		return "", nil, nil, errf("not_installed", "run `nexal inference install "+id+"` first", "%s is not installed", id)
 	}
 	args = []string{"-I", "-m", "mlx_lm", "server", "--model", dir, "--host", apiHost, "--port", strconv.Itoa(apiPort)}
-	env = []string{"HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", "PATH=/usr/bin:/bin"}
+	env = []string{"HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PYTHONUNBUFFERED=1", disableMPI, "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }

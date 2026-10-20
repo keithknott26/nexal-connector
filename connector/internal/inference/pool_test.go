@@ -109,3 +109,35 @@ func TestPoolUsesPipeline(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Every model server keeps MLX off MPI. The solo server has no ring environment, so without this MLX falls
+// through to MPI_Init, which aborts on a Mac with Open MPI installed.
+func TestServersDisableMPI(t *testing.T) {
+	d := poolDir(t)
+	hf := filepath.Join(d, "h.json")
+	hosts := []string{"100.64.0.1:8010", "100.64.0.2:8010"}
+	_, _, ring, err := PoolServeCommand(d, "m1", 1, hosts, "100.64.0.2", 8001, hf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, solo, err := SoloServeCommand(d, "m1", "100.64.0.1", 8001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, env := range map[string][]string{"ring member": ring, "solo": solo} {
+		found := false
+		for _, e := range env {
+			if e == disableMPI {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s server environment lacks %s: %v", name, disableMPI, env)
+		}
+	}
+	for _, e := range solo {
+		if strings.HasPrefix(e, "MLX_RANK=") || strings.HasPrefix(e, "MLX_HOSTFILE=") {
+			t.Fatalf("the solo server must not join a ring: %v", solo)
+		}
+	}
+}

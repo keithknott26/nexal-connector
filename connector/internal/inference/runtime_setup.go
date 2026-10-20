@@ -228,6 +228,6 @@ func ServeCommand(inferenceDir, id, host string, port int) (name string, args []
 		return "", nil, nil, errf("not_installed", "run `nexal inference install "+id+"` first", "%s is not installed", id)
 	}
 	args = []string{"-I", "-m", "mlx_lm.server", "--model", dir, "--host", ip.String(), "--port", strconv.Itoa(port)}
-	env = []string{"HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", "PATH=/usr/bin:/bin"}
+	env = []string{"HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", disableMPI, "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }

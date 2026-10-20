@@ -1012,7 +1012,16 @@ func (d *DevPod) Alive(ctx context.Context, ws string) (bool, error) {
 func (d *DevPod) Delete(ctx context.Context, ws string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.deleteLocked(ctx, ws)
+	if err := d.deleteLocked(ctx, ws); err != nil {
+		return err
+	}
+	// Check the runtime holds nothing of this VM, then free the managed Colima
+	// disk if it was the last VM.
+	if err := d.verifyWorkspaceGone(ctx, ws); err != nil {
+		return err
+	}
+	_ = d.PurgeColimaIfIdle(ctx)
+	return nil
 }
 
 // deleteLocked removes the sidecar, the workspace container(s) with their

@@ -165,6 +165,45 @@ func TestSendAllFail(t *testing.T) {
 	}
 }
 
+func TestSendDetailedSetupFailures(t *testing.T) {
+	a, _ := ParseMAC("3c:22:fb:01:02:03")
+	macs := []net.HardwareAddr{a}
+
+	t.Run("interface enumeration fails", func(t *testing.T) {
+		withFakes(t, nil, nil, &fakeUDP{})
+		systemInterfaces = func() ([]ifaceV4, []net.Interface, error) { return nil, nil, errors.New("boom") }
+		var traced []Report
+		SetTrace(func(r Report) { traced = append(traced, r) })
+		t.Cleanup(func() { SetTrace(nil) })
+		rep, err := SendDetailed(macs)
+		if err == nil || err.Error() != "cannot enumerate network interfaces" {
+			t.Fatalf("err = %v", err)
+		}
+		if len(rep.MACs) != 1 || len(traced) != 1 {
+			t.Fatalf("report MACs %v, traced %d; want 1 masked MAC and 1 trace", rep.MACs, len(traced))
+		}
+	})
+
+	t.Run("udp socket cannot open", func(t *testing.T) {
+		withFakes(t, nil, nil, &fakeUDP{})
+		openUDP = func() (udpSender, error) { return nil, errors.New("no socket") }
+		if _, err := SendDetailed(macs); err == nil || err.Error() != "cannot open a UDP socket for Wake-on-LAN" {
+			t.Fatalf("err = %v", err)
+		}
+	})
+
+	t.Run("invalid MAC is rejected before any I/O", func(t *testing.T) {
+		udp := &fakeUDP{}
+		withFakes(t, nil, nil, udp)
+		if _, err := SendDetailed([]net.HardwareAddr{{1, 2, 3}}); err == nil {
+			t.Fatal("short MAC accepted")
+		}
+		if len(udp.sent) != 0 {
+			t.Fatalf("sent %d packets for an invalid MAC", len(udp.sent))
+		}
+	})
+}
+
 func TestCollectLocal(t *testing.T) {
 	up := net.FlagUp | net.FlagBroadcast
 	raw := []net.Interface{

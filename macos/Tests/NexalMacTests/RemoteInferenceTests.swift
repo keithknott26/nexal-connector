@@ -18,6 +18,8 @@ final class RemoteInferenceTests: XCTestCase {
                        ["inference", "remote-stop", "rinf_1", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceTest(endpoint: "http://100.86.1.2:8001/v1").arguments(config: config),
                        ["inference", "remote-test", "http://100.86.1.2:8001/v1", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.remoteInferenceSweep(endpoint: "http://100.86.1.2:8001/v1", calls: 20).arguments(config: config),
+                       ["inference", "remote-test", "http://100.86.1.2:8001/v1", "--calls", "20", "--json", "--config", "/tmp/c.json"])
     }
 
     func testEndpointAndIdValidation() {

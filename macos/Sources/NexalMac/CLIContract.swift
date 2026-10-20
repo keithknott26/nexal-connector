@@ -100,6 +100,8 @@ enum CLICommand {
     case remoteInferenceStop(requestId: String)
     /// `nexal inference remote-test <endpoint> --json`: reachability, first-token time, speed and a capability probe.
     case remoteInferenceTest(endpoint: String)
+    /// `nexal inference remote-test <endpoint> --calls N --json`: generation speed over many calls in a row.
+    case remoteInferenceSweep(endpoint: String, calls: Int)
 
     /// How long one invocation may run. Everything answers within 20 seconds
     /// except adding the Time Machine destination: it may wait up to 90 s for the
@@ -127,6 +129,7 @@ enum CLICommand {
         if case .inferenceReview = self { return 3600 }
         if case .inferenceServe = self { return 7 * 24 * 3600 }
         if case .remoteInferenceTest = self { return 240 }
+        if case .remoteInferenceSweep = self { return 1800 }
         return 20
     }
 
@@ -230,6 +233,8 @@ enum CLICommand {
             command = ["inference", "remote-stop", requestId, "--json"]
         case let .remoteInferenceTest(endpoint):
             command = ["inference", "remote-test", endpoint, "--json"]
+        case let .remoteInferenceSweep(endpoint, calls):
+            command = ["inference", "remote-test", endpoint, "--calls", String(calls), "--json"]
         }
         return command + ["--config", config.path]
     }

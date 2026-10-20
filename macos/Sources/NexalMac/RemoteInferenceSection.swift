@@ -104,6 +104,11 @@ final class RemoteInferenceModel: ObservableObject {
     @Published var busy = false
     @Published var testing: Set<String> = []
     @Published var results: [String: RemoteInferenceTestResult] = [:]
+    @Published var sweeping: Set<String> = []
+    @Published var sweeps: [String: RemoteInferenceSweep] = [:]
+    /// The capabilities estimate of tokens per second for each request that was swept; absent when unknown.
+    @Published var expected: [String: Double] = [:]
+    private var lastReport: InferenceReport?
     private var polling: Task<Void, Never>?
 
     func loadMachines(_ app: AppModel) {
@@ -111,6 +116,7 @@ final class RemoteInferenceModel: ObservableObject {
             reviewed = await app.reviewedModelIDs()
             do {
                 let report = try InferenceReport.decode(try await app.inferencePreflight())
+                lastReport = report
                 allMachines = report.machines
                 machines = report.machines.filter { !$0.isSelf && $0.hostId?.isEmpty == false }
             } catch { problem = "Could not list your other Macs: \(error.localizedDescription)" }
@@ -163,6 +169,23 @@ final class RemoteInferenceModel: ObservableObject {
         Task {
             do { _ = try await app.remoteInference(.remoteInferenceStop(requestId: id)); await refresh(app) }
             catch { problem = "Could not stop it: \(error.localizedDescription)" }
+        }
+    }
+
+    /// Twenty generations in a row against the model's address, drawn against what the capabilities report expects.
+    func sweep(id: String, modelId: String, endpoint: String?, app: AppModel, calls: Int = 20) {
+        guard let endpoint else { return }
+        sweeping.insert(id); problem = nil
+        expected[id] = nil
+        if let report = lastReport, let model = report.models.first(where: { $0.id == modelId }) {
+            expected[id] = ExpectedSpeed.tokensPerSec(model: model, machines: report.machines, links: report.links)
+        }
+        Task {
+            defer { sweeping.remove(id) }
+            do {
+                let data = try await app.remoteInference(.remoteInferenceSweep(endpoint: endpoint, calls: calls))
+                sweeps[id] = try JSONDecoder().decode(RemoteInferenceSweep.self, from: data)
+            } catch { problem = "The speed sweep failed: \(error.localizedDescription)" }
         }
     }
 
@@ -295,8 +318,14 @@ struct RemoteInferenceContent: View {
                     Button(remote.testing.contains(c.id) ? "Testing…" : "Test speed & capability") { remote.test(id: c.id, endpoint: c.endpoint, app: app) }
                         .controlSize(.small).disabled(remote.testing.contains(c.id))
                     if remote.testing.contains(c.id) { ProgressView().controlSize(.small) }
+                    Button(remote.sweeping.contains(c.id) ? "Sweeping…" : "Speed sweep (20 calls)") {
+                        remote.sweep(id: c.id, modelId: c.modelId, endpoint: c.endpoint, app: app)
+                    }
+                    .controlSize(.small).disabled(remote.sweeping.contains(c.id))
+                    if remote.sweeping.contains(c.id) { ProgressView().controlSize(.small) }
                 }
                 if let t = remote.results[c.id] { resultView(t) }
+                if let sw = remote.sweeps[c.id] { SpeedSweepView(sweep: sw, expected: remote.expected[c.id]) }
             }
             Button(c.state == "failed" ? "Dismiss" : (c.isPool ? "Stop pool" : "Stop"), role: .destructive) { remote.stop(c.id, app: app) }
                 .controlSize(.small)

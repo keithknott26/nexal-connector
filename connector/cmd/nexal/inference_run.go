@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 
 	"nexal/connector/internal/inference"
 )
@@ -90,11 +91,31 @@ func inferenceServe(ctx context.Context, args []string) error {
 // question. The endpoint must be a neXal mesh address or loopback.
 func inferenceRemoteTest(ctx context.Context, args []string) error {
 	var asJSON *bool
+	var calls *int
 	endpoint, _, _, err := parseModelArgs("remote-test", args, true, func(f *flag.FlagSet) {
 		asJSON = f.Bool("json", false, "print the result as one JSON document")
+		calls = f.Int("calls", 0, "measure generation speed over this many calls in a row (2-60) instead of one test")
 	})
 	if err != nil {
 		return err
+	}
+	if *calls != 0 {
+		sw, err := inference.RemoteSweep(ctx, endpoint, *calls, nil, nil)
+		if err != nil {
+			return &codedError{code: "remote_test_failed", err: err}
+		}
+		if *asJSON {
+			return json.NewEncoder(os.Stdout).Encode(sw)
+		}
+		writeLine(os.Stdout, "%s (%s)", sw.Endpoint, sw.Model)
+		for _, x := range sw.Samples {
+			if !x.OK {
+				writeLine(os.Stdout, "  %2d  failed: %s", x.Call, x.Error)
+				continue
+			}
+			writeLine(os.Stdout, "  %2d  %6.1f tokens/s  %s", x.Call, x.TokensPerSec, strings.Repeat("#", int(x.TokensPerSec/2)))
+		}
+		return nil
 	}
 	res, err := inference.RemoteTest(ctx, endpoint, nil)
 	if err != nil {

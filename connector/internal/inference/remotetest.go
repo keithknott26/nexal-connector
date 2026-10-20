@@ -50,6 +50,10 @@ func ValidateRemoteEndpoint(raw string) (*url.URL, error) {
 // RemoteTest measures reachability, time to first token, generation speed and a one-line capability
 // probe against an OpenAI-compatible server. client may be nil.
 func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*RemoteTestResult, error) {
+	return remoteRun(ctx, endpoint, client, "What is 17 + 25? Answer with just the number.", 256)
+}
+
+func remoteRun(ctx context.Context, endpoint string, client *http.Client, prompt string, maxTokens int) (*RemoteTestResult, error) {
 	u, err := ValidateRemoteEndpoint(endpoint)
 	if err != nil {
 		return nil, err
@@ -86,10 +90,10 @@ func RemoteTest(ctx context.Context, endpoint string, client *http.Client) (*Rem
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"model": res.Model, "stream": true, "max_tokens": 256, "temperature": 0,
+		"model": res.Model, "stream": true, "max_tokens": maxTokens, "temperature": 0,
 		// Thinking models (Qwen3) would spend the budget reasoning; ask for a direct answer.
 		"chat_template_kwargs": map[string]any{"enable_thinking": false},
-		"messages":             []map[string]string{{"role": "user", "content": "What is 17 + 25? Answer with just the number."}},
+		"messages":             []map[string]string{{"role": "user", "content": prompt}},
 	})
 	t1 := time.Now()
 	req, _ = http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(body))

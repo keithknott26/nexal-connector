@@ -293,3 +293,29 @@ func TestPlaceholderMACIsNotWakeable(t *testing.T) {
 		t.Fatalf("a real locally administered address must stay valid: %v", err)
 	}
 }
+
+func TestSkipReason(t *testing.T) {
+	const up = net.FlagUp | net.FlagBroadcast
+	cases := []struct {
+		name string
+		in   ifaceV4
+		want string
+	}{
+		{"usable", ifaceV4{"en0", up, netip.MustParsePrefix("192.168.1.5/24")}, ""},
+		{"down", ifaceV4{"en0", net.FlagBroadcast, netip.MustParsePrefix("192.168.1.5/24")}, "interface down"},
+		{"no broadcast", ifaceV4{"en0", net.FlagUp, netip.MustParsePrefix("192.168.1.5/24")}, "not broadcast-capable"},
+		{"loopback flag", ifaceV4{"en0", up | net.FlagLoopback, netip.MustParsePrefix("192.168.1.5/24")}, "loopback"},
+		{"point-to-point", ifaceV4{"en0", up | net.FlagPointToPoint, netip.MustParsePrefix("192.168.1.5/24")}, "point-to-point"},
+		{"virtual", ifaceV4{"utun3", up, netip.MustParsePrefix("192.168.1.5/24")}, "virtual interface (tunnel, bridge or similar)"},
+		{"ipv6", ifaceV4{"en0", up, netip.MustParsePrefix("fe80::1/64")}, "not IPv4"},
+		{"loopback addr", ifaceV4{"en0", up, netip.MustParsePrefix("127.0.0.2/8")}, "loopback address"},
+		{"link-local", ifaceV4{"en0", up, netip.MustParsePrefix("169.254.1.1/16")}, "link-local address"},
+		{"/31", ifaceV4{"en0", up, netip.MustParsePrefix("10.0.0.1/31")}, "/31 has no broadcast address"},
+		{"/30 ok", ifaceV4{"en0", up, netip.MustParsePrefix("10.0.0.1/30")}, ""},
+	}
+	for _, c := range cases {
+		if got := skipReason(c.in); got != c.want {
+			t.Errorf("%s: skipReason = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

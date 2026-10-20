@@ -70,6 +70,15 @@ final class SpeedSweepTests: XCTestCase {
         XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M2 Pro")?.high, 200)
         XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M4")?.low, 120)
         XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "apple m1 ultra")?.high, 800)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M5 Pro")?.high, 307)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M5 Max")?.low, 460)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M5 Max")?.high, 614)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M5 Ultra")?.high, 1200)
+        for chip in ["m1", "m1 pro", "m1 max", "m1 ultra", "m2", "m2 pro", "m2 max", "m2 ultra", "m3", "m3 pro", "m3 max", "m3 ultra", "m4", "m4 pro", "m4 max", "m5", "m6"] {
+            let bw = ExpectedSpeed.bandwidth(chip: "Apple " + chip.uppercased())
+            XCTAssertNotNil(bw, chip)
+            XCTAssertLessThanOrEqual(bw?.low ?? 1, bw?.high ?? 0, chip)
+        }
         XCTAssertNil(ExpectedSpeed.bandwidth(chip: "Intel Core i9"))
         XCTAssertNil(ExpectedSpeed.bandwidth(chip: nil))
     }

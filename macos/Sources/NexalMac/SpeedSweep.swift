@@ -82,7 +82,8 @@ enum ExpectedSpeed {
         "m2": (100, 100), "m2 pro": (200, 200), "m2 max": (400, 400), "m2 ultra": (800, 800),
         "m3": (100, 100), "m3 pro": (150, 150), "m3 max": (300, 400), "m3 ultra": (819, 819),
         "m4": (120, 120), "m4 pro": (273, 273), "m4 max": (410, 546),
-        "m5": (153, 153),
+        "m5": (153, 153), "m5 pro": (307, 307), "m5 max": (460, 614), "m5 ultra": (1200, 1200),
+        "m6": (170, 170),
     ]
     /// The share of that bandwidth generation reaches: a slow run and a good run.
     static let efficiency = (low: 0.6, high: 0.85)

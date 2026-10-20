@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -122,6 +124,7 @@ func TestHandleRequest(t *testing.T) {
 	t.Run("opens once and rate-limits repeats", func(t *testing.T) {
 		r := NewRunner(slog.New(slog.DiscardHandler))
 		r.ctx, r.provider = ctx, provider
+		waitPortFree(t, 2*time.Second) // an earlier test's one-shot listener may still be closing
 		r.HandleRequest("req-3", "peer-a")
 		if r.server.Addr() == "" {
 			t.Fatal("port should be open after a request")
@@ -135,6 +138,25 @@ func TestHandleRequest(t *testing.T) {
 			t.Fatal("a repeat request inside minOpenSpacing should be ignored")
 		}
 	})
+}
+
+// waitPortFree blocks until the fixed bandwidth port can be bound, so a test does not race the
+// asynchronous teardown of a previous test's listener.
+func waitPortFree(t *testing.T, within time.Duration) {
+	t.Helper()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(Port))
+	deadline := time.Now().Add(within)
+	for {
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			ln.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("port %d still in use: %v", Port, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func waitClosed(t *testing.T, srv *Server, within time.Duration) {

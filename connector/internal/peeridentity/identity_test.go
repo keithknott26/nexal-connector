@@ -330,3 +330,27 @@ func TestGenuineFirstRunMints(t *testing.T) {
 		t.Fatalf("unexpected result: fp=%q puts=%d", Fingerprint(id), m.puts)
 	}
 }
+
+func TestStorableSecretBounds(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", false},
+		{"too short", strings.Repeat("a", 15), false},
+		{"min length", strings.Repeat("a", 16), true},
+		{"max length", strings.Repeat("a", 4096), true},
+		{"too long", strings.Repeat("a", 4097), false},
+		{"contains space", strings.Repeat("a", 16) + " b", false},
+		{"contains newline", strings.Repeat("a", 16) + "\n", false},
+		{"contains non-ASCII", strings.Repeat("a", 16) + "é", false},
+		{"contains DEL", strings.Repeat("a", 16) + "\x7f", false},
+		{"printable punctuation", "abcdefgh+/=_-~!abc", true},
+	}
+	for _, c := range cases {
+		if got := storableSecret(c.in); got != c.want {
+			t.Errorf("%s: storableSecret = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -36,7 +36,9 @@ jobs:
           persist-credentials: false
       # Same Homebrew Python as mlx-policy. The iOS strings are checked when that repo sits next to this one.
       - run: python3 i18n/scripts/test_l10n.py
-      - run: python3 i18n/scripts/l10n.py extract && git diff --exit-code -- macos/Resources || { echo "en.lproj is stale: run python3 i18n/scripts/l10n.py extract and commit"; exit 1; }
+      - run: |
+          python3 i18n/scripts/l10n.py extract
+          git diff --exit-code -- macos/Resources || { echo "en.lproj is stale; run python3 i18n/scripts/l10n.py extract and commit"; exit 1; }
       - run: python3 i18n/scripts/l10n.py check
   mlx-policy:
     runs-on: [self-hosted, macOS, ARM64]

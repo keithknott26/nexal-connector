@@ -8,10 +8,14 @@ import (
 	"strconv"
 )
 
+// mlx 0.32.4 is the newest release (mlx-lm 0.32.2 is the newest mlx-lm and needs mlx >= 0.32.2, transformers
+// >= 5.7.0). It was raised from 0.32.2 after the ring all-reduce crashed in libmlx on 0.32.2; 0.32.3 and
+// 0.32.4 do not touch the ring code, so this does not by itself fix that crash. transformers stays at the
+// version the models were reviewed with.
 // Pooling one model across several Macs needs the distributed server in newer mlx-lm releases. It
 // lives in its own environment so the single-Mac runtime keeps its older pins.
 const (
-	PoolMLXVersion          = "0.32.2"
+	PoolMLXVersion          = "0.32.4"
 	PoolMLXLMVersion        = "0.32.2"
 	PoolTransformersVersion = "5.7.0"
 )

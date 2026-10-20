@@ -47,7 +47,7 @@ func (c *Client) CloseRuntime(ctx context.Context, host, session string) error {
 }
 func (c *Client) DownloadRuntime(ctx context.Context, host, session string, index int, dest io.Writer, size int64) error {
 	path, err := runtimePath(host, session)
-	if err != nil || index < 0 || index > 127 || size < 1 || size > 16<<30 {
+	if err != nil || session == "" || index < 0 || index > 127 || size < 1 || size > 16<<30 {
 		return errors.New("invalid runtime artifact")
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", c.base+path+"/files/"+strconv.Itoa(index), nil)

@@ -28,6 +28,7 @@ type spec struct {
 func main() {
 	qsrc := "Qwen3 dense model card figures, recalled; NOT read from a pinned config.json. Re-check at pin time."
 	psrc := "Phi-4-mini-instruct model card figures, recalled; NOT read from a pinned config.json. Re-check at pin time."
+	rsrc := "Phi-4-mini-reasoning config.json read at mlx-community/Phi-4-mini-reasoning-4bit and -8bit (same phi3 shape as Phi-4-mini-instruct, no auto_map). Re-check at pin time."
 	specs := []spec{
 		{"qwen3-32b", "Qwen3", "Qwen3-32B", "qwen3", "mlx-community/Qwen3-32B", 32.8, inference.ArchSpec{Layers: 64, KVHeads: 8, HeadDim: 128, HiddenSize: 5120, IntermediateSize: 25600, VocabSize: 151936}, "Apache-2.0", 32768, qsrc},
 		{"qwen3-14b", "Qwen3", "Qwen3-14B", "qwen3", "mlx-community/Qwen3-14B", 14.8, inference.ArchSpec{Layers: 40, KVHeads: 8, HeadDim: 128, HiddenSize: 5120, IntermediateSize: 17408, VocabSize: 151936}, "Apache-2.0", 32768, qsrc},
@@ -36,6 +37,7 @@ func main() {
 		{"qwen3-1.7b", "Qwen3", "Qwen3-1.7B", "qwen3", "mlx-community/Qwen3-1.7B", 1.7, inference.ArchSpec{Layers: 28, KVHeads: 8, HeadDim: 128, HiddenSize: 2048, IntermediateSize: 6144, VocabSize: 151936}, "Apache-2.0", 32768, qsrc},
 		{"qwen3-0.6b", "Qwen3", "Qwen3-0.6B", "qwen3", "mlx-community/Qwen3-0.6B", 0.6, inference.ArchSpec{Layers: 28, KVHeads: 8, HeadDim: 128, HiddenSize: 1024, IntermediateSize: 3072, VocabSize: 151936}, "Apache-2.0", 32768, qsrc},
 		{"phi-4-mini", "Phi-4", "Phi-4-mini-instruct", "phi3", "mlx-community/Phi-4-mini-instruct", 3.8, inference.ArchSpec{Layers: 32, KVHeads: 8, HeadDim: 128, HiddenSize: 3072, IntermediateSize: 8192, VocabSize: 200064}, "MIT", 131072, psrc},
+		{"phi-4-mini-reasoning", "Phi-4", "Phi-4-mini-reasoning", "phi3", "mlx-community/Phi-4-mini-reasoning", 3.8, inference.ArchSpec{Layers: 32, KVHeads: 8, HeadDim: 128, HiddenSize: 3072, IntermediateSize: 8192, VocabSize: 200064}, "MIT", 131072, rsrc},
 	}
 	quants := []struct {
 		id, label, repoSuffix string

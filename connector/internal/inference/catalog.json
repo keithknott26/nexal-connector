@@ -489,6 +489,76 @@
       "revision": "",
       "runtimeMaxInputTokens": 4096,
       "runtimeMaxOutputTokens": 512
+    },
+    {
+      "advertisedContextTokens": 131072,
+      "arch": {
+        "layers": 32,
+        "kvHeads": 8,
+        "headDim": 128,
+        "hiddenSize": 3072,
+        "intermediateSize": 8192,
+        "vocabSize": 200064
+      },
+      "archSource": "Phi-4-mini-reasoning config.json read at mlx-community/Phi-4-mini-reasoning-4bit and -8bit (same phi3 shape as Phi-4-mini-instruct, no auto_map). Re-check at pin time.",
+      "architecture": "phi3",
+      "bitsPerWeight": 4.5,
+      "displayName": "Phi-4-mini-reasoning (4-bit group-64)",
+      "estimate": {
+        "weightsBytes": 2137500000,
+        "kvBytes": 603979776,
+        "activationsBytes": 321664512,
+        "temporaryBytes": 213750000,
+        "safetyBytes": 1073741824
+      },
+      "family": "Phi-4",
+      "files": [],
+      "hfRepo": "mlx-community/Phi-4-mini-reasoning-4bit",
+      "id": "phi-4-mini-reasoning-q4",
+      "installBlockedReason": "revision and per-file SHA-256 not yet pinned",
+      "installable": false,
+      "license": "MIT",
+      "paramsBillions": 3.8,
+      "pinned": false,
+      "quantization": "4-bit group-64",
+      "revision": "",
+      "runtimeMaxInputTokens": 4096,
+      "runtimeMaxOutputTokens": 512
+    },
+    {
+      "advertisedContextTokens": 131072,
+      "arch": {
+        "layers": 32,
+        "kvHeads": 8,
+        "headDim": 128,
+        "hiddenSize": 3072,
+        "intermediateSize": 8192,
+        "vocabSize": 200064
+      },
+      "archSource": "Phi-4-mini-reasoning config.json read at mlx-community/Phi-4-mini-reasoning-4bit and -8bit (same phi3 shape as Phi-4-mini-instruct, no auto_map). Re-check at pin time.",
+      "architecture": "phi3",
+      "bitsPerWeight": 8.5,
+      "displayName": "Phi-4-mini-reasoning (8-bit group-64)",
+      "estimate": {
+        "weightsBytes": 4037500000,
+        "kvBytes": 603979776,
+        "activationsBytes": 321664512,
+        "temporaryBytes": 403750000,
+        "safetyBytes": 1073741824
+      },
+      "family": "Phi-4",
+      "files": [],
+      "hfRepo": "mlx-community/Phi-4-mini-reasoning-8bit",
+      "id": "phi-4-mini-reasoning-q8",
+      "installBlockedReason": "revision and per-file SHA-256 not yet pinned",
+      "installable": false,
+      "license": "MIT",
+      "paramsBillions": 3.8,
+      "pinned": false,
+      "quantization": "8-bit group-64",
+      "revision": "",
+      "runtimeMaxInputTokens": 4096,
+      "runtimeMaxOutputTokens": 512
     }
   ],
   "estimateLabel": "ESTIMATE: derived from parameter count and bits per weight, not measured on hardware.",

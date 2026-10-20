@@ -42,7 +42,7 @@ func TestCatalogLoadsAndIsHonest(t *testing.T) {
 			}
 		}
 	}
-	if families["Qwen3"] != 12 || families["Phi-4"] != 2 {
+	if families["Qwen3"] != 12 || families["Phi-4"] != 4 {
 		t.Errorf("families = %v", families)
 	}
 	for _, p := range []float64{0.6, 1.7, 4.0, 8.2, 14.8, 32.8, 3.8} {

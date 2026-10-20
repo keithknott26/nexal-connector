@@ -552,3 +552,32 @@ func itoa(n int) string {
 	}
 	return string(digits)
 }
+
+func TestMappingStringAndSummaryAreDistinctPerState(t *testing.T) {
+	want := map[Mapping]string{
+		MappingUnknown:             "unknown",
+		MappingEndpointIndependent: "endpoint-independent",
+		MappingEndpointDependent:   "endpoint-dependent",
+	}
+	seen := map[string]Mapping{}
+	for m, s := range want {
+		if got := m.String(); got != s {
+			t.Fatalf("Mapping(%d).String() = %q, want %q", m, got, s)
+		}
+		sum := m.Summary()
+		if sum == "" {
+			t.Fatalf("%v has an empty summary", m)
+		}
+		if prev, dup := seen[sum]; dup {
+			t.Fatalf("%v and %v share the summary %q", m, prev, sum)
+		}
+		seen[sum] = m
+	}
+	// An out-of-range value must degrade to the honest "unknown", never panic.
+	if got := Mapping(200).String(); got != "unknown" {
+		t.Fatalf("out-of-range Mapping String() = %q, want unknown", got)
+	}
+	if got := Mapping(200).Summary(); got != MappingUnknown.Summary() {
+		t.Fatalf("out-of-range Mapping Summary() = %q, want the unknown summary", got)
+	}
+}

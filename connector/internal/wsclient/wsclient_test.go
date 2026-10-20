@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -358,5 +359,48 @@ func TestReadDeadline(t *testing.T) {
 	var ne net.Error
 	if !errors.As(err, &ne) || !ne.Timeout() {
 		t.Fatalf("want timeout, got %v", err)
+	}
+}
+
+func TestValidReceivedCloseCodeFollowsRFCSection74(t *testing.T) {
+	for code, want := range map[int]bool{
+		999: false, 1000: true, 1003: true, 1004: false, 1005: false, 1006: false,
+		1007: true, 1011: true, 1014: true, 1015: false, 2999: false,
+		3000: true, 4999: true, 5000: false, 0: false, -1: false,
+	} {
+		if got := validReceivedCloseCode(code); got != want {
+			t.Errorf("validReceivedCloseCode(%d) = %v, want %v", code, got, want)
+		}
+	}
+}
+
+func TestHeaderHasTokenIsCaseInsensitiveAcrossValuesAndCommas(t *testing.T) {
+	h := http.Header{}
+	h.Add("Connection", "keep-alive, Upgrade")
+	h.Add("Connection", "close")
+	for _, tok := range []string{"upgrade", "UPGRADE", "keep-alive", "close"} {
+		if !headerHasToken(h, "connection", tok) {
+			t.Errorf("token %q not found", tok)
+		}
+	}
+	if headerHasToken(h, "Connection", "upgrad") {
+		t.Error("partial token must not match")
+	}
+	if headerHasToken(h, "Upgrade", "websocket") {
+		t.Error("absent header must not match")
+	}
+}
+
+func TestErrorTypesCarryOnlyCodesNotServerText(t *testing.T) {
+	he := &HandshakeError{Status: 403}
+	if got := he.Error(); got != "websocket upgrade refused (HTTP 403)" {
+		t.Errorf("HandshakeError = %q", got)
+	}
+	ce := &CloseError{Code: 4001, Reason: "secret-server-text"}
+	if got := ce.Error(); got != "websocket closed by peer (code 4001)" || strings.Contains(got, "secret") {
+		t.Errorf("CloseError = %q", got)
+	}
+	if !isHandshakeError(fmt.Errorf("dial: %w", he)) || isHandshakeError(ce) || isHandshakeError(nil) {
+		t.Error("isHandshakeError must match only wrapped HandshakeError")
 	}
 }

@@ -67,8 +67,12 @@ func TestMeasureOpensPeerFirst(t *testing.T) {
 	defer cancel()
 	r := NewRunner(slog.New(slog.DiscardHandler))
 	asked := 0
-	r.SetOpener(func(ctx context.Context, id string) error {
+	r.SetOpener(func(ctx context.Context, addr string) error {
 		asked++
+		// The coordinator knows a peer by the tunnel address it published, not by the mesh peer id.
+		if addr != "127.0.0.1" {
+			t.Errorf("opener asked for %q, want the peer's tunnel address", addr)
+		}
 		return r.server.StartOnce(ctx, "127.0.0.1", time.Minute)
 	})
 	peer := mesh.Peer{ID: "peer-a", Name: "peer-a", TunnelAddress: "127.0.0.1"}

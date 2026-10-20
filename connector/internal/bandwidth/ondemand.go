@@ -61,7 +61,7 @@ func (r *Runner) measure(ctx context.Context, peer mesh.Peer) Result {
 	open := r.opener
 	r.mu.RUnlock()
 	if open != nil {
-		if err := open(ctx, peer.ID); err != nil {
+		if err := open(ctx, peer.TunnelAddress); err != nil {
 			return failedResult(peer, "open request: "+err.Error())
 		}
 		if err := waitForPort(ctx, peer.TunnelAddress, openReadyTimeout); err != nil {

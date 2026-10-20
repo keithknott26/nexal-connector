@@ -2,40 +2,37 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-func TestRequestBandwidthOpenPostsToPeer(t *testing.T) {
-	var gotMethod, gotPath, gotAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		w.Write([]byte(`{"requestId":"r1","delivered":true}`))
+func TestRequestBandwidthOpenNamesThePeerByTunnelAddress(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v2/hosts/bandwidth-open" || r.Header.Get("Authorization") != "Bearer host-scoped-secret" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(202)
+		_, _ = w.Write([]byte(`{"requestId":"bw_1","delivered":true}`))
 	}))
-	defer server.Close()
-	c, err := New(server.URL, "host-credential-value", true)
-	if err != nil {
+	defer srv.Close()
+	c, _ := New(srv.URL, "host-scoped-secret", true)
+	if err := c.RequestBandwidthOpen(context.Background(), "100.86.56.136"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.RequestBandwidthOpen(context.Background(), "peer-one"); err != nil {
-		t.Fatal(err)
-	}
-	if gotMethod != http.MethodPost || gotPath != "/api/v2/hosts/peer-one/bandwidth-open" {
-		t.Errorf("request %s %s", gotMethod, gotPath)
-	}
-	if gotAuth != "Bearer host-credential-value" {
-		t.Error("missing host bearer")
+	if len(got) != 1 || got["tunnelAddress"] != "100.86.56.136" {
+		t.Fatalf("body = %v", got)
 	}
 }
 
-func TestRequestBandwidthOpenRejectsBadHostIDBeforeNetwork(t *testing.T) {
-	c := &Client{}
-	for _, id := range []string{"", "a/b", "../x", "has space"} {
-		if err := c.RequestBandwidthOpen(context.Background(), id); err == nil {
-			t.Errorf("expected invalid host id error for %q", id)
+func TestRequestBandwidthOpenRefusesAnAddressOutsideTheMesh(t *testing.T) {
+	c, _ := New("https://coordinator.invalid", "t", true)
+	for _, bad := range []string{"", "8.8.8.8", "mac-mini-m4", "6LWVHzV0tr7kAuVU6oYHjWoBEFn6wEAoQ0Oyx+OBA2s="} {
+		if err := c.RequestBandwidthOpen(context.Background(), bad); err == nil {
+			t.Errorf("%q was accepted", bad)
 		}
 	}
 }

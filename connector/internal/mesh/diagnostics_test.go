@@ -167,3 +167,34 @@ func TestNoteRuntimeWithoutLoggerIsNoop(t *testing.T) {
 		t.Fatalf("no logger must leave state untouched: %+v %q", diag.last, diag.lastFailure)
 	}
 }
+
+func TestNoteServiceProbeLogsOnlyChanges(t *testing.T) {
+	buf := captureDiag(t)
+	noteServiceProbe("127.0.0.1", []string{"ssh", "smb"})
+	noteServiceProbe("127.0.0.1", []string{"ssh", "smb"})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("an unchanged probe must not log again: %q", buf.String())
+	}
+	for _, want := range []string{"target=local", "ssh=true", "vnc=false", "smb=true"} {
+		if !strings.Contains(lines[0], want) {
+			t.Fatalf("log line missing %q: %s", want, lines[0])
+		}
+	}
+	noteServiceProbe("127.0.0.1", []string{"vnc"})
+	noteServiceProbe("100.64.0.2", []string{"vnc"})
+	if got := strings.Count(buf.String(), "service probe"); got != 3 {
+		t.Fatalf("a changed result or new address must log: got %d lines: %s", got, buf.String())
+	}
+	if !strings.Contains(buf.String(), "target=100.64.0.2") {
+		t.Fatalf("remote address should be logged as-is: %s", buf.String())
+	}
+}
+
+func TestNoteServiceProbeWithoutLoggerIsNoop(t *testing.T) {
+	SetDiagnosticLogger(nil)
+	noteServiceProbe("127.0.0.1", []string{"ssh"})
+	if len(diag.services) != 0 {
+		t.Fatalf("no logger must leave state untouched: %v", diag.services)
+	}
+}

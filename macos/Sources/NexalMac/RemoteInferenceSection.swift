@@ -172,6 +172,16 @@ final class RemoteInferenceModel: ObservableObject {
         }
     }
 
+    /// True when the capabilities report says this model fits on one Mac, so pooling only makes it slower; nil when unknown.
+    func fitsOneMac(_ modelId: String) -> Bool? {
+        guard let model = lastReport?.models.first(where: { $0.id == modelId }) else { return nil }
+        switch model.verdict {
+        case .runsNow, .fitsSingleHostBlocked: return true
+        case .fitsShardedOnly, .doesNotFit: return false
+        case .other: return nil
+        }
+    }
+
     /// Twenty generations in a row against the model's address, drawn against what the capabilities report expects.
     /// `hostIds` are the Macs of the request, leader first; the estimate covers the whole pool only while the pool
     /// is the thing answering, and otherwise just the Mac serving alone.
@@ -228,6 +238,10 @@ struct RemoteInferenceContent: View {
                 Text("POOL YOUR MACS").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
                 Text("Spread one model over \(members.count) online Macs (\(members.map(\.name).joined(separator: ", ")); \(memory) memory together). Worth it for a model too big for one Mac; each word is slower than on a single Mac.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if remote.fitsOneMac(modelId) == true {
+                    Label("This model fits on one Mac and runs faster there (about as fast as one Mac, with no network in between). A pool can also drop out, so use \"Run there\" unless you want to test pooling.", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 Button("Pool \(members.count) Macs") { remote.servePool(modelId: modelId, app: app) }
                     .buttonStyle(.bordered).controlSize(.small)
                     .disabled(remote.busy || running)

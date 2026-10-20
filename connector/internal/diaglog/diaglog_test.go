@@ -174,3 +174,27 @@ func TestRedactLeavesOrdinaryLogTextAlone(t *testing.T) {
 		t.Fatalf("ordinary text changed:\n%s", out)
 	}
 }
+
+func TestRedactKeyValueFormAndLongRuns(t *testing.T) {
+	out := Redact("api_key=abc123secret&mode=fast token=42 note=" + strings.Repeat("a", 40) + " blob=" + strings.Repeat("aB3", 14))
+	for _, gone := range []string{"abc123secret", strings.Repeat("aB3", 14)} {
+		if strings.Contains(out, gone) {
+			t.Errorf("%q survived redaction: %s", gone, out)
+		}
+	}
+	for _, keep := range []string{"mode=fast", "token=42", strings.Repeat("a", 40)} {
+		if !strings.Contains(out, keep) {
+			t.Errorf("harmless text %q was removed: %s", keep, out)
+		}
+	}
+}
+
+func TestTailWithoutNewlineKeepsTruncatedBytes(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "log")
+	if err := os.WriteFile(p, []byte("abcdefghij"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Tail(p, 4); got != "ghij" {
+		t.Fatalf("Tail = %q", got)
+	}
+}

@@ -161,3 +161,35 @@ func TestNewCollectorWiresRealRunnerAndStatfs(t *testing.T) {
 		t.Fatalf("NewCollector left hooks unset: %+v", c)
 	}
 }
+
+func TestParseThermEdgeCases(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		want string
+	}{
+		{"empty output is unknown", "", ThermalUnknown},
+		{"unrelated output is unknown", "something else entirely\n", ThermalUnknown},
+		{"speed limit 100 is nominal", "CPU_Speed_Limit \t= 100\n", ThermalNominal},
+		{"thermal level 0 is nominal", "Thermal_Level = 0\n", ThermalNominal},
+		{"positive thermal level is throttled", "Thermal_Level = 2\n", ThermalThrottled},
+		{"non-numeric limit is unknown", "CPU_Speed_Limit = fast\n", ThermalUnknown},
+	}
+	for _, tc := range cases {
+		if got := parseTherm([]byte(tc.out)); got != tc.want {
+			t.Errorf("%s: parseTherm = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestParseSwVersEdgeCases(t *testing.T) {
+	if got := parseSwVers([]byte("ProductName: macOS\nBuildVersion: 27A1\n")); got != "" {
+		t.Fatalf("missing version should yield empty, got %q", got)
+	}
+	if got := parseSwVers([]byte("ProductVersion: 27.0\n")); got != "macOS 27.0" {
+		t.Fatalf("missing name and build should default to macOS, got %q", got)
+	}
+	if got := parseSwVers(nil); got != "" {
+		t.Fatalf("empty output: %q", got)
+	}
+}

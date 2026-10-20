@@ -25,14 +25,14 @@
     "transformers": "4.57.6"
   },
   "dependency_release_gate": "RELEASE-GATES.md",
-  "requirements_input_sha256": "f64e191b8f366af97601dbfa1833641e74a0badb24dfe0b4d0335f9aeb2412a8",
+  "requirements_input_sha256": "afdc53a11efc15346f2ea14f903d151dac37f22331e2f73e5fc44096ea923c3b",
   "source_sha256": {
     "nexal_mlx/__init__.py": "ffe0c5f57543c11a1738dfe757534171d0a238a579802d36f951f388f152fecb",
     "nexal_mlx/__main__.py": "935a1c1166b0c1ea35a82256345000bf2c73ded718d77773bc27a71ecce28f7d",
     "nexal_mlx/cli.py": "f465347cc8a76078768ad0bc1ecfc3deb550e3f649c75a9a1a64a4f8669df72b",
     "nexal_mlx/profiles.py": "14f4917670a36a3c6c0cf089ca8b1c5f9087264deb5bc1909173e520dda22105",
     "nexal_mlx/ring.py": "6b0051759e1cdee5fe5e14a667093512801ba8469a94ca31ed57e764a752072e",
-    "nexal_mlx/runtime.py": "5dedb4e24dcea06971d897ecaf77250fbe6fcc340da6113c98996648c67c90bd",
+    "nexal_mlx/runtime.py": "110b5f5d5e55d7f71a001beaebc2099bc6751f7de7fbe6a0a5e4973f3fbff816",
     "nexal_mlx/security.py": "a9096b6b5d1bebc161c7b86b246f8afc8ff8cdd5d561dc053a7bccce604e438b",
     "nexal_mlx_entry.py": "a7de43620d79d2b0401062db7ed58c490fea2373d6ed8ba486b603870a57dfc2"
   }

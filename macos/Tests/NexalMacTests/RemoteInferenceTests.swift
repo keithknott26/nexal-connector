@@ -67,11 +67,22 @@ final class RemoteInferenceTests: XCTestCase {
         let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(data))
         XCTAssertEqual(cards.map(\.id), ["r1", "r3"])
         XCTAssertTrue(cards[0].isPool)
-        XCTAssertEqual(cards[0].step, "install")  // the slowest Mac sets the pace
+        // Once the Mac that answers is serving, its own step is the news (see RemoteInferenceCard.cards).
+        XCTAssertEqual(cards[0].step, "serve")
         XCTAssertEqual(cards[0].state, "running")
         XCTAssertEqual(cards[0].progress ?? 0, 0.6, accuracy: 0.001)
         XCTAssertFalse(cards[1].isPool)
         XCTAssertEqual(cards[1].endpoint, "http://100.1.2.3:8001/v1")
+    }
+
+    func testPoolStepIsTheSlowestMacUntilTheLeadServes() {
+        let data = Data("""
+        {"id":"r1","targetHostId":"h1","modelId":"big","state":"running","step":"verify","progress":0.8,"poolId":"p1","poolRank":0,"poolSize":2}
+        {"id":"r2","targetHostId":"h2","modelId":"big","state":"running","step":"install","progress":0.3,"poolId":"p1","poolRank":1,"poolSize":2}
+
+        """.utf8)
+        let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(data))
+        XCTAssertEqual(cards[0].step, "install")  // the slowest Mac sets the pace
     }
 
     func testPoolFailureShowsTheFailedMac() {

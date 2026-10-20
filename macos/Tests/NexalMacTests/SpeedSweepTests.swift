@@ -63,7 +63,7 @@ final class SpeedSweepTests: XCTestCase {
     }
 
     func testSummaryIsNilWhenEveryCallFailed() {
-        XCTAssertNil(SweepSummary(sweep([nil, nil]), expected: 10))
+        XCTAssertNil(SweepSummary(sweep([nil, nil]), expected: ExpectedEstimate(low: 10, high: 20, chips: "Apple M2")))
     }
 
     func testChipBandwidthTable() {

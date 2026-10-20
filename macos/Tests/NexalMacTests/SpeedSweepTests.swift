@@ -19,13 +19,47 @@ final class SpeedSweepTests: XCTestCase {
     }
 
     func testSummaryUsesTheMedianAndCountsFailures() throws {
-        let summary = try XCTUnwrap(SweepSummary(sweep([30, 10, nil, 20]), expected: 40))
+        let band = ExpectedEstimate(low: 40, high: 60, chips: "Apple M4 Pro")
+        let summary = try XCTUnwrap(SweepSummary(sweep([30, 10, nil, 20]), expected: band))
         XCTAssertEqual(summary.median, 20)
         XCTAssertEqual(summary.fastest, 30)
         XCTAssertEqual(summary.slowest, 10)
         XCTAssertEqual(summary.failed, 1)
-        XCTAssertEqual(try XCTUnwrap(summary.percentOfExpected), 50, accuracy: 0.001)
+        XCTAssertEqual(summary.verdict, .below)
         XCTAssertTrue(summary.line.contains("1 of 4 calls failed"))
+    }
+
+    func testVerdictAllowsSlackAroundTheBand() throws {
+        let band = ExpectedEstimate(low: 40, high: 60, chips: "x")
+        XCTAssertEqual(try XCTUnwrap(SweepSummary(sweep([50, 50]), expected: band)).verdict, .inLine)
+        XCTAssertEqual(try XCTUnwrap(SweepSummary(sweep([36, 36]), expected: band)).verdict, .inLine)
+        XCTAssertEqual(try XCTUnwrap(SweepSummary(sweep([80, 80]), expected: band)).verdict, .above)
+        XCTAssertEqual(try XCTUnwrap(SweepSummary(sweep([50, 50]), expected: nil)).verdict, .unknown)
+    }
+
+    func testEstimateIsARangeFromWeightsAndChip() throws {
+        let e = try XCTUnwrap(ExpectedSpeed.estimate(weights: 2.3e9, shares: [1], chips: ["Apple M4 Pro"], hopMs: 1))
+        XCTAssertEqual(e.low, 273e9 * 0.6 / 2.3e9, accuracy: 0.01)
+        XCTAssertEqual(e.high, 273e9 * 0.85 / 2.3e9, accuracy: 0.01)
+        XCTAssertEqual(e.chips, "Apple M4 Pro")
+    }
+
+    func testBinnedChipsWidenTheRange() throws {
+        let fixed = try XCTUnwrap(ExpectedSpeed.estimate(weights: 2e9, shares: [1], chips: ["Apple M4 Pro"], hopMs: 1))
+        let binned = try XCTUnwrap(ExpectedSpeed.estimate(weights: 2e9, shares: [1], chips: ["Apple M4 Max"], hopMs: 1))
+        XCTAssertGreaterThan(binned.high / binned.low, fixed.high / fixed.low)
+    }
+
+    func testAPoolAddsTimesAndHopsSoItIsSlowerThanOneMac() throws {
+        let solo = try XCTUnwrap(ExpectedSpeed.estimate(weights: 4e9, shares: [1], chips: ["Apple M2"], hopMs: 2))
+        let pool = try XCTUnwrap(ExpectedSpeed.estimate(weights: 4e9, shares: [0.5, 0.5], chips: ["Apple M2", "Apple M2"], hopMs: 2))
+        XCTAssertLessThan(pool.high, solo.high)
+    }
+
+    func testUnknownChipGivesNoEstimate() {
+        XCTAssertNil(ExpectedSpeed.estimate(weights: 2e9, shares: [1], chips: ["Apple M9 Ultra"], hopMs: 1))
+        XCTAssertNil(ExpectedSpeed.estimate(weights: 2e9, shares: [0.5, 0.5], chips: ["Apple M2", nil], hopMs: 1))
+        XCTAssertNil(ExpectedSpeed.estimate(weights: 0, shares: [1], chips: ["Apple M2"], hopMs: 1))
     }
 
     func testSummaryIsNilWhenEveryCallFailed() {
@@ -33,9 +67,9 @@ final class SpeedSweepTests: XCTestCase {
     }
 
     func testChipBandwidthTable() {
-        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M2 Pro"), 200)
-        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M4"), 120)
-        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "apple m1 ultra"), 800)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M2 Pro")?.high, 200)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "Apple M4")?.low, 120)
+        XCTAssertEqual(ExpectedSpeed.bandwidth(chip: "apple m1 ultra")?.high, 800)
         XCTAssertNil(ExpectedSpeed.bandwidth(chip: "Intel Core i9"))
         XCTAssertNil(ExpectedSpeed.bandwidth(chip: nil))
     }

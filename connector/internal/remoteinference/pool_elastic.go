@@ -442,7 +442,13 @@ func (l *leader) watch(ctx context.Context, cur Task) bool {
 			} else if time.Since(l.lastProbe) >= r.ProbeEvery {
 				l.lastProbe = time.Now()
 				if err := healthy(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(l.pooledPort)), 30*time.Second); err != nil {
-					if l.probeFails++; l.probeFails >= probeFailLimit {
+					// An HTTP error status is an answer, not a flaky network: a pool server that returns 404 or 5xx has lost its ring.
+					if strings.HasPrefix(err.Error(), "HTTP ") {
+						l.probeFails = probeFailLimit
+					} else {
+						l.probeFails++
+					}
+					if l.probeFails >= probeFailLimit {
 						reason = "the pool stopped answering (" + tailText(err.Error(), 80) + ")"
 					}
 				} else {
@@ -478,6 +484,7 @@ func (l *leader) watch(ctx context.Context, cur Task) bool {
 
 func (r *Runner) poolMember(ctx context.Context, t Task, addr string) {
 	rank := t.PoolRank
+	crashes := 0 // consecutive times this Mac's share of the model died on its own
 	for ctx.Err() == nil {
 		port, err := r.freePort(addr)
 		if err != nil {
@@ -500,7 +507,9 @@ func (r *Runner) poolMember(ctx context.Context, t Task, addr string) {
 		}
 		st = poolStatus{state: "ready", step: "serve", detail: fmt.Sprintf("Sharing %s with the pool (Mac %d of %d).", t.ModelID, rank+1, t.PoolSize), progress: 1, ring: &mine}
 		r.poolReport(ctx, t, st)
+		startedAt := time.Now()
 		why := r.superviseRank(ctx, t, p, ring, st)
+		died := !p.alive() // its server crashed or exited, as opposed to the ring changing under it
 		p.stop()
 		r.release(port)
 		if ctx.Err() != nil {
@@ -511,9 +520,31 @@ func (r *Runner) poolMember(ctx context.Context, t Task, addr string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(r.Rejoin):
+		case <-time.After(r.rejoinDelay(&crashes, died, time.Since(startedAt))):
 		}
 	}
+}
+
+// rejoinDelay is how long a member that left the pool waits before offering to join again. A server that
+// keeps crashing (a failed ring, a library fault) would otherwise drag the other Macs through a new attempt
+// every few seconds, so each crash in a row doubles the wait, up to two minutes.
+func (r *Runner) rejoinDelay(crashes *int, died bool, ranFor time.Duration) time.Duration {
+	if !died {
+		*crashes = 0
+		return r.Rejoin
+	}
+	if ranFor >= stableAfter {
+		*crashes = 0
+	}
+	*crashes++
+	wait := r.Rejoin
+	for i := 1; i < *crashes && wait < 2*time.Minute; i++ {
+		wait *= 2
+	}
+	if wait > 2*time.Minute {
+		wait = 2 * time.Minute
+	}
+	return wait
 }
 
 // waitForRing waits until the coordinator has every member's address, this Mac's at its rank.

@@ -45,3 +45,24 @@ func TestPoolBackoffGrowsAndCaps(t *testing.T) {
 		t.Fatal("backoff schedule wrong")
 	}
 }
+
+func TestRejoinDelayBacksOffAfterRepeatedCrashes(t *testing.T) {
+	r := &Runner{Rejoin: 5 * time.Second}
+	n := 0
+	if r.rejoinDelay(&n, false, time.Minute) != 5*time.Second {
+		t.Fatal("a ring change rejoins at the normal pace")
+	}
+	got := []time.Duration{r.rejoinDelay(&n, true, time.Second), r.rejoinDelay(&n, true, time.Second), r.rejoinDelay(&n, true, time.Second)}
+	if got[0] != 5*time.Second || got[1] != 10*time.Second || got[2] != 20*time.Second {
+		t.Fatal(got)
+	}
+	for i := 0; i < 10; i++ {
+		r.rejoinDelay(&n, true, time.Second)
+	}
+	if r.rejoinDelay(&n, true, time.Second) != 2*time.Minute {
+		t.Fatal("capped at two minutes")
+	}
+	if r.rejoinDelay(&n, true, 10*time.Minute) != 5*time.Second {
+		t.Fatal("a long healthy run resets the count")
+	}
+}

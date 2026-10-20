@@ -107,7 +107,7 @@ final class RemoteInferenceModel: ObservableObject {
     @Published var sweeping: Set<String> = []
     @Published var sweeps: [String: RemoteInferenceSweep] = [:]
     /// The capabilities estimate of tokens per second for each request that was swept; absent when unknown.
-    @Published var expected: [String: Double] = [:]
+    @Published var expected: [String: ExpectedEstimate] = [:]
     private var lastReport: InferenceReport?
     private var polling: Task<Void, Never>?
 
@@ -173,12 +173,16 @@ final class RemoteInferenceModel: ObservableObject {
     }
 
     /// Twenty generations in a row against the model's address, drawn against what the capabilities report expects.
-    func sweep(id: String, modelId: String, endpoint: String?, app: AppModel, calls: Int = 20) {
+    /// `hostIds` are the Macs of the request, leader first; the estimate covers the whole pool only while the pool
+    /// is the thing answering, and otherwise just the Mac serving alone.
+    func sweep(id: String, modelId: String, endpoint: String?, hostIds: [String], pooled: Bool, app: AppModel, calls: Int = 20) {
         guard let endpoint else { return }
         sweeping.insert(id); problem = nil
         expected[id] = nil
         if let report = lastReport, let model = report.models.first(where: { $0.id == modelId }) {
-            expected[id] = ExpectedSpeed.tokensPerSec(model: model, machines: report.machines, links: report.links)
+            let all = ExpectedSpeed.serving(hostIds: hostIds, machines: report.machines)
+            let serving = pooled ? all : Array(all.prefix(1))
+            expected[id] = ExpectedSpeed.estimate(model: model, serving: serving, links: report.links)
         }
         Task {
             defer { sweeping.remove(id) }
@@ -319,7 +323,8 @@ struct RemoteInferenceContent: View {
                         .controlSize(.small).disabled(remote.testing.contains(c.id))
                     if remote.testing.contains(c.id) { ProgressView().controlSize(.small) }
                     Button(remote.sweeping.contains(c.id) ? "Sweeping…" : "Speed sweep (20 calls)") {
-                        remote.sweep(id: c.id, modelId: c.modelId, endpoint: c.endpoint, app: app)
+                        remote.sweep(id: c.id, modelId: c.modelId, endpoint: c.endpoint, hostIds: c.members.map(\.hostId),
+                                     pooled: c.isPool && (c.detail?.contains("sharing the load") == true), app: app)
                     }
                     .controlSize(.small).disabled(remote.sweeping.contains(c.id))
                     if remote.sweeping.contains(c.id) { ProgressView().controlSize(.small) }

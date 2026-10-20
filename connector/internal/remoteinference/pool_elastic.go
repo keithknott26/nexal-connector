@@ -51,7 +51,16 @@ func (r *Runner) startProc(ctx context.Context, args ...string) (*proc, error) {
 		return nil, err
 	}
 	p := &proc{cancel: cancel, done: make(chan struct{}), tail: tail}
-	go func() { p.err = cmd.Wait(); close(p.done) }()
+	go func() {
+		p.err = cmd.Wait()
+		close(p.done)
+		// The card keeps about 280 characters. When a server ends on its own (not because we stopped it),
+		// keep everything it said last in the log, so a crash can be diagnosed from the ring messages.
+		if pctx.Err() == nil && r.Logger != nil {
+			r.Logger.Warn("inference server ended on its own", "command", strings.Join(args[:min(len(args), 3)], " "),
+				"error", fmt.Sprint(p.err), "output", tail.String())
+		}
+	}()
 	return p, nil
 }
 

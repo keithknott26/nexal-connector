@@ -432,6 +432,40 @@ func TestSharingStatementsAreHonest(t *testing.T) {
 	}
 }
 
+func TestBuildSharingStatementBranches(t *testing.T) {
+	fits := buildSharing(true, true, "")
+	if fits.Statement != statementShardedFits || fits.SingleHostExecution != "available" {
+		t.Errorf("sharded+runnable: %+v", fits)
+	}
+	blocked := buildSharing(true, false, "")
+	if !strings.Contains(blocked.Statement, "single-host run is blocked") || blocked.SingleHostExecution != "blocked" {
+		t.Errorf("sharded+blocked: %+v", blocked)
+	}
+	if got := buildSharing(false, true, "").Statement; got != statementNoShard {
+		t.Errorf("unsharded statement = %q", got)
+	}
+	// No distributed probe value means no extra evidence line, and the shared
+	// evidence slice must be copied, not aliased.
+	if len(fits.Evidence) != len(sharingEvidence) {
+		t.Errorf("evidence len = %d, want %d", len(fits.Evidence), len(sharingEvidence))
+	}
+	fits.Evidence[0] = "mutated"
+	if sharingEvidence[0] == "mutated" {
+		t.Error("buildSharing aliases the package evidence slice")
+	}
+}
+
+func TestInstallLineBranches(t *testing.T) {
+	pinned := installLine(CatalogEntry{ID: "m1", DisplayName: "Model One", Installable: true}, "Mini")
+	if !strings.Contains(pinned, "nexal inference install m1") || !strings.Contains(pinned, "On Mini") {
+		t.Errorf("installable line = %q", pinned)
+	}
+	manual := installLine(CatalogEntry{ID: "m1", DisplayName: "Model One"}, "Mini")
+	if !strings.Contains(manual, "Model One") || strings.Contains(manual, "nexal inference install") {
+		t.Errorf("manual line = %q", manual)
+	}
+}
+
 func TestHowToUseNamesOnlyRealThings(t *testing.T) {
 	cat, _ := LoadCatalog()
 	text := strings.Join(howToUse(cat.Entries[0], "MacBook", true), "\n")

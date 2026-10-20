@@ -260,3 +260,17 @@ func TestControlDelegatesToStatusAndEnable(t *testing.T) {
 		t.Fatalf("Control.Enable on an already-listening service = %v, want nil", err)
 	}
 }
+
+func TestLabelAndPortFallThroughForUnknownService(t *testing.T) {
+	if got := Label("bogus"); got != "bogus" {
+		t.Fatalf("Label(unknown) = %q, want the id echoed back", got)
+	}
+	if got := port("bogus"); got != "" {
+		t.Fatalf("port(unknown) = %q, want empty", got)
+	}
+	for service, want := range map[string]string{ScreenSharing: "5900", FileSharing: "445", SecureShell: "22"} {
+		if got := port(service); got != want {
+			t.Fatalf("port(%s) = %q, want %q", service, got, want)
+		}
+	}
+}

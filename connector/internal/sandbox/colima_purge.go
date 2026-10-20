@@ -47,7 +47,7 @@ func (d *DevPod) PurgeColimaIfIdle(ctx context.Context) error {
 		return nil
 	}
 	bin, ok := d.cfg.Env.FindBinary("colima")
-	if !ok || !strings.HasPrefix(bin, ManagedRuntimeBin()+string(filepath.Separator)) {
+	if !ok || !strings.HasPrefix(bin, ManagedRuntimeBin(d.cfg.Env.Home)+string(filepath.Separator)) {
 		return nil
 	}
 	busy, err := hasWorkspaceDirs(d.cfg.StateDir)

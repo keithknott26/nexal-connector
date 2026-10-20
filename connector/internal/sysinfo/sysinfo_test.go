@@ -193,3 +193,31 @@ func TestParseSwVersEdgeCases(t *testing.T) {
 		t.Fatalf("empty output: %q", got)
 	}
 }
+
+func TestAbs(t *testing.T) {
+	for in, want := range map[int]int{-7: 7, 0: 0, 7: 7} {
+		if got := abs(in); got != want {
+			t.Fatalf("abs(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestMaterialBatteryThresholdIsSymmetricAndInclusive(t *testing.T) {
+	base := Info{BatteryPercent: 50}
+	for _, tc := range []struct {
+		name string
+		pct  int
+		want bool
+	}{
+		{"just under on the way down", 50 - BatteryChangeThreshold + 1, false},
+		{"exact threshold down", 50 - BatteryChangeThreshold, true},
+		{"just under on the way up", 50 + BatteryChangeThreshold - 1, false},
+		{"exact threshold up", 50 + BatteryChangeThreshold, true},
+	} {
+		next := base
+		next.BatteryPercent = tc.pct
+		if got := Material(base, next); got != tc.want {
+			t.Fatalf("%s: Material = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

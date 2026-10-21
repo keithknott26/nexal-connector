@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"nexal/connector/internal/cybersecurity"
 )
 
 func buildBin(t *testing.T) string {
@@ -57,6 +59,13 @@ func TestCLI(t *testing.T) {
 	t.Run("invalid line reports line number", func(t *testing.T) {
 		_, errOut, code := run(t, bin, alert+"\nnot json\n", flags...)
 		if code != 1 || !strings.Contains(errOut, "line 2") {
+			t.Fatalf("exit %d stderr %q", code, errOut)
+		}
+	})
+	t.Run("oversized line is rejected", func(t *testing.T) {
+		big := strings.Repeat("x", cybersecurity.MaxEVEBytes+2)
+		_, errOut, code := run(t, bin, big+"\n", flags...)
+		if code != 1 || !strings.Contains(errOut, "line limit exceeded") {
 			t.Fatalf("exit %d stderr %q", code, errOut)
 		}
 	})

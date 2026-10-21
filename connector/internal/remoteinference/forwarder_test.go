@@ -68,3 +68,20 @@ func TestForwarderSwapsServersAndSaysWhenThereIsNone(t *testing.T) {
 		t.Fatal(n, quiet)
 	}
 }
+
+func TestForwarderAlsoAnswersOnTheExtraAddress(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "up") }))
+	defer up.Close()
+	main, extra := freeAddr(t), freeAddr(t)
+	f, err := NewForwarder(main, extra, "256.0.0.1:1") // an address that cannot be opened is skipped
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.SetUpstream(strings.TrimPrefix(up.URL, "http://"), "")
+	for _, addr := range []string{main, extra} {
+		if code, body := get(t, "http://"+addr+"/x"); code != 200 || body != "up" {
+			t.Fatal(addr, code, body)
+		}
+	}
+}

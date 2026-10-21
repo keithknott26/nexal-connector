@@ -205,7 +205,7 @@ func (r *Runner) poolLeader(ctx context.Context, t Task, addr string) {
 		return
 	}
 	defer r.release(apiPort)
-	fwd, err := NewForwarder(net.JoinHostPort(addr, strconv.Itoa(apiPort)))
+	fwd, err := NewForwarder(net.JoinHostPort(addr, strconv.Itoa(apiPort)), net.JoinHostPort("127.0.0.1", strconv.Itoa(apiPort)))
 	if err != nil {
 		r.fail(ctx, t, "serve", fmt.Sprintf("Cannot answer on %s:%d: %v", addr, apiPort, err))
 		return

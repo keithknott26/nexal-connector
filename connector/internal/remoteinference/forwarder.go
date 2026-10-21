@@ -14,7 +14,6 @@ import (
 // otherwise tell that they answer), and the pool swaps the server behind this one address as Macs join and
 // leave without the address, or anyone using it, changing.
 type Forwarder struct {
-	ln  net.Listener
 	srv *http.Server
 
 	mu       sync.Mutex
@@ -25,14 +24,21 @@ type Forwarder struct {
 }
 
 // NewForwarder starts listening on listen (ip:port). Until SetUpstream is called every request gets a 503.
-func NewForwarder(listen string) (*Forwarder, error) {
+// Each address in alsoListen is served too when it can be opened; a Mac cannot connect to its own neXal
+// address, so the loopback address on the same port is what lets this Mac's own checks reach the model.
+func NewForwarder(listen string, alsoListen ...string) (*Forwarder, error) {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return nil, err
 	}
-	f := &Forwarder{ln: ln, last: time.Now(), notice: "The model is starting."}
+	f := &Forwarder{last: time.Now(), notice: "The model is starting."}
 	f.srv = &http.Server{Handler: f}
 	go func() { _ = f.srv.Serve(ln) }()
+	for _, addr := range alsoListen {
+		if extra, e := net.Listen("tcp", addr); e == nil {
+			go func() { _ = f.srv.Serve(extra) }()
+		}
+	}
 	return f, nil
 }
 

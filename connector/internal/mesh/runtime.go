@@ -261,6 +261,12 @@ func PeerAddressByName(ctx context.Context, fqdn string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	return peerAddressFromStatus(out, want)
+}
+
+// peerAddressFromStatus finds the peer whose lowercased, dot-trimmed FQDN is
+// want in the runtime's JSON status and returns its address without the prefix.
+func peerAddressFromStatus(out []byte, want string) (string, bool) {
 	var rs runtimeStatus
 	if json.Unmarshal(out, &rs) != nil {
 		return "", false

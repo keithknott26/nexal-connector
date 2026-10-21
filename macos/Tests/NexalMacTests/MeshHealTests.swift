@@ -1,6 +1,7 @@
 import XCTest
 @testable import NexalMac
 
+@MainActor
 final class MeshHealTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_000_000)
 

@@ -67,6 +67,24 @@ func TestCollectorIsOptInAndRejectsUntrustedEndpoint(t *testing.T) {
 		}
 	}
 }
+func TestCollectorRejectsMalformedAndPlaintextEndpoints(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://collector.test#frag",
+		"https://",
+		"collector.test:4318",
+		"ftp://collector.test",
+		"http://collector.test:4318",
+		"http://127.0.0.1.example:4318",
+		"http://%zz",
+	} {
+		t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+		if shutdown, err := Start(context.Background()); err == nil {
+			_ = shutdown(context.Background())
+			t.Fatalf("accepted invalid endpoint %q", endpoint)
+		}
+	}
+}
+
 func TestOperationRedactsAllParameters(t *testing.T) {
 	if Operation("/api/drive/private/financial.pdf") != "/api/drive" {
 		t.Fatal("unexpected class")

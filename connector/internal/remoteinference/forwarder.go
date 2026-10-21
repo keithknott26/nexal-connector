@@ -34,6 +34,9 @@ func NewForwarder(listen string, alsoListen ...string) (*Forwarder, error) {
 	}
 	lns := []net.Listener{ln}
 	for _, a := range alsoListen {
+		if a == listen {
+			continue // the same address twice (a Mac whose neXal address is loopback in tests)
+		}
 		extra, err := net.Listen("tcp", a)
 		if err != nil {
 			for _, l := range lns {

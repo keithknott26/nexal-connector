@@ -305,4 +305,17 @@ func waitClosed(t *testing.T, srv *Server, within time.Duration) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	// Addr is cleared before the listener is actually closed, so also wait until the port can
+	// be rebound; otherwise the next test's StartOnce races the close and hits "address in use".
+	for {
+		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(Port)))
+		if err == nil {
+			_ = ln.Close()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("port never released: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

@@ -169,3 +169,72 @@ func TestReportSandboxStateFallsBackWithoutLanIP(t *testing.T) {
 		t.Fatalf("%v %q", err, bodies)
 	}
 }
+
+func TestSandboxManagementRoutes(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := c.DeleteSandbox(ctx, "h1", "sb1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SetSandboxPower(ctx, "h1", "sb1", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateSandbox(ctx, "h1", json.RawMessage(`{"kind":"vm"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SandboxRunners(ctx, "h1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SandboxImages(ctx, "h1", "r1"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"DELETE /api/v2/hosts/h1/sandboxes/sb1",
+		"POST /api/v2/hosts/h1/sandboxes/sb1/stop",
+		"POST /api/v2/hosts/h1/sandboxes",
+		"GET /api/v2/hosts/h1/sandbox-runners",
+		"GET /api/v2/hosts/h1/sandbox-images?runner=r1",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("routes:\n%v\nwant:\n%v", got, want)
+	}
+}
+
+func TestSandboxManagementRejectsBadInput(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := c.DeleteSandbox(ctx, "h1", "../x"); err == nil {
+		t.Error("bad sandbox id accepted")
+	}
+	if _, err := c.SetSandboxPower(ctx, "h1", "sb1", "reboot"); err == nil {
+		t.Error("bad power action accepted")
+	}
+	if _, err := c.CreateSandbox(ctx, "h1", json.RawMessage(`{bad`)); err == nil {
+		t.Error("invalid JSON body accepted")
+	}
+	if _, err := c.SandboxImages(ctx, "h1", "a/b"); err == nil {
+		t.Error("bad runner id accepted")
+	}
+	if _, err := c.SandboxRunners(ctx, "bad host"); err == nil {
+		t.Error("bad host id accepted")
+	}
+	if hits != 0 {
+		t.Fatalf("%d requests reached the server", hits)
+	}
+}

@@ -206,8 +206,6 @@ func (c *Client) CreateSandbox(ctx context.Context, hostID string, body json.Raw
 	return out, nil
 }
 
-// SandboxImages is GET /api/v2/hosts/:hostId/sandbox-images[?runner=]: the image
-// catalog for a runner computer (this host when runner is empty).
 // SandboxRunners is GET /api/v2/hosts/:id/sandbox-runners: where the owner can create an
 // instance (this computer, other computers that host instances, neXal storage).
 func (c *Client) SandboxRunners(ctx context.Context, hostID string) (json.RawMessage, error) {
@@ -222,6 +220,8 @@ func (c *Client) SandboxRunners(ctx context.Context, hostID string) (json.RawMes
 	return out, nil
 }
 
+// SandboxImages is GET /api/v2/hosts/:hostId/sandbox-images[?runner=]: the image
+// catalog for a runner computer (this host when runner is empty).
 func (c *Client) SandboxImages(ctx context.Context, hostID, runner string) (json.RawMessage, error) {
 	p, err := sandboxPath(hostID, "sandbox-images")
 	if err != nil {

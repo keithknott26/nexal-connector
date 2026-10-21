@@ -24,15 +24,30 @@ type Forwarder struct {
 	last     time.Time // the last request start or response byte
 }
 
-// NewForwarder starts listening on listen (ip:port). Until SetUpstream is called every request gets a 503.
-func NewForwarder(listen string) (*Forwarder, error) {
+// NewForwarder starts listening on listen (ip:port), and on each alsoListen address. Loopback is added by
+// the pool so this Mac can reach its own endpoint (it cannot connect to its own neXal address). Until
+// SetUpstream is called every request gets a 503.
+func NewForwarder(listen string, alsoListen ...string) (*Forwarder, error) {
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return nil, err
 	}
+	lns := []net.Listener{ln}
+	for _, a := range alsoListen {
+		extra, err := net.Listen("tcp", a)
+		if err != nil {
+			for _, l := range lns {
+				_ = l.Close()
+			}
+			return nil, err
+		}
+		lns = append(lns, extra)
+	}
 	f := &Forwarder{ln: ln, last: time.Now(), notice: "The model is starting."}
 	f.srv = &http.Server{Handler: f}
-	go func() { _ = f.srv.Serve(ln) }()
+	for _, l := range lns {
+		go func(l net.Listener) { _ = f.srv.Serve(l) }(l)
+	}
 	return f, nil
 }
 

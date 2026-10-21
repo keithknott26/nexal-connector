@@ -68,3 +68,23 @@ func TestForwarderSwapsServersAndSaysWhenThereIsNone(t *testing.T) {
 		t.Fatal(n, quiet)
 	}
 }
+
+func TestForwarderAlsoListensOnExtraAddresses(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok") }))
+	defer up.Close()
+	a, b := freeAddr(t), freeAddr(t)
+	f, err := NewForwarder(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.SetUpstream(strings.TrimPrefix(up.URL, "http://"), "")
+	for _, addr := range []string{a, b} {
+		if code, body := get(t, "http://"+addr+"/v1/models"); code != 200 || body != "ok" {
+			t.Fatal(addr, code, body)
+		}
+	}
+	if _, err := NewForwarder(freeAddr(t), a); err == nil {
+		t.Fatal("an extra address that is taken should fail")
+	}
+}

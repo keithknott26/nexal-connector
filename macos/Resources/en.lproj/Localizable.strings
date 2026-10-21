@@ -632,7 +632,7 @@
 "Protected" = "Protected";
 
 /* macos/Sources/NexalMac/NetworkPanel.swift:584 */
-"Public IP · Private IP · Location" = "Public IP · Private IP · Location";
+"Public IP · Private IP · Mesh IP · Location" = "Public IP · Private IP · Mesh IP · Location";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:22 */
 "Quantum type" = "Quantum type";

@@ -220,3 +220,41 @@ func TestPoolMemberJoinsWhenTheRingCompletesAndRejoinsAfterALoss(t *testing.T) {
 		return ok
 	})
 }
+
+func TestRingHasRequiresAddressAtRank(t *testing.T) {
+	ring := []string{"a:1", "b:2"}
+	for _, c := range []struct {
+		name string
+		ring []string
+		rank int
+		mine string
+		want bool
+	}{
+		{"match", ring, 1, "b:2", true},
+		{"wrong rank", ring, 0, "b:2", false},
+		{"rank past end", ring, 2, "b:2", false},
+		{"blank address", []string{""}, 0, "", false},
+		{"empty ring", nil, 0, "a:1", false},
+	} {
+		if got := ringHas(c.ring, c.rank, c.mine); got != c.want {
+			t.Errorf("%s: ringHas = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestSameRingNeedsEqualNonEmptyRings(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		a, b []string
+		want bool
+	}{
+		{"equal", []string{"a", "b"}, []string{"a", "b"}, true},
+		{"reordered", []string{"a", "b"}, []string{"b", "a"}, false},
+		{"length differs", []string{"a"}, []string{"a", "b"}, false},
+		{"both empty is not a ring", nil, []string{}, false},
+	} {
+		if got := sameRing(c.a, c.b); got != c.want {
+			t.Errorf("%s: sameRing = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

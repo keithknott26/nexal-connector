@@ -81,3 +81,58 @@ func TestResolvesInsideMesh(t *testing.T) {
 		t.Fatal("unresolvable accepted")
 	}
 }
+
+func TestValidMeshHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"tm-gw-1.netbird.cloud":           true,
+		"100.64.0.1":                      true,
+		"100.127.255.254":                 true,
+		"100.128.0.1":                     false,
+		"100.63.255.255":                  false,
+		"8.8.8.8":                         false,
+		"fd00::1":                         false,
+		"localhost":                       false,
+		"Upper.Example.com":               false,
+		"-bad.example.com":                false,
+		"":                                false,
+		strings.Repeat("a", 250) + ".com": false,
+	} {
+		if got := ValidMeshHost(host); got != want {
+			t.Errorf("ValidMeshHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestDestinationValidate(t *testing.T) {
+	if err := dest().Validate(); err != nil {
+		t.Fatalf("valid destination rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*Destination){
+		"protocol":          func(d *Destination) { d.Protocol = "afp" },
+		"port":              func(d *Destination) { d.Port = 139 },
+		"public host":       func(d *Destination) { d.Host = "8.8.8.8" },
+		"share pattern":     func(d *Destination) { d.Share = "../etc"; d.Username = d.Share },
+		"username mismatch": func(d *Destination) { d.Username = "tm00000000000000000000" },
+	} {
+		d := dest()
+		mutate(&d)
+		if err := d.Validate(); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+}
+
+func TestZeroDropsSecrets(t *testing.T) {
+	c := &SMBCredential{Destination: dest(), Password: "secret", URL: "smb://u:secret@h/s"}
+	c.Zero()
+	if c.Password != "" || c.URL != "" || c.Destination != dest() {
+		t.Fatalf("SMBCredential.Zero wrong result: %+v", c)
+	}
+	s := &Credentials{AccessKeyID: "a", SecretAccessKey: "b", SessionToken: "c", Bucket: "bk"}
+	s.Zero()
+	if s.AccessKeyID != "" || s.SecretAccessKey != "" || s.SessionToken != "" || s.Bucket != "bk" {
+		t.Fatalf("Credentials.Zero wrong result: %+v", s)
+	}
+	(*SMBCredential)(nil).Zero()
+	(*Credentials)(nil).Zero()
+}

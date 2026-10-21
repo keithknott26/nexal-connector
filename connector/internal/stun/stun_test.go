@@ -581,3 +581,29 @@ func TestMappingStringAndSummaryAreDistinctPerState(t *testing.T) {
 		t.Fatalf("out-of-range Mapping Summary() = %q, want the unknown summary", got)
 	}
 }
+
+func TestRequestTransactionIDIsStrict(t *testing.T) {
+	req, txid, err := NewBindingRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := RequestTransactionID(req); !ok || got != txid {
+		t.Fatalf("well-formed request: got (%x, %v), want (%x, true)", got, ok, txid)
+	}
+
+	badCookie := append([]byte(nil), req...)
+	badCookie[4] ^= 0xff
+	notRequest := append([]byte(nil), req...)
+	binary.BigEndian.PutUint16(notRequest[0:2], bindingSuccess)
+
+	for name, msg := range map[string][]byte{
+		"nil":           nil,
+		"short":         req[:headerBytes-1],
+		"bad cookie":    badCookie,
+		"not a request": notRequest,
+	} {
+		if _, ok := RequestTransactionID(msg); ok {
+			t.Errorf("%s: accepted, want rejected", name)
+		}
+	}
+}

@@ -2,8 +2,10 @@ package bandwidth
 
 import (
 	"context"
+	"hash/fnv"
 	"log/slog"
 	"math"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +44,31 @@ func nextDelay(unmeasured bool, retries int) time.Duration {
 	return d
 }
 
+// startupSpread is the window a host's first test is spread over, by a stable hash of its
+// neXal address, so Macs that start together do not all test (and ask to be tested) at once.
+const startupSpread = 90 * time.Second
+
+// startupOffset is this host's fixed place in startupSpread. The same address always gets the
+// same offset, and different addresses are spread across the window.
+func startupOffset(self string) time.Duration {
+	if self == "" {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(self))
+	return time.Duration(h.Sum32()%uint32(startupSpread/time.Second)) * time.Second
+}
+
+// jitter spreads d by up to +/-10% so hosts that began in step drift apart instead of
+// testing at the same moment every cycle.
+func jitter(d time.Duration) time.Duration {
+	span := int64(d / 5)
+	if span <= 0 {
+		return d
+	}
+	return d - d/10 + time.Duration(rand.Int64N(span))
+}
+
 // Runner manages periodic bandwidth tests to all connected mesh peers.
 // It stores the most recent result per peer and exposes them for the status
 // API and the coordinator report.
@@ -60,7 +87,7 @@ type Runner struct {
 	ctx      context.Context
 	provider mesh.Provider
 	opener   func(context.Context, string) error
-	lastOpen time.Time
+	openerID func(context.Context, string) (string, error)
 }
 
 // NewRunner creates a bandwidth test runner.
@@ -95,6 +122,13 @@ func (r *Runner) Run(ctx context.Context, provider mesh.Provider) {
 	r.mu.Unlock()
 	defer r.server.Stop()
 
+	// Spread hosts out: each waits its own fixed offset before the first test.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(startupOffset(provider.Snapshot().SelfTunnelAddress)):
+	}
+
 	// Run initial test, then periodically. A cycle that leaves a connected peer without a
 	// reading is retried soon (see RetryInterval); the full refresh still happens every
 	// TestInterval.
@@ -108,7 +142,7 @@ func (r *Runner) Run(ctx context.Context, provider mesh.Provider) {
 		} else {
 			retries = 0
 		}
-		delay := nextDelay(unmeasured, max(retries-1, 0))
+		delay := jitter(nextDelay(unmeasured, max(retries-1, 0)))
 		select {
 		case <-ctx.Done():
 			return

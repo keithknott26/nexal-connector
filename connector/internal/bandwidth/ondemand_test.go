@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -96,9 +98,9 @@ func TestMeasureReportsOpenRequestFailure(t *testing.T) {
 	}
 }
 
-// HandleRequest opens this Mac's port on the published tunnel address, ignores requests
-// that arrive before the runner has a context or without a tunnel address, and drops
-// repeats that come faster than minOpenSpacing.
+// HandleRequest opens the request's slot port on the published tunnel address (and the legacy fixed
+// port for older peers), and ignores requests that arrive before the runner has a context or
+// without a tunnel address.
 func TestHandleRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -121,23 +123,158 @@ func TestHandleRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("opens once and rate-limits repeats", func(t *testing.T) {
+	t.Run("opens the request's slot port", func(t *testing.T) {
 		r := NewRunner(slog.New(slog.DiscardHandler))
 		r.ctx, r.provider = ctx, provider
-		waitPortFree(t, 2*time.Second) // an earlier test's one-shot listener may still be closing
+		defer r.server.Stop()
 		r.HandleRequest("req-3", "peer-a")
 		if r.server.Addr() == "" {
 			t.Fatal("port should be open after a request")
 		}
-		if _, _, err := Measure(ctx, "127.0.0.1", 64<<10); err != nil {
-			t.Fatalf("Measure: %v", err)
-		}
-		waitClosed(t, r.server, 2*time.Second)
-		r.HandleRequest("req-4", "peer-a") // within minOpenSpacing of req-3
-		if r.server.Addr() != "" {
-			t.Fatal("a repeat request inside minOpenSpacing should be ignored")
+		if _, _, err := MeasureOn(ctx, "127.0.0.1", SlotPort("req-3"), 64<<10); err != nil {
+			t.Fatalf("MeasureOn slot port: %v", err)
 		}
 	})
+
+	t.Run("several requests at once each get their own port", func(t *testing.T) {
+		r := NewRunner(slog.New(slog.DiscardHandler))
+		r.ctx, r.provider = ctx, provider
+		defer r.server.Stop()
+		ids := []string{}
+		seen := map[int]bool{}
+		for i := 0; len(ids) < 4; i++ {
+			id := "bw_" + strconv.Itoa(i)
+			if !seen[SlotPort(id)] {
+				seen[SlotPort(id)] = true
+				ids = append(ids, id)
+			}
+		}
+		for _, id := range ids {
+			r.HandleRequest(id, "peer-a")
+		}
+		if got := r.server.OpenSlots(); got < len(ids) {
+			t.Fatalf("%d slots open, want at least %d", got, len(ids))
+		}
+		for _, id := range ids {
+			if _, _, err := MeasureOn(ctx, "127.0.0.1", SlotPort(id), 64<<10); err != nil {
+				t.Fatalf("%s: %v", id, err)
+			}
+		}
+	})
+
+	t.Run("a slot port that is taken is refused, not stolen", func(t *testing.T) {
+		r := NewRunner(slog.New(slog.DiscardHandler))
+		r.ctx, r.provider = ctx, provider
+		defer r.server.Stop()
+		if err := r.server.OpenSlot(ctx, "127.0.0.1", SlotPort("req-5"), time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.server.OpenSlot(ctx, "127.0.0.1", SlotPort("req-5"), time.Minute); !errors.Is(err, ErrSlotBusy) {
+			t.Fatalf("second OpenSlot = %v, want ErrSlotBusy", err)
+		}
+	})
+}
+
+func TestSlotPortStaysInRange(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		p := SlotPort("bw_" + strconv.Itoa(i))
+		if p < SlotBase || p >= SlotBase+SlotCount || p == Port {
+			t.Fatalf("SlotPort = %d outside %d..%d", p, SlotBase, SlotBase+SlotCount-1)
+		}
+	}
+	if SlotPort("x") != SlotPort("x") {
+		t.Fatal("SlotPort must be stable for one request id")
+	}
+}
+
+// With an id-returning opener the test dials the request's slot port and succeeds.
+func TestMeasureUsesTheRequestSlot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewRunner(slog.New(slog.DiscardHandler))
+	defer r.server.Stop()
+	r.SetOpenerWithID(func(ctx context.Context, addr string) (string, error) {
+		return "bw_slot_test", r.server.OpenSlot(ctx, "127.0.0.1", SlotPort("bw_slot_test"), time.Minute)
+	})
+	res := r.measure(ctx, mesh.Peer{ID: "p", Name: "p", TunnelAddress: "127.0.0.1"})
+	if res.Error != "" || res.DownloadMbps <= 0 {
+		t.Fatalf("measure = %+v, want a successful reading", res)
+	}
+}
+
+// A port that never opens fails with the kind of failure and the request id, so the log says why.
+func TestMeasureNamesWhyThePortDidNotOpen(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	r := NewRunner(slog.New(slog.DiscardHandler))
+	r.SetOpenerWithID(func(context.Context, string) (string, error) { return "bw_nothing_listens", nil })
+	res := r.measure(ctx, mesh.Peer{ID: "p", Name: "p", TunnelAddress: "127.0.0.1"})
+	for _, want := range []string{"[refused]", "request=bw_nothing_listens", "nothing was listening"} {
+		if !strings.Contains(res.Error, want) {
+			t.Fatalf("error %q does not contain %q", res.Error, want)
+		}
+	}
+}
+
+func TestClassifyDial(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		kind string
+	}{
+		{&net.OpError{Err: syscall.ECONNREFUSED}, "refused"},
+		{&net.OpError{Err: syscall.EHOSTUNREACH}, "no-route"},
+		{context.DeadlineExceeded, "timeout"},
+		{context.Canceled, "canceled"},
+		{errors.New("boom"), "error"},
+	} {
+		if kind, hint := classifyDial(c.err); kind != c.kind || hint == "" {
+			t.Errorf("classifyDial(%v) = %q, %q; want kind %q with a hint", c.err, kind, hint, c.kind)
+		}
+	}
+	if kind, _ := classifyDial(timeoutErr{}); kind != "timeout" {
+		t.Errorf("a net timeout classified as %q", kind)
+	}
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func TestDescribeOpenFailureExplainsConflict(t *testing.T) {
+	if got := describeOpenFailure(errors.New("coordinator rejected request (HTTP 409)")); !strings.Contains(got, "already has a bandwidth request open") {
+		t.Fatal(got)
+	}
+}
+
+// Hosts are spread across the startup window, the same address always lands in the same place, and
+// the periodic delay drifts within +/-10%.
+func TestSchedulesAreStaggered(t *testing.T) {
+	if startupOffset("") != 0 {
+		t.Fatal("no address, no offset")
+	}
+	seen := map[time.Duration]bool{}
+	for i := 0; i < 20; i++ {
+		addr := "100.86.0." + strconv.Itoa(i+1)
+		o := startupOffset(addr)
+		if o < 0 || o >= startupSpread {
+			t.Fatalf("offset %s outside the window", o)
+		}
+		if o != startupOffset(addr) {
+			t.Fatal("offset must be stable")
+		}
+		seen[o] = true
+	}
+	if len(seen) < 10 {
+		t.Fatalf("only %d distinct offsets across 20 hosts; they are bunching", len(seen))
+	}
+	for i := 0; i < 200; i++ {
+		d := jitter(TestInterval)
+		if d < TestInterval*9/10 || d > TestInterval*11/10 {
+			t.Fatalf("jitter(%s) = %s, outside +/-10%%", TestInterval, d)
+		}
+	}
 }
 
 // waitPortFree blocks until the fixed bandwidth port can be bound, so a test does not race the

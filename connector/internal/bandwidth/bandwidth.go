@@ -18,10 +18,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -41,6 +44,25 @@ const MaxPayloadBytes = 8 << 20 // 8 MiB
 // Chosen to avoid conflicts with SSH (22), VNC (5900) and SMB (445) which the
 // mesh already uses, and to be outside the IANA registered range.
 const Port = 41820
+
+// Slot ports. An on-demand test listens on one port from this range, picked from the request id,
+// instead of the single fixed Port, so several tests against one Mac (a storage gateway is tested by
+// many Macs at once) never share a port or replace each other's listener. Both sides derive the
+// port from the request id the coordinator hands out, so nothing extra travels with the request.
+const (
+	SlotBase  = 41821
+	SlotCount = 64
+)
+
+// SlotPort is the port a test for requestID uses: SlotBase to SlotBase+SlotCount-1.
+func SlotPort(requestID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(requestID))
+	return SlotBase + int(h.Sum32()%SlotCount)
+}
+
+// ErrSlotBusy means another test already holds the slot port.
+var ErrSlotBusy = errors.New("slot port already in use")
 
 // sendBufSize is the per-write chunk the server streams. 64 KiB matches the
 // JuiceFS block size and the throttle burst constant.
@@ -65,6 +87,7 @@ type Server struct {
 	mu       sync.Mutex
 	listener net.Listener
 	addr     string
+	slots    map[int]net.Listener // one-shot listeners by port (OpenSlot), independent of listener
 }
 
 // NewServer creates a bandwidth test server but does not start listening.
@@ -92,7 +115,14 @@ func (s *Server) StartOnce(ctx context.Context, tunnelAddr string, window time.D
 }
 
 func (s *Server) start(ctx context.Context, tunnelAddr string, once bool) (net.Listener, error) {
-	s.Stop()
+	s.mu.Lock()
+	old := s.listener
+	s.listener = nil
+	s.addr = ""
+	s.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
 	listenAddr := net.JoinHostPort(tunnelAddr, fmt.Sprintf("%d", Port))
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", listenAddr)
@@ -107,29 +137,72 @@ func (s *Server) start(ctx context.Context, tunnelAddr string, once bool) (net.L
 	return ln, nil
 }
 
-// stopIf closes ln only if it is still the current listener, so a stale timer from an
+// stopIf closes ln only if it is still a current listener, so a stale timer from an
 // earlier window cannot close a newer one.
 func (s *Server) stopIf(ln net.Listener) {
 	s.mu.Lock()
-	if s.listener != ln {
-		s.mu.Unlock()
-		return
+	owned := false
+	if s.listener == ln {
+		s.listener = nil
+		s.addr = ""
+		owned = true
 	}
-	s.listener = nil
-	s.addr = ""
+	for port, l := range s.slots {
+		if l == ln {
+			delete(s.slots, port)
+			owned = true
+		}
+	}
 	s.mu.Unlock()
-	_ = ln.Close()
+	if owned {
+		_ = ln.Close()
+	}
 }
 
-// Stop shuts down the listener. Idempotent.
+// OpenSlot listens on tunnelAddr:port for one measurement, independently of any other listener.
+// It closes when a payload has been served or after window. A port already held by another test
+// returns ErrSlotBusy.
+func (s *Server) OpenSlot(ctx context.Context, tunnelAddr string, port int, window time.Duration) error {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", net.JoinHostPort(tunnelAddr, strconv.Itoa(port)))
+	if err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return fmt.Errorf("%w: %v", ErrSlotBusy, err)
+		}
+		return fmt.Errorf("bandwidth server: %w", err)
+	}
+	s.mu.Lock()
+	if s.slots == nil {
+		s.slots = map[int]net.Listener{}
+	}
+	s.slots[port] = ln
+	s.mu.Unlock()
+	go s.serve(ctx, ln, true)
+	time.AfterFunc(window, func() { s.stopIf(ln) })
+	return nil
+}
+
+// OpenSlots is how many slot listeners are open right now.
+func (s *Server) OpenSlots() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.slots)
+}
+
+// Stop shuts down every listener. Idempotent.
 func (s *Server) Stop() {
 	s.mu.Lock()
 	ln := s.listener
 	s.listener = nil
 	s.addr = ""
+	slots := s.slots
+	s.slots = nil
 	s.mu.Unlock()
 	if ln != nil {
 		_ = ln.Close()
+	}
+	for _, l := range slots {
+		_ = l.Close()
 	}
 }
 
@@ -137,7 +210,13 @@ func (s *Server) Stop() {
 func (s *Server) Addr() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.addr
+	if s.addr != "" {
+		return s.addr
+	}
+	for _, l := range s.slots {
+		return l.Addr().String()
+	}
+	return ""
 }
 
 func (s *Server) serve(ctx context.Context, ln net.Listener, once bool) {
@@ -212,6 +291,11 @@ func (s *Server) handleConn(conn net.Conn, buf []byte, done func()) {
 // It connects to the peer's bandwidth server, requests payloadBytes of data,
 // and measures the download speed.
 func Measure(ctx context.Context, tunnelAddr string, payloadBytes int) (float64, time.Duration, error) {
+	return MeasureOn(ctx, tunnelAddr, Port, payloadBytes)
+}
+
+// MeasureOn is Measure against a specific port (a slot port, see SlotPort).
+func MeasureOn(ctx context.Context, tunnelAddr string, port, payloadBytes int) (float64, time.Duration, error) {
 	if payloadBytes <= 0 {
 		payloadBytes = DefaultPayloadBytes
 	}
@@ -219,7 +303,7 @@ func Measure(ctx context.Context, tunnelAddr string, payloadBytes int) (float64,
 		return 0, 0, errors.New("payload exceeds maximum")
 	}
 
-	addr := net.JoinHostPort(tunnelAddr, fmt.Sprintf("%d", Port))
+	addr := net.JoinHostPort(tunnelAddr, strconv.Itoa(port))
 	// A short dial timeout: peers that run no bandwidth server (a phone, a gateway) drop the
 	// connection attempt silently, and waiting out the whole test budget for each of them
 	// delayed every real measurement behind a minute of failures.
@@ -266,7 +350,12 @@ func Measure(ctx context.Context, tunnelAddr string, payloadBytes int) (float64,
 
 // TestPeer runs a bandwidth test to one peer and returns a Result.
 func TestPeer(ctx context.Context, peerID, peerName, tunnelAddr string) Result {
-	mbps, elapsed, err := Measure(ctx, tunnelAddr, DefaultPayloadBytes)
+	return TestPeerOn(ctx, peerID, peerName, tunnelAddr, Port)
+}
+
+// TestPeerOn is TestPeer against a specific port.
+func TestPeerOn(ctx context.Context, peerID, peerName, tunnelAddr string, port int) Result {
+	mbps, elapsed, err := MeasureOn(ctx, tunnelAddr, port, DefaultPayloadBytes)
 	result := Result{
 		PeerID:        peerID,
 		PeerName:      peerName,

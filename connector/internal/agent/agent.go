@@ -254,7 +254,13 @@ func New(c config.Config, path string, api client.API, probe Probe, devPull bool
 		opt(a)
 	}
 	if a.bandwidthRunner != nil && a.api != nil {
-		a.bandwidthRunner.SetOpener(a.api.RequestBandwidthOpen)
+		if o, ok := a.api.(interface {
+			RequestBandwidthOpenID(context.Context, string) (string, error)
+		}); ok {
+			a.bandwidthRunner.SetOpenerWithID(o.RequestBandwidthOpenID)
+		} else {
+			a.bandwidthRunner.SetOpener(a.api.RequestBandwidthOpen)
+		}
 	}
 	b, err := config.ReadPrivate(a.journalPath(), 8<<20)
 	if err == nil {

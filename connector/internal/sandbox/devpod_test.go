@@ -21,6 +21,8 @@ type fakeRun struct {
 	bootSeen string // join file content while the sidecar starts
 	// noNetwork makes `docker network inspect` fail (the tenant network does not exist yet).
 	noNetwork bool
+	// removed is set once the workspace container is removed, so `ps -aq` no longer lists it.
+	removed bool
 }
 
 func (f *fakeRun) run(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
@@ -40,7 +42,17 @@ func (f *fakeRun) run(ctx context.Context, env []string, name string, args ...st
 		return nil, nil
 	case strings.Contains(line, "ps -q --filter label="):
 		return []byte("cid123\n"), nil
+	case strings.Contains(line, "rm -f -v cid123"):
+		f.mu.Lock()
+		f.removed = true
+		f.mu.Unlock()
 	case strings.Contains(line, "ps -aq"):
+		f.mu.Lock()
+		gone := f.removed
+		f.mu.Unlock()
+		if gone {
+			return nil, nil
+		}
 		return []byte("cid123\n"), nil
 	case strings.Contains(line, "ps -q --filter name=nexal-mesh"):
 		return []byte("side1\n"), nil

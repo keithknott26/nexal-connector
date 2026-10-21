@@ -302,7 +302,60 @@ final class AppModel: ObservableObject {
         guard NetworkService.isRunning, selection != nil, configurationExists,
               hasPersistedHostIdentity || hasUnfinishedEnrollment else { return }
         do { _ = try await invoke(.rejoinNetwork) }
-        catch { pairingProblem = error.localizedDescription }
+        catch {
+            // A service left in its login-backoff state refuses `up` with "update settings are
+            // disabled" until it is installed again. Reinstalling needs the administrator prompt,
+            // so ask once per launch, then join again.
+            if Self.serviceNeedsReinstall(error.localizedDescription), !serviceReinstallAttempted {
+                serviceReinstallAttempted = true
+                AgentLog.note("secure networking service is stuck; reinstalling it")
+                do {
+                    try await Task.detached(priority: .userInitiated) { try NetworkService.install() }.value
+                    _ = try await invoke(.rejoinNetwork)
+                    pairingProblem = nil
+                } catch { pairingProblem = error.localizedDescription }
+                return
+            }
+            pairingProblem = error.localizedDescription
+        }
+    }
+
+    private var serviceReinstallAttempted = false
+
+    /// The runtime's refusal of `up` while its service is stuck.
+    static func serviceNeedsReinstall(_ message: String) -> Bool {
+        message.localizedCaseInsensitiveContains("update settings are disabled")
+    }
+
+    // MARK: Secure-network self-healing
+    //
+    // The secure-network runtime can end up stopped (a restart that was cut short, an update, a
+    // crash) while the connector keeps running, and nothing joined it again: the panel then showed
+    // only this Mac, "Waiting for another computer", until the app was reopened. Rejoin is
+    // idempotent, so when the network has been down for a while, join again.
+    private var meshDownSince: Date?
+    private var lastMeshHeal: Date?
+    static let meshDownBeforeHealing: TimeInterval = 45
+    static let meshHealCooldown: TimeInterval = 120
+
+    /// Whether to rejoin now: the network has been down long enough, and the last attempt is not recent.
+    static func shouldHealMesh(downSince: Date?, lastHeal: Date?, now: Date = Date()) -> Bool {
+        guard let downSince, now.timeIntervalSince(downSince) >= meshDownBeforeHealing else { return false }
+        if let lastHeal, now.timeIntervalSince(lastHeal) < meshHealCooldown { return false }
+        return true
+    }
+
+    private func healMeshIfDown() {
+        guard let mesh = status?.mesh, mesh.providerAvailable,
+              mesh.peers.isEmpty, mesh.lifecycle != "connected" else {
+            meshDownSince = nil
+            return
+        }
+        if meshDownSince == nil { meshDownSince = Date() }
+        guard Self.shouldHealMesh(downSince: meshDownSince, lastHeal: lastMeshHeal) else { return }
+        lastMeshHeal = Date()
+        AgentLog.note("secure network is down; joining again")
+        Task { await rejoinNetworkIfEnrolled() }
     }
 
     func chooseConnector() {
@@ -706,6 +759,7 @@ final class AppModel: ObservableObject {
         do {
             try await updateStatus()
             consecutivePollFailures = 0
+            healMeshIfDown()
         } catch {
             consecutivePollFailures += 1
             // One slow or failed poll (the connector busy for a moment) keeps what is on screen.

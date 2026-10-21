@@ -116,6 +116,11 @@ enum CLICommand {
         if case .redeemGuestInvitation = self { return 60 }
         if case .activateGuestInvitation = self { return 40 }
         if case .exitRoute = self { return 35 }
+        // Restarting the secure network and joining again waits for authentication and a fresh
+        // quantum-safe key exchange. The default 20 s killed it between stopping and starting,
+        // which left the Mac off its network.
+        if case .rejoinNetwork = self { return 90 }
+        if case .rekeyNetwork = self { return 150 }
         if case .diagnostics(.bundle(_)) = self { return 60 }
         // Reads the connector status, collects this Mac's details and may run the
         // runtime probe (10 s limit); the connector call alone allows 5 s.

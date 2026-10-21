@@ -96,10 +96,48 @@ func rekeyPairV2(ctx context.Context, path string) error {
 	}
 	// Stopping is best effort: a runtime that is already down still needs the join.
 	_ = (mesh.ExecRunner{}).Run(ctx, "nexal-network", "down")
-	if err := rejoinPairV2(ctx, path); err != nil {
-		return err
+	// Never leave the Mac off its network: join again, and confirm the runtime is connected to
+	// management and signal. One more attempt follows a failure.
+	var last error
+	for attempt := 1; attempt <= 2; attempt++ {
+		notEnrolled, err := rejoinMesh(ctx, path)
+		switch {
+		case err != nil:
+			last = err
+		case notEnrolled:
+			return emit(map[string]any{"rekeyed": false, "reason": "not_enrolled"})
+		case meshReconnected(ctx, 30*time.Second):
+			return emit(map[string]any{"rekeyed": true})
+		default:
+			last = errors.New("the secure network did not reconnect within 30 seconds")
+		}
+		if attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(3 * time.Second):
+			}
+		}
 	}
-	return emit(map[string]any{"rekeyed": true})
+	return errors.New("could not rejoin the secure network after restarting it: " + last.Error())
+}
+
+// meshReconnected waits until the runtime reports management and signal connected.
+func meshReconnected(ctx context.Context, wait time.Duration) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		if d, err := mesh.ReadRuntimeDetail(ctx); err == nil && d.ManagementConnected && d.SignalConnected {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // rejoinPairV2 re-runs the network join for a Mac that already finished
@@ -108,32 +146,43 @@ func rekeyPairV2(ctx context.Context, path string) error {
 // its login, an enrolled Mac would sit off the network with nothing to retry.
 // It is idempotent: joining an already-joined runtime is a no-op for it.
 func rejoinPairV2(ctx context.Context, path string) error {
-	cfg, err := config.Load(path)
+	notEnrolled, err := rejoinMesh(ctx, path)
 	if err != nil {
 		return err
+	}
+	if notEnrolled {
+		return emit(map[string]any{"rejoined": false, "reason": "not_enrolled"})
+	}
+	return emit(map[string]any{"rejoined": true})
+}
+
+func rejoinMesh(ctx context.Context, path string) (notEnrolled bool, err error) {
+	cfg, err := config.Load(path)
+	if err != nil {
+		return false, err
 	}
 	if cfg.GuestAccess != nil {
 		if cfg.GuestAccess.IsExpired(time.Now()) {
 			_ = expireGuest(ctx, path, &cfg)
-			return guestExpiredError(cfg.GuestAccess)
+			return false, guestExpiredError(cfg.GuestAccess)
 		}
 		if !guestGuardReady(ctx, path, *cfg.GuestAccess) {
-			return errors.New("temporary access requires its installed expiry guard")
+			return false, errors.New("temporary access requires its installed expiry guard")
 		}
 	}
 	if cfg.Enrollment == nil || cfg.Enrollment.ManagementURL == "" ||
 		(cfg.Enrollment.Status != "joining" && cfg.Enrollment.Status != "paired") {
-		return emit(map[string]any{"rejoined": false, "reason": "not_enrolled"})
+		return true, nil
 	}
 	secrets, err := config.NewSecrets(path, cfg)
 	if err != nil {
-		return err
+		return false, err
 	}
 	hostname := ""
 	if cfg.GuestAccess != nil {
 		hostname = cfg.GuestAccess.MeshHostname
 		if !client.ValidGuestHostname(cfg.GuestAccess.GrantID, hostname) {
-			return errors.New("temporary mesh identity unavailable")
+			return false, errors.New("temporary mesh identity unavailable")
 		}
 	}
 	if cfg.GuestAccess != nil {
@@ -141,10 +190,7 @@ func rejoinPairV2(ctx context.Context, path string) error {
 	} else {
 		err = startPersistedMesh(ctx, secrets, cfg.Enrollment.ManagementURL, hostname)
 	}
-	if err != nil {
-		return err
-	}
-	return emit(map[string]any{"rejoined": true})
+	return false, err
 }
 
 func leavePairV2(ctx context.Context, path string) error {

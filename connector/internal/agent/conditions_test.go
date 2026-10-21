@@ -347,3 +347,24 @@ func TestPlatformBridgeOverridesThePmsetReading(t *testing.T) {
 		t.Fatalf("thermal provenance not reported: %q", st.Contribution.ThermalSource)
 	}
 }
+
+func TestWithSyntheticConditionsInstallsHonestFixture(t *testing.T) {
+	a := &Agent{}
+	WithSyntheticConditions()(a)
+	if a.conditionSource == nil {
+		t.Fatal("WithSyntheticConditions did not install a source")
+	}
+	s := a.conditionSource.Signals()
+	if !s.Synthetic {
+		t.Error("fixture must be marked Synthetic")
+	}
+	if s.Power != contribution.PowerAC || !s.DiskKnown {
+		t.Errorf("fixture should claim AC power and known disk, got %+v", s)
+	}
+	if s.Thermal != contribution.ThermalUnknown {
+		t.Errorf("fixture must not fake a thermal reading, got %v", s.Thermal)
+	}
+	if s.FreeDiskBytes < contribution.MinFreeDiskBytesDefault {
+		t.Errorf("fixture disk %d below the default minimum", s.FreeDiskBytes)
+	}
+}

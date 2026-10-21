@@ -432,6 +432,8 @@ struct ConnectorStatus: Decodable {
 		let updatedAt: String?
 		var peers: [MeshPeer]
 		let discovery: MeshDiscovery?
+		/// This Mac's own neXal (mesh) address. Absent from older connectors.
+		let selfTunnelAddress: String?
 	}
 	struct MeshDiscovery: Decodable {
 		let wideAreaBonjour: Bool; let gateway: String; let bridge: String

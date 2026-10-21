@@ -579,9 +579,9 @@ struct NetworkPanel: View {
                         if protected { Text("· 🔐 Encrypted - Level 5").help("Quantum-safe link to neXal storage") }
                     }
                     .foregroundStyle(.primary)
-                    Text(PeerAddressText.summary(publicIP: publicIP, lanIP: privateIP, meshIP: nil, location: location))
+                    Text(PeerAddressText.summary(publicIP: publicIP, lanIP: privateIP, meshIP: mesh.selfTunnelAddress, location: location))
                         .font(.caption).foregroundStyle(.secondary)
-                        .help("Public IP · Private IP · Location")
+                        .help("Public IP · Private IP · Mesh IP · Location")
                 }
                 .textSelection(.enabled)
             }

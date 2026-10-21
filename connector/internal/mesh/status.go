@@ -173,9 +173,10 @@ type Status struct {
 	UpdatedAt          string          `json:"updatedAt,omitempty"`
 	Peers              []Peer          `json:"peers"`
 	Discovery          DiscoveryStatus `json:"discovery"`
-	// SelfTunnelAddress is this host's own tunnel IP. Reported to the coordinator
-	// only as the Wake-on-LAN lookup key (client.WakeInfo.TunnelAddress).
-	SelfTunnelAddress string `json:"-"`
+	// SelfTunnelAddress is this host's own tunnel IP. Local-only like Peer.TunnelAddress: it is in
+	// the local status for the owner's panel (this Mac's row), and reaches the coordinator only as
+	// the Wake-on-LAN lookup key (client.WakeInfo.TunnelAddress); TunnelReportFromRuntime never copies it.
+	SelfTunnelAddress string `json:"selfTunnelAddress,omitempty"`
 }
 
 // Provider is the only dependency neXal takes on a mesh implementation.

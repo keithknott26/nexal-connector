@@ -122,7 +122,11 @@ enum NetworkService {
         "fw & \" --setblockall off >/dev/null 2>&1; \" "
         + "& fw & \" --setstealthmode off >/dev/null 2>&1; \" "
         + "& fw & \" --add \" & p & \" >/dev/null 2>&1; \" "
-        + "& fw & \" --unblockapp \" & p & \" >/dev/null 2>&1; \""
+        + "& fw & \" --unblockapp \" & p & \" >/dev/null 2>&1; \" "
+        // The agent (`nexal`, next to the runtime) listens on the bandwidth-test port, so it
+        // needs the same allowance; otherwise inbound connections to it are dropped silently.
+        + "& fw & \" --add \\\"$(dirname \" & p & \")/nexal\\\" >/dev/null 2>&1; \" "
+        + "& fw & \" --unblockapp \\\"$(dirname \" & p & \")/nexal\\\" >/dev/null 2>&1; \""
 
     /// Reads a firewall setting. Getters do not need root.
     private static func firewallSetting(_ flag: String) -> String {

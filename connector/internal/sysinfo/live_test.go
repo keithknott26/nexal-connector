@@ -115,3 +115,31 @@ func TestLimitedOutputRejectsWritesPastCap(t *testing.T) {
 		t.Fatalf("buffer grew past cap: %d", out.Len())
 	}
 }
+
+func TestParseAvailableRejectsMalformedVMStat(t *testing.T) {
+	const total = 1 << 30
+	for name, out := range map[string]string{
+		"missing page size":     "Pages free: 10.\nPages speculative: 2.\n",
+		"missing speculative":   "page size of 16384 bytes\nPages free: 10.\n",
+		"unsupported page":      "page size of 8192 bytes\nPages free: 10.\nPages speculative: 2.\n",
+		"sum exceeds total":     "page size of 4096 bytes\nPages free: 262144.\nPages speculative: 262144.\n",
+		"overflowing page size": "page size of 99999999999999999999 bytes\nPages free: 1.\nPages speculative: 1.\n",
+	} {
+		if got := parseAvailable([]byte(out), total); got != nil {
+			t.Errorf("%s: parseAvailable = %d, want nil", name, *got)
+		}
+	}
+}
+
+func TestBytesChangedIsSymmetricAndInclusive(t *testing.T) {
+	a, b := uint64(100), uint64(150)
+	if !bytesChanged(&a, &b, 50) || !bytesChanged(&b, &a, 50) {
+		t.Fatal("a difference equal to the threshold must count as changed in both directions")
+	}
+	if bytesChanged(&a, &b, 51) || bytesChanged(&b, &a, 51) {
+		t.Fatal("a difference below the threshold must not count as changed")
+	}
+	if !bytesChanged(&a, nil, 1) || !bytesChanged(nil, &a, 1) || bytesChanged(nil, nil, 1) {
+		t.Fatal("nil handling: only a nil/non-nil mismatch is a change")
+	}
+}

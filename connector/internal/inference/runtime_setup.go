@@ -235,7 +235,7 @@ func ServeCommand(inferenceDir, id, host string, port int) (name string, args []
 // serveShim runs mlx_lm's own server unchanged except for /v1/models. mlx_lm 0.28 lists only models in the
 // Hugging Face cache, so a server started from a local folder answers {"data": []} and callers fall back to
 // "default_model". The shim reports the model folder's name and accepts that name in requests.
-const serveShim = `import sys, json
+const serveShim = `import sys, json, time
 from mlx_lm import server as s
 name = sys.argv[sys.argv.index("--model") + 1].rstrip("/").split("/")[-1]
 init = s.ModelProvider.__init__
@@ -246,7 +246,7 @@ s.ModelProvider.__init__ = patched_init
 def models(self):
     self._set_completion_headers(200)
     self.end_headers()
-    self.wfile.write(json.dumps({"object": "list", "data": [{"id": name, "object": "model", "created": self.created}]}).encode())
+    self.wfile.write(json.dumps({"object": "list", "data": [{"id": name, "object": "model", "created": int(time.time())}]}).encode())
     self.wfile.flush()
 s.APIHandler.handle_models_request = models
 s.main()

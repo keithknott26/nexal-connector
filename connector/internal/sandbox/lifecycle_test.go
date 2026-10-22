@@ -366,3 +366,51 @@ func quickStop(m *Manager) {
 	m.caps.StopGrace = time.Millisecond
 	m.mu.Unlock()
 }
+
+type powerCoord struct {
+	mu                  sync.Mutex
+	host                string
+	awake, batt, called bool
+}
+
+func (c *powerCoord) SandboxTasks(ctx context.Context, hostID string) ([]Task, error) {
+	return nil, nil
+}
+func (c *powerCoord) ReportSandboxState(ctx context.Context, hostID string, r StateReport) error {
+	return nil
+}
+func (c *powerCoord) ReportSandboxHostingState(ctx context.Context, hostID string, awake, onBattery bool) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.host, c.awake, c.batt, c.called = hostID, awake, onBattery, true
+	return nil
+}
+
+// reportPower is a no-op without a host ID or a coordinator that implements
+// HostingStateReporter, and forwards the flags otherwise.
+func TestReportPowerGuardsAndForwards(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, &fakeDev{}, &fakeGuest{})
+	pc := &powerCoord{}
+	m.mu.Lock()
+	m.coord = pc
+	m.mu.Unlock()
+	if err := m.reportPower(context.Background(), true, true); err != nil || pc.called {
+		t.Fatalf("no host ID must skip: err=%v called=%v", err, pc.called)
+	}
+	m.mu.Lock()
+	m.hostID = "h1"
+	m.mu.Unlock()
+	if err := m.reportPower(context.Background(), false, true); err != nil {
+		t.Fatal(err)
+	}
+	if !pc.called || pc.host != "h1" || pc.awake || !pc.batt {
+		t.Fatalf("%+v", pc)
+	}
+	// A coordinator without the optional interface is silently skipped.
+	m.mu.Lock()
+	m.coord = nil
+	m.mu.Unlock()
+	if err := m.reportPower(context.Background(), true, false); err != nil {
+		t.Fatal(err)
+	}
+}

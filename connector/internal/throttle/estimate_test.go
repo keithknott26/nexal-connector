@@ -247,3 +247,48 @@ func TestEstimateStaysInsidePolicyBounds(t *testing.T) {
 		t.Error("an estimator without a clock was accepted")
 	}
 }
+
+func TestMeteredStateString(t *testing.T) {
+	for state, want := range map[MeteredState]string{
+		MeteredNo:        "unmetered",
+		MeteredYes:       "metered",
+		MeteredState(99): "unknown",
+	} {
+		if got := state.String(); got != want {
+			t.Errorf("MeteredState(%d).String() = %q, want %q", state, got, want)
+		}
+	}
+}
+
+func TestTrimmedPercentile(t *testing.T) {
+	mk := func(rates ...uint64) []Sample {
+		out := make([]Sample, len(rates))
+		for i, r := range rates {
+			// One second elapsed, so Bytes is the rate.
+			out[i] = Sample{Bytes: r, Elapsed: time.Second}
+		}
+		return out
+	}
+	base := uint64(minSampleBytes)
+
+	if got := trimmedPercentile(nil, 50); got != 0 {
+		t.Errorf("empty samples = %v, want 0", got)
+	}
+	// Invalid samples are skipped, leaving nothing.
+	if got := trimmedPercentile([]Sample{{Bytes: 1, Elapsed: time.Second}, {Bytes: base}}, 50); got != 0 {
+		t.Errorf("only invalid samples = %v, want 0", got)
+	}
+	// Fewer than five samples are not trimmed; low-side nearest rank at p50
+	// over 4 values picks index 2.
+	if got := trimmedPercentile(mk(base*4, base, base*3, base*2), 50); got != float64(base*3) {
+		t.Errorf("untrimmed p50 = %v, want %v", got, base*3)
+	}
+	// Five samples drop min and max: [2,3,4] with p0 -> 2.
+	if got := trimmedPercentile(mk(base*100, base, base*3, base*2, base*4), 0); got != float64(base*2) {
+		t.Errorf("trimmed p0 = %v, want %v", got, base*2)
+	}
+	// Percentile past the end clamps to the last element.
+	if got := trimmedPercentile(mk(base, base*2), 100); got != float64(base*2) {
+		t.Errorf("p100 = %v, want %v", got, base*2)
+	}
+}

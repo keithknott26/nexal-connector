@@ -253,3 +253,28 @@ func TestProfilerFieldMatchesExactKeyOnly(t *testing.T) {
 		t.Fatalf("empty output: %q", got)
 	}
 }
+
+func TestValidSerialLengthBoundaries(t *testing.T) {
+	for s, want := range map[string]bool{
+		"ABCDEFG":               false, // 7
+		"ABCDEFGH":              true,  // 8
+		"ABCDEFGHIJKLMNOPQRST":  true,  // 20
+		"ABCDEFGHIJKLMNOPQRSTU": false, // 21
+		"ABC-EFGH":              false,
+	} {
+		if got := validSerial(s); got != want {
+			t.Errorf("validSerial(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+func TestLocalRankUnmapsIPv4AndRejectsPublic(t *testing.T) {
+	if got := localRank(netip.MustParseAddr("::ffff:192.168.1.5")); got != 2 {
+		t.Fatalf("mapped 192.168.1.5 rank = %d, want 2", got)
+	}
+	for _, s := range []string{"8.8.8.8", "172.32.0.1", "100.64.0.1", "2001:db8::1"} {
+		if got := localRank(netip.MustParseAddr(s)); got != -1 {
+			t.Errorf("localRank(%s) = %d, want -1", s, got)
+		}
+	}
+}

@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"log/slog"
 	"net/netip"
 	"testing"
+
+	"nexal/connector/internal/bandwidth"
+	"nexal/connector/internal/mesh"
 )
 
 func mustPrefix(t *testing.T, s string) netip.Prefix {
@@ -152,5 +156,19 @@ func TestPeerRowNeverCarriesAnAddressWithoutARoute(t *testing.T) {
 		if r.Note == "" {
 			t.Errorf("%s row has no explanation for the missing address", r.Reachability)
 		}
+	}
+}
+
+func TestEnrichMeshStatusLeavesUnmeasuredPeersUntouched(t *testing.T) {
+	in := mesh.Status{Peers: []mesh.Peer{{ID: "a", BandwidthMbps: 7}, {ID: "b"}}}
+
+	if got := (&Agent{}).enrichMeshStatus(in); got.Peers[0].BandwidthMbps != 7 || got.Peers[1].BandwidthMbps != 0 {
+		t.Fatalf("nil runner changed status: %+v", got.Peers)
+	}
+
+	a := &Agent{bandwidthRunner: bandwidth.NewRunner(slog.Default())}
+	got := a.enrichMeshStatus(in)
+	if got.Peers[0].BandwidthMbps != 7 || got.Peers[1].BandwidthMbps != 0 {
+		t.Fatalf("runner without results overwrote bandwidth: %+v", got.Peers)
 	}
 }

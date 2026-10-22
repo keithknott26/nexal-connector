@@ -143,3 +143,46 @@ func TestBytesChangedIsSymmetricAndInclusive(t *testing.T) {
 		t.Fatal("nil handling: only a nil/non-nil mismatch is a change")
 	}
 }
+
+func TestFloatChangedThresholdAndNilHandling(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name string
+		a, b *float64
+		want bool
+	}{
+		{"both nil", nil, nil, false},
+		{"nil to value", nil, f(1), true},
+		{"value to nil", f(1), nil, true},
+		{"below threshold", f(10), f(10.4), false},
+		{"at threshold is inclusive", f(10), f(10.5), true},
+		{"drop is symmetric", f(10.5), f(10), true},
+	}
+	for _, c := range cases {
+		if got := floatChanged(c.a, c.b, 0.5); got != c.want {
+			t.Errorf("%s: floatChanged = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestIdleChangedOnlyAtSixtySecondBoundary(t *testing.T) {
+	u := func(v uint64) *uint64 { return &v }
+	cases := []struct {
+		name string
+		a, b *uint64
+		want bool
+	}{
+		{"both nil", nil, nil, false},
+		{"nil to value", nil, u(5), true},
+		{"value to nil", u(5), nil, true},
+		{"same side, active", u(1), u(59), false},
+		{"same side, idle", u(60), u(9000), false},
+		{"crosses into idle", u(59), u(60), true},
+		{"crosses back to active", u(300), u(0), true},
+	}
+	for _, c := range cases {
+		if got := idleChanged(c.a, c.b); got != c.want {
+			t.Errorf("%s: idleChanged = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -239,3 +239,38 @@ func TestComputeCompletionFuncIsCallable(t *testing.T) {
 	done(true)
 	Compute(context.Background())(false)
 }
+
+func TestStartIsNoopWithoutEndpoint(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	shutdown, err := Start(context.Background())
+	if err != nil || shutdown == nil {
+		t.Fatalf("Start without endpoint: err=%v, shutdown nil=%v; want no-op shutdown", err, shutdown == nil)
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartRejectsUnsafeCollectorEndpoints(t *testing.T) {
+	for _, endpoint := range []string{
+		"http://collector.example.com",        // cleartext to a non-loopback host
+		"ftp://127.0.0.1",                     // unsupported scheme
+		"https://user:pass@collector.example", // embedded credentials
+		"https://collector.example/?key=1",    // query string
+		"https://collector.example/#frag",     // fragment
+		"https://",                            // no host
+		"collector.example:4318",              // no scheme
+		"http://[::1",                         // unparseable
+	} {
+		t.Run(endpoint, func(t *testing.T) {
+			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+			shutdown, err := Start(context.Background())
+			if err == nil || shutdown != nil {
+				t.Fatalf("Start(%q) accepted an unsafe endpoint", endpoint)
+			}
+			if strings.Contains(err.Error(), endpoint) {
+				t.Fatalf("error leaks endpoint: %v", err)
+			}
+		})
+	}
+}

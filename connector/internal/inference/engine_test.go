@@ -592,3 +592,56 @@ func TestDownloadBytesInVerdict(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkReportBoundariesAndUnknowns(t *testing.T) {
+	online := Host{ID: "p", Name: "P", Online: true}
+	base := Link{Lifecycle: "connected", Path: "direct", LatencyKnown: true, LatencyMS: 3, BandwidthKnown: true, BandwidthMbps: 800}
+
+	// One flap under the threshold is stable; at the threshold it is unstable.
+	l := base
+	l.PathFlapsLastHour = flapUnstableThreshold - 1
+	if r := buildLinkReport(online, &l); r.Unstable || r.Quality != "good" {
+		t.Errorf("below flap threshold: unstable=%v quality=%s", r.Unstable, r.Quality)
+	}
+	l.PathFlapsLastHour = flapUnstableThreshold
+	if r := buildLinkReport(online, &l); !r.Unstable || r.Quality != "poor" {
+		t.Errorf("at flap threshold: unstable=%v quality=%s", r.Unstable, r.Quality)
+	}
+
+	// Loss exactly at the poor threshold is poor; just under is not.
+	l = base
+	l.LossKnown, l.PacketLossPercent = true, lossPoorPercent
+	if got := buildLinkReport(online, &l).Quality; got != "poor" {
+		t.Errorf("loss at threshold = %s", got)
+	}
+	l.PacketLossPercent = lossPoorPercent - 0.1
+	if got := buildLinkReport(online, &l).Quality; got != "good" {
+		t.Errorf("loss under threshold = %s", got)
+	}
+
+	// Unknown measurements stay nil rather than reading as zero, and an unmeasured
+	// link is at best fair.
+	l = Link{Lifecycle: "connected", Path: "direct"}
+	r := buildLinkReport(online, &l)
+	if r.LatencyMS != nil || r.BandwidthMbps != nil || r.PacketLossPercent != nil {
+		t.Errorf("unknown measurements must be nil: %+v", r)
+	}
+	if r.Quality != "fair" || r.PQ != "unknown" {
+		t.Errorf("quality=%s pq=%s", r.Quality, r.PQ)
+	}
+
+	// An offline peer is unusable whether or not a link record exists, and an
+	// empty path reads as unknown.
+	off := Host{ID: "q", Name: "Q"}
+	if got := buildLinkReport(off, nil).Quality; got != "unusable" {
+		t.Errorf("offline without link = %s", got)
+	}
+	if got := buildLinkReport(off, &base).Quality; got != "unusable" {
+		t.Errorf("offline with link = %s", got)
+	}
+	l = base
+	l.Path = ""
+	if got := buildLinkReport(online, &l).Path; got != "unknown" {
+		t.Errorf("empty path = %q", got)
+	}
+}

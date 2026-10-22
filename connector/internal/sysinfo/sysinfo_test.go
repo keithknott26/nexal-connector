@@ -221,3 +221,35 @@ func TestMaterialBatteryThresholdIsSymmetricAndInclusive(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSysctlEdgeCases(t *testing.T) {
+	if got := parseSysctl(nil); len(got) != 0 {
+		t.Fatalf("empty input: %v", got)
+	}
+	v := parseSysctl([]byte("no separator here\n  spaced key  :  padded value  \nurl: http://host:80/x\n: nokey\n"))
+	if _, ok := v["no separator here"]; ok {
+		t.Fatalf("line without colon must be skipped: %v", v)
+	}
+	if v["spaced key"] != "padded value" {
+		t.Fatalf("key and value must be trimmed: %v", v)
+	}
+	if v["url"] != "http://host:80/x" {
+		t.Fatalf("only the first colon splits: %v", v)
+	}
+	if val, ok := v[""]; !ok || val != "nokey" {
+		t.Fatalf("empty key is kept as-is: %v", v)
+	}
+}
+
+func TestProfilerFieldMatchesExactKeyOnly(t *testing.T) {
+	out := []byte("Hardware:\n    Chip Name: M4\n    Chip: Apple M4 Pro\n    Memory: 24 GB\n")
+	if got := profilerField(out, "Chip"); got != "Apple M4 Pro" {
+		t.Fatalf("Chip: %q", got)
+	}
+	if got := profilerField(out, "Missing"); got != "" {
+		t.Fatalf("missing field: %q", got)
+	}
+	if got := profilerField(nil, "Chip"); got != "" {
+		t.Fatalf("empty output: %q", got)
+	}
+}

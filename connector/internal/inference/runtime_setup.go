@@ -227,7 +227,27 @@ func ServeCommand(inferenceDir, id, host string, port int) (name string, args []
 	if st, e := os.Stat(dir); e != nil || !st.IsDir() {
 		return "", nil, nil, errf("not_installed", "run `nexal inference install "+id+"` first", "%s is not installed", id)
 	}
-	args = []string{"-I", "-m", "mlx_lm.server", "--model", dir, "--host", ip.String(), "--port", strconv.Itoa(port)}
+	args = []string{"-I", "-c", serveShim, "--model", dir, "--host", ip.String(), "--port", strconv.Itoa(port)}
 	env = []string{"HF_HUB_OFFLINE=1", "TRANSFORMERS_OFFLINE=1", "HF_HUB_DISABLE_TELEMETRY=1", disableMPI, "PATH=/usr/bin:/bin"}
 	return rt.Python, args, env, nil
 }
+
+// serveShim runs mlx_lm's own server unchanged except for /v1/models. mlx_lm 0.28 lists only models in the
+// Hugging Face cache, so a server started from a local folder answers {"data": []} and callers fall back to
+// "default_model". The shim reports the model folder's name and accepts that name in requests.
+const serveShim = `import sys, json
+from mlx_lm import server as s
+name = sys.argv[sys.argv.index("--model") + 1].rstrip("/").split("/")[-1]
+init = s.ModelProvider.__init__
+def patched_init(self, cli_args):
+    init(self, cli_args)
+    self.default_model_map[name] = "default_model"
+s.ModelProvider.__init__ = patched_init
+def models(self):
+    self._set_completion_headers(200)
+    self.end_headers()
+    self.wfile.write(json.dumps({"object": "list", "data": [{"id": name, "object": "model", "created": self.created}]}).encode())
+    self.wfile.flush()
+s.APIHandler.handle_models_request = models
+s.main()
+`

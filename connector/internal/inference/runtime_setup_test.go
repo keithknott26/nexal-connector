@@ -113,7 +113,7 @@ func TestServeCommandValidation(t *testing.T) {
 		t.Fatalf("%v %s", err, name)
 	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-I -m mlx_lm.server") || !strings.Contains(joined, "--host 100.64.0.1") || strings.Contains(joined, "trust-remote-code") {
+	if !strings.Contains(joined, "-I -c ") || !strings.Contains(joined, "mlx_lm import server") || !strings.Contains(joined, "--host 100.64.0.1") || strings.Contains(joined, "trust-remote-code") {
 		t.Fatalf("args: %s", joined)
 	}
 	if !strings.Contains(strings.Join(env, " "), "HF_HUB_OFFLINE=1") {

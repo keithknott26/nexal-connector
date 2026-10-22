@@ -175,3 +175,48 @@ func TestEnsureDigests(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoteSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Errorf("method = %s, want HEAD", r.Method)
+		}
+		switch r.URL.Path {
+		case "/ok":
+			w.Header().Set("Content-Length", "4096")
+		case "/missing":
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	s := NewImageStore(t.TempDir(), nil)
+	ctx := context.Background()
+	if got := s.RemoteSize(ctx, srv.URL+"/ok"); got != 4096 {
+		t.Errorf("ok size = %d, want 4096", got)
+	}
+	if got := s.RemoteSize(ctx, srv.URL+"/missing"); got != 0 {
+		t.Errorf("404 size = %d, want 0", got)
+	}
+	if got := s.RemoteSize(ctx, "://bad url"); got != 0 {
+		t.Errorf("bad url size = %d, want 0", got)
+	}
+	srv.Close()
+	if got := s.RemoteSize(ctx, srv.URL+"/ok"); got != 0 {
+		t.Errorf("unreachable size = %d, want 0", got)
+	}
+}
+
+func TestNewImageStoreRedirectPolicy(t *testing.T) {
+	check := NewImageStore(t.TempDir(), nil).HTTP.CheckRedirect
+	httpsReq, _ := http.NewRequest(http.MethodGet, "https://mirror.example/x", nil)
+	httpReq, _ := http.NewRequest(http.MethodGet, "http://mirror.example/x", nil)
+	if err := check(httpsReq, make([]*http.Request, 1)); err != nil {
+		t.Errorf("https redirect refused: %v", err)
+	}
+	if err := check(httpReq, make([]*http.Request, 1)); err == nil {
+		t.Error("http redirect must be refused")
+	}
+	if err := check(httpsReq, make([]*http.Request, 5)); err == nil {
+		t.Error("5th redirect must be refused")
+	}
+}

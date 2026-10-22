@@ -173,3 +173,29 @@ func TestKillRequests(t *testing.T) {
 		t.Error("expired request must be dropped")
 	}
 }
+
+func TestRunKillRequestsReturnsWhenContextEnds(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.RunKillRequests(ctx); close(done) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunKillRequests did not return after its context ended")
+	}
+}
+
+func TestFirstBootTimeoutFollowsCaps(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	if got, want := m.firstBootTimeout(), DefaultCaps().FirstBootTimeout; got != want {
+		t.Errorf("default first-boot timeout = %v, want %v", got, want)
+	}
+	c := m.Caps()
+	c.FirstBootTimeout = 42 * time.Second
+	m.SetCaps(c)
+	if got := m.firstBootTimeout(); got != 42*time.Second {
+		t.Errorf("first-boot timeout = %v, want 42s", got)
+	}
+}

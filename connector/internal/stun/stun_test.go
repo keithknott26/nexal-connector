@@ -607,3 +607,40 @@ func TestRequestTransactionIDIsStrict(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeAddressDirect(t *testing.T) {
+	var txid TransactionID
+	for i := range txid {
+		txid[i] = byte(i + 1)
+	}
+	cookie := uint32(magicCookie)
+
+	// Legacy form: port and address are verbatim.
+	legacy := []byte{0, familyIPv4, 0x1F, 0x90, 192, 0, 2, 7}
+	got, err := decodeAddress(legacy, txid, false)
+	if err != nil || got != netip.MustParseAddrPort("192.0.2.7:8080") {
+		t.Fatalf("legacy decode = %v, %v", got, err)
+	}
+
+	// XOR form: the same address, masked with the cookie.
+	xor := []byte{0, familyIPv4, 0, 0, 0, 0, 0, 0}
+	binary.BigEndian.PutUint16(xor[2:4], 8080^uint16(cookie>>16))
+	for i, b := range []byte{192, 0, 2, 7} {
+		xor[4+i] = b ^ byte(cookie>>(24-8*uint(i)))
+	}
+	got, err = decodeAddress(xor, txid, true)
+	if err != nil || got != netip.MustParseAddrPort("192.0.2.7:8080") {
+		t.Fatalf("xor decode = %v, %v", got, err)
+	}
+
+	for name, value := range map[string][]byte{
+		"too short":       {0, familyIPv4, 0},
+		"ipv4 wrong size": {0, familyIPv4, 0, 1, 1, 2, 3},
+		"ipv6 wrong size": append([]byte{0, familyIPv6, 0, 1}, make([]byte, 4)...),
+		"unknown family":  {0, 0x09, 0, 1, 1, 2, 3, 4},
+	} {
+		if _, err := decodeAddress(value, txid, true); !errors.Is(err, ErrMalformed) {
+			t.Errorf("%s: err = %v, want ErrMalformed", name, err)
+		}
+	}
+}

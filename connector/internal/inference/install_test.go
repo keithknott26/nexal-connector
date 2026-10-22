@@ -584,3 +584,30 @@ func TestManifestMemoryNeverUnderstatesWeights(t *testing.T) {
 		t.Error("manifest encoding not deterministic")
 	}
 }
+
+func TestBuildManifestMemoryTerms(t *testing.T) {
+	f := newFakeHF(t)
+	var e CatalogEntry
+	for _, x := range f.pinnedCatalog(t).Entries {
+		if x.ID == testID {
+			e = x
+		}
+	}
+	m, warns, err := BuildManifest(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("unexpected warnings: %v", warns)
+	}
+	if want := (e.Estimate.KVBytes + ContextTokens - 1) / ContextTokens; m.Memory.KVBytesPerToken != want {
+		t.Errorf("kv_bytes_per_token = %d, want ceil %d", m.Memory.KVBytesPerToken, want)
+	}
+	if m.Memory.LoadPeakBytes != m.Memory.WeightsBytes+e.Estimate.TemporaryBytes {
+		t.Errorf("load peak = %d", m.Memory.LoadPeakBytes)
+	}
+	e.Estimate.SafetyBytes = 0
+	if _, _, err := BuildManifest(e); err == nil || !strings.Contains(err.Error(), "safety_bytes") {
+		t.Errorf("zero safety term accepted: %v", err)
+	}
+}

@@ -48,6 +48,26 @@ func script(t *testing.T, body string) string {
 	return p
 }
 
+// fakeModelServer answers /v1/models on the --port the runner passed to `serve` (the runner serves the model
+// on loopback and forwards its public port to it), once the fake `serve` has written its arguments to args.
+func fakeModelServer(args string) {
+	go func() {
+		for i := 0; i < 200; i++ {
+			b, _ := os.ReadFile(args)
+			f := strings.Fields(string(b))
+			for j := 0; j+1 < len(f); j++ {
+				if f[j] == "--port" {
+					if l, err := net.Listen("tcp", "127.0.0.1:"+f[j+1]); err == nil {
+						go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"data":[]}`)) }))
+					}
+					return
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+}
+
 func wait(t *testing.T, f func() bool) {
 	t.Helper()
 	for i := 0; i < 200; i++ {
@@ -64,13 +84,9 @@ func TestRunsSetupInstallServeThenReportsEndpoint(t *testing.T) {
 	p := fl.Addr().(*net.TCPAddr).Port
 	fl.Close()
 	port := strconv.Itoa(p)
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		if l, err := net.Listen("tcp", "127.0.0.1:"+port); err == nil {
-			go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"data":[]}`)) }))
-		}
-	}()
-	exe := script(t, `[ "$2" = serve ] && exec sleep 30; exit 0`)
+	args := filepath.Join(t.TempDir(), "args")
+	fakeModelServer(args)
+	exe := script(t, `[ "$2" = serve ] && { echo "$@" > `+args+`; exec sleep 30; }; exit 0`)
 	c := &fakeCoord{tasks: []Task{{ID: "rinf_1", ModelID: "qwen3-4b", State: "pending"}}}
 	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1/32" }, Port: p, MaxPort: p, ReadyAfter: 10 * time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -163,20 +179,15 @@ func TestAlreadyInstalledModelSkipsPinAndDownload(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "calls")
 	exe := script(t, `echo "$2" >> `+log+`
 if [ "$2" = status ]; then echo '{"models":[{"modelId":"qwen3-4b-q4"}]}'; fi
-[ "$2" = serve ] && exec sleep 30
+[ "$2" = serve ] && { echo "$@" > `+log+`.args; exec sleep 30; }
 exit 0`)
+	fakeModelServer(log + ".args")
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := l.Addr().(*net.TCPAddr).Port
 	l.Close()
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		if l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p)); err == nil {
-			go http.Serve(l, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"data":[]}`)) }))
-		}
-	}()
 	c := &fakeCoord{tasks: []Task{{ID: "rinf_5", ModelID: "qwen3-4b-q4"}}}
 	r := &Runner{Coord: c, HostID: "h", Exe: exe, Address: func() string { return "127.0.0.1" }, Port: p, MaxPort: p, ReadyAfter: 10 * time.Second}
 	r.Once(context.Background())

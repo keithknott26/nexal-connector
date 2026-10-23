@@ -300,10 +300,28 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		return
 	}
 	defer r.release(port)
+	// The model server listens on loopback and a forwarder answers on the neXal address: a Mac cannot
+	// connect to its own neXal address, so probing the server there would never succeed.
+	lport, lerr := freeLoopbackPort()
+	if lerr != nil {
+		r.fail(ctx, t, "serve", lerr.Error())
+		return
+	}
+	var also []string
+	if ip := net.ParseIP(addr); ip == nil || !ip.IsLoopback() { // already loopback: a second listen would collide
+		also = append(also, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	}
+	fwd, ferr := NewForwarder(net.JoinHostPort(addr, strconv.Itoa(port)), also...)
+	if ferr != nil {
+		r.fail(ctx, t, "serve", fmt.Sprintf("Cannot answer on %s:%d: %v", addr, port, ferr))
+		return
+	}
+	defer fwd.Close()
+	local := net.JoinHostPort("127.0.0.1", strconv.Itoa(lport))
 	serveStart := 0.9
 	r.reportP(ctx, t, "running", "serve", "Starting the model server (loading it into memory)", "", &serveStart)
 	sctx, cancel := context.WithCancel(ctx)
-	cmd := r.command(sctx, "serve", t.ModelID, "--host", addr, "--port", strconv.Itoa(port))
+	cmd := r.command(sctx, "serve", t.ModelID, "--host", "127.0.0.1", "--port", strconv.Itoa(lport))
 	var tail lineTail
 	cmd.Stdout, cmd.Stderr = &tail, &tail
 	if err := cmd.Start(); err != nil {
@@ -332,7 +350,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		case <-time.After(2 * time.Second):
 		}
-		ok, why := up(ctx, endpoint)
+		ok, why := up(ctx, "http://"+local+"/v1")
 		if ok {
 			break
 		}
@@ -343,6 +361,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		}
 	}
+	fwd.SetUpstream(local, "")
 	done := 1.0
 	r.reportP(ctx, t, "ready", "serve", "Serving "+t.ModelID, endpoint, &done)
 	// Keep watching: if the server dies later, say so.

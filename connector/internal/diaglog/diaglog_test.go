@@ -3,6 +3,7 @@ package diaglog
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,4 +198,33 @@ func TestTailWithoutNewlineKeepsTruncatedBytes(t *testing.T) {
 	if got := Tail(p, 4); got != "ghij" {
 		t.Fatalf("Tail = %q", got)
 	}
+}
+
+func TestLevelAndGroupedLoggerReachBothSinks(t *testing.T) {
+	dir := t.TempDir()
+	var stderr bytes.Buffer
+	c := New(&stderr, slog.LevelWarn, filepath.Join(dir, "config.json"), filepath.Join(dir, "logs"))
+	if got := c.Level(); got != slog.LevelWarn {
+		t.Fatalf("baseline level = %v, want WARN", got)
+	}
+	c.Set(true)
+	if got := c.Level(); got != slog.LevelDebug {
+		t.Fatalf("diagnostic level = %v, want DEBUG", got)
+	}
+
+	c.Logger().WithGroup("mesh").With("peer", "m4").Debug("grouped", "state", "up")
+	for name, out := range map[string]string{"ordinary log": stderr.String(), "diagnostics file": readDiag(t, dir)} {
+		if !strings.Contains(out, `"mesh":{"peer":"m4","state":"up"}`) {
+			t.Errorf("%s lost the group or attrs: %q", name, out)
+		}
+	}
+}
+
+func readDiag(t *testing.T, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "logs", FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

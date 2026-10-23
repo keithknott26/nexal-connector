@@ -101,10 +101,10 @@ final class InferenceQuickStart: ObservableObject {
                 }
 
                 let status = model.status
-                let lan = status?.presence?.hosts?.first { $0.hostId == status?.hostId }?.info?.lanAddress
+                let lan = status?.presence?.hosts?.first { $0.hostId == status?.hostId }?.info.lanAddress
                 let extra = Self.extraAddresses(mesh: status?.mesh?.selfTunnelAddress, lan: lan)
                 phase = .serving(model: id, urls: Self.urls(port: Self.port, extra: extra))
-                let result = try await stream(.inferenceServe(modelId: id, port: Self.port, alsoListen: extra.map(\.ip)), model: model) { _ in }
+                let result = try await stream(.inferenceServe(modelId: id, port: Self.port, alsoListen: extra.map { $0.ip }), model: model) { _ in }
                 if stopping { phase = .idle; return }
                 phase = .failed(result.reason ?? "The model server stopped. Check that this Mac has enough free memory for \(id).")
             } catch {

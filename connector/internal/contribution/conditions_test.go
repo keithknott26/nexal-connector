@@ -195,10 +195,11 @@ func TestFreeDiskBytesReadsARealFilesystem(t *testing.T) {
 	}
 	// A path that does not exist must be an error, which the caller turns into
 	// unknown — not a zero that would read as "disk full" and stop the host.
-	if _, err := FreeDiskBytes(dir + "/definitely-absent"); err == nil {
+	_, missErr := FreeDiskBytes(dir + "/definitely-absent")
+	if missErr == nil {
 		t.Fatal("statfs on a missing path reported success")
 	}
-	if err != nil && strings.Contains(err.Error(), dir) {
+	if strings.Contains(missErr.Error(), dir) {
 		t.Fatal("disk error text leaked a filesystem path")
 	}
 	if _, err := os.Stat(dir); err != nil {

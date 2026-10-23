@@ -192,9 +192,12 @@ final class InferenceInstallTests: XCTestCase {
                        ["inference", "setup", "--json", "--config", config.path])
         XCTAssertEqual(CLICommand.inferencePinLatest(modelId: "m").arguments(config: config),
                        ["inference", "pin", "m", "--latest", "--json", "--config", config.path])
-        // The chat server only ever listens on this Mac's loopback address.
-        XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8080).arguments(config: config),
-                       ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8080", "--config", config.path])
+        // The chat server binds loopback; extra addresses (neXal, LAN) are relayed to it.
+        XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8090).arguments(config: config),
+                       ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8090", "--config", config.path])
+        XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8090, alsoListen: ["100.86.1.2", "192.168.1.5"]).arguments(config: config),
+                       ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8090",
+                        "--also-listen", "100.86.1.2", "--also-listen", "192.168.1.5", "--config", config.path])
         XCTAssertGreaterThan(CLICommand.inferenceInstall(modelId: "m").timeLimit, 3600)
         XCTAssertGreaterThanOrEqual(CLICommand.inferenceVerify(modelId: "m").timeLimit, 120)
     }

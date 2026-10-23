@@ -3,7 +3,8 @@ import SwiftUI
 /// One-click AI inference: pick a model, and the app sets up the MLX runtime, pins and downloads the model
 /// (every file hash-checked by the connector) and runs a local OpenAI-compatible chat server on this Mac.
 /// All work happens in `nexal inference setup | pin --latest | install | serve`; this file only sequences
-/// them and shows progress. The server listens on 127.0.0.1 only.
+/// them and shows progress. The server binds 127.0.0.1 and also answers on this Mac's neXal (mesh) address and
+/// LAN address when they are known, so the owner's other Macs and devices on the LAN can use it too.
 struct QuickStartModel: Identifiable, Equatable {
     let id: String
     let title: String
@@ -12,7 +13,8 @@ struct QuickStartModel: Identifiable, Equatable {
 
 @MainActor
 final class InferenceQuickStart: ObservableObject {
-    static let port = 8080
+    /// Inside 8001-8099, the range the neXal network opens between the owner's Macs.
+    static let port = 8090
     static let models: [QuickStartModel] = [
         .init(id: "qwen3-4b-q4", title: "Qwen3 4B", detail: "2.3 GB download · quick, runs on any Mac"),
         .init(id: "qwen3-8b-q4", title: "Qwen3 8B", detail: "4.6 GB download · needs about 8 GB free memory"),
@@ -23,7 +25,7 @@ final class InferenceQuickStart: ObservableObject {
     enum Phase: Equatable {
         case idle
         case working(model: String, step: String, fraction: Double?)
-        case serving(model: String)
+        case serving(model: String, urls: [ServeURL])
         case failed(String)
     }
 
@@ -36,6 +38,27 @@ final class InferenceQuickStart: ObservableObject {
         case .working, .serving: return true
         default: return false
         }
+    }
+
+    /// One address the running model answers on.
+    struct ServeURL: Equatable, Hashable { let label: String; let url: String }
+
+    /// The addresses to answer on besides loopback: this Mac's neXal address and LAN address (IPv4 only).
+    static func extraAddresses(mesh: String?, lan: String?) -> [(label: String, ip: String)] {
+        [("neXal network", mesh), ("LAN", lan)].compactMap { label, ip in
+            guard let ip, isIPv4(ip), ip != "127.0.0.1" else { return nil }
+            return (label, ip)
+        }
+    }
+
+    static func urls(port: Int, extra: [(label: String, ip: String)]) -> [ServeURL] {
+        [ServeURL(label: "This Mac", url: "http://127.0.0.1:\(port)/v1")]
+            + extra.map { ServeURL(label: $0.label, url: "http://\($0.ip):\(port)/v1") }
+    }
+
+    static func isIPv4(_ s: String) -> Bool {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false)
+        return parts.count == 4 && parts.allSatisfy { p in p.count <= 3 && Int(p).map { (0...255).contains($0) } == true }
     }
 
     func dismiss() { if case .failed = phase { phase = .idle } }
@@ -77,8 +100,11 @@ final class InferenceQuickStart: ObservableObject {
                     }
                 }
 
-                phase = .serving(model: id)
-                let result = try await stream(.inferenceServe(modelId: id, port: Self.port), model: model) { _ in }
+                let status = model.status
+                let lan = status?.presence?.hosts?.first { $0.hostId == status?.hostId }?.info?.lanAddress
+                let extra = Self.extraAddresses(mesh: status?.mesh?.selfTunnelAddress, lan: lan)
+                phase = .serving(model: id, urls: Self.urls(port: Self.port, extra: extra))
+                let result = try await stream(.inferenceServe(modelId: id, port: Self.port, alsoListen: extra.map(\.ip)), model: model) { _ in }
                 if stopping { phase = .idle; return }
                 phase = .failed(result.reason ?? "The model server stopped. Check that this Mac has enough free memory for \(id).")
             } catch {
@@ -157,12 +183,13 @@ struct InferenceQuickStartView: View {
                     Button("Cancel") { quick.stop() }.controlSize(.small)
                 }
                 .cardStyle()
-            case let .serving(id):
+            case let .serving(id, urls):
                 VStack(alignment: .leading, spacing: 6) {
                     Label("\(id) is running", systemImage: "bolt.horizontal.circle.fill").font(.callout.weight(.semibold)).foregroundStyle(.green)
-                    CopyableBlock(title: "Chat endpoint (OpenAI-compatible, this Mac only)", lines: [
-                        "http://127.0.0.1:\(InferenceQuickStart.port)/v1/chat/completions",
-                    ])
+                    ForEach(urls, id: \.self) { u in
+                        CopyableBlock(title: "\(u.label) (OpenAI-compatible)", lines: [u.url])
+                    }
+                    Text("No sign-in: anyone who can reach an address above can use the model.").font(.caption2).foregroundStyle(.tertiary)
                     Text("The first answer can take a minute while the model loads into memory.").font(.caption2).foregroundStyle(.tertiary)
                     Button("Stop") { quick.stop() }.controlSize(.small)
                 }

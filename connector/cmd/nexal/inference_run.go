@@ -6,9 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"nexal/connector/internal/inference"
@@ -53,12 +55,20 @@ func inferenceSetup(ctx context.Context, args []string) error {
 	return nil
 }
 
+// addrList is a repeatable string flag (--also-listen A --also-listen B).
+type addrList []string
+
+func (a *addrList) String() string     { return strings.Join(*a, ",") }
+func (a *addrList) Set(v string) error { *a = append(*a, v); return nil }
+
 func inferenceServe(ctx context.Context, args []string) error {
 	var host *string
 	var port *int
+	var also addrList
 	id, _, path, err := parseModelArgs("serve", args, true, func(f *flag.FlagSet) {
-		host = f.String("host", "127.0.0.1", "the one IP address to listen on (this Mac's neXal address to share with your other Macs)")
+		host = f.String("host", "127.0.0.1", "the IP address the model server binds (this Mac's neXal address to share with your other Macs)")
 		port = f.Int("port", inference.DefaultServePort, "TCP port")
+		f.Var(&also, "also-listen", "another IP address of this Mac to answer on, on the same port (repeatable): its neXal or LAN address")
 	})
 	if err != nil {
 		return err
@@ -67,6 +77,10 @@ func inferenceServe(ctx context.Context, args []string) error {
 	name, argv, env, serr := inference.ServeCommand(infDir, id, *host, *port)
 	if serr != nil {
 		return coded(serr)
+	}
+	extra, aerr := inference.ValidateAlsoListen(*host, also)
+	if aerr != nil {
+		return coded(aerr)
 	}
 	// Refuse damaged files before anything reads them.
 	res, verr := inference.CheckModel(ctx, infDir, id, false)
@@ -79,7 +93,17 @@ func inferenceServe(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, name, argv...)
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	// Each extra address relays to the server, so one server answers on loopback, the neXal network and the LAN.
+	target := net.JoinHostPort(*host, strconv.Itoa(*port))
+	for _, a := range extra {
+		if _, err := inference.Relay(ctx, net.JoinHostPort(a, strconv.Itoa(*port)), target); err != nil {
+			return &codedError{code: "port_in_use", err: fmt.Errorf("cannot answer on %s:%d: %w", a, *port, err)}
+		}
+	}
 	writeLine(os.Stdout, "Serving %s on http://%s:%d/v1 (OpenAI-compatible; no sign-in, so only share it on a network you trust)", id, *host, *port)
+	for _, a := range extra {
+		writeLine(os.Stdout, "Also answering on http://%s/v1", net.JoinHostPort(a, strconv.Itoa(*port)))
+	}
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the model server stopped: %w", err)}
 	}

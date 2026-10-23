@@ -14,8 +14,9 @@ import (
 // otherwise tell that they answer), and the pool swaps the server behind this one address as Macs join and
 // leave without the address, or anyone using it, changing.
 type Forwarder struct {
-	ln  net.Listener
-	srv *http.Server
+	ln    net.Listener
+	srv   *http.Server
+	addrs []string // every host:port this answers on, the main address first
 
 	mu       sync.Mutex
 	upstream string // host:port of the current server; "" while there is none
@@ -47,6 +48,9 @@ func NewForwarder(listen string, alsoListen ...string) (*Forwarder, error) {
 		lns = append(lns, extra)
 	}
 	f := &Forwarder{ln: ln, last: time.Now(), notice: "The model is starting."}
+	for _, l := range lns {
+		f.addrs = append(f.addrs, l.Addr().String())
+	}
 	f.srv = &http.Server{Handler: f}
 	for _, l := range lns {
 		go func(l net.Listener) { _ = f.srv.Serve(l) }(l)
@@ -67,6 +71,25 @@ func (f *Forwarder) Busy() (inflight int, quiet time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inflight, time.Since(f.last)
+}
+
+// Endpoints is every URL the forwarder answers on: the main (neXal) address, then LAN addresses, then
+// loopback (which only works on this Mac).
+func (f *Forwarder) Endpoints() []string {
+	var main, lan, loop []string
+	for i, a := range f.addrs {
+		u := "http://" + a + "/v1"
+		host, _, _ := net.SplitHostPort(a)
+		switch ip := net.ParseIP(host); {
+		case i == 0:
+			main = append(main, u)
+		case ip != nil && ip.IsLoopback():
+			loop = append(loop, u)
+		default:
+			lan = append(lan, u)
+		}
+	}
+	return append(append(main, lan...), loop...)
 }
 
 // Close stops listening and drops open connections.

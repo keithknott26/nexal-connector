@@ -5,6 +5,15 @@ enum RemoteInferenceID {
         s.first?.isASCII == true && (s.first!.isLetter || s.first!.isNumber) && s.count <= 80 && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
     }
     /// http://100.x.y.z:8001-8099/v1 (a neXal address) or loopback.
+    /// What kind of address an endpoint is, for the label beside it.
+    static func kind(_ s: String) -> String {
+        guard let host = URL(string: s)?.host else { return "" }
+        let p = host.split(separator: ".").compactMap { Int($0) }
+        guard p.count == 4 else { return "" }
+        if host == "127.0.0.1" { return "That Mac only" }
+        if p[0] == 100 && (64...127).contains(p[1]) { return "neXal network" }
+        return "LAN"
+    }
     static func isMeshEndpoint(_ s: String) -> Bool {
         guard let u = URL(string: s), u.scheme == "http", u.user == nil, u.query == nil, let host = u.host, u.port != nil else { return false }
         let p = host.split(separator: ".").compactMap { Int($0) }
@@ -22,6 +31,8 @@ struct RemoteInferenceRequest: Decodable, Identifiable, Equatable {
     let step: String?
     let detail: String?
     let endpoint: String?
+    /// Every address the model answers on: neXal first, then the LAN, then loopback (that Mac only).
+    let endpoints: [String]?
     /// 0...1 while the model downloads on the other Mac.
     let progress: Double?
     /// Set when several Macs serve the model together; rank 0 answers.
@@ -59,7 +70,10 @@ struct RemoteInferenceCard: Identifiable, Equatable {
     let endpoint: String?
     let progress: Double?
     let members: [Member]
+    /// Every address the model answers on (see RemoteInferenceRequest.endpoints); just `endpoint` from older Macs.
+    var endpoints: [String] = []
     var isPool: Bool { members.count > 1 }
+    var addresses: [String] { endpoints.isEmpty ? (endpoint.map { [$0] } ?? []) : endpoints }
 
     static func cards(_ requests: [RemoteInferenceRequest]) -> [RemoteInferenceCard] {
         var order: [String] = []
@@ -73,7 +87,7 @@ struct RemoteInferenceCard: Identifiable, Equatable {
             guard let group = groups[key]?.sorted(by: { ($0.poolRank ?? 0) < ($1.poolRank ?? 0) }), let lead = group.first else { return nil }
             let members = group.map { Member(hostId: $0.targetHostId, state: $0.state, step: $0.step, detail: $0.detail) }
             if group.count == 1 {
-                return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: lead.state, step: lead.step, detail: lead.detail, endpoint: lead.endpoint, progress: lead.progress, members: members)
+                return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: lead.state, step: lead.step, detail: lead.detail, endpoint: lead.endpoint, progress: lead.progress, members: members, endpoints: lead.endpoints ?? [])
             }
             // Show the Mac that really failed, not the others that stopped because of it.
             let failed = group.first { $0.state == "failed" && $0.step != "pool" } ?? group.first { $0.state == "failed" }
@@ -87,7 +101,8 @@ struct RemoteInferenceCard: Identifiable, Equatable {
             // Mac alone", "the pool lost a member". Before that, the slowest Mac sets the pace.
             let shown = failed ?? (lead.state == "ready" || lead.step == "serve" ? lead : slowest)
             return RemoteInferenceCard(id: lead.id, modelId: lead.modelId, state: state, step: shown?.step, detail: shown?.detail,
-                                       endpoint: lead.endpoint, progress: state == "running" ? progress : nil, members: members)
+                                       endpoint: lead.endpoint, progress: state == "running" ? progress : nil, members: members,
+                                       endpoints: lead.endpoints ?? [])
         }
     }
 }
@@ -320,17 +335,20 @@ struct RemoteInferenceContent: View {
                     ProgressView().progressViewStyle(.linear)
                 }
             }
-            if c.state != "ready" && c.state != "pending" { stepsView(c) }
+            if c.state != "ready" { stepsView(c) }
             if let d = c.detail, c.state != "ready" || c.isPool {
                 Text(d).font(.caption2).foregroundStyle(c.state == "failed" ? .red : RemoteInferenceStages.isWarning(d) ? .orange : .secondary).textSelection(.enabled)
             }
             if c.state == "pending" { Text(c.isPool ? "Waiting for the Macs in the pool to pick this up…" : "Waiting for that Mac to pick this up…").font(.caption2).foregroundStyle(.secondary) }
             if c.isPool { memberLines(c) }
-            if c.state == "ready", let e = c.endpoint {
-                HStack {
-                    Text(e).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
-                    Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(e, forType: .string) }
-                        .buttonStyle(.link).font(.caption2)
+            if c.state == "ready", c.endpoint != nil || !c.endpoints.isEmpty {
+                ForEach(c.addresses, id: \.self) { e in
+                    HStack {
+                        Text(RemoteInferenceID.kind(e)).font(.caption2).foregroundStyle(.secondary).frame(width: 92, alignment: .leading)
+                        Text(e).font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                        Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(e, forType: .string) }
+                            .buttonStyle(.link).font(.caption2)
+                    }
                 }
                 HStack {
                     Button(remote.testing.contains(c.id) ? "Testing…" : "Test speed & capability") { remote.test(id: c.id, endpoint: c.endpoint, app: app) }
@@ -372,7 +390,8 @@ struct RemoteInferenceContent: View {
 
     /// The stages of a request, in order. `RemoteInferenceStages.index(of:)` maps the step the other Mac reports.
     @ViewBuilder private func stepsView(_ c: RemoteInferenceCard) -> some View {
-        let current = RemoteInferenceStages.index(of: c.step)
+        // A request still waiting for its Mac has done the first step (the coordinator opened the ports).
+        let current = c.state == "pending" && c.step == "ports" ? 1 : RemoteInferenceStages.index(of: c.step)
         let failed = c.state == "failed"
         HStack(spacing: 10) {
             ForEach(Array((c.isPool ? RemoteInferenceStages.pool : RemoteInferenceStages.all).enumerated()), id: \.offset) { i, title in
@@ -403,16 +422,17 @@ struct RemoteInferenceContent: View {
 
 /// The stages the other Mac goes through, matching the steps its connector reports.
 enum RemoteInferenceStages {
-    static let all = ["Runtime", "Check", "Download", "Verify", "Start"]
+    static let all = ["Ports", "Runtime", "Check", "Download", "Verify", "Start"]
     /// A pool waits for the other Macs where a single Mac verifies.
-    static let pool = ["Runtime", "Check", "Download", "Join pool", "Start"]
-    private static let keys = ["setup", "pin", "install", "verify", "serve"]
+    static let pool = ["Ports", "Runtime", "Check", "Download", "Join pool", "Start"]
+    private static let keys = ["ports", "setup", "pin", "install", "verify", "serve"]
     /// A short phrase for what one Mac in a pool is doing.
     static func label(_ state: String, _ step: String?) -> String {
         if state == "ready" { return "ready" }
         if state == "failed" { return "failed" }
         if state == "pending" { return "waiting" }
         switch step {
+        case "ports": return "opening the AI ports"
         case "setup": return "preparing the runtime"
         case "pin": return "checking the model"
         case "install": return "downloading"
@@ -423,5 +443,5 @@ enum RemoteInferenceStages {
     }
     /// Pool notices worth the owner's attention: a Mac dropped out, or the pool could not form.
     static func isWarning(_ detail: String) -> Bool { detail.contains("lost a member") || detail.contains("Could not form") || detail.contains("Left the pool") }
-    static func index(of step: String?) -> Int? { step == "pool" ? 3 : step.flatMap { keys.firstIndex(of: $0) } }
+    static func index(of step: String?) -> Int? { step == "pool" ? 4 : step.flatMap { keys.firstIndex(of: $0) } }
 }

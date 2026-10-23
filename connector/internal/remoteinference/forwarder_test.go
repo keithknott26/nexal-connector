@@ -88,3 +88,17 @@ func TestForwarderAlsoListensOnExtraAddresses(t *testing.T) {
 		t.Fatal("an extra address that is taken should fail")
 	}
 }
+
+func TestForwarderEndpointsOrder(t *testing.T) {
+	f, err := NewForwarder("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.addrs = []string{"100.86.56.136:8015", "127.0.0.1:8015", "192.168.1.20:8015"}
+	got := strings.Join(f.Endpoints(), " ")
+	want := "http://100.86.56.136:8015/v1 http://192.168.1.20:8015/v1 http://127.0.0.1:8015/v1"
+	if got != want {
+		t.Fatalf("got %s", got)
+	}
+}

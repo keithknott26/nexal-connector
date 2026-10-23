@@ -24,13 +24,14 @@ import (
 // gone quiet can be told apart from one that is only idle.
 type poolStatus struct {
 	state, step, detail, endpoint string
+	endpoints                     []string
 	progress                      float64
 	ring                          *string
 }
 
 func (r *Runner) poolReport(ctx context.Context, t Task, s poolStatus) {
 	p := s.progress
-	_ = r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: s.state, Step: s.step, Detail: clean(s.detail, 280), Endpoint: s.endpoint, RingAddress: s.ring, Progress: &p})
+	_ = r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: s.state, Step: s.step, Detail: clean(s.detail, 280), Endpoint: s.endpoint, Endpoints: s.endpoints, RingAddress: s.ring, Progress: &p})
 }
 
 // proc is one helper process: a model server this runner started.
@@ -321,7 +322,7 @@ func (l *leader) startSolo(ctx context.Context, why string) bool {
 	}
 	l.solo = p
 	l.fwd.SetUpstream(hostPort, "")
-	l.say(poolStatus{state: "ready", step: "serve", detail: l.soloText(), endpoint: l.endpoint, progress: 1})
+	l.say(poolStatus{state: "ready", step: "serve", detail: l.soloText(), endpoint: l.endpoint, endpoints: l.fwd.Endpoints(), progress: 1})
 	return true
 }
 
@@ -396,7 +397,7 @@ func (l *leader) form(ctx context.Context, ring []string) {
 			l.ringGone.ok()
 			l.fwd.SetUpstream(hostPort, "")
 			old.stop() // its memory is needed by the shared model
-			l.say(poolStatus{state: "ready", step: "pool", detail: fmt.Sprintf("Serving %s with %d Macs sharing the load.", t.ModelID, t.PoolSize), endpoint: l.endpoint, progress: 1, ring: l.status.ring})
+			l.say(poolStatus{state: "ready", step: "pool", detail: fmt.Sprintf("Serving %s with %d Macs sharing the load.", t.ModelID, t.PoolSize), endpoint: l.endpoint, endpoints: l.fwd.Endpoints(), progress: 1, ring: l.status.ring})
 			return
 		}
 		if time.Now().After(deadline) {
@@ -413,7 +414,7 @@ func (l *leader) abandon(reason string) {
 	l.failures++
 	l.nextTry = time.Now().Add(poolBackoff(l.failures))
 	l.leaveRing()
-	l.say(poolStatus{state: "ready", step: "pool", detail: "Could not form the pool (" + tailText(reason, 150) + "). Serving on this Mac alone; will try again.", endpoint: l.endpoint, progress: 1, ring: l.status.ring})
+	l.say(poolStatus{state: "ready", step: "pool", detail: "Could not form the pool (" + tailText(reason, 150) + "). Serving on this Mac alone; will try again.", endpoint: l.endpoint, endpoints: l.fwd.Endpoints(), progress: 1, ring: l.status.ring})
 }
 
 // watch checks a running pool and falls back to this Mac alone when a member is lost. It returns false

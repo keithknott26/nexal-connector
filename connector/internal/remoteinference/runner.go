@@ -31,6 +31,8 @@ type Task struct {
 	Step            string `json:"step,omitempty"`
 	Detail          string `json:"detail,omitempty"`
 	Endpoint        string `json:"endpoint,omitempty"`
+	// Endpoints is every address the model answers on: the neXal address first, then the LAN, then loopback.
+	Endpoints []string `json:"endpoints,omitempty"`
 	// Progress is the overall progress (0..1) the Mac doing the work last reported; nil before it has.
 	Progress *float64 `json:"progress,omitempty"`
 	// Pooling: this Mac is member PoolRank of PoolSize. PoolRing lists every member's ring address in
@@ -51,6 +53,8 @@ type Report struct {
 	Step     string `json:"step,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	Endpoint string `json:"endpoint,omitempty"`
+	// Endpoints lists every address the model answers on (neXal, LAN, loopback); sent once it is ready.
+	Endpoints []string `json:"endpoints,omitempty"`
 	// RingAddress is where this pool member listens for the other members (ip:port). Nil leaves what the
 	// coordinator has; a pointer to "" takes this member out of the ring.
 	RingAddress *string `json:"ringAddress,omitempty"`
@@ -363,7 +367,10 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	}
 	fwd.SetUpstream(local, "")
 	done := 1.0
-	r.reportP(ctx, t, "ready", "serve", "Serving "+t.ModelID, endpoint, &done)
+	if err := r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: "ready", Step: "serve", Detail: "Serving " + t.ModelID,
+		Endpoint: endpoint, Endpoints: fwd.Endpoints(), Progress: &done}); err != nil {
+		r.Logger.Debug("remote inference report failed", "error", err.Error())
+	}
 	// Keep watching: if the server dies later, say so.
 	err := <-exited
 	r.drop(t.ID)

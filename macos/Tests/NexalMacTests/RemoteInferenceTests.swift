@@ -48,11 +48,12 @@ final class RemoteInferenceTests: XCTestCase {
     }
 
     func testStagesFollowTheStepsTheOtherMacReports() {
-        XCTAssertEqual(RemoteInferenceStages.all.count, 5)
-        XCTAssertEqual(RemoteInferenceStages.index(of: "setup"), 0)
-        XCTAssertEqual(RemoteInferenceStages.index(of: "install"), 2)
-        XCTAssertEqual(RemoteInferenceStages.index(of: "verify"), 3)
-        XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
+        XCTAssertEqual(RemoteInferenceStages.all.count, 6)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "ports"), 0)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "setup"), 1)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "install"), 3)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "verify"), 4)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 5)
         XCTAssertNil(RemoteInferenceStages.index(of: "network"))
         XCTAssertNil(RemoteInferenceStages.index(of: nil))
     }
@@ -73,6 +74,7 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(cards[0].progress ?? 0, 0.6, accuracy: 0.001)
         XCTAssertFalse(cards[1].isPool)
         XCTAssertEqual(cards[1].endpoint, "http://100.1.2.3:8001/v1")
+        XCTAssertEqual(cards[1].addresses, ["http://100.1.2.3:8001/v1"])  // an older Mac sends only the neXal address
     }
 
     func testPoolStepIsTheSlowestMacUntilTheLeadServes() {
@@ -111,8 +113,8 @@ final class RemoteInferenceTests: XCTestCase {
     }
 
     func testPoolStageIndex() {
-        XCTAssertEqual(RemoteInferenceStages.index(of: "pool"), 3)
-        XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 4)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "pool"), 4)
+        XCTAssertEqual(RemoteInferenceStages.index(of: "serve"), 5)
         XCTAssertEqual(RemoteInferenceStages.label("running", "pool"), "waiting for the pool")
     }
 
@@ -122,5 +124,14 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(l.commitPage?.host, "huggingface.co")
         let evil = json.replacingOccurrences(of: "https://huggingface.co", with: "https://evil.example")
         XCTAssertNil(try JSONDecoder().decode(ReviewLatest.self, from: Data(evil.utf8)).commitPage)
+    }
+
+    func testEveryAddressIsListedAndLabelled() {
+        let line = """
+        {"id":"r9","targetHostId":"h9","modelId":"m","state":"ready","step":"serve","endpoint":"http://100.86.56.136:8015/v1","endpoints":["http://100.86.56.136:8015/v1","http://192.168.1.20:8015/v1","http://127.0.0.1:8015/v1"]}
+        """
+        let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(Data(line.utf8)))
+        XCTAssertEqual(cards[0].addresses.count, 3)
+        XCTAssertEqual(cards[0].addresses.map(RemoteInferenceID.kind), ["neXal network", "LAN", "That Mac only"])
     }
 }

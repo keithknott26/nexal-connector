@@ -92,7 +92,7 @@ enum CLICommand {
     /// `nexal inference pin <id> --latest --json`: pins the repository's current commit and hashes its files.
     case inferencePinLatest(modelId: String)
     /// `nexal inference serve <id> --host 127.0.0.1 --port N`: runs the local chat server until stopped.
-    case inferenceServe(modelId: String, port: Int, alsoListen: [String] = [])
+    case inferenceServe(modelId: String, port: Int, alsoListen: [String] = [], json: Bool = false)
     /// `nexal inference remote-serve <id> --to <host> --json`: asks another Mac on this network to install and serve a model.
     case remoteInferenceServe(modelId: String, hostId: String)
     /// `nexal inference remote-serve <id> --pool a,b --json`: several Macs serve one model together; the first answers.
@@ -231,9 +231,9 @@ enum CLICommand {
             command = ["inference", "setup", "--json"]
         case let .inferencePinLatest(modelId):
             command = ["inference", "pin", modelId, "--latest", "--json"]
-        case let .inferenceServe(modelId, port, alsoListen):
+        case let .inferenceServe(modelId, port, alsoListen, json):
             command = ["inference", "serve", modelId, "--host", "127.0.0.1", "--port", String(port)]
-                + alsoListen.flatMap { ["--also-listen", $0] }
+                + alsoListen.flatMap { ["--also-listen", $0] } + (json ? ["--json"] : [])
         case let .remoteInferenceServe(modelId, hostId):
             command = ["inference", "remote-serve", modelId, "--to", hostId, "--json"]
         case let .remoteInferencePool(modelId, hostIds):

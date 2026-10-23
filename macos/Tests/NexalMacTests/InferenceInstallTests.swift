@@ -195,6 +195,11 @@ final class InferenceInstallTests: XCTestCase {
         // The chat server binds loopback; extra addresses (neXal, LAN) are relayed to it.
         XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8090).arguments(config: config),
                        ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8090", "--config", config.path])
+        XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8001, alsoListen: ["auto"], json: true).arguments(config: config),
+                       ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8001", "--also-listen", "auto", "--json", "--config", config.path])
+        let line = Data(#"{"event":"listening","urls":["http://100.86.56.136:8001/v1","http://192.168.68.52:8001/v1","http://192.168.68.54:8001/v1","http://127.0.0.1:8001/v1"]}"#.utf8)
+        XCTAssertEqual(InferenceQuickStart.listening(line)?.map(\.label), ["neXal network", "LAN", "LAN", "This Mac"])
+        XCTAssertEqual(InferenceQuickStart.listening(line)?.first?.url, "http://100.86.56.136:8001/v1")
         XCTAssertEqual(CLICommand.inferenceServe(modelId: "m", port: 8090, alsoListen: ["100.86.1.2", "192.168.1.5"]).arguments(config: config),
                        ["inference", "serve", "m", "--host", "127.0.0.1", "--port", "8090",
                         "--also-listen", "100.86.1.2", "--also-listen", "192.168.1.5", "--config", config.path])

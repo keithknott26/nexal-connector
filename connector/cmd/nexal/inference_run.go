@@ -64,11 +64,13 @@ func (a *addrList) Set(v string) error { *a = append(*a, v); return nil }
 func inferenceServe(ctx context.Context, args []string) error {
 	var host *string
 	var port *int
+	var asJSON *bool
 	var also addrList
 	id, _, path, err := parseModelArgs("serve", args, true, func(f *flag.FlagSet) {
 		host = f.String("host", "127.0.0.1", "the IP address the model server binds (this Mac's neXal address to share with your other Macs)")
 		port = f.Int("port", inference.DefaultServePort, "TCP port")
-		f.Var(&also, "also-listen", "another IP address of this Mac to answer on, on the same port (repeatable): its neXal or LAN address")
+		f.Var(&also, "also-listen", "another IP address of this Mac to answer on, on the same port (repeatable): its neXal or LAN address; \"auto\" = all of them")
+		asJSON = f.Bool("json", false, "also print {\"event\":\"listening\",\"urls\":[...]} once every address answers: neXal first, then LAN, then loopback")
 	})
 	if err != nil {
 		return err
@@ -78,7 +80,19 @@ func inferenceServe(ctx context.Context, args []string) error {
 	if serr != nil {
 		return coded(serr)
 	}
-	extra, aerr := inference.ValidateAlsoListen(*host, also)
+	// "auto": every neXal and LAN address this Mac has right now. One that cannot be used is skipped, not fatal.
+	auto := false
+	var named []string
+	for _, a := range also {
+		if a == inference.AutoListen {
+			auto = true
+			mesh, lan := inference.ShareAddresses()
+			named = append(append(named, mesh...), lan...)
+			continue
+		}
+		named = append(named, a)
+	}
+	extra, aerr := inference.ValidateAlsoListen(*host, named)
 	if aerr != nil {
 		return coded(aerr)
 	}
@@ -95,14 +109,28 @@ func inferenceServe(ctx context.Context, args []string) error {
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	// Each extra address relays to the server, so one server answers on loopback, the neXal network and the LAN.
 	target := net.JoinHostPort(*host, strconv.Itoa(*port))
+	var opened []string
 	for _, a := range extra {
 		if _, err := inference.Relay(ctx, net.JoinHostPort(a, strconv.Itoa(*port)), target); err != nil {
+			if auto {
+				fmt.Fprintf(os.Stderr, "not answering on %s:%d: %v\n", a, *port, err)
+				continue
+			}
 			return &codedError{code: "port_in_use", err: fmt.Errorf("cannot answer on %s:%d: %w", a, *port, err)}
 		}
+		opened = append(opened, a)
 	}
 	writeLine(os.Stdout, "Serving %s on http://%s:%d/v1 (OpenAI-compatible; no sign-in, so only share it on a network you trust)", id, *host, *port)
-	for _, a := range extra {
-		writeLine(os.Stdout, "Also answering on http://%s/v1", net.JoinHostPort(a, strconv.Itoa(*port)))
+	urls := []string{}
+	for _, a := range opened {
+		u := "http://" + net.JoinHostPort(a, strconv.Itoa(*port)) + "/v1"
+		urls = append(urls, u)
+		writeLine(os.Stdout, "Also answering on %s", u)
+	}
+	urls = append(urls, "http://"+target+"/v1")
+	if *asJSON {
+		b, _ := json.Marshal(map[string]any{"event": "listening", "urls": urls})
+		writeLine(os.Stdout, "%s", b)
 	}
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the model server stopped: %w", err)}

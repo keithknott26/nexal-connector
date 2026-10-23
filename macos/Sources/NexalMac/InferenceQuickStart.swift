@@ -14,7 +14,7 @@ struct QuickStartModel: Identifiable, Equatable {
 @MainActor
 final class InferenceQuickStart: ObservableObject {
     /// Inside 8001-8099, the range the neXal network opens between the owner's Macs.
-    static let port = 8090
+    static let port = 8001
     static let models: [QuickStartModel] = [
         .init(id: "qwen3-4b-q4", title: "Qwen3 4B", detail: "2.3 GB download · quick, runs on any Mac"),
         .init(id: "qwen3-8b-q4", title: "Qwen3 8B", detail: "4.6 GB download · needs about 8 GB free memory"),
@@ -51,9 +51,25 @@ final class InferenceQuickStart: ObservableObject {
         }
     }
 
+    /// neXal first, then the LAN, then loopback (this Mac only).
     static func urls(port: Int, extra: [(label: String, ip: String)]) -> [ServeURL] {
-        [ServeURL(label: "This Mac", url: "http://127.0.0.1:\(port)/v1")]
-            + extra.map { ServeURL(label: $0.label, url: "http://\($0.ip):\(port)/v1") }
+        extra.map { ServeURL(label: $0.label, url: "http://\($0.ip):\(port)/v1") }
+            + [ServeURL(label: "This Mac", url: "http://127.0.0.1:\(port)/v1")]
+    }
+
+    /// The addresses the helper really answers on, from its `{"event":"listening","urls":[...]}` line.
+    nonisolated static func listening(_ line: Data) -> [ServeURL]? {
+        struct Line: Decodable { let event: String; let urls: [String]? }
+        guard let l = try? JSONDecoder().decode(Line.self, from: line), l.event == "listening", let urls = l.urls, !urls.isEmpty else { return nil }
+        return urls.map { ServeURL(label: label(of: $0), url: $0) }
+    }
+
+    nonisolated static func label(of url: String) -> String {
+        guard let host = URL(string: url)?.host else { return "Address" }
+        let p = host.split(separator: ".").compactMap { Int($0) }
+        if host == "127.0.0.1" { return "This Mac" }
+        if p.count == 4 && p[0] == 100 && (64...127).contains(p[1]) { return "neXal network" }
+        return "LAN"
     }
 
     static func isIPv4(_ s: String) -> Bool {
@@ -104,7 +120,11 @@ final class InferenceQuickStart: ObservableObject {
                 let lan = status?.presence?.hosts?.first { $0.hostId == status?.hostId }?.info.lanAddress
                 let extra = Self.extraAddresses(mesh: status?.mesh?.selfTunnelAddress, lan: lan)
                 phase = .serving(model: id, urls: Self.urls(port: Self.port, extra: extra))
-                let result = try await stream(.inferenceServe(modelId: id, port: Self.port, alsoListen: extra.map { $0.ip }), model: model) { _ in }
+                // The helper finds every neXal and LAN address itself ("auto") and says which ones answer.
+                let result = try await stream(.inferenceServe(modelId: id, port: Self.port, alsoListen: [InferenceQuickStart.autoListen], json: true),
+                                              model: model) { [self] line in
+                    if let urls = Self.listening(line) { phase = .serving(model: id, urls: urls) }
+                }
                 if stopping { phase = .idle; return }
                 phase = .failed(result.reason ?? "The model server stopped. Check that this Mac has enough free memory for \(id).")
             } catch {
@@ -112,6 +132,8 @@ final class InferenceQuickStart: ObservableObject {
             }
         }
     }
+
+    static let autoListen = "auto"
 
     static let notReviewed = "This model has not been reviewed for this version of neXal yet. Update neXal, or pick another model."
 

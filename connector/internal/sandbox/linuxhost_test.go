@@ -40,6 +40,12 @@ func TestNoVMHypervisorRefusesStart(t *testing.T) {
 	if _, err := h.Start(context.Background(), Spec{}); !errors.Is(err, errNoVMs) {
 		t.Fatalf("Start err = %v", err)
 	}
+	if err := h.Stop(context.Background(), Handle{}); err != nil {
+		t.Fatalf("Stop err = %v", err)
+	}
+	if err := h.Kill(context.Background(), Handle{}); err != nil {
+		t.Fatalf("Kill err = %v", err)
+	}
 	if alive, err := h.Alive(context.Background(), Handle{}); alive || err != nil {
 		t.Fatalf("Alive = %v, %v", alive, err)
 	}

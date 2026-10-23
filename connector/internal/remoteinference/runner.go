@@ -66,11 +66,15 @@ type Coordinator interface {
 
 // Runner polls for requests addressed to this Mac.
 type Runner struct {
-	Coord      Coordinator
-	HostID     string
-	Exe        string   // the nexal binary
-	BaseArgs   []string // e.g. --config <path>, appended to every inference command
-	Address    func() string
+	Coord    Coordinator
+	HostID   string
+	Exe      string   // the nexal binary
+	BaseArgs []string // e.g. --config <path>, appended to every inference command
+	Address  func() string
+	// LAN lists this Mac's private LAN addresses; models also answer there (as well as on the neXal address
+	// and loopback). nil means every private IPv4 address of an up, non-virtual interface. NoLAN turns it off.
+	LAN        func() []string
+	NoLAN      bool
 	Port       int // first port to try for a server (default 8001)
 	MaxPort    int // last port (default 8099): the neXal network only opens 8001-8099 between Macs
 	Poll       time.Duration
@@ -307,11 +311,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		r.fail(ctx, t, "serve", lerr.Error())
 		return
 	}
-	var also []string
-	if ip := net.ParseIP(addr); ip == nil || !ip.IsLoopback() { // already loopback: a second listen would collide
-		also = append(also, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-	}
-	fwd, ferr := NewForwarder(net.JoinHostPort(addr, strconv.Itoa(port)), also...)
+	fwd, ferr := r.forwarder(ctx, addr, port)
 	if ferr != nil {
 		r.fail(ctx, t, "serve", fmt.Sprintf("Cannot answer on %s:%d: %v", addr, port, ferr))
 		return
@@ -615,4 +615,63 @@ func poolExit(out string, err error) string {
 		s = append([]rune("..."), s[len(s)-277:]...) // the end of the output says what went wrong
 	}
 	return string(s)
+}
+
+// forwarder answers on addr:port (the neXal address), loopback and this Mac's LAN addresses on the same port.
+// A LAN address that cannot be used (taken port, address gone) is dropped rather than failing the model.
+func (r *Runner) forwarder(ctx context.Context, addr string, port int) (*Forwarder, error) {
+	p := strconv.Itoa(port)
+	var base []string
+	if ip := net.ParseIP(addr); ip == nil || !ip.IsLoopback() { // already loopback: a second listen would collide
+		base = append(base, net.JoinHostPort("127.0.0.1", p))
+	}
+	var lan []string
+	if !r.NoLAN {
+		list := r.LAN
+		if list == nil {
+			list = lanAddresses
+		}
+		for _, a := range list() {
+			if a != addr {
+				lan = append(lan, net.JoinHostPort(a, p))
+			}
+		}
+	}
+	if len(lan) > 0 {
+		f, err := NewForwarder(net.JoinHostPort(addr, p), append(base, lan...)...)
+		if err == nil {
+			r.Logger.InfoContext(ctx, "model also answers on the LAN", "addresses", lan)
+			return f, nil
+		}
+		r.Logger.WarnContext(ctx, "cannot answer on the LAN; neXal address and loopback only", "error", err)
+	}
+	return NewForwarder(net.JoinHostPort(addr, p), base...)
+}
+
+// lanAddresses is every private IPv4 address (10/8, 172.16/12, 192.168/16) of an up interface that is not
+// loopback, the neXal tunnel or a virtual machine bridge.
+func lanAddresses() []string {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, in := range ifs {
+		if in.Flags&net.FlagUp == 0 || in.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if n := in.Name; strings.HasPrefix(n, "utun") || strings.HasPrefix(n, "bridge") || strings.HasPrefix(n, "vmenet") ||
+			strings.HasPrefix(n, "wt") || strings.HasPrefix(n, "docker") || strings.HasPrefix(n, "veth") {
+			continue
+		}
+		addrs, _ := in.Addrs()
+		for _, a := range addrs {
+			if ipn, ok := a.(*net.IPNet); ok {
+				if ip4 := ipn.IP.To4(); ip4 != nil && ip4.IsPrivate() {
+					out = append(out, ip4.String())
+				}
+			}
+		}
+	}
+	return out
 }

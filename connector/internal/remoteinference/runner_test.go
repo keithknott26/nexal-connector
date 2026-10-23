@@ -231,3 +231,21 @@ func TestPinStepNeverRunsAPinCommand(t *testing.T) {
 		t.Fatalf("calls:\n%s", b)
 	}
 }
+
+func TestForwarderDropsUnusableLANAddress(t *testing.T) {
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	p := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	r := &Runner{LAN: func() []string { return []string{"192.0.2.1"} }} // not on this machine: cannot listen
+	r.init()
+	f, err := r.forwarder(context.Background(), "127.0.0.1", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(p)); err != nil {
+		t.Fatal(err)
+	} else {
+		c.Close()
+	}
+}

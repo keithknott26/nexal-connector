@@ -368,3 +368,21 @@ func TestWithSyntheticConditionsInstallsHonestFixture(t *testing.T) {
 		t.Errorf("fixture disk %d below the default minimum", s.FreeDiskBytes)
 	}
 }
+
+// Contribution() is the lock-taking accessor for the verdict Snapshot embeds; the
+// two must never disagree, and the verdict must keep claiming enforcement.
+func TestContributionAccessorMatchesSnapshot(t *testing.T) {
+	a, _ := testAgent(t)
+	got := a.Contribution()
+	want := a.Snapshot().Contribution
+	if got.Enforced != want.Enforced || got.EnforcedScope != want.EnforcedScope ||
+		got.ThermalSource != want.ThermalSource || got.ObservedAt != want.ObservedAt {
+		t.Fatalf("Contribution() = %+v, Snapshot().Contribution = %+v", got, want)
+	}
+	if !got.Enforced {
+		t.Fatal("contribution verdict must report enforcement")
+	}
+	if got.EnforcedScope == "" {
+		t.Fatal("EnforcedScope must always explain what is gated")
+	}
+}

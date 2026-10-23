@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -272,5 +273,22 @@ func TestStartRejectsUnsafeCollectorEndpoints(t *testing.T) {
 				t.Fatalf("error leaks endpoint: %v", err)
 			}
 		})
+	}
+}
+
+func TestStartAcceptsLoopbackCollectorAndShutsDown(t *testing.T) {
+	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer collector.Close()
+	prevTraces, prevMeters := otel.GetTracerProvider(), otel.GetMeterProvider()
+	defer func() { otel.SetTracerProvider(prevTraces); otel.SetMeterProvider(prevMeters) }()
+
+	// httptest listens on 127.0.0.1 over cleartext HTTP, which Start allows for loopback only.
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL+"/")
+	shutdown, err := Start(context.Background())
+	if err != nil || shutdown == nil {
+		t.Fatalf("Start(%q): err=%v, shutdown nil=%v; want working collector setup", collector.URL, err, shutdown == nil)
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatalf("shutdown: %v", err)
 	}
 }

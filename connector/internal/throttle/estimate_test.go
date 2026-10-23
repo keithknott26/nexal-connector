@@ -292,3 +292,20 @@ func TestTrimmedPercentile(t *testing.T) {
 		t.Errorf("p100 = %v, want %v", got, base*2)
 	}
 }
+
+// clampRate is the last line of defence between a noisy measurement and the
+// validated policy bounds, so both edges and the passthrough are asserted.
+func TestClampRateStaysWithinPolicyBounds(t *testing.T) {
+	if got := clampRate(0); got != MinBytesPerSecond {
+		t.Fatalf("clampRate(0) = %d, want floor %d", got, MinBytesPerSecond)
+	}
+	if got := clampRate(float64(MaxBytesPerSecond) * 4); got != MaxBytesPerSecond {
+		t.Fatalf("clampRate(huge) = %d, want ceiling %d", got, MaxBytesPerSecond)
+	}
+	mid := float64(MinBytesPerSecond) + 1000.5
+	if mid < float64(MaxBytesPerSecond) {
+		if got := clampRate(mid); got != uint64(mid) {
+			t.Fatalf("clampRate(%v) = %d, want truncated %d", mid, got, uint64(mid))
+		}
+	}
+}

@@ -414,3 +414,26 @@ func TestReportPowerGuardsAndForwards(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestListSortedAndUsageCountsOnlyActive(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	put(m, &record{ID: "b", State: StateRunning, Size: Size{CPUs: 2, MemoryMB: 1024}})
+	put(m, &record{ID: "a", State: StatePaused, Size: Size{CPUs: 1, MemoryMB: 512}})
+	put(m, &record{ID: "c", State: StateStopped, Size: Size{CPUs: 8, MemoryMB: 8192}})
+	put(m, &record{ID: "d", State: StateFailed, Size: Size{CPUs: 4, MemoryMB: 4096}})
+
+	got := m.List()
+	if len(got) != 4 || got[0].SandboxID != "a" || got[1].SandboxID != "b" || got[2].SandboxID != "c" || got[3].SandboxID != "d" {
+		t.Fatalf("List not sorted by id: %+v", got)
+	}
+	if got[0].State != StatePaused || got[1].Size.CPUs != 2 {
+		t.Fatalf("List lost fields: %+v", got)
+	}
+
+	m.mu.Lock()
+	u := m.usageLocked()
+	m.mu.Unlock()
+	if u.Count != 2 || u.CPUs != 3 || u.MemoryMB != 1536 {
+		t.Fatalf("usage must count only active sandboxes: %+v", u)
+	}
+}

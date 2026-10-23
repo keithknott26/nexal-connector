@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"context"
+	"os"
 	"testing"
 	"time"
 )
@@ -71,5 +73,22 @@ func TestPowerTracker(t *testing.T) {
 	p.Woke()
 	if a := p.Observe(false, t0.Add(900*time.Second)); a != PowerNone {
 		t.Fatal("wake already reported awake")
+	}
+}
+
+// The macOS probes shell out to fixed absolute paths. Where those binaries are
+// absent they must degrade to "unknown" / "not on battery", never panic or lie.
+func TestMacProbesDegradeWhenToolsMissing(t *testing.T) {
+	if _, err := os.Stat("/usr/sbin/ioreg"); err == nil {
+		t.Skip("ioreg present; degraded path not reachable")
+	}
+	if closed, ok := IORegLid(context.Background()); closed || ok {
+		t.Fatalf("IORegLid = (%v,%v), want (false,false)", closed, ok)
+	}
+	if _, err := os.Stat("/usr/bin/pmset"); err == nil {
+		t.Skip("pmset present; degraded path not reachable")
+	}
+	if onBatteryNow(context.Background()) {
+		t.Fatal("onBatteryNow must be false when pmset is unavailable")
 	}
 }

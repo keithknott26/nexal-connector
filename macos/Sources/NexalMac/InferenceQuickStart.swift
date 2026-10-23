@@ -120,6 +120,14 @@ final class InferenceQuickStart: ObservableObject {
                 let lan = status?.presence?.hosts?.first { $0.hostId == status?.hostId }?.info.lanAddress
                 let extra = Self.extraAddresses(mesh: status?.mesh?.selfTunnelAddress, lan: lan)
                 phase = .serving(model: id, urls: Self.urls(port: Self.port, extra: extra))
+                // The macOS firewall drops connections from other devices to a helper it does not allow, and an
+                // update re-signs the helper, which voids an earlier allowance. Ask once to allow it again.
+                if await Task.detached(operation: { NetworkService.firewallBlocksHelpers }).value {
+                    phase = .working(model: id, step: "Allowing your other computers through the macOS firewall…", fraction: nil)
+                    // Cancelling the password prompt is not fatal: the model still answers on this Mac.
+                    _ = try? await Task.detached(operation: { try NetworkService.allowHelpersInFirewall() }).value
+                    if stopping { phase = .idle; return }
+                }
                 // The helper finds every neXal and LAN address itself ("auto") and says which ones answer.
                 let result = try await stream(.inferenceServe(modelId: id, port: Self.port, alsoListen: [InferenceQuickStart.autoListen], json: true),
                                               model: model) { [self] line in

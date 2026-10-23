@@ -114,5 +114,15 @@ if [ "${NEXAL_SKIP_VMNET:-}" != 1 ]; then
   bash "$ROOT/macos/scripts/install-vmnet.sh" --binary "$APP/Contents/Helpers/nexal-vmnet" \
     || echo "warning: nexal-vmnet was not installed; VMs keep NAT networking only"
 fi
+# The macOS firewall ties each allowance to the binary's signature, so re-signing above voids it: inbound
+# connections to model servers and the bandwidth test (nexal) and to the mesh runtime are then dropped
+# silently. Allow them again (the app also checks this before it serves a model).
+FW=/usr/libexec/ApplicationFirewall/socketfilterfw
+for bin in "$APP/Contents/Helpers/nexal" "$APP/Contents/Helpers/nexal-network" "$SUPPORT_BIN"; do
+  [ -x "$bin" ] || continue
+  sudo "$FW" --add "$bin" >/dev/null 2>&1 || true
+  sudo "$FW" --unblockapp "$bin" >/dev/null 2>&1 || true
+  echo "Firewall: allowed incoming connections for $bin"
+done
 open "$APP"
 echo "Done. Previous binaries kept in $OUT (nexal.previous, NexalMac.previous) for rollback."

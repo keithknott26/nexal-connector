@@ -141,6 +141,53 @@ enum NetworkService {
         return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).lowercased()
     }
 
+    private static func firewallOutput(_ arguments: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: firewallTool)
+        process.arguments = arguments
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return "" }
+        process.waitUntilExit()
+        return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).lowercased()
+    }
+
+    /// The helpers other devices connect to: the mesh runtime, and `nexal` (AI model servers, the bandwidth
+    /// test) in the app and in its Application Support copy.
+    static var inboundHelpers: [URL] {
+        let support = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Nexal/bin/nexal")
+        return [bundledHelper, bundledHelper.deletingLastPathComponent().appendingPathComponent("nexal"), support]
+            .filter { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    /// True when the macOS firewall is on and does not allow one of `inboundHelpers` (never allowed, blocked,
+    /// or allowed before an update re-signed it). Getters need no root. Blocking: call off the main actor.
+    static var firewallBlocksHelpers: Bool {
+        guard isOn(firewallOutput(["--getglobalstate"])) else { return false }
+        return inboundHelpers.contains { !firewallOutput(["--getappblocked", $0.path]).contains("permitted") }
+    }
+
+    /// Shows the administrator prompt once and allows every helper in `inboundHelpers` inbound in the macOS
+    /// firewall. The paths go in as arguments and are quoted by AppleScript itself. Blocking.
+    static func allowHelpersInFirewall() throws {
+        let paths = inboundHelpers.map(\.path)
+        guard let first = paths.first else { return }
+        let script = [
+            "on run argv",
+            "set fw to quoted form of \"\(firewallTool)\"",
+            "set cmd to \"\"",
+            "repeat with p in argv",
+            "set q to quoted form of (p as text)",
+            "set cmd to cmd & fw & \" --add \" & q & \" >/dev/null 2>&1; \" & fw & \" --unblockapp \" & q & \" >/dev/null 2>&1; \"",
+            "end repeat",
+            "do shell script cmd & \"true\" with prompt \"neXal needs to allow incoming connections in the macOS firewall so your other computers can use the AI model on this Mac.\" with administrator privileges",
+            "end run",
+        ]
+        try runAdminScript(script, argument: first, additionalArguments: Array(paths.dropFirst()))
+    }
+
     /// Output wording differs across macOS versions ("enabled"/"disabled",
     /// "is on"/"is off"); "disabled" does not contain "enabled".
     private static func isOn(_ text: String) -> Bool {

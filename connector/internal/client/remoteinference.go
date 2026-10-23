@@ -107,3 +107,27 @@ func (c *Client) CancelRemoteInference(ctx context.Context, hostID, taskID strin
 	}
 	return c.callLenient(ctx, "POST", p, nil, nil)
 }
+
+// InferenceGatewayState is the coordinator's answer to InferenceGateway.
+type InferenceGatewayState struct {
+	Open      bool   `json:"open"`
+	State     string `json:"state,omitempty"` // applied | pending | failed
+	Error     string `json:"error,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+	Ports     string `json:"ports,omitempty"` // "8001-8099"
+}
+
+// InferenceGateway is PUT .../inference-gateway. While this Mac serves an AI model, open=true starts or renews a
+// short lease that lets the neXal storage host connect to it on TCP 8001-8099; open=false ends it. A lease that
+// is not renewed runs out by itself, so a crashed or sleeping Mac does not leave the ports open.
+func (c *Client) InferenceGateway(ctx context.Context, hostID string, open bool) (*InferenceGatewayState, error) {
+	p, err := remoteInferencePath(hostID, "inference-gateway")
+	if err != nil {
+		return nil, err
+	}
+	var out InferenceGatewayState
+	if err := c.call(ctx, "PUT", p, map[string]bool{"open": open}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

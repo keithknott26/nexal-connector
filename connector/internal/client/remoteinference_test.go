@@ -129,3 +129,32 @@ func TestReportRemoteInferenceRetriesWithoutProgress(t *testing.T) {
 		t.Fatalf("bodies: %q", bodies)
 	}
 }
+
+func TestInferenceGatewayLease(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = append(got, r.Method+" "+r.URL.Path+" "+string(b))
+		w.Header().Set("content-type", "application/json")
+		if strings.Contains(string(b), "true") {
+			_, _ = w.Write([]byte(`{"open":true,"state":"applied","error":null,"expiresAt":"2026-10-23T12:00:00Z","ports":"8001-8099"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"open":false}`))
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := c.InferenceGateway(context.Background(), "host_1", true)
+	if err != nil || !st.Open || st.State != "applied" {
+		t.Fatalf("%+v %v", st, err)
+	}
+	if _, err := c.InferenceGateway(context.Background(), "host_1", false); err != nil {
+		t.Fatal(err)
+	}
+	if got[0] != `PUT /api/v2/hosts/host_1/inference-gateway {"open":true}` || got[1] != `PUT /api/v2/hosts/host_1/inference-gateway {"open":false}` {
+		t.Fatalf("%q", got)
+	}
+}

@@ -64,12 +64,13 @@ func (a *addrList) Set(v string) error { *a = append(*a, v); return nil }
 func inferenceServe(ctx context.Context, args []string) error {
 	var host *string
 	var port *int
-	var asJSON *bool
+	var asJSON, storageHost *bool
 	var also addrList
 	id, _, path, err := parseModelArgs("serve", args, true, func(f *flag.FlagSet) {
 		host = f.String("host", "127.0.0.1", "the IP address the model server binds (this Mac's neXal address to share with your other Macs)")
 		port = f.Int("port", inference.DefaultServePort, "TCP port")
 		f.Var(&also, "also-listen", "another IP address of this Mac to answer on, on the same port (repeatable): its neXal or LAN address; \"auto\" = all of them")
+		storageHost = f.Bool("storage-host", true, "while serving, let the neXal storage host reach this model (TCP 8001-8099, closed again when it stops)")
 		asJSON = f.Bool("json", false, "also print {\"event\":\"listening\",\"urls\":[...]} once every address answers: neXal first, then LAN, then loopback")
 	})
 	if err != nil {
@@ -131,6 +132,10 @@ func inferenceServe(ctx context.Context, args []string) error {
 	if *asJSON {
 		b, _ := json.Marshal(map[string]any{"event": "listening", "urls": urls})
 		writeLine(os.Stdout, "%s", b)
+	}
+	if *storageHost {
+		stop := storageHostLease(ctx, *path, os.Stdout)
+		defer stop()
 	}
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the model server stopped: %w", err)}

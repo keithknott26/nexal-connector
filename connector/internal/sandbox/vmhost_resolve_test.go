@@ -1,8 +1,11 @@
 package sandbox
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,5 +41,28 @@ func TestVMHostCandidatesIncludeBundleAndSupportDir(t *testing.T) {
 		if !ok {
 			t.Errorf("missing candidate %s", p)
 		}
+	}
+}
+
+func TestVZHypervisorStartRejectsBadIDAndMissingHost(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "nexal-vmhost")
+	h := NewVZHypervisor(missing, filepath.Join(dir, "run")).(*vzHypervisor)
+	if got := h.domain(); got != fmt.Sprintf("gui/%d", os.Getuid()) {
+		t.Fatalf("domain = %q", got)
+	}
+	if _, err := h.Start(context.Background(), Spec{SandboxID: "../evil"}); err == nil || !strings.Contains(err.Error(), "invalid sandbox id") {
+		t.Fatalf("bad id: %v", err)
+	}
+	_, err := h.Start(context.Background(), Spec{SandboxID: "sb1"})
+	if err == nil || !strings.Contains(err.Error(), "not installed") || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing host: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "run")); statErr == nil {
+		t.Fatal("run dir must not be created before the helper is found")
+	}
+	h.search = func() []string { return []string{filepath.Join(dir, "other")} }
+	if got := h.searched(); len(got) != 2 || got[0] != missing {
+		t.Fatalf("searched = %v", got)
 	}
 }

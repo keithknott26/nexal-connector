@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"context"
+	"strings"
+	"testing"
+)
 
 func TestSafeIORegistryParsing(t *testing.T) {
 	good := []byte("+ -o IOHIDSystem\n    \"HIDIdleTime\" = 600000000000\n")
@@ -42,5 +46,20 @@ func TestBoundedBufferRejectsOverflow(t *testing.T) {
 	}
 	if got := b.String(); got != "abcd" {
 		t.Fatalf("buffer changed after rejected write: %q", got)
+	}
+}
+
+func TestDiagnosticReturnsOutputAndScrubsFailures(t *testing.T) {
+	out, err := diagnostic(context.Background(), "/bin/echo", "hello")
+	if err != nil || strings.TrimSpace(string(out)) != "hello" {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	// A missing binary and a non-zero exit both collapse to the same generic
+	// error so no path or stderr detail leaks to callers.
+	for _, path := range []string{"/nonexistent/nexal-diagnostic", "/bin/false"} {
+		out, err := diagnostic(context.Background(), path)
+		if err == nil || err.Error() != "telemetry unavailable" || out != nil {
+			t.Errorf("%s: out=%q err=%v", path, out, err)
+		}
 	}
 }

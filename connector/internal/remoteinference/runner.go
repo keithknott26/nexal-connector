@@ -325,13 +325,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	serveStart := 0.9
 	r.reportP(ctx, t, "running", "serve", "Starting the model server (loading it into memory)", "", &serveStart)
 	sctx, cancel := context.WithCancel(ctx)
-<<<<<<< HEAD
 	cmd := r.command(sctx, "serve", t.ModelID, "--host", "127.0.0.1", "--port", strconv.Itoa(lport))
-=======
-	// The server binds loopback and also answers on the neXal address: a Mac cannot connect to its own neXal
-	// address, so loopback is how this Mac checks it answers (and how its own Test reaches it).
-	cmd := r.command(sctx, "serve", t.ModelID, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--also-listen", addr)
->>>>>>> ba42179 (inference: answer on loopback, the neXal address and the LAN)
 	var tail lineTail
 	cmd.Stdout, cmd.Stderr = &tail, &tail
 	if err := cmd.Start(); err != nil {
@@ -346,7 +340,6 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 	endpoint := fmt.Sprintf("http://%s:%d/v1", addr, port)
-	local := fmt.Sprintf("http://127.0.0.1:%d/v1", port)
 	deadline := time.Now().Add(r.ReadyAfter)
 	for {
 		select {
@@ -361,11 +354,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 			return
 		case <-time.After(2 * time.Second):
 		}
-<<<<<<< HEAD
 		ok, why := up(ctx, "http://"+local+"/v1")
-=======
-		ok, why := up(ctx, local)
->>>>>>> ba42179 (inference: answer on loopback, the neXal address and the LAN)
 		if ok {
 			break
 		}

@@ -708,7 +708,15 @@ final class AppModel: ObservableObject {
             if peer.pq != "protected", peer.pq != "rekeying", Self.mayRekey(last: lastRekeyAt) {
                 lastRekeyAt = Date()
                 activity = "Renewing quantum-safe protection…"
-                _ = try await invoke(.rekeyNetwork)
+                do { _ = try await invoke(.rekeyNetwork) }
+                catch let e where Self.serviceNeedsReinstall(e.localizedDescription) {
+                    // The service refuses to join ("update settings are disabled"): reinstall it with settings
+                    // changes allowed (one administrator prompt), then join again.
+                    AgentLog.note("secure networking service refused to rejoin; reinstalling it")
+                    activity = "Repairing the secure networking service…"
+                    try await Task.detached(priority: .userInitiated) { try NetworkService.install() }.value
+                    _ = try await invoke(.rejoinNetwork)
+                }
                 try? await Task.sleep(for: .seconds(8))
             }
             try await updateStatus()

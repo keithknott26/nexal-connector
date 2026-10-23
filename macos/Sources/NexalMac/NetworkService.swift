@@ -76,6 +76,9 @@ enum NetworkService {
         let helper = try validatedHelper()
         // The path goes in as an argument and is quoted by AppleScript itself,
         // so a space or quote in the app's location cannot become shell syntax.
+        // --disable-update-settings=false: the runtime saves that setting in /var/lib/netbird/service.json and
+        // keeps it across reinstalls; left on, every join (`up` with the management URL) is refused with
+        // "update settings are disabled", so a Refresh that restarts the network can never join again.
         // `service install` fails harmlessly if the service is already
         // registered but stopped; `service start` is what must succeed.
         let script = [
@@ -95,8 +98,8 @@ enum NetworkService {
             // firewall then blocks. Re-registering pins it to this bundle.
             "do shell script p & \" service stop >/dev/null 2>&1; \" "
                 + "& p & \" service uninstall >/dev/null 2>&1; \" "
-                + "& p & \" service install --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
-                + "& p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
+                + "& p & \" service install --service-env NB_LAZY_CONN=off --disable-update-settings=false >/dev/null 2>&1; \" "
+                + "& p & \" service reconfigure --service-env NB_LAZY_CONN=off --disable-update-settings=false >/dev/null 2>&1; \" "
                 + "& \"\(wakeForNetworkCommand)\" "
                 + "& firewallCommands "
                 + "& p & \" service start\" "
@@ -357,7 +360,7 @@ enum NetworkService {
         if firewall { command += " & " + firewallCommandsExpression }
         if wake { command += " & \"\(wakeForNetworkCommand)\"" }
         if lazy {
-            command += " & p & \" service reconfigure --service-env NB_LAZY_CONN=off >/dev/null 2>&1; \" "
+            command += " & p & \" service reconfigure --service-env NB_LAZY_CONN=off --disable-update-settings=false >/dev/null 2>&1; \" "
                 + "& p & \" service start >/dev/null 2>&1; \""
         }
         let what = [firewall ? "allow connections from your other computers in the macOS firewall (turning off Block all incoming connections and stealth mode)" : nil,

@@ -220,3 +220,15 @@ func TestNewImageStoreRedirectPolicy(t *testing.T) {
 		t.Error("5th redirect must be refused")
 	}
 }
+
+func TestDefaultStateDirsUnderApplicationSupport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	base := filepath.Join(home, "Library", "Application Support", "Nexal")
+	if got, err := DefaultImageDir(); err != nil || got != filepath.Join(base, "images") {
+		t.Fatalf("DefaultImageDir = %q, %v", got, err)
+	}
+	if got, err := DefaultDevStateDir(); err != nil || got != filepath.Join(base, "devcontainers") {
+		t.Fatalf("DefaultDevStateDir = %q, %v", got, err)
+	}
+}

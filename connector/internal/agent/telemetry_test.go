@@ -31,3 +31,16 @@ func TestConservativeMemoryParsing(t *testing.T) {
 		t.Fatal("missing telemetry accepted")
 	}
 }
+
+func TestBoundedBufferRejectsOverflow(t *testing.T) {
+	b := &boundedBuffer{max: 4}
+	if n, err := b.Write([]byte("abcd")); err != nil || n != 4 {
+		t.Fatalf("write at limit: %d %v", n, err)
+	}
+	if n, err := b.Write([]byte("e")); err == nil || n != 0 {
+		t.Fatalf("write past limit: %d %v", n, err)
+	}
+	if got := b.String(); got != "abcd" {
+		t.Fatalf("buffer changed after rejected write: %q", got)
+	}
+}

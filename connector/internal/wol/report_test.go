@@ -88,6 +88,20 @@ func TestPrefixKeysCapped(t *testing.T) {
 	}
 }
 
+func TestPrefixKeysDedupeAndOrder(t *testing.T) {
+	a := PrefixKeys([]string{"192.168.1.0/24", "10.0.0.0/8", "192.168.1.0/24"})
+	b := PrefixKeys([]string{"10.0.0.0/8", "192.168.1.0/24"})
+	if len(a) != 2 || fmt.Sprint(a) != fmt.Sprint(b) {
+		t.Fatalf("duplicates/order changed keys: %v vs %v", a, b)
+	}
+	if got := PrefixKeys(nil); got == nil || len(got) != 0 {
+		t.Fatalf("PrefixKeys(nil) = %#v, want empty non-nil slice", got)
+	}
+	if k := PrefixKeys([]string{"10.0.0.0/8"}); len(k[0]) != 64 {
+		t.Fatalf("key %q is not a sha256 hex digest", k[0])
+	}
+}
+
 func TestParseOversizedInput(t *testing.T) {
 	big := bytes.Repeat([]byte(" womp 1\n"), 40000)
 	if got := ParseWomp(big); got != WakeUnknown {

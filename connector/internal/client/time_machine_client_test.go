@@ -93,3 +93,52 @@ func TestTimeMachineRejectsInvalidHostID(t *testing.T) {
 		t.Error("usage accepted invalid host id")
 	}
 }
+
+func TestTimeMachineSMBCredentialValidatesAgainstExpectedDestination(t *testing.T) {
+	dest := timemachine.Destination{Protocol: "smb", Host: "100.64.0.9", Port: 445, Share: "tm0123456789abcdef0123", Username: "tm0123456789abcdef0123"}
+	password := "abcdefghijklmnopqrstuvwxyz012345"
+	respond := dest
+	pass := password
+	var hits int
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != "POST /api/v2/devices/host1/time-machine/credentials" {
+			http.NotFound(w, r)
+			return
+		}
+		hits++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"protocol": respond.Protocol, "host": respond.Host, "port": respond.Port,
+			"share": respond.Share, "username": respond.Username, "password": pass,
+			"url": "smb://leak:" + pass + "@100.64.0.9/tm0123456789abcdef0123",
+		})
+	}))
+	defer s.Close()
+	c, err := New(s.URL, "host-token-123456", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	cred, err := c.TimeMachineSMBCredential(ctx, "host1", dest)
+	if err != nil || cred.Password != password || cred.Destination != dest {
+		t.Fatalf("matching credential: %+v %v", cred, err)
+	}
+
+	respond.Host = "100.64.0.10"
+	cred, err = c.TimeMachineSMBCredential(ctx, "host1", dest)
+	if err == nil || cred.Password != "" || cred.URL != "" {
+		t.Fatalf("mismatched destination must fail with no secret: %+v %v", cred, err)
+	}
+
+	respond = dest
+	pass = "short"
+	cred, err = c.TimeMachineSMBCredential(ctx, "host1", dest)
+	if err == nil || cred.Password != "" || cred.URL != "" {
+		t.Fatalf("malformed password must fail with no secret: %+v %v", cred, err)
+	}
+
+	before := hits
+	if _, err := c.TimeMachineSMBCredential(ctx, "bad/id", dest); err == nil || hits != before {
+		t.Fatalf("invalid host id must be rejected before any request: %v", err)
+	}
+}

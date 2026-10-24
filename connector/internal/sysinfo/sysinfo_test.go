@@ -304,3 +304,22 @@ func TestLocalRankUnmapsIPv4AndRejectsPublic(t *testing.T) {
 		}
 	}
 }
+
+func TestNonDarwinStaticAndThermalSkipExternalCommands(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS shells out to sysctl/pmset by design")
+	}
+	c := &Collector{
+		Run: func(context.Context, string, ...string) ([]byte, error) {
+			t.Fatal("non-darwin hosts must not run macOS tools")
+			return nil, nil
+		},
+	}
+	info := c.readStatic(context.Background())
+	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() || info.Chip != "" {
+		t.Fatalf("unexpected static info: %+v", info)
+	}
+	if got := c.thermal(context.Background()); got != "" {
+		t.Fatalf("thermal = %q, want empty off macOS", got)
+	}
+}

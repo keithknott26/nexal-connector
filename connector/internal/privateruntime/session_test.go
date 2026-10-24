@@ -263,3 +263,31 @@ func TestNetworkReservationRevocationStopsRuntimeBeforeRelease(t *testing.T) {
 		t.Fatal("reservation or session leaked")
 	}
 }
+
+func TestVerifyRejectsMalformedEnvelopeAndAncestorFiles(t *testing.T) {
+	good := file([]byte("hello"))
+	valid := envelope(t, []File{good})
+	for name, mutate := range map[string]func(*Envelope){
+		"payload not base64":    func(e *Envelope) { e.Payload = "!!!" },
+		"payload too large":     func(e *Envelope) { e.Payload = base64.StdEncoding.EncodeToString(make([]byte, 40*1024+1)) },
+		"public key not base64": func(e *Envelope) { e.PublicKey = "!!!" },
+		"public key wrong size": func(e *Envelope) { e.PublicKey = base64.StdEncoding.EncodeToString([]byte("short")) },
+		"signature not base64":  func(e *Envelope) { e.Signature = "!!!" },
+	} {
+		e := valid
+		mutate(&e)
+		if _, err := Verify(e); err != ErrClosed {
+			t.Fatalf("%s: got %v, want ErrClosed", name, err)
+		}
+	}
+	// A file that is an ancestor directory of another file must be rejected,
+	// whichever order the manifest lists them in.
+	child := good
+	child.Path = "runtime/child"
+	if _, err := Verify(envelope(t, []File{good, child})); err != ErrClosed {
+		t.Fatalf("child listed after ancestor: got %v", err)
+	}
+	if _, err := Verify(envelope(t, []File{child, good})); err != ErrClosed {
+		t.Fatalf("child listed before ancestor: got %v", err)
+	}
+}

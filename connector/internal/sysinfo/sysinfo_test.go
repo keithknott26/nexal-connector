@@ -81,6 +81,32 @@ func TestParseBattery(t *testing.T) {
 	}
 }
 
+func TestParseBatteryEdgeCases(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		percent int
+		state   string
+	}{
+		{"line without tab is skipped", "Now drawing from 'Battery Power'\n -InternalBattery-0 85%; discharging\n", 0, ""},
+		{"non-numeric percent", "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t(no estimate)%; discharging\n", 0, ""},
+		{"percent above 100", "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t101%; discharging\n", 0, ""},
+		{"negative percent", "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t-5%; discharging\n", 0, ""},
+		{"missing state on AC", "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t50%\n", 50, "ac"},
+		{"missing state on battery", "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t50%\n", 50, "discharging"},
+		{"unknown state on AC", "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t80%; finishing charge; 0:10 remaining\n", 80, "ac"},
+		{"charging is kept", "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t42%; charging; 1:00 remaining\n", 42, "charging"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, s := parseBattery([]byte(tc.in))
+			if p != tc.percent || s != tc.state {
+				t.Fatalf("got %d %q, want %d %q", p, s, tc.percent, tc.state)
+			}
+		})
+	}
+}
+
 func TestPickLANAddressSkipsTunnelsAndPublicAddresses(t *testing.T) {
 	ifaces := []net.Interface{
 		{Name: "lo0", Flags: net.FlagUp | net.FlagLoopback},

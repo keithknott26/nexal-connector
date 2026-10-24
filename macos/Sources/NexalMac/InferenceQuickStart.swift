@@ -66,6 +66,7 @@ final class InferenceQuickStart: ObservableObject {
 
     nonisolated static func label(of url: String) -> String {
         guard let host = URL(string: url)?.host else { return "Address" }
+        if host.hasSuffix(".mesh.nexal.systems") { return "neXal name" }
         let p = host.split(separator: ".").compactMap { Int($0) }
         if host == "127.0.0.1" { return "This Mac" }
         if p.count == 4 && p[0] == 100 && (64...127).contains(p[1]) { return "neXal network" }

@@ -8,6 +8,7 @@ enum RemoteInferenceID {
     /// What kind of address an endpoint is, for the label beside it.
     static func kind(_ s: String) -> String {
         guard let host = URL(string: s)?.host else { return "" }
+        if host.hasSuffix(".mesh.nexal.systems") { return "neXal name" }
         let p = host.split(separator: ".").compactMap { Int($0) }
         guard p.count == 4 else { return "" }
         if host == "127.0.0.1" { return "That Mac only" }
@@ -16,6 +17,9 @@ enum RemoteInferenceID {
     }
     static func isMeshEndpoint(_ s: String) -> Bool {
         guard let u = URL(string: s), u.scheme == "http", u.user == nil, u.query == nil, let host = u.host, u.port != nil else { return false }
+        if host.hasSuffix(".mesh.nexal.systems") {  // a computer's network name, <device>.<slug>.mesh.nexal.systems
+            return host.split(separator: ".").allSatisfy { !$0.isEmpty && $0.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "-") } }
+        }
         let p = host.split(separator: ".").compactMap { Int($0) }
         guard p.count == 4, p.allSatisfy({ (0...255).contains($0) }) else { return false }
         return host == "127.0.0.1" || (p[0] == 100 && (64...127).contains(p[1]))

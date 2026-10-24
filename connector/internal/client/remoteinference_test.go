@@ -131,13 +131,14 @@ func TestReportRemoteInferenceRetriesWithoutProgress(t *testing.T) {
 }
 
 func TestInferenceGatewayLease(t *testing.T) {
-	var got []string
+	var got, queries []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		got = append(got, r.Method+" "+r.URL.Path+" "+string(b))
+		queries = append(queries, r.URL.RawQuery)
 		w.Header().Set("content-type", "application/json")
 		if strings.Contains(string(b), "true") {
-			_, _ = w.Write([]byte(`{"open":true,"state":"applied","error":null,"expiresAt":"2026-10-23T12:00:00Z","ports":"8001-8099"}`))
+			_, _ = w.Write([]byte(`{"open":true,"state":"applied","error":null,"expiresAt":"2026-10-23T12:00:00Z","ports":"8001-8099","dnsName":"mac-mini-m4.e8gas.mesh.nexal.systems","future":1}`))
 			return
 		}
 		_, _ = w.Write([]byte(`{"open":false}`))
@@ -148,13 +149,13 @@ func TestInferenceGatewayLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := c.InferenceGateway(context.Background(), "host_1", true)
-	if err != nil || !st.Open || st.State != "applied" {
+	if err != nil || !st.Open || st.State != "applied" || st.DNSName != "mac-mini-m4.e8gas.mesh.nexal.systems" {
 		t.Fatalf("%+v %v", st, err)
 	}
 	if _, err := c.InferenceGateway(context.Background(), "host_1", false); err != nil {
 		t.Fatal(err)
 	}
-	if got[0] != `PUT /api/v2/hosts/host_1/inference-gateway {"open":true}` || got[1] != `PUT /api/v2/hosts/host_1/inference-gateway {"open":false}` {
+	if got[0] != `PUT /api/v2/hosts/host_1/inference-gateway {"open":true}` || got[1] != `PUT /api/v2/hosts/host_1/inference-gateway {"open":false}` || queries[0] != "name=1" {
 		t.Fatalf("%q", got)
 	}
 }

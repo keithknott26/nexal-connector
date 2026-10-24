@@ -115,18 +115,21 @@ type InferenceGatewayState struct {
 	Error     string `json:"error,omitempty"`
 	ExpiresAt string `json:"expiresAt,omitempty"`
 	Ports     string `json:"ports,omitempty"` // "8001-8099"
+	// DNSName is this Mac's network name, <device>.<slug>.mesh.nexal.systems (asked for with ?name=1).
+	DNSName string `json:"dnsName,omitempty"`
 }
 
 // InferenceGateway is PUT .../inference-gateway. While this Mac serves an AI model, open=true starts or renews a
 // short lease that lets the neXal storage host connect to it on TCP 8001-8099; open=false ends it. A lease that
 // is not renewed runs out by itself, so a crashed or sleeping Mac does not leave the ports open.
 func (c *Client) InferenceGateway(ctx context.Context, hostID string, open bool) (*InferenceGatewayState, error) {
-	p, err := remoteInferencePath(hostID, "inference-gateway")
+	p, err := remoteInferencePath(hostID, "inference-gateway?name=1")
 	if err != nil {
 		return nil, err
 	}
 	var out InferenceGatewayState
-	if err := c.call(ctx, "PUT", p, map[string]bool{"open": open}, &out); err != nil {
+	// Lenient: a coordinator newer than this connector may add fields (HARDENING-PLAN §43).
+	if err := c.callLenient(ctx, "PUT", p, map[string]bool{"open": open}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

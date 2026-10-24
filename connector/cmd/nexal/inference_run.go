@@ -122,7 +122,19 @@ func inferenceServe(ctx context.Context, args []string) error {
 		opened = append(opened, a)
 	}
 	writeLine(os.Stdout, "Serving %s on http://%s:%d/v1 (OpenAI-compatible; no sign-in, so only share it on a network you trust)", id, *host, *port)
+	// The storage-host lease comes first: its answer carries this Mac's network name, listed before the addresses.
+	dnsName := ""
+	if *storageHost {
+		stop, name := storageHostLease(ctx, *path, os.Stdout)
+		defer stop()
+		dnsName = name
+	}
 	urls := []string{}
+	if dnsName != "" && meshOpened(opened) {
+		u := "http://" + net.JoinHostPort(dnsName, strconv.Itoa(*port)) + "/v1"
+		urls = append(urls, u)
+		writeLine(os.Stdout, "Also answering on %s", u)
+	}
 	for _, a := range opened {
 		u := "http://" + net.JoinHostPort(a, strconv.Itoa(*port)) + "/v1"
 		urls = append(urls, u)
@@ -132,10 +144,6 @@ func inferenceServe(ctx context.Context, args []string) error {
 	if *asJSON {
 		b, _ := json.Marshal(map[string]any{"event": "listening", "urls": urls})
 		writeLine(os.Stdout, "%s", b)
-	}
-	if *storageHost {
-		stop := storageHostLease(ctx, *path, os.Stdout)
-		defer stop()
 	}
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the model server stopped: %w", err)}
@@ -191,4 +199,16 @@ func inferenceRemoteTest(ctx context.Context, args []string) error {
 	}
 	writeLine(os.Stdout, "  capability:   %s", ok)
 	return nil
+}
+
+// meshOpened reports whether one of the addresses answering is this Mac's neXal (100.64.0.0/10) address: the
+// network name resolves to it, so the name is only listed when that address really answers.
+func meshOpened(addrs []string) bool {
+	_, mesh, _ := net.ParseCIDR("100.64.0.0/10")
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil && mesh.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

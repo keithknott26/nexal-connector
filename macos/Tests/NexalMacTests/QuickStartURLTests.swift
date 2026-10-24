@@ -9,6 +9,15 @@ final class QuickStartURLTests: XCTestCase {
                        ["http://100.86.56.136:8001/v1", "http://192.168.68.58:8001/v1", "http://127.0.0.1:8001/v1"])
     }
 
+    func testNetworkNameIsListedFirstAndLabelled() {
+        let line = Data(#"{"event":"listening","urls":["http://mac-mini-m4.e8gas.mesh.nexal.systems:8002/v1","http://100.86.56.136:8002/v1","http://192.168.68.56:8002/v1","http://127.0.0.1:8002/v1"]}"#.utf8)
+        XCTAssertEqual(InferenceQuickStart.listening(line)?.map(\.label), ["neXal name", "neXal network", "LAN", "This Mac"])
+        XCTAssertEqual(RemoteInferenceID.kind("http://mac-mini-m4.e8gas.mesh.nexal.systems:8002/v1"), "neXal name")
+        XCTAssertTrue(RemoteInferenceID.isMeshEndpoint("http://mac-mini-m4.e8gas.mesh.nexal.systems:8002/v1"))
+        XCTAssertFalse(RemoteInferenceID.isMeshEndpoint("http://evil.example.com:8002/v1"))
+        XCTAssertFalse(RemoteInferenceID.isMeshEndpoint("http://mac-mini-m4.e8gas.mesh.nexal.systems/v1"))  // no port
+    }
+
     func testSkipsUnknownOrInvalidAddresses() {
         XCTAssertTrue(InferenceQuickStart.extraAddresses(mesh: nil, lan: "fe80::1").isEmpty)
         XCTAssertTrue(InferenceQuickStart.extraAddresses(mesh: "999.1.1.1", lan: "127.0.0.1").isEmpty)

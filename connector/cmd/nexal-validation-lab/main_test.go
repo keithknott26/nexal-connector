@@ -55,3 +55,14 @@ func TestRunRejectsSymlinkConfig(t *testing.T) {
 	}
 	wantErr(t, runWith(t, link), "private regular file")
 }
+
+func TestRunRejectsInvalidCoordinator(t *testing.T) {
+	wantErr(t, runWith(t, writeCfg(t, `{"coordinator":"http://example.invalid","hostId":"host-1","token":"t"}`, 0o600)), "invalid coordinator")
+	wantErr(t, runWith(t, writeCfg(t, `{"coordinator":"","hostId":"host-1","token":"t"}`, 0o600)), "invalid coordinator")
+	wantErr(t, runWith(t, writeCfg(t, `{"coordinator":"https://example.invalid","hostId":"host-1","token":"bad token"}`, 0o600)), "invalid coordinator")
+}
+
+func TestRunReportsIncompleteValidationWhenCoordinatorUnreachable(t *testing.T) {
+	// Port 1 on loopback refuses connections immediately, so ValidationTick fails fast.
+	wantErr(t, runWith(t, writeCfg(t, `{"coordinator":"https://127.0.0.1:1","hostId":"host-1","token":"t"}`, 0o600)), "validation did not complete")
+}

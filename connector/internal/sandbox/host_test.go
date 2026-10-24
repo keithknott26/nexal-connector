@@ -16,6 +16,25 @@ func TestParseDFFree(t *testing.T) {
 	}
 }
 
+func TestParseDFFreeMalformed(t *testing.T) {
+	for name, out := range map[string]string{
+		"empty":          "",
+		"header only":    "Filesystem 1024-blocks Used Available Capacity Mounted on\n",
+		"too few fields": "Filesystem 1024-blocks Used Available\n/dev/disk3s5 1 2\n",
+		"non-numeric":    "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1 2 lots 5% /\n",
+		"negative":       "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1 2 -4 5% /\n",
+	} {
+		if _, err := ParseDFFree(out); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
+	}
+	// Only the last line is read, and trailing blank lines are tolerated.
+	got, err := ParseDFFree("hdr\n\n/dev/x 10 5 7 40% /\n\n")
+	if err != nil || got != 7<<10 {
+		t.Fatalf("got %d err %v", got, err)
+	}
+}
+
 func TestParseOnBattery(t *testing.T) {
 	if !ParseOnBattery("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1) 80%; discharging") {
 		t.Fatal("battery not detected")

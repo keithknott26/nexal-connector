@@ -291,3 +291,52 @@ func TestVerifyRejectsMalformedEnvelopeAndAncestorFiles(t *testing.T) {
 		t.Fatalf("child listed before ancestor: got %v", err)
 	}
 }
+
+func TestRunLoopRefusesUnsafeConfiguration(t *testing.T) {
+	_, base := fixture(t)
+	loose := t.TempDir()
+	if err := os.Chmod(loose, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*Manager){
+		"nil api":          func(m *Manager) { m.API = nil },
+		"unsafe host id":   func(m *Manager) { m.HostID = "../host" },
+		"nil connected":    func(m *Manager) { m.Connected = nil },
+		"relative root":    func(m *Manager) { m.Root = "relative/root" },
+		"group/world root": func(m *Manager) { m.Root = loose },
+	}
+	for name, mutate := range cases {
+		m := base
+		mutate(&m)
+		if err := m.RunLoop(context.Background()); err != ErrClosed {
+			t.Fatalf("%s: got %v, want ErrClosed", name, err)
+		}
+	}
+}
+
+func TestRunLoopRemovesAbandonedSessionDirectories(t *testing.T) {
+	f, m := fixture(t)
+	m.Connected = func() bool { return false }
+	stale := filepath.Join(m.Root, "session-abandoned")
+	if err := os.MkdirAll(filepath.Join(stale, "payload"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(m.Root, "unrelated")
+	if err := os.Mkdir(keep, 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := m.RunLoop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("abandoned session dir survived: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("unrelated dir removed: %v", err)
+	}
+	if f.opens != 0 {
+		t.Fatal("offline execution")
+	}
+}

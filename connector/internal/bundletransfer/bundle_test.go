@@ -289,3 +289,29 @@ func TestInstallAndReadRejectUnsafeLocations(t *testing.T) {
 		t.Fatalf("invalid bundle left files behind: %v", entries)
 	}
 }
+func TestSealRejectsBadBindingKeyAndOversizeBundle(t *testing.T) {
+	b, tx, key := fixture(t)
+	fp := Fingerprint(key.EncapsulationKey().Bytes())
+
+	same := tx
+	same.ReceiverHostID = same.DonorHostID
+	if _, err := Seal(same, fp, b); err == nil {
+		t.Fatal("donor and receiver on the same host accepted")
+	}
+
+	short := tx
+	short.PublicKey = base64.StdEncoding.EncodeToString([]byte("not an ml-kem key"))
+	if _, err := Seal(short, Fingerprint([]byte("not an ml-kem key")), b); err == nil ||
+		!strings.Contains(err.Error(), "invalid recipient encryption key") {
+		t.Fatalf("malformed recipient key = %v", err)
+	}
+
+	big := Bundle{}
+	for name, data := range b {
+		big[name] = data
+	}
+	big["extra.bin"] = make([]byte, MaxPlaintext)
+	if _, err := Seal(tx, fp, big); err == nil {
+		t.Fatal("oversize bundle accepted")
+	}
+}

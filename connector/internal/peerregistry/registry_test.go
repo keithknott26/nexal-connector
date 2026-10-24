@@ -337,3 +337,31 @@ func TestSaveRefusesANilRegistry(t *testing.T) {
 		t.Fatalf("Save(nil) left a file behind: %v", err)
 	}
 }
+
+func TestLoadReportsUnreadableRegistryInsteadOfStartingEmpty(t *testing.T) {
+	// A path that exists but cannot be read as a file must not be mistaken for
+	// "never enrolled": an empty registry would re-admit a revoked machine.
+	path := filepath.Join(privateDir(t), "peers.json")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	r, err := Load(path, fixedClock())
+	if err == nil {
+		t.Fatal("Load() = nil error, want a read failure")
+	}
+	if r != nil {
+		t.Fatal("Load() returned a registry alongside an error")
+	}
+}
+
+func TestSaveReportsWriteFailure(t *testing.T) {
+	// The parent of the target is a regular file, so the atomic write cannot
+	// succeed and Save must say so rather than pretend membership was persisted.
+	blocker := filepath.Join(privateDir(t), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := Save(filepath.Join(blocker, "peers.json"), pool.NewRegistry(fixedClock())); err == nil {
+		t.Fatal("Save() = nil error, want a write failure")
+	}
+}

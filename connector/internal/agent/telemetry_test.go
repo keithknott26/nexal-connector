@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,5 +62,21 @@ func TestDiagnosticReturnsOutputAndScrubsFailures(t *testing.T) {
 		if err == nil || err.Error() != "telemetry unavailable" || out != nil {
 			t.Errorf("%s: out=%q err=%v", path, out, err)
 		}
+	}
+}
+
+func TestMacProbeOffDarwinAssumesOwnerActive(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("probe shells out to macOS tools on darwin")
+	}
+	got := MacProbe(300)(context.Background())
+	if !got.OwnerActive || got.Known || got.TotalMemoryBytes != 0 || got.AvailableMemoryBytes != 0 {
+		t.Fatalf("off-darwin probe must report an unknown, active owner: %+v", got)
+	}
+}
+
+func TestParseFreeMemoryRejectsOversizedInput(t *testing.T) {
+	if _, err := ParseFreeMemory(make([]byte, 256<<10+1)); err == nil {
+		t.Fatal("oversized telemetry accepted")
 	}
 }

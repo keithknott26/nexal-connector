@@ -47,6 +47,16 @@ func TestCLI(t *testing.T) {
 			t.Fatalf("exit %d, want 2", code)
 		}
 	})
+	t.Run("missing rules-version", func(t *testing.T) {
+		if _, _, code := run(t, bin, "", "-source-id", "capture_1"); code != 2 {
+			t.Fatalf("exit %d, want 2", code)
+		}
+	})
+	t.Run("positional arguments rejected", func(t *testing.T) {
+		if _, _, code := run(t, bin, "", append(flags, "extra.json")...); code != 2 {
+			t.Fatalf("exit %d, want 2", code)
+		}
+	})
 	t.Run("alerts emitted and non-alerts skipped", func(t *testing.T) {
 		out, _, code := run(t, bin, `{"event_type":"dns"}`+"\n"+alert+"\n", flags...)
 		if code != 0 {

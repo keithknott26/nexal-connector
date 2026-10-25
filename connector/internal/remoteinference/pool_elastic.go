@@ -449,7 +449,7 @@ func (l *leader) form(ctx context.Context, ring, lanRing []string) {
 			l.ringGone.ok()
 			l.fwd.SetUpstream(hostPort, "")
 			old.stop() // its memory is needed by the shared model
-			l.say(poolStatus{state: "ready", step: "pool", detail: fmt.Sprintf("Serving %s with %d Macs sharing the load.", t.ModelID, t.PoolSize), endpoint: l.endpoint, endpoints: l.fwd.Endpoints(), progress: 1, ring: l.status.ring})
+			l.say(poolStatus{state: "ready", step: "pool", detail: fmt.Sprintf("Serving %s with %d Macs sharing the load%s.", t.ModelID, t.PoolSize, overLAN(plan)), endpoint: l.endpoint, endpoints: l.fwd.Endpoints(), progress: 1, ring: l.status.ring})
 			return
 		}
 		if time.Now().After(deadline) {

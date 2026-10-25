@@ -437,3 +437,32 @@ func TestListSortedAndUsageCountsOnlyActive(t *testing.T) {
 		t.Fatalf("usage must count only active sandboxes: %+v", u)
 	}
 }
+
+func TestRemoveBoxFilesErr(t *testing.T) {
+	dev := &fakeDev{}
+	m := newTestManager(t, &fakeHyp{}, dev, nil)
+	if err := m.removeBoxFilesErr("../escape"); err == nil || len(dev.deleted) != 0 {
+		t.Fatalf("invalid id must be rejected before any cleanup: err=%v deleted=%v", err, dev.deleted)
+	}
+	if err := os.MkdirAll(m.boxDir("sb1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.diskPath("sb1"), []byte("disk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	put(m, &record{ID: "sb1", Workspace: "ws1"})
+	if err := m.removeBoxFilesErr("sb1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(m.boxDir("sb1")); !os.IsNotExist(err) {
+		t.Fatalf("box dir should be gone: %v", err)
+	}
+	if len(dev.deleted) != 1 || dev.deleted[0] != "ws1" {
+		t.Fatalf("dev workspace should be deleted: %v", dev.deleted)
+	}
+	// no workspace recorded: only files are removed, Dev is untouched
+	put(m, &record{ID: "sb2"})
+	if err := m.removeBoxFilesErr("sb2"); err != nil || len(dev.deleted) != 1 {
+		t.Fatalf("err=%v deleted=%v", err, dev.deleted)
+	}
+}

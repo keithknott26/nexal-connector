@@ -20,6 +20,13 @@ var gatewayRenew = 4 * time.Minute
 // It also returns this Mac's network name (<device>.<slug>.mesh.nexal.systems, "" when there is none yet), from
 // the first answer. Best effort: a Mac that is not enrolled, or a coordinator that does not offer it, just serves.
 func storageHostLease(ctx context.Context, configPath string, out io.Writer) (stop func(), dnsName string) {
+	return holdStorageHostLease(ctx, configPath, out, true)
+}
+
+// holdStorageHostLease is storageHostLease; with closeOnStop false, stop only ends the renewals and the lease runs
+// out by itself (10 minutes). A pool hands its address from one helper to the next (alone, then sharing), and the
+// helper that ends must not close the lease the next one has just renewed.
+func holdStorageHostLease(ctx context.Context, configPath string, out io.Writer, closeOnStop bool) (stop func(), dnsName string) {
 	noop := func() {}
 	c, err := config.Load(configPath)
 	if err != nil || c.HostID == "" {
@@ -75,6 +82,9 @@ func storageHostLease(ctx context.Context, configPath string, out io.Writer) (st
 	return func() {
 		cancel()
 		<-done
+		if !closeOnStop {
+			return
+		}
 		cctx, ccancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer ccancel()
 		_, _ = api.InferenceGateway(cctx, c.HostID, false)

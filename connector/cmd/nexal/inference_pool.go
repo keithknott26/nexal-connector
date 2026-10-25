@@ -109,9 +109,10 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 		writeLine(os.Stdout, "Pool rank %d working for rank 0 on %s", *rank, id)
 	}
 	// Like `inference serve`: the Mac that answers holds the storage-host lease, which also gives the storage
-	// host this Mac's network name. Without it a pool was unreachable (and unresolvable) from there.
+	// host this Mac's network name. Without it a pool was unreachable (and unresolvable) from there. It is not
+	// closed on exit: the next helper of the same pool (alone -> sharing) starts before this one stops.
 	if *storageHost && (*solo || *rank == 0) {
-		stop, _ := storageHostLease(ctx, *path, os.Stdout)
+		stop, _ := holdStorageHostLease(ctx, *path, os.Stdout, false)
 		defer stop()
 	}
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {

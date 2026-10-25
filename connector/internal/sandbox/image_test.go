@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func goodImage() Image {
@@ -230,5 +231,32 @@ func TestDefaultStateDirsUnderApplicationSupport(t *testing.T) {
 	}
 	if got, err := DefaultDevStateDir(); err != nil || got != filepath.Join(base, "devcontainers") {
 		t.Fatalf("DefaultDevStateDir = %q, %v", got, err)
+	}
+}
+
+func TestTrimOutput(t *testing.T) {
+	if got := trimOutput([]byte("  cp: boom \n")); got != "cp: boom" {
+		t.Fatalf("trimOutput whitespace = %q", got)
+	}
+	// Truncation at 300 bytes must not leave a split multi-byte rune behind.
+	long := strings.Repeat("a", 299) + "é" // é straddles the 300-byte cut
+	got := trimOutput([]byte(long))
+	if !utf8.ValidString(got) {
+		t.Fatalf("trimOutput produced invalid UTF-8: %q", got)
+	}
+	if len(got) != 299 {
+		t.Fatalf("trimOutput len = %d, want 299", len(got))
+	}
+}
+
+func TestCloneDiskFailsWithoutFallbackCopy(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "disk.img")
+	err := CloneDisk(context.Background(), filepath.Join(dir, "missing-base.img"), dst, 1)
+	if err == nil || !strings.Contains(err.Error(), "apfs clone failed") {
+		t.Fatalf("CloneDisk with missing base = %v, want apfs clone failure", err)
+	}
+	if _, statErr := os.Stat(dst); statErr == nil {
+		t.Fatal("CloneDisk must not leave a destination disk behind on failure")
 	}
 }

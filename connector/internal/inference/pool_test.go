@@ -158,3 +158,18 @@ func TestServersDisableMPI(t *testing.T) {
 		}
 	}
 }
+
+func TestPoolPackagesPinsExactVersions(t *testing.T) {
+	want := []string{"mlx==" + PoolMLXVersion, "mlx-lm==" + PoolMLXLMVersion, "transformers==" + PoolTransformersVersion}
+	got := PoolPackages()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("PoolPackages = %v, want %v", got, want)
+	}
+}
+
+func TestPoolPythonLivesInVenv(t *testing.T) {
+	d := t.TempDir()
+	if got, want := PoolPython(d), filepath.Join(d, "venv-pool", "bin", "python3"); got != want {
+		t.Fatalf("PoolPython = %q, want %q", got, want)
+	}
+}

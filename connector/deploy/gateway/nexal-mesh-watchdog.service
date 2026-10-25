@@ -1,0 +1,8 @@
+[Unit]
+Description=neXal mesh watchdog: rebuild NetBird sessions that stop carrying traffic
+After=netbird.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/lib/nexal/nexal-mesh-watchdog.py
+Nice=10

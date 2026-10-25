@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -62,5 +63,62 @@ func TestRingRelayAcceptsOnlyThePool(t *testing.T) {
 	}
 	if got := try(map[string]bool{"100.86.0.9": true}); got != "" {
 		t.Fatalf("stranger got %q", got)
+	}
+}
+
+func TestRingLANAddress(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken := l.Addr().(*net.TCPAddr).Port
+	defer l.Close()
+	f, _ := net.Listen("tcp", "127.0.0.1:0")
+	free := f.Addr().(*net.TCPAddr).Port
+	f.Close()
+
+	r := &Runner{LAN: func() []string { return []string{"not-an-ip", "127.0.0.1"} }}
+	if got, want := r.ringLAN("100.86.0.1", free), net.JoinHostPort("127.0.0.1", strconv.Itoa(free)); got != want {
+		t.Fatalf("free port: got %q, want %q", got, want)
+	}
+	if got := r.ringLAN("100.86.0.1", taken); got != "" {
+		t.Fatalf("port in use on the LAN: got %q, want none", got)
+	}
+	if got := r.ringLAN("127.0.0.1", free); got != "" {
+		t.Fatalf("loopback neXal address: got %q, want none", got)
+	}
+	if got := r.ringLAN("garbage", free); got != "" {
+		t.Fatalf("unparseable neXal address: got %q, want none", got)
+	}
+	r.NoLAN = true
+	if got := r.ringLAN("100.86.0.1", free); got != "" {
+		t.Fatalf("NoLAN: got %q, want none", got)
+	}
+}
+
+func TestPlanRingKeepsCoordinatorRingWithoutLAN(t *testing.T) {
+	r := &Runner{}
+	ring := []string{"100.86.0.1:8010", "100.86.0.2:8011"}
+	for _, tc := range []struct {
+		name string
+		addr string
+		rank int
+	}{
+		{"loopback address", "127.0.0.1", 0},
+		{"unparseable address", "nope", 1},
+		{"rank outside ring", "100.86.0.1", 5},
+	} {
+		plan, err := r.planRing(context.Background(), ring, []string{"192.168.1.10:8010"}, tc.rank, 8010, tc.addr)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if strings.Join(plan.hosts, ",") != strings.Join(ring, ",") || len(plan.relays) != 0 {
+			t.Fatalf("%s: hosts %v relays %d", tc.name, plan.hosts, len(plan.relays))
+		}
+		plan.hosts[0] = "changed"
+		if ring[0] == "changed" {
+			t.Fatalf("%s: plan aliases the coordinator ring", tc.name)
+		}
+		plan.close()
 	}
 }

@@ -191,7 +191,7 @@ type leader struct {
 }
 
 func (r *Runner) poolLeader(ctx context.Context, t Task, addr string) {
-	apiPort, err := r.freePort(addr)
+	apiPort, err := r.pickPort(addr, true) // the address callers keep: the lowest free port, like a single serve
 	if err != nil {
 		r.fail(ctx, t, "pool", err.Error())
 		return
@@ -203,6 +203,7 @@ func (r *Runner) poolLeader(ctx context.Context, t Task, addr string) {
 		return
 	}
 	defer fwd.Close()
+	fwd.SetModel(t.ModelID)
 	l := &leader{r: r, t: t, addr: addr, fwd: fwd, endpoint: fmt.Sprintf("http://%s:%d/v1", addr, apiPort)}
 	defer l.shutdown()
 	if !l.startSolo(ctx, "Starting the model on this Mac") {

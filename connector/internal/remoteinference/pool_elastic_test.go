@@ -122,7 +122,7 @@ func TestPoolLeaderServesAloneThenSharesThenFallsBack(t *testing.T) {
 		}
 		return ok
 	})
-	soloBody := body(t, endpoint+"/models")
+	soloBody := body(t, endpoint+"/health")
 	if !strings.HasPrefix(soloBody, "port ") {
 		t.Fatal(soloBody)
 	}
@@ -131,7 +131,7 @@ func TestPoolLeaderServesAloneThenSharesThenFallsBack(t *testing.T) {
 	c.setRing([]string{ring, "127.0.0.1:9"})
 	wait(t, func() bool { return logHas(log, "--rank 0 --hosts "+ring+",127.0.0.1:9") })
 	wait(t, func() bool { return strings.Contains(c.last().Detail, "2 Macs sharing") })
-	if now := body(t, endpoint+"/models"); now == soloBody || !strings.HasPrefix(now, "port ") {
+	if now := body(t, endpoint+"/health"); now == soloBody || !strings.HasPrefix(now, "port ") {
 		t.Fatalf("still on the solo server: %q", now)
 	}
 
@@ -151,7 +151,7 @@ func TestPoolLeaderServesAloneThenSharesThenFallsBack(t *testing.T) {
 	if strings.Count(string(b), "--solo") != 2 {
 		t.Fatalf("expected the model to be started on this Mac twice:\n%s", b)
 	}
-	if got := body(t, endpoint+"/models"); !strings.HasPrefix(got, "port ") {
+	if got := body(t, endpoint+"/health"); !strings.HasPrefix(got, "port ") {
 		t.Fatal(got)
 	}
 }
@@ -179,7 +179,7 @@ func TestPoolLeaderKeepsServingWhenThePoolDoesNotForm(t *testing.T) {
 		_, ok := c.find(func(r Report) bool { return strings.Contains(r.Detail, "Could not form the pool") })
 		return ok
 	})
-	if !strings.HasPrefix(body(t, endpoint+"/models"), "port ") {
+	if !strings.HasPrefix(body(t, endpoint+"/health"), "port ") {
 		t.Fatal("the model should still answer on this Mac")
 	}
 	if _, ok := c.find(func(r Report) bool { return r.State == "failed" }); ok {

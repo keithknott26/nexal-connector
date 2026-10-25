@@ -1,7 +1,9 @@
 package remoteinference
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -23,6 +25,16 @@ type Forwarder struct {
 	notice   string // what to tell callers while there is none
 	inflight int
 	last     time.Time // the last request start or response byte
+	model    string    // see SetModel
+}
+
+// SetModel makes the forwarder answer /v1/models itself with this model id, and pass a request that names it to
+// the server as "default_model". The pool's mlx_lm server lists nothing for a model loaded from a local folder
+// (an empty /v1/models), so callers could not find the model; a single serve gets the same from serveShim.
+func (f *Forwarder) SetModel(id string) {
+	f.mu.Lock()
+	f.model = id
+	f.mu.Unlock()
 }
 
 // NewForwarder starts listening on listen (ip:port), and on each alsoListen address. Loopback is added by
@@ -97,11 +109,22 @@ func (f *Forwarder) Close() { _ = f.srv.Close() }
 
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	up, notice := f.upstream, f.notice
+	up, notice, model := f.upstream, f.notice, f.model
 	f.mu.Unlock()
 	if up == "" {
 		fail(w, http.StatusServiceUnavailable, notice)
 		return
+	}
+	if model != "" {
+		if r.Method == http.MethodGet && (r.URL.Path == "/v1/models" || r.URL.Path == "/models") {
+			w.Header().Set("content-type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": []any{
+				map[string]any{"id": model, "object": "model", "created": time.Now().Unix(), "owned_by": "nexal"}}})
+			return
+		}
+		if r.Method == http.MethodPost && r.Body != nil {
+			renameModel(r, model)
+		}
 	}
 	f.mu.Lock()
 	f.inflight++
@@ -140,4 +163,37 @@ func fail(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": msg, "type": "pool_unavailable"}})
+}
+
+// renameModel rewrites a JSON body's "model": "<id>" to "default_model", the name the pool's server answers to.
+// Anything else (another name, a body that is not JSON, one over 64 MB) passes unchanged.
+func renameModel(r *http.Request, id string) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20+1))
+	_ = r.Body.Close()
+	restore := func(b []byte) {
+		r.Body = io.NopCloser(bytes.NewReader(b))
+		r.ContentLength = int64(len(b))
+		r.Header.Del("Transfer-Encoding")
+	}
+	if err != nil || len(body) > 64<<20 {
+		restore(body)
+		return
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(body, &m) != nil {
+		restore(body)
+		return
+	}
+	var name string
+	if json.Unmarshal(m["model"], &name) != nil || name != id {
+		restore(body)
+		return
+	}
+	m["model"] = json.RawMessage(`"default_model"`)
+	out, err := json.Marshal(m)
+	if err != nil {
+		restore(body)
+		return
+	}
+	restore(out)
 }

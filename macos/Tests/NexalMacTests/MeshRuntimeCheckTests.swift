@@ -10,8 +10,9 @@ final class MeshRuntimeCheckTests: XCTestCase {
 
     func testOutdatedOnlyWhenOlder() {
         XCTAssertTrue(MeshRuntimeCheck.isOutdated(installed: "0.79.0-nexal-mlkem1024-gated.11-mac"))
-        XCTAssertFalse(MeshRuntimeCheck.isOutdated(installed: "0.79.0-nexal-mlkem1024-gated.13-mac"))
+        XCTAssertTrue(MeshRuntimeCheck.isOutdated(installed: "0.79.0-nexal-mlkem1024-gated.13-mac"))
         XCTAssertFalse(MeshRuntimeCheck.isOutdated(installed: "0.79.0-nexal-mlkem1024-gated.14-mac"))
+        XCTAssertFalse(MeshRuntimeCheck.isOutdated(installed: "0.79.0-nexal-mlkem1024-gated.15-mac"))
         XCTAssertFalse(MeshRuntimeCheck.isOutdated(installed: nil), "unknown must not warn")
         XCTAssertFalse(MeshRuntimeCheck.isOutdated(installed: "unknown"))
     }

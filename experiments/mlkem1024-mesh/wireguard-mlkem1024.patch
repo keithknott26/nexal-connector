@@ -164,7 +164,7 @@
 +			if elem.packet == nil {
 +				continue
 +			}
-+			if device.quantumRequired.Load() && !elem.quantumControl && !peer.quantumKeyReady(elem.keypair, time.Now()) {
++			if device.quantumRequired.Load() && !elem.quantumControl && !peer.quantumKeyUsable(elem.keypair, time.Now()) {
 +				continue
 +			}
  			if len(elem.packet) != MessageKeepaliveSize {
@@ -199,7 +199,7 @@
  
 --- /dev/null
 +++ b/device/nexal_quantum.go
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,177 @@
 +// SPDX-License-Identifier: MIT
 +package device
 +
@@ -214,8 +214,17 @@
 +// path, including CreateOutboundPacket used by forwarding. It does not alter
 +// WireGuard's wire protocol or advertise product-level NIST certification.
 +type quantumLease struct {
-+	generation            uint64
-+	expires               time.Time
++	generation uint64
++	expires    time.Time
++	// Renewal overlap: the generation this one replaced, while its own lease has
++	// not expired. Its sessions may keep carrying data until the new generation's
++	// handshake completes (then WireGuard rotates keypairs) or the old lease ends.
++	// Without it every renewal blacked out application data for the seconds the
++	// two peers took to install the new key and handshake (MLX ring traffic then
++	// stalled long enough for macOS to abort GPU work). A session still needs an
++	// ML-KEM-derived PSK whose lease is unexpired; generation 0 never qualifies.
++	prevGeneration        uint64
++	prevExpires           time.Time
 +	local, remote         netip.Addr
 +	localPort, remotePort uint16
 +}
@@ -261,13 +270,18 @@
 +		return errors.New("control endpoint not configured")
 +	}
 +	next := *old
++	next.prevGeneration, next.prevExpires = 0, time.Time{}
++	if old.generation != 0 && time.Now().Before(old.expires) {
++		next.prevGeneration, next.prevExpires = old.generation, old.expires
++	}
 +	next.generation++
 +	next.expires = time.Now().Add(time.Until(expires))
 +	p.handshake.presharedKey = NoisePresharedKey(psk)
 +	p.quantum.Store(&next)
 +	p.handshake.mutex.Unlock()
-+	// Keep the previous session usable for the bounded control flow while a
-+	// fresh handshake takes effect. quantumAllows rejects its application data.
++	// Keep the previous session usable while a fresh handshake takes effect: for
++	// application data only within the previous generation's unexpired lease
++	// (quantumKeyUsable), otherwise just for the bounded control flow.
 +	// ExpireCurrentKeypairs would also kill in-flight TCP delivery confirmations.
 +	if err := p.SendHandshakeInitiationOnEndpointChange(); err != nil {
 +		d.log.Errorf("%v - Failed to start quantum session handshake: %v", p, err)
@@ -282,6 +296,7 @@
 +	next := *old
 +	next.generation++
 +	next.expires = time.Time{}
++	next.prevGeneration, next.prevExpires = 0, time.Time{} // revocation ends the overlap too
 +	p.quantum.Store(&next)
 +}
 +func (d *Device) RevokeQuantum(key [32]byte) {
@@ -298,9 +313,21 @@
 +	}
 +	return p.quantumKeyReady(p.keypairs.Current(), time.Now())
 +}
++
++// quantumKeyReady: the session uses the current generation (status evidence).
 +func (p *Peer) quantumKeyReady(key *Keypair, now time.Time) bool {
 +	s := p.quantum.Load()
 +	return s != nil && key != nil && s.generation != 0 && key.quantumGeneration == s.generation && now.Before(s.expires)
++}
++
++// quantumKeyUsable: the session may carry application data — the current
++// generation, or the one it replaced while that lease is still unexpired.
++func (p *Peer) quantumKeyUsable(key *Keypair, now time.Time) bool {
++	if p.quantumKeyReady(key, now) {
++		return true
++	}
++	s := p.quantum.Load()
++	return s != nil && key != nil && s.prevGeneration != 0 && key.quantumGeneration == s.prevGeneration && now.Before(s.prevExpires)
 +}
 +
 +// quantumAllows runs on plaintext before encryption and after authenticated
@@ -309,7 +336,7 @@
 +	if !p.device.quantumRequired.Load() || len(packet) == 0 {
 +		return true
 +	}
-+	if p.quantumKeyReady(key, time.Now()) {
++	if p.quantumKeyUsable(key, time.Now()) {
 +		return true
 +	}
 +	s := p.quantum.Load()

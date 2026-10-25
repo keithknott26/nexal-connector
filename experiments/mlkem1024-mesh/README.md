@@ -25,7 +25,8 @@ This directory pins and patches three dependencies: NetBird v0.79.0,
 - A WireGuard **session-generation gate** at encryption, queued send and
   authenticated receive boundaries. It covers ordinary TUN packets and direct
   forwarding/exit-node packet injection. Application data requires a session
-  derived from the currently installed ML-KEM output key and an unexpired lease.
+  derived from the currently installed ML-KEM output key and an unexpired lease
+  (or, during a renewal, the generation it replaced while that lease is unexpired).
   Old WireGuard traffic keys cannot satisfy a new key generation.
 - Before protection and during recovery, only empty keepalives and the exact
   peer-to-local/peer TCP control-port traffic are exempt. Bootstrap fragments,
@@ -206,6 +207,21 @@ session gate is unchanged: nothing is admitted on an expired lease or for a peer
 the profile. Details, verification and the remaining work are in `RESILIENCE-PLAN.md`.
 A mixed pair (old candidate on one end, this change on the other) performs no exchange at
 all; upgrade both ends together.
+
+### Renewal overlap — 2026-10-25 (gated.14)
+
+`wireguard-mlkem1024.patch` now keeps the generation a renewal replaced usable for
+application data until the new generation's WireGuard session exists or the old
+lease expires, whichever comes first. Before, every renewal (about every 90 s) blocked
+application data for the several seconds the two peers took to install the new key and
+complete a handshake; long-lived flows such as MLX ring traffic between pooled Macs
+stalled long enough for macOS to abort their GPU work. The gate still admits data only
+under a session whose ML-KEM-derived PSK has an unexpired lease; generation 0 (no
+ML-KEM key) never qualifies; revocation, endpoint reconfiguration and plain IPC PSK
+writes end the overlap at once. Status evidence (`QuantumSessionReady`) still requires
+the current generation, so a peer shows `session-pending` during the overlap.
+Tests: `TestNexalRenewalKeepsPreviousSessionUntilLeaseEnds`,
+`TestNexalRenewalDoesNotBlackOutData` (fails without the overlap).
 
 ### Status probe network budget
 

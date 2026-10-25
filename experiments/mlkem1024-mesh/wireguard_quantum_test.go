@@ -170,3 +170,80 @@ func TestNexalKeyTransitionPreservesControlOnlySession(t *testing.T) {
 		t.Fatal("old session rejected authorized control traffic")
 	}
 }
+
+// Renewal overlap: after a new key is installed, the previous generation's
+// session keeps carrying data until the new session is up or the old lease
+// expires; revocation or expiry ends it, and status evidence stays strict.
+func TestNexalRenewalKeepsPreviousSessionUntilLeaseEnds(t *testing.T) {
+	local, remote := netip.MustParseAddr("100.64.0.1"), netip.MustParseAddr("100.64.0.2")
+	d := &Device{}
+	d.RequireQuantum()
+	p := &Peer{device: d}
+	app := tuntest.Ping(remote, local)
+	p.quantum.Store(&quantumLease{generation: 3, expires: time.Now().Add(time.Minute), prevGeneration: 2,
+		prevExpires: time.Now().Add(30 * time.Second), local: local, remote: remote, localPort: 10001, remotePort: 10002})
+	prev, older := &Keypair{quantumGeneration: 2}, &Keypair{quantumGeneration: 1}
+	if !p.quantumAllows(app, prev, true) || !p.quantumAllows(app, prev, false) {
+		t.Fatal("previous generation within its lease rejected")
+	}
+	if p.quantumAllows(app, older, true) || p.quantumAllows(app, &Keypair{}, true) {
+		t.Fatal("generation before the previous one (or none) admitted")
+	}
+	if p.quantumKeyReady(prev, time.Now()) {
+		t.Fatal("evidence must require the current generation")
+	}
+	lease := *p.quantum.Load()
+	lease.prevExpires = time.Now().Add(-time.Second)
+	p.quantum.Store(&lease)
+	if p.quantumAllows(app, prev, true) {
+		t.Fatal("previous generation admitted after its lease expired")
+	}
+	lease.prevExpires = time.Now().Add(time.Minute)
+	p.quantum.Store(&lease)
+	p.invalidateQuantumLocked()
+	if p.quantumAllows(app, prev, true) {
+		t.Fatal("revocation did not end the overlap")
+	}
+}
+
+// Two real devices: the peer that renews first keeps exchanging data with the
+// one that has not renewed yet (their PSKs differ, so no new session can form).
+func TestNexalRenewalDoesNotBlackOutData(t *testing.T) {
+	pair := genTestPair(t, false)
+	var keys [2][32]byte
+	for i := range pair {
+		d := pair[i].dev
+		d.RequireQuantum()
+		for k := range d.peers.keyMap {
+			keys[i] = [32]byte(k)
+		}
+		if err := d.ConfigureQuantumControl(keys[i], pair[i].ip, pair[1-i].ip, 10001, uint16(10002)); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.InstallQuantumKey(keys[i], [32]byte{7}, time.Now().Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(12 * time.Second)
+	for !pair[0].dev.QuantumSessionReady(keys[0]) || !pair[1].dev.QuantumSessionReady(keys[1]) {
+		if time.Now().After(deadline) {
+			t.Fatal("first session did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	pair.Send(t, Ping, nil)
+	if err := pair[0].dev.InstallQuantumKey(keys[0], [32]byte{8}, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if pair[0].dev.QuantumSessionReady(keys[0]) {
+		t.Fatal("evidence claimed the renewed generation before its session exists")
+	}
+	for _, dir := range []struct{ from, to int }{{1, 0}, {0, 1}} {
+		pair[dir.from].tun.Outbound <- tuntest.Ping(pair[dir.to].ip, pair[dir.from].ip)
+		select {
+		case <-pair[dir.to].tun.Inbound:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("data %d->%d blacked out during renewal", dir.from, dir.to)
+		}
+	}
+}

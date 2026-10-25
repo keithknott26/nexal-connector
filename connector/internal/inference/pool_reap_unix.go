@@ -17,7 +17,20 @@ func ReapOrphanPoolServers(inferenceDir string) []int {
 	if err != nil {
 		return nil
 	}
-	pids := orphanPoolServers(string(out), inferenceDir, os.Getpid())
+	return stopAll(orphanPoolServers(string(out), inferenceDir, os.Getpid()))
+}
+
+// ReapOrphanServeServers stops single-Mac model servers whose helper is gone (see orphanServeServers):
+// each holds a whole model in memory, so a new server would otherwise load a second copy beside it.
+func ReapOrphanServeServers(inferenceDir string) []int {
+	out, err := exec.Command("/bin/ps", "-axo", "pid=,ppid=,command=").Output()
+	if err != nil {
+		return nil
+	}
+	return stopAll(orphanServeServers(string(out), inferenceDir, os.Getpid()))
+}
+
+func stopAll(pids []int) []int {
 	for _, pid := range pids {
 		_ = syscall.Kill(pid, syscall.SIGTERM)
 	}

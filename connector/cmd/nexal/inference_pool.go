@@ -86,6 +86,9 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 	if left := inference.ReapOrphanPoolServers(infDir); len(left) > 0 {
 		writeLine(os.Stdout, "Stopped %d pool server(s) left over from an earlier run", len(left))
 	}
+	if left := inference.ReapOrphanServeServers(infDir); len(left) > 0 {
+		writeLine(os.Stdout, "Stopped %d model server(s) left over from an earlier run", len(left))
+	}
 	res, verr := inference.CheckModel(ctx, infDir, id, false)
 	if verr != nil {
 		return coded(verr)

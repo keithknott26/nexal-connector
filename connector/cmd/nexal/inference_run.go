@@ -105,6 +105,9 @@ func inferenceServe(ctx context.Context, args []string) error {
 	if !res.OK {
 		return &codedError{code: "model_damaged", err: errors.New("the model files changed since install; run `nexal inference verify " + id + "` and install it again")}
 	}
+	if left := inference.ReapOrphanServeServers(infDir); len(left) > 0 {
+		writeLine(os.Stdout, "Stopped %d model server(s) left over from an earlier run", len(left))
+	}
 	cmd := exec.CommandContext(ctx, name, argv...)
 	cmd.Env = env
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

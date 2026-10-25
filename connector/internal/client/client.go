@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/observability"
@@ -168,15 +169,19 @@ func New(base, token string, dev bool) (*Client, error) {
 // Code is the one exception, and it is narrow: the machine-readable
 // error.code from the contract's {error:{code,message}} shape, kept only when
 // it is 1–64 characters of [a-z0-9_]. It exists so a caller can tell one 409
-// from another (e.g. wake's no_wake_relay) without string-matching prose; the
-// message is never kept, and Error() does not print the code, so every
-// existing message is unchanged.
+// from another (e.g. wake's no_wake_relay) without string-matching prose.
+// Message is the coordinator's own explanation of a 4xx (error.message), cleaned
+// to one short printable line; Error() appends it so the owner sees why, not just a number.
 type StatusError struct {
-	Status int
-	Code   string
+	Status  int
+	Code    string
+	Message string
 }
 
 func (e *StatusError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("coordinator rejected request (HTTP %d): %s", e.Status, e.Message)
+	}
 	return fmt.Sprintf("coordinator rejected request (HTTP %d)", e.Status)
 }
 
@@ -244,7 +249,11 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any, stric
 		// is what the pairing command needs in order to tell the owner WHICH of the
 		// several possible causes applies (HARDENING-PLAN §26). The message is
 		// unchanged, so existing callers and their tests see exactly what they did.
-		return &StatusError{Status: resp.StatusCode, Code: errorCode(resp.Body)}
+		code, msg := errorDetail(resp.Body)
+		if resp.StatusCode >= 500 {
+			msg = "" // a server fault may carry backend detail; only the coordinator's own 4xx answers are shown
+		}
+		return &StatusError{Status: resp.StatusCode, Code: code, Message: msg}
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if err != nil {
@@ -353,20 +362,28 @@ func (c *Client) Complete(ctx context.Context, id string, r Result, seconds floa
 // errorCode extracts error.code from a non-2xx body and returns it only if it is
 // a short [a-z0-9_] token; anything else (including the message) is dropped so
 // no server-controlled prose can reach a terminal or a log.
-func errorCode(r io.Reader) string {
+func errorCode(r io.Reader) string { c, _ := errorDetail(r); return c }
+
+// errorDetail reads {"error":{"code":..,"message":..}}: the code only when it is 1–64 characters of
+// [a-z0-9_], the message as one printable line of at most 240 characters.
+func errorDetail(r io.Reader) (string, string) {
 	b, err := io.ReadAll(io.LimitReader(r, 8<<10))
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var shape struct {
 		Error struct {
-			Code string `json:"code"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(b, &shape) != nil {
-		return ""
+		return "", ""
 	}
-	code := shape.Error.Code
+	return cleanCode(shape.Error.Code), cleanMessage(shape.Error.Message)
+}
+
+func cleanCode(code string) string {
 	if len(code) < 1 || len(code) > 64 {
 		return ""
 	}
@@ -376,4 +393,19 @@ func errorCode(r io.Reader) string {
 		}
 	}
 	return code
+}
+
+func cleanMessage(m string) string {
+	var b strings.Builder
+	for _, r := range m {
+		if b.Len() >= 240 {
+			break
+		}
+		if unicode.IsPrint(r) {
+			b.WriteRune(r)
+		} else if unicode.IsSpace(r) {
+			b.WriteByte(' ')
+		}
+	}
+	return strings.TrimSpace(b.String())
 }

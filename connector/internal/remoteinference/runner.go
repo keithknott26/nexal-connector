@@ -10,15 +10,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"nexal/connector/internal/diaglog"
 )
 
 // Task is one queued request, as the coordinator reports it.
@@ -93,6 +98,7 @@ type Runner struct {
 	WakeGrace  time.Duration // how long after waking from sleep ring and stall checks are held off (default 60 s)
 	Rejoin     time.Duration // how long a member that left the pool waits before offering to join again (default 5 s)
 	Logger     *slog.Logger
+	LogDir     string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
 
 	mu      sync.Mutex
 	serving map[string]*serve // task id -> server
@@ -241,6 +247,9 @@ func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
 	all := append([]string{"inference"}, args...)
 	all = append(all, r.BaseArgs...)
 	cmd := exec.CommandContext(ctx, r.Exe, all...)
+	// The helper ends when this agent does (see exitWithParent in cmd/nexal), so a crashed or restarted
+	// agent never leaves a model server holding memory and a port.
+	cmd.Env = append(os.Environ(), "NEXAL_EXIT_WITH_PARENT="+strconv.Itoa(os.Getpid()))
 	// Stopping a helper asks it to end, so it takes its model server down with it instead of leaving it behind.
 	cmd.Cancel = func() error {
 		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -302,7 +311,9 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 		r.pool(ctx, t, addr)
 		return
 	}
-	port, perr := r.freePort(addr)
+	// One Mac serving one model keeps the same port from run to run (the lowest free one), so callers
+	// that saved its address keep working after a restart.
+	port, perr := r.pickPort(addr, true)
 	if perr != nil {
 		r.fail(ctx, t, "serve", perr.Error())
 		return
@@ -328,6 +339,12 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	cmd := r.command(sctx, "serve", t.ModelID, "--host", "127.0.0.1", "--port", strconv.Itoa(lport))
 	var tail lineTail
 	cmd.Stdout, cmd.Stderr = &tail, &tail
+	if lf := r.serverLog(port); lf != nil {
+		defer lf.Close()
+		w := io.MultiWriter(&tail, lf)
+		cmd.Stdout, cmd.Stderr = w, w
+		fmt.Fprintf(lf, "\n=== %s %s on port %d (task %s)\n", time.Now().Format(time.RFC3339), t.ModelID, port, t.ID)
+	}
 	if err := cmd.Start(); err != nil {
 		cancel()
 		r.fail(ctx, t, "serve", err.Error())
@@ -575,12 +592,27 @@ func (l *lineTail) String() string { l.mu.Lock(); defer l.mu.Unlock(); return st
 // freePort reserves a port in [Port, MaxPort] that nothing on addr is using. Successive calls move on
 // through the range, so a ring address that was given up is not handed out again at once and a stale one
 // cannot be mistaken for a new one.
-func (r *Runner) freePort(addr string) (int, error) {
+func (r *Runner) freePort(addr string) (int, error) { return r.pickPort(addr, false) }
+
+// serverLog opens <LogDir>/inference-<port>.log (capped at 5 MB, one rotation), or returns nil.
+func (r *Runner) serverLog(port int) *diaglog.RotatingFile {
+	if r.LogDir == "" || os.MkdirAll(r.LogDir, 0o700) != nil {
+		return nil
+	}
+	return diaglog.NewRotatingFile(filepath.Join(r.LogDir, fmt.Sprintf("inference-%d.log", port)), 5<<20)
+}
+
+// pickPort is freePort; lowest starts at Port every time instead of after the last port handed out.
+func (r *Runner) pickPort(addr string, lowest bool) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := r.MaxPort - r.Port + 1
+	start := r.cursor
+	if lowest {
+		start = 0
+	}
 	for i := 0; i < n; i++ {
-		p := r.Port + (r.cursor+i)%n
+		p := r.Port + (start+i)%n
 		if r.used[p] {
 			continue
 		}
@@ -599,7 +631,9 @@ func (r *Runner) freePort(addr string) (int, error) {
 			lo.Close()
 		}
 		r.used[p] = true
-		r.cursor = (p - r.Port + 1) % n
+		if !lowest {
+			r.cursor = (p - r.Port + 1) % n
+		}
 		return p, nil
 	}
 	return 0, fmt.Errorf("no free port between %d and %d on this Mac", r.Port, r.MaxPort)

@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,9 +40,25 @@ import (
 )
 
 func emit(v any) error { return json.NewEncoder(os.Stdout).Encode(v) }
+
+// exitWithParent: a helper started by the agent (which sets NEXAL_EXIT_WITH_PARENT to its own pid) stops,
+// the same way as on Ctrl-C, once that agent is gone, so its model server does not outlive it.
+func exitWithParent(pid string, stop context.CancelFunc) {
+	want, err := strconv.Atoi(pid)
+	if err != nil || want <= 1 {
+		return
+	}
+	go func() {
+		for os.Getppid() == want {
+			time.Sleep(2 * time.Second)
+		}
+		stop()
+	}()
+}
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	exitWithParent(os.Getenv("NEXAL_EXIT_WITH_PARENT"), stop)
 	shutdown, telemetryErr := observability.Start(ctx)
 	if telemetryErr != nil {
 		slog.Warn("telemetry disabled: invalid or unavailable collector configuration")
@@ -717,6 +734,9 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	if exe, exeErr := os.Executable(); exeErr == nil {
 		ri := &remoteinference.Runner{Coord: api, HostID: c.HostID, Exe: exe, BaseArgs: []string{"--config", *path},
 			Address: func() string { return meshProvider.Snapshot().SelfTunnelAddress }, Logger: logger.With("component", "remote-inference")}
+		if d, err := diaglog.LogDir(); err == nil {
+			ri.LogDir = d
+		}
 		go ri.Run(ctx)
 	}
 	// Version-2 enrollment uses the embedded peer-to-peer mesh runtime. Older

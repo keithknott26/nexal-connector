@@ -83,6 +83,23 @@ func TestOrphanPoolServers(t *testing.T) {
 	}
 }
 
+func TestOrphanServeServers(t *testing.T) {
+	d := "/Users/k/Library/Application Support/Nexal/inference"
+	m := modelsRoot(d) + "/qwen3-4b-q4"
+	shim := "/opt/py/Python -I -c import sys, json, time, os, threading\nfrom mlx_lm import server as s\nparent = os.getppid()\n s.main()\n --model " + m + " --host 127.0.0.1 --port "
+	ps := strings.Join([]string{
+		"  201     1 " + shim + "51000",                                               // orphaned
+		"  202  4000 " + shim + "51001",                                               // its helper is alive
+		"  203     1 " + strings.Replace(shim, m, "/elsewhere/models/x", 1) + "1",     // another directory
+		"  204     1 /opt/py/Python -I -m mlx_lm server --model " + m + " --pipeline", // a pool server: not this reaper's
+		"  205     1 " + shim + "51002",                                               // this process itself
+	}, "\n")
+	got := orphanServeServers(ps, d, 205)
+	if len(got) != 1 || got[0] != 201 {
+		t.Fatalf("picked %v, want [201]", got)
+	}
+}
+
 func TestPoolUsesPipeline(t *testing.T) {
 	d := poolDir(t)
 	cfg := func(modelType string) {

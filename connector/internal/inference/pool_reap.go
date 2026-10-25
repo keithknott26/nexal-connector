@@ -32,3 +32,36 @@ func orphanPoolServers(ps, inferenceDir string, self int) []int {
 	}
 	return pids
 }
+
+// orphanServeServers picks single-Mac model servers (`nexal inference serve`, run through serveShim) whose
+// helper is gone: parent pid 1, serving a model from this inference directory. serveShim's script spans
+// several lines, so a line that does not start with a pid and a parent pid continues the one before it.
+func orphanServeServers(ps, inferenceDir string, self int) []int {
+	models := "--model " + modelsRoot(inferenceDir) + string(filepath.Separator)
+	type proc struct {
+		pid, ppid int
+		cmd       string
+	}
+	var procs []proc
+	for _, line := range strings.Split(ps, "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 3 {
+			pid, e1 := strconv.Atoi(f[0])
+			ppid, e2 := strconv.Atoi(f[1])
+			if e1 == nil && e2 == nil {
+				procs = append(procs, proc{pid, ppid, strings.Join(f[2:], " ")})
+				continue
+			}
+		}
+		if len(procs) > 0 {
+			procs[len(procs)-1].cmd += " " + strings.TrimSpace(line)
+		}
+	}
+	var pids []int
+	for _, p := range procs {
+		if p.ppid == 1 && p.pid != self && strings.Contains(p.cmd, models) && strings.Contains(p.cmd, "from mlx_lm import server") {
+			pids = append(pids, p.pid)
+		}
+	}
+	return pids
+}

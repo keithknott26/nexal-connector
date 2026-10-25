@@ -7,9 +7,13 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"nexal/connector/internal/diaglog"
 )
 
 // An elastic pool. The Mac that answers (rank 0) starts the whole model on itself first, so it answers at
@@ -47,12 +51,31 @@ func (r *Runner) startProc(ctx context.Context, args ...string) (*proc, error) {
 	cmd := r.command(pctx, args...)
 	tail := &lineTail{}
 	cmd.Stdout, cmd.Stderr = tail, tail
+	// Each pool helper's output (the mlx server and MLX's ring messages) also goes to
+	// <LogDir>/inference-pool-<model>.log, so a crash can be read afterwards.
+	var lf io.WriteCloser
+	if len(args) > 1 && r.LogDir != "" && os.MkdirAll(r.LogDir, 0o700) == nil {
+		lf = diaglog.NewRotatingFile(filepath.Join(r.LogDir, "inference-pool-"+args[1]+".log"), 10<<20)
+		w := io.MultiWriter(tail, lf)
+		cmd.Stdout, cmd.Stderr = w, w
+		fmt.Fprintf(lf, "\n=== %s %s\n", time.Now().Format(time.RFC3339), strings.Join(args, " "))
+	}
 	if err := cmd.Start(); err != nil {
 		cancel()
+		if lf != nil {
+			lf.Close()
+		}
 		return nil, err
 	}
 	p := &proc{cancel: cancel, done: make(chan struct{}), tail: tail}
-	go func() { p.err = cmd.Wait(); close(p.done) }()
+	go func() {
+		p.err = cmd.Wait()
+		if lf != nil {
+			fmt.Fprintf(lf, "=== %s exited: %v\n", time.Now().Format(time.RFC3339), p.err)
+			lf.Close()
+		}
+		close(p.done)
+	}()
 	return p, nil
 }
 

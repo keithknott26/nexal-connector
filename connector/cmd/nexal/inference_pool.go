@@ -58,13 +58,14 @@ func inferencePoolSetup(ctx context.Context, args []string) error {
 func inferencePoolServe(ctx context.Context, args []string) error {
 	var rank, apiPort *int
 	var hosts, apiHost *string
-	var solo *bool
+	var solo, storageHost *bool
 	id, _, path, err := parseModelArgs("pool-serve", args, true, func(f *flag.FlagSet) {
 		rank = f.Int("rank", -1, "this Mac's position in --hosts (0 answers the API)")
 		hosts = f.String("hosts", "", "every member's ring address, comma separated, in rank order (ip:port)")
 		apiHost = f.String("api-host", "", "the one IP address rank 0 answers on")
 		apiPort = f.Int("api-port", inference.DefaultServePort, "TCP port rank 0 answers on")
 		solo = f.Bool("solo", false, "serve the whole model on this Mac alone (no ring), on --api-host:--api-port")
+		storageHost = f.Bool("storage-host", true, "on the Mac that answers (rank 0 or --solo): let the neXal storage host reach the model and resolve this Mac's network name while it runs")
 	})
 	if err != nil {
 		return err
@@ -106,6 +107,12 @@ func inferencePoolServe(ctx context.Context, args []string) error {
 		writeLine(os.Stdout, "Pool rank 0 serving %s on http://%s:%d/v1", id, *apiHost, *apiPort)
 	default:
 		writeLine(os.Stdout, "Pool rank %d working for rank 0 on %s", *rank, id)
+	}
+	// Like `inference serve`: the Mac that answers holds the storage-host lease, which also gives the storage
+	// host this Mac's network name. Without it a pool was unreachable (and unresolvable) from there.
+	if *storageHost && (*solo || *rank == 0) {
+		stop, _ := storageHostLease(ctx, *path, os.Stdout)
+		defer stop()
 	}
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return &codedError{code: "server_stopped", err: fmt.Errorf("the pool server stopped: %w", err)}

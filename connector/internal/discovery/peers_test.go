@@ -274,3 +274,18 @@ func TestLocalLinkViewDoesNotFail(t *testing.T) {
 		t.Fatal("a public address was not classified as WAN against real interfaces")
 	}
 }
+
+func TestLocalityString(t *testing.T) {
+	cases := map[Locality]string{
+		LocalityUnknown:  "unknown",
+		LocalitySameLink: "same-link",
+		LocalityLAN:      "lan",
+		LocalityWAN:      "wan",
+		Locality(200):    "unknown",
+	}
+	for l, want := range cases {
+		if got := l.String(); got != want {
+			t.Errorf("Locality(%d).String() = %q, want %q", l, got, want)
+		}
+	}
+}

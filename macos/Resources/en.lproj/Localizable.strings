@@ -4,7 +4,7 @@
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:101 */
 "%@ alert%@ waiting to be sent" = "%@ alert%@ waiting to be sent";
 
-/* macos/Sources/NexalMac/InferenceQuickStart.swift:162 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:219 */
 "%@ is running" = "%@ is running";
 
 /* macos/Sources/NexalMac/NetworkPanel.swift:1244 */
@@ -280,7 +280,7 @@
 /* macos/Sources/NexalMac/NetworkPanel.swift:436 */
 "Direct" = "Direct";
 
-/* macos/Sources/NexalMac/InferenceQuickStart.swift:174 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:232 */
 "Dismiss" = "Dismiss";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:176 */
@@ -316,7 +316,7 @@
 /* macos/Sources/NexalMac/DiagnosticsSettingsView.swift:33 */
 "Export diagnostics…" = "Export diagnostics…";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:306 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:325 */
 "Failed" = "Failed";
 
 /* macos/Sources/NexalMac/MeshStatusView.swift:59 */
@@ -454,7 +454,7 @@
 /* macos/Sources/NexalMac/SandboxInfo.swift:245 */
 "Logs · %@" = "Logs · %@";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:267 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:286 */
 "Mac" = "Mac";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:253 */
@@ -478,7 +478,7 @@
 /* macos/Sources/NexalMac/NetworkPanel.swift:488 */
 "Min %@" = "Min %@";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:270 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:289 */
 "Model" = "Model";
 
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:773 */
@@ -517,13 +517,13 @@
 /* macos/Sources/NexalMac/NetworkPanel.swift:492 */
 "No measurements yet." = "No measurements yet.";
 
-/* macos/Sources/NexalMac/InferenceQuickStart.swift:181 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:239 */
 "No model has been reviewed for this version of neXal yet. Update neXal to get the next set." = "No model has been reviewed for this version of neXal yet. Update neXal to get the next set.";
 
 /* macos/Sources/NexalMac/InferenceSection.swift:370 */
 "No models installed." = "No models installed.";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:264 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:283 */
 "No other Macs found on your network yet." = "No other Macs found on your network yet.";
 
 /* macos/Sources/NexalMac/NetworkPanel.swift:165 */
@@ -531,6 +531,9 @@
 
 /* macos/Sources/NexalMac/AppUpdate.swift:179 */
 "No releases are published yet." = "No releases are published yet.";
+
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:223 */
+"No sign-in: anyone who can reach an address above can use the model." = "No sign-in: anyone who can reach an address above can use the model.";
 
 /* macos/Sources/NexalMac/ModelReview.swift:165 */
 "Not reviewed yet" = "Not reviewed yet";
@@ -592,7 +595,7 @@
 /* macos/Sources/NexalMac/HoneypotSettingsView.swift:71 */
 "Opens fake services on this Mac. Nothing legitimate should ever connect, so any connection from another computer is reported as an alert. It never runs commands or accepts logins." = "Opens fake services on this Mac. Nothing legitimate should ever connect, so any connection from another computer is reported as an alert. It never runs commands or accepts logins.";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:238 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:257 */
 "POOL YOUR MACS" = "POOL YOUR MACS";
 
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:244 */
@@ -613,7 +616,7 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:168 */
 "Play a sound after successful pairing" = "Play a sound after successful pairing";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:245 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:264 */
 "Pool %lld Macs" = "Pool %lld Macs";
 
 /* macos/Sources/NexalMac/NetworkPanel.swift:958 */
@@ -625,7 +628,7 @@
 /* macos/Sources/NexalMac/CoordinatorChoice.swift:18 */
 "Production" = "Production";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:317 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:336 */
 "Progress" = "Progress";
 
 /* macos/Sources/NexalMac/NetworkPanel.swift:828 */
@@ -646,10 +649,10 @@
 /* macos/Sources/NexalMac/ModelReview.swift:145 */
 "REVIEW MODELS FOR THE NEXT RELEASE" = "REVIEW MODELS FOR THE NEXT RELEASE";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:260 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:279 */
 "RUN A MODEL ON ANOTHER MAC" = "RUN A MODEL ON ANOTHER MAC";
 
-/* macos/Sources/NexalMac/InferenceQuickStart.swift:150 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:207 */
 "RUN A MODEL ON THIS MAC" = "RUN A MODEL ON THIS MAC";
 
 /* macos/Sources/NexalMac/ModelReview.swift:176 */
@@ -718,10 +721,10 @@
 /* macos/Sources/NexalMac/ModelReview.swift:163 */
 "Reviewed at %@" = "Reviewed at %@";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:261 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:280 */
 "Run a model on one of your other Macs and use it from here over the neXal network. That Mac downloads the model and keeps it private to your network." = "Run a model on one of your other Macs and use it from here over the neXal network. That Mac downloads the model and keeps it private to your network.";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:273 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:292 */
 "Run there" = "Run there";
 
 /* macos/Sources/NexalMac/L10n.swift:71 */
@@ -757,7 +760,7 @@
 /* macos/Sources/NexalMac/NetworkPanel.swift:1298 */
 "Server: %@" = "Server: %@";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:305 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:324 */
 "Serving" = "Serving";
 
 /* macos/Sources/NexalMac/NetworkPanel.swift:952 */
@@ -817,7 +820,7 @@
 /* macos/Sources/NexalMac/ConnectorSettingsView.swift:166 */
 "Sound & menu bar" = "Sound & menu bar";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:239 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:258 */
 "Spread one model over %lld online Macs (%@; %@ memory together). Worth it for a model too big for one Mac; each word is slower than on a single Mac." = "Spread one model over %lld online Macs (%@; %@ memory together). Worth it for a model too big for one Mac; each word is slower than on a single Mac.";
 
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:1005 */
@@ -835,7 +838,7 @@
 /* macos/Sources/NexalMac/NetworkPanel.swift:1095 */
 "Status" = "Status";
 
-/* macos/Sources/NexalMac/InferenceQuickStart.swift:167 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:225 */
 "Stop" = "Stop";
 
 /* macos/Sources/NexalMac/ThrowawayHosting.swift:1009 */
@@ -874,7 +877,7 @@
 /* macos/Sources/NexalMac/AppUpdate.swift:243 */
 "The download failed its checksum check, so it was not installed." = "The download failed its checksum check, so it was not installed.";
 
-/* macos/Sources/NexalMac/InferenceQuickStart.swift:166 */
+/* macos/Sources/NexalMac/InferenceQuickStart.swift:224 */
 "The first answer can take a minute while the model loads into memory." = "The first answer can take a minute while the model loads into memory.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:258 */
@@ -898,7 +901,7 @@
 /* macos/Sources/NexalMac/NetworkPanel.swift:1326 */
 "This Mac's saved settings point to a neXal server this version does not use (%@). Remove config.json, then pair again." = "This Mac's saved settings point to a neXal server this version does not use (%@). Remove config.json, then pair again.";
 
-/* macos/Sources/NexalMac/RemoteInferenceSection.swift:242 */
+/* macos/Sources/NexalMac/RemoteInferenceSection.swift:261 */
 "This model fits on one Mac and runs faster there (about as fast as one Mac, with no network in between). A pool can also drop out, so use \"Run there\" unless you want to test pooling." = "This model fits on one Mac and runs faster there (about as fast as one Mac, with no network in between). A pool can also drop out, so use \"Run there\" unless you want to test pooling.";
 
 /* macos/Sources/NexalMac/AppUpdate.swift:237 */

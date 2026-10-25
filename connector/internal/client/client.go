@@ -359,11 +359,6 @@ func (c *Client) Complete(ctx context.Context, id string, r Result, seconds floa
 	return out.Accepted, err
 }
 
-// errorCode extracts error.code from a non-2xx body and returns it only if it is
-// a short [a-z0-9_] token; anything else (including the message) is dropped so
-// no server-controlled prose can reach a terminal or a log.
-func errorCode(r io.Reader) string { c, _ := errorDetail(r); return c }
-
 // errorDetail reads {"error":{"code":..,"message":..}}: the code only when it is 1–64 characters of
 // [a-z0-9_], the message as one printable line of at most 240 characters.
 func errorDetail(r io.Reader) (string, string) {

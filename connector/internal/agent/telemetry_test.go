@@ -80,3 +80,25 @@ func TestParseFreeMemoryRejectsOversizedInput(t *testing.T) {
 		t.Fatal("oversized telemetry accepted")
 	}
 }
+
+func TestMemoryParsingRejectsUnsupportedPageSizeAndDuplicates(t *testing.T) {
+	for name, in := range map[string]string{
+		"odd page size":       "page size of 1234 bytes\nPages free: 1.\nPages speculative: 1.",
+		"duplicate free":      "page size of 4096 bytes\nPages free: 1.\nPages free: 2.\nPages speculative: 1.",
+		"missing page size":   "Pages free: 1.\nPages speculative: 1.",
+		"missing speculative": "page size of 4096 bytes\nPages free: 1.",
+	} {
+		if _, err := ParseFreeMemory([]byte(in)); err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
+	}
+	if got, err := ParseFreeMemory([]byte("page size of 4096 bytes\nPages free: 2.\nPages speculative: 3.")); err != nil || got != 5*4096 {
+		t.Fatalf("valid 4k input = %d, %v", got, err)
+	}
+}
+
+func TestParseIdleRejectsOversizedInput(t *testing.T) {
+	if _, err := ParseIdle(make([]byte, 256<<10+1)); err == nil {
+		t.Fatal("expected oversized idle telemetry to be rejected")
+	}
+}

@@ -122,3 +122,33 @@ func TestPlanRingKeepsCoordinatorRingWithoutLAN(t *testing.T) {
 		plan.close()
 	}
 }
+
+func TestOverLAN(t *testing.T) {
+	cases := []struct {
+		hosts []string
+		want  string
+	}{
+		{[]string{"127.0.0.1:8010", "100.86.0.2:8011"}, ""},
+		{[]string{"127.0.0.1:8010", "192.168.1.20:8011"}, " over the LAN"},
+		{[]string{"10.0.0.5:8010", "127.0.0.1:8011"}, " over the LAN"},
+		{[]string{"not-an-address", "127.0.0.1:8011"}, ""},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		if got := overLAN(&ringPlan{hosts: c.hosts}); got != c.want {
+			t.Errorf("overLAN(%v) = %q, want %q", c.hosts, got, c.want)
+		}
+	}
+}
+
+func TestTailText(t *testing.T) {
+	if got := tailText("short", 10); got != "short" {
+		t.Errorf("under the limit: %q", got)
+	}
+	if got := tailText("abcdefghij", 4); got != "...ghij" {
+		t.Errorf("long text: %q", got)
+	}
+	if got := tailText("ααββγγ", 2); got != "...γγ" { // cuts on runes, not bytes
+		t.Errorf("multibyte text: %q", got)
+	}
+}

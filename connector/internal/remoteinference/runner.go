@@ -42,10 +42,12 @@ type Task struct {
 	Progress *float64 `json:"progress,omitempty"`
 	// Pooling: this Mac is member PoolRank of PoolSize. PoolRing lists every member's ring address in
 	// rank order once all have said where they listen; PoolEndpoint is rank 0's API once it answers.
-	PoolID       string   `json:"poolId,omitempty"`
-	PoolRank     int      `json:"poolRank,omitempty"`
-	PoolSize     int      `json:"poolSize,omitempty"`
-	PoolRing     []string `json:"poolRing,omitempty"`
+	PoolID   string   `json:"poolId,omitempty"`
+	PoolRank int      `json:"poolRank,omitempty"`
+	PoolSize int      `json:"poolSize,omitempty"`
+	PoolRing []string `json:"poolRing,omitempty"`
+	// PoolRingLAN is each member's LAN ring address ("" when it has none), same order as PoolRing.
+	PoolRingLAN  []string `json:"poolRingLan,omitempty"`
 	PoolEndpoint string   `json:"poolEndpoint,omitempty"`
 	CreatedAt    string   `json:"createdAt,omitempty"`
 	UpdatedAt    string   `json:"updatedAt,omitempty"`
@@ -63,6 +65,8 @@ type Report struct {
 	// RingAddress is where this pool member listens for the other members (ip:port). Nil leaves what the
 	// coordinator has; a pointer to "" takes this member out of the ring.
 	RingAddress *string `json:"ringAddress,omitempty"`
+	// RingLAN is this member's ring address on its private LAN, sent with RingAddress ("" for none).
+	RingLAN *string `json:"ringLan,omitempty"`
 	// Progress is 0..1 while a download is under way; nil otherwise.
 	Progress *float64 `json:"progress,omitempty"`
 }
@@ -737,6 +741,16 @@ func (r *Runner) forwarder(ctx context.Context, addr string, port int) (*Forward
 	return NewForwarder(net.JoinHostPort(addr, p), base...)
 }
 
+// lanInterface: up, not loopback, not the neXal tunnel or a virtual machine / container bridge.
+func lanInterface(in net.Interface) bool {
+	if in.Flags&net.FlagUp == 0 || in.Flags&net.FlagLoopback != 0 {
+		return false
+	}
+	n := in.Name
+	return !(strings.HasPrefix(n, "utun") || strings.HasPrefix(n, "bridge") || strings.HasPrefix(n, "vmenet") ||
+		strings.HasPrefix(n, "wt") || strings.HasPrefix(n, "docker") || strings.HasPrefix(n, "veth"))
+}
+
 // lanAddresses is every private IPv4 address (10/8, 172.16/12, 192.168/16) of an up interface that is not
 // loopback, the neXal tunnel or a virtual machine bridge.
 func lanAddresses() []string {
@@ -746,11 +760,7 @@ func lanAddresses() []string {
 	}
 	var out []string
 	for _, in := range ifs {
-		if in.Flags&net.FlagUp == 0 || in.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		if n := in.Name; strings.HasPrefix(n, "utun") || strings.HasPrefix(n, "bridge") || strings.HasPrefix(n, "vmenet") ||
-			strings.HasPrefix(n, "wt") || strings.HasPrefix(n, "docker") || strings.HasPrefix(n, "veth") {
+		if !lanInterface(in) {
 			continue
 		}
 		addrs, _ := in.Addrs()

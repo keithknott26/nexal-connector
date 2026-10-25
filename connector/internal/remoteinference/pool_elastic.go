@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"nexal/connector/internal/diaglog"
@@ -31,11 +32,12 @@ type poolStatus struct {
 	endpoints                     []string
 	progress                      float64
 	ring                          *string
+	ringLAN                       *string // sent with ring: this Mac's LAN ring address ("" for none)
 }
 
 func (r *Runner) poolReport(ctx context.Context, t Task, s poolStatus) {
 	p := s.progress
-	_ = r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: s.state, Step: s.step, Detail: clean(s.detail, 280), Endpoint: s.endpoint, Endpoints: s.endpoints, RingAddress: s.ring, Progress: &p})
+	_ = r.Coord.ReportRemoteInference(ctx, r.HostID, Report{TaskID: t.ID, State: s.state, Step: s.step, Detail: clean(s.detail, 280), Endpoint: s.endpoint, Endpoints: s.endpoints, RingAddress: s.ring, RingLAN: s.ringLAN, Progress: &p})
 }
 
 // proc is one helper process: a model server this runner started.
@@ -44,6 +46,8 @@ type proc struct {
 	done   chan struct{}
 	err    error
 	tail   *lineTail
+	ring   *ringPlan // relays for this run's ring traffic, closed when it stops
+	once   sync.Once
 }
 
 func (r *Runner) startProc(ctx context.Context, args ...string) (*proc, error) {
@@ -98,6 +102,11 @@ func (p *proc) stop() {
 	case <-p.done:
 	case <-time.After(20 * time.Second):
 	}
+	p.once.Do(func() {
+		if p.ring != nil {
+			p.ring.close()
+		}
+	})
 }
 
 func (p *proc) exit() string { return poolExit(p.tail.String(), p.err) }
@@ -209,6 +218,8 @@ type leader struct {
 	lastProbe    time.Time
 	probeFails   int
 	pooledAt     time.Time // when the current pool started answering
+	pooledLAN    bool      // the current (or last) pool reached a member over the LAN
+	lanOff       bool      // a LAN ring failed early once: this request uses the neXal addresses from now on
 	wake         wakeWatch
 	ringGone     persist
 }
@@ -262,7 +273,7 @@ func (r *Runner) poolLeader(ctx context.Context, t Task, addr string) {
 				if l.ringAddr == "" {
 					l.offer()
 				} else if ringHas(cur.PoolRing, 0, l.ringAddr) {
-					l.form(ctx, cur.PoolRing)
+					l.form(ctx, cur.PoolRing, cur.PoolRingLAN)
 				}
 			}
 		}
@@ -282,6 +293,9 @@ func (l *leader) shutdown() {
 func (l *leader) say(s poolStatus) {
 	if s.ring == nil {
 		s.ring = l.status.ring
+	}
+	if s.ringLAN == nil {
+		s.ringLAN = l.status.ringLAN
 	}
 	l.status = s
 	l.lastBeat = time.Now()
@@ -357,9 +371,12 @@ func (l *leader) offer() {
 		return
 	}
 	l.ringPort, l.ringAddr = port, net.JoinHostPort(l.addr, strconv.Itoa(port))
-	ring := l.ringAddr
+	ring, lan := l.ringAddr, ""
+	if !l.lanOff {
+		lan = l.r.ringLAN(l.addr, port)
+	}
 	s := l.status
-	s.ring = &ring
+	s.ring, s.ringLAN = &ring, &lan
 	l.say(s)
 }
 
@@ -371,24 +388,35 @@ func (l *leader) leaveRing() {
 	}
 	l.ringPort, l.ringAddr = 0, ""
 	s := l.status
-	s.ring = &empty
+	s.ring, s.ringLAN = &empty, &empty
 	l.say(s)
 }
 
 // form starts the pooled server on the ring and moves the address to it once it generates. The solo
 // server keeps answering until then.
-func (l *leader) form(ctx context.Context, ring []string) {
+func (l *leader) form(ctx context.Context, ring, lanRing []string) {
 	r, t := l.r, l.t
 	port, err := freeLoopbackPort()
 	if err != nil {
 		return
 	}
 	hostPort := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", "0", "--hosts", strings.Join(ring, ","), "--api-host", "127.0.0.1", "--api-port", strconv.Itoa(port), "--storage-host=false")
+	if l.lanOff {
+		lanRing = nil
+	}
+	plan, err := r.planRing(ctx, ring, lanRing, 0, l.ringPort, l.addr)
 	if err != nil {
+		l.abandon("cannot listen for the pool: " + err.Error())
+		return
+	}
+	p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", "0", "--hosts", strings.Join(plan.hosts, ","), "--api-host", "127.0.0.1", "--api-port", strconv.Itoa(port), "--storage-host=false")
+	if err != nil {
+		plan.close()
 		l.abandon("could not start: " + err.Error())
 		return
 	}
+	p.ring = plan
+	l.pooledLAN = overLAN(plan) != ""
 	started := time.Now()
 	deadline := started.Add(r.FormWait)
 	s := l.status
@@ -435,6 +463,7 @@ func (l *leader) form(ctx context.Context, ring []string) {
 
 // abandon gives up one attempt to form a pool: the Mac keeps serving alone and tries again later.
 func (l *leader) abandon(reason string) {
+	l.giveUpLAN(time.Time{})
 	l.failures++
 	l.nextTry = time.Now().Add(poolBackoff(l.failures))
 	l.leaveRing()
@@ -489,6 +518,7 @@ func (l *leader) watch(ctx context.Context, cur Task) bool {
 	l.fwd.SetUpstream("", "The pool lost a member and is restarting on one Mac. Try again in about a minute.")
 	l.pooled.stop()
 	l.pooled = nil
+	l.giveUpLAN(l.pooledAt)
 	if time.Since(l.pooledAt) >= stableAfter {
 		l.failures = 0 // it ran well for a while, so this is a new problem, not a flap
 	}
@@ -509,7 +539,8 @@ func (l *leader) watch(ctx context.Context, cur Task) bool {
 
 func (r *Runner) poolMember(ctx context.Context, t Task, addr string) {
 	rank := t.PoolRank
-	crashes := 0 // consecutive times this Mac's share of the model died on its own
+	crashes := 0    // consecutive times this Mac's share of the model died on its own
+	lanOff := false // a LAN ring failed early once: neXal addresses only from now on
 	for ctx.Err() == nil {
 		port, err := r.freePort(addr)
 		if err != nil {
@@ -517,31 +548,50 @@ func (r *Runner) poolMember(ctx context.Context, t Task, addr string) {
 			return
 		}
 		mine := net.JoinHostPort(addr, strconv.Itoa(port))
-		st := poolStatus{state: "running", step: "pool", detail: "Ready to share the load. Waiting for the Mac that answers.", progress: 0.88, ring: &mine}
+		lan := ""
+		if !lanOff {
+			lan = r.ringLAN(addr, port)
+		}
+		st := poolStatus{state: "running", step: "pool", detail: "Ready to share the load. Waiting for the Mac that answers.", progress: 0.88, ring: &mine, ringLAN: &lan}
 		r.poolReport(ctx, t, st)
-		ring, ok := r.waitForRing(ctx, t, rank, mine, st)
+		ring, lanRing, ok := r.waitForRing(ctx, t, rank, mine, st)
 		if !ok {
 			r.release(port)
 			return
 		}
-		p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", strconv.Itoa(rank), "--hosts", strings.Join(ring, ","), "--api-host", addr, "--storage-host=false")
+		if lanOff {
+			lanRing = nil
+		}
+		plan, err := r.planRing(ctx, ring, lanRing, rank, port, addr)
 		if err != nil {
+			r.release(port)
+			r.fail(ctx, t, "serve", "Cannot listen for the pool on "+mine+": "+err.Error())
+			return
+		}
+		p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", strconv.Itoa(rank), "--hosts", strings.Join(plan.hosts, ","), "--api-host", addr, "--storage-host=false")
+		if err != nil {
+			plan.close()
 			r.release(port)
 			r.fail(ctx, t, "serve", err.Error())
 			return
 		}
-		st = poolStatus{state: "ready", step: "serve", detail: fmt.Sprintf("Sharing %s with the pool (Mac %d of %d).", t.ModelID, rank+1, t.PoolSize), progress: 1, ring: &mine}
+		p.ring = plan
+		st = poolStatus{state: "ready", step: "serve", detail: fmt.Sprintf("Sharing %s with the pool (Mac %d of %d)%s.", t.ModelID, rank+1, t.PoolSize, overLAN(plan)), progress: 1, ring: &mine, ringLAN: &lan}
 		r.poolReport(ctx, t, st)
 		startedAt := time.Now()
 		why := r.superviseRank(ctx, t, p, ring, st)
 		died := !p.alive() // its server crashed or exited, as opposed to the ring changing under it
+		if died && overLAN(plan) != "" && time.Since(startedAt) < stableAfter {
+			lanOff = true
+			r.Logger.Warn("pool ring over the LAN failed; using the neXal addresses for this request", "model", t.ModelID)
+		}
 		p.stop()
 		r.release(port)
 		if ctx.Err() != nil {
 			return
 		}
 		empty := ""
-		r.poolReport(ctx, t, poolStatus{state: "running", step: "pool", detail: "Left the pool (" + tailText(why, 150) + "). Ready to join again.", progress: 0.88, ring: &empty})
+		r.poolReport(ctx, t, poolStatus{state: "running", step: "pool", detail: "Left the pool (" + tailText(why, 150) + "). Ready to join again.", progress: 0.88, ring: &empty, ringLAN: &empty})
 		select {
 		case <-ctx.Done():
 			return
@@ -573,20 +623,20 @@ func (r *Runner) rejoinDelay(crashes *int, died bool, ranFor time.Duration) time
 }
 
 // waitForRing waits until the coordinator has every member's address, this Mac's at its rank.
-func (r *Runner) waitForRing(ctx context.Context, t Task, rank int, mine string, st poolStatus) ([]string, bool) {
+func (r *Runner) waitForRing(ctx context.Context, t Task, rank int, mine string, st poolStatus) ([]string, []string, bool) {
 	last := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, false
+			return nil, nil, false
 		case <-time.After(r.PoolPoll):
 		}
 		cur, ok := r.fetch(ctx, t.ID)
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
 		if ringHas(cur.PoolRing, rank, mine) {
-			return cur.PoolRing, true
+			return cur.PoolRing, cur.PoolRingLAN, true
 		}
 		if time.Since(last) >= r.Heartbeat {
 			last = time.Now()
@@ -626,4 +676,27 @@ func (r *Runner) superviseRank(ctx context.Context, t Task, p *proc, ring []stri
 			r.poolReport(ctx, t, st)
 		}
 	}
+}
+
+// overLAN is " over the LAN" when this Mac reaches another member on its LAN ring address.
+func overLAN(p *ringPlan) string {
+	for _, h := range p.hosts {
+		if ip, _, err := net.SplitHostPort(h); err == nil {
+			if a := net.ParseIP(ip); a != nil && a.IsPrivate() {
+				return " over the LAN"
+			}
+		}
+	}
+	return ""
+}
+
+// giveUpLAN: a pool that reached a member over the LAN and failed before it ran stableAfter (or never formed)
+// falls back to the neXal addresses for the rest of this request. A LAN path can be blocked (a firewall, macOS
+// local network privacy, client isolation on the Wi-Fi) while the mesh still works.
+func (l *leader) giveUpLAN(since time.Time) {
+	if l.pooledLAN && (since.IsZero() || time.Since(since) < stableAfter) {
+		l.lanOff = true
+		l.r.Logger.Warn("pool ring over the LAN failed; using the neXal addresses for this request", "model", l.t.ModelID)
+	}
+	l.pooledLAN = false
 }

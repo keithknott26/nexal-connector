@@ -99,6 +99,10 @@ type Runner struct {
 	Rejoin     time.Duration // how long a member that left the pool waits before offering to join again (default 5 s)
 	Logger     *slog.Logger
 	LogDir     string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
+	// Lease opens (true) or closes (false) the storage-host lease: TCP 8001-8099 from the neXal storage host to
+	// this Mac, and its network name there. The runner holds it while this Mac answers a request (a single serve,
+	// or rank 0 of a pool), whichever helper is running, so a pool switching helpers never drops it.
+	Lease func(ctx context.Context, open bool) error
 
 	mu      sync.Mutex
 	serving map[string]*serve // task id -> server
@@ -106,6 +110,40 @@ type Runner struct {
 	latest  map[string]Task // the last poll's requests for this Mac
 	used    map[int]bool
 	cursor  int // where the next freePort starts looking
+	leased  bool
+	leaseAt time.Time
+}
+
+// leaseRenew is how often the storage-host lease is renewed while held (the coordinator's lease lasts 10 minutes).
+var leaseRenew = 3 * time.Minute
+
+// holdLease opens or renews the storage-host lease while a request this Mac answers is running or ready, and
+// closes it once none is. Called after every poll.
+func (r *Runner) holdLease(ctx context.Context, tasks []Task) {
+	if r.Lease == nil {
+		return
+	}
+	want := false
+	for _, t := range tasks {
+		if (t.State == "running" || t.State == "ready") && (t.PoolID == "" || t.PoolRank == 0) {
+			want = true
+		}
+	}
+	lctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	switch {
+	case want && (!r.leased || time.Since(r.leaseAt) >= leaseRenew):
+		if err := r.Lease(lctx, true); err != nil {
+			r.Logger.Warn("storage-host lease failed", "error", err.Error())
+			return
+		}
+		r.leased, r.leaseAt = true, time.Now()
+	case !want && r.leased:
+		if err := r.Lease(lctx, false); err != nil {
+			r.Logger.Debug("storage-host lease close failed", "error", err.Error())
+		}
+		r.leased = false
+	}
 }
 
 type serve struct {
@@ -197,6 +235,7 @@ func (r *Runner) Once(ctx context.Context) {
 	r.mu.Lock()
 	r.latest = snapshot
 	r.mu.Unlock()
+	r.holdLease(ctx, tasks)
 	for _, t := range tasks {
 		live[t.ID] = true
 		r.mu.Lock()
@@ -336,7 +375,7 @@ func (r *Runner) handle(ctx context.Context, t Task) {
 	serveStart := 0.9
 	r.reportP(ctx, t, "running", "serve", "Starting the model server (loading it into memory)", "", &serveStart)
 	sctx, cancel := context.WithCancel(ctx)
-	cmd := r.command(sctx, "serve", t.ModelID, "--host", "127.0.0.1", "--port", strconv.Itoa(lport))
+	cmd := r.command(sctx, "serve", t.ModelID, "--host", "127.0.0.1", "--port", strconv.Itoa(lport), "--storage-host=false")
 	var tail lineTail
 	cmd.Stdout, cmd.Stderr = &tail, &tail
 	if lf := r.serverLog(port); lf != nil {

@@ -287,7 +287,7 @@ func (l *leader) startSolo(ctx context.Context, why string) bool {
 		r.fail(ctx, t, "serve", err.Error())
 		return false
 	}
-	p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--solo", "--api-host", "127.0.0.1", "--api-port", strconv.Itoa(port))
+	p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--solo", "--api-host", "127.0.0.1", "--api-port", strconv.Itoa(port), "--storage-host=false")
 	if err != nil {
 		r.fail(ctx, t, "serve", err.Error())
 		return false
@@ -360,7 +360,7 @@ func (l *leader) form(ctx context.Context, ring []string) {
 		return
 	}
 	hostPort := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", "0", "--hosts", strings.Join(ring, ","), "--api-host", "127.0.0.1", "--api-port", strconv.Itoa(port))
+	p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", "0", "--hosts", strings.Join(ring, ","), "--api-host", "127.0.0.1", "--api-port", strconv.Itoa(port), "--storage-host=false")
 	if err != nil {
 		l.abandon("could not start: " + err.Error())
 		return
@@ -500,7 +500,7 @@ func (r *Runner) poolMember(ctx context.Context, t Task, addr string) {
 			r.release(port)
 			return
 		}
-		p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", strconv.Itoa(rank), "--hosts", strings.Join(ring, ","), "--api-host", addr)
+		p, err := r.startProc(ctx, "pool-serve", t.ModelID, "--rank", strconv.Itoa(rank), "--hosts", strings.Join(ring, ","), "--api-host", addr, "--storage-host=false")
 		if err != nil {
 			r.release(port)
 			r.fail(ctx, t, "serve", err.Error())

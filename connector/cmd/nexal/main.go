@@ -737,6 +737,11 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		if d, err := diaglog.LogDir(); err == nil {
 			ri.LogDir = d
 		}
+		hostID := c.HostID
+		ri.Lease = func(ctx context.Context, open bool) error {
+			_, err := api.InferenceGateway(ctx, hostID, open)
+			return err
+		}
 		go ri.Run(ctx)
 	}
 	// Version-2 enrollment uses the embedded peer-to-peer mesh runtime. Older

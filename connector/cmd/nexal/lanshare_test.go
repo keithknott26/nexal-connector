@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"strings"
 	"testing"
 )
@@ -37,5 +38,21 @@ func TestLanShareDestinationRejectsBadInput(t *testing.T) {
 		if err := lanShareCommand(context.Background(), args); err == nil {
 			t.Fatalf("expected error for %v", args)
 		}
+	}
+}
+
+func TestLanShareDesiredRegistersPathAndNameFlags(t *testing.T) {
+	fs := flag.NewFlagSet("lan-share", flag.ContinueOnError)
+	path, name := lanShareDesired(fs)
+	if err := fs.Parse([]string{"--path", "/Volumes/Data/Share", "--name", "Backups"}); err != nil {
+		t.Fatal(err)
+	}
+	if *path != "/Volumes/Data/Share" || *name != "Backups" {
+		t.Fatalf("flags not bound: path=%q name=%q", *path, *name)
+	}
+	fs = flag.NewFlagSet("lan-share", flag.ContinueOnError)
+	path, name = lanShareDesired(fs)
+	if err := fs.Parse(nil); err != nil || *path != "" || *name != "" {
+		t.Fatalf("defaults should be empty: %q %q %v", *path, *name, err)
 	}
 }

@@ -80,3 +80,32 @@ func TestWindowBoundsAreUTCCanonicalAndReplaySafe(t *testing.T) {
 		t.Fatal("replayed completed UTC window was trained twice")
 	}
 }
+
+func TestWindowBoundsRejectInvalidInputAndHandleSundayBoundary(t *testing.T) {
+	if _, _, err := WindowBounds(Window("daily"), time.Now()); err == nil {
+		t.Fatal("unknown window accepted")
+	}
+	if _, _, err := WindowBounds(WindowWeekly, time.Time{}); err == nil {
+		t.Fatal("zero time accepted")
+	}
+	// Sunday 2026-03-08 belongs to the week starting Monday 2026-03-02.
+	start, end, err := WindowBounds(WindowWeekly, time.Date(2026, 3, 8, 23, 0, 0, 0, time.UTC))
+	if err != nil || start.Format(time.RFC3339) != "2026-02-23T00:00:00Z" || end.Format(time.RFC3339) != "2026-03-02T00:00:00Z" {
+		t.Fatalf("sunday bounds %s..%s err=%v", start, end, err)
+	}
+}
+
+func TestNewBaselineRejectsOutOfRangeObservation(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, d := range []time.Duration{0, 6 * 24 * time.Hour, 53 * 7 * 24 * time.Hour} {
+		if _, err := NewBaseline(now, d); err == nil {
+			t.Fatalf("duration %s accepted", d)
+		}
+	}
+	if _, err := NewBaseline(time.Time{}, 14*24*time.Hour); err == nil {
+		t.Fatal("zero time accepted")
+	}
+	if _, err := NewBaseline(now, 52*7*24*time.Hour); err != nil {
+		t.Fatalf("upper bound rejected: %v", err)
+	}
+}

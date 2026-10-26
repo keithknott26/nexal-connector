@@ -152,3 +152,18 @@ func TestTailText(t *testing.T) {
 		t.Errorf("multibyte text: %q", got)
 	}
 }
+
+// lanIPNets must only ever report private, non-loopback IPv4 networks, whatever interfaces the host has.
+func TestLanIPNetsOnlyPrivateIPv4(t *testing.T) {
+	for _, n := range lanIPNets() {
+		if n.IP.To4() == nil {
+			t.Errorf("%v is not IPv4", n)
+		}
+		if !n.IP.IsPrivate() || n.IP.IsLoopback() {
+			t.Errorf("%v is not a private, non-loopback network", n)
+		}
+		if n.Mask == nil {
+			t.Errorf("%v has no mask", n)
+		}
+	}
+}

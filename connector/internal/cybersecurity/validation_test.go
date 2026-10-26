@@ -83,3 +83,18 @@ func TestValidationHoneypotAuthorizationAndReplay(t *testing.T) {
 		t.Fatal("replayed exercise")
 	}
 }
+
+func TestServeValidationRejectsBeforeListening(t *testing.T) {
+	expired := validationGrant()
+	expired.ExpiresAt = time.Now().Add(-time.Minute)
+	for name, r := range map[string]ValidationRun{"local module": validationGrant(), "expired grant": expired} {
+		called := false
+		executed, reason, err := ServeValidation(context.Background(), r,
+			func(context.Context) bool { called = true; return true },
+			func(context.Context) error { called = true; return nil },
+			func(context.Context, Event) error { called = true; return nil })
+		if executed || reason != "execution_failed" || err == nil || called {
+			t.Fatalf("%s: executed=%v reason=%q err=%v callbacks=%v", name, executed, reason, err, called)
+		}
+	}
+}

@@ -466,3 +466,41 @@ func TestRemoveBoxFilesErr(t *testing.T) {
 		t.Fatalf("err=%v deleted=%v", err, dev.deleted)
 	}
 }
+
+func TestHeartbeatThrottlesAndSkipsBusyAndIdleSandboxes(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	now := time.Unix(1_000_000, 0)
+	m.opts.Now = func() time.Time { return now }
+	put(m, &record{ID: "run", State: StateRunning})
+	put(m, &record{ID: "key", State: StateProvisioning, AwaitKey: true})
+	put(m, &record{ID: "busy", State: StateRunning, busy: true})
+	put(m, &record{ID: "stopped", State: StateStopped})
+
+	m.heartbeat()
+	m.wg.Wait()
+	m.mu.Lock()
+	if !m.lastHB.Equal(now) || m.hbBusy {
+		t.Fatalf("first heartbeat must stamp the time and release the busy flag: lastHB=%v busy=%v", m.lastHB, m.hbBusy)
+	}
+	m.mu.Unlock()
+
+	// Within heartbeatEvery nothing is re-sent, so the stamp stays put.
+	now = now.Add(heartbeatEvery - time.Second)
+	m.heartbeat()
+	m.wg.Wait()
+	m.mu.Lock()
+	if !m.lastHB.Equal(time.Unix(1_000_000, 0)) {
+		t.Fatalf("heartbeat inside the interval must be skipped, lastHB=%v", m.lastHB)
+	}
+	m.mu.Unlock()
+
+	// Once the interval has elapsed it runs again.
+	now = now.Add(2 * time.Second)
+	m.heartbeat()
+	m.wg.Wait()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.lastHB.Equal(now) {
+		t.Fatalf("heartbeat after the interval must run, lastHB=%v", m.lastHB)
+	}
+}

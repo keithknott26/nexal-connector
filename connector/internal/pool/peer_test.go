@@ -439,3 +439,15 @@ func TestPeerMLKEM1024SurvivesDefaultGroupDisabling(t *testing.T) {
 	t.Setenv("GODEBUG", "tlsmlkem=0,tlssecpmlkem=0")
 	TestPeerHandshakeUsesPostQuantumKeyExchange(t)
 }
+
+func TestPeerClientDeviceIDIsExpectedRemoteAndCloseIsRepeatable(t *testing.T) {
+	registry := NewRegistry(nil)
+	a := enrolledIdentity(t, registry)
+	b := enrolledIdentity(t, registry)
+	client := testPeerClient(t, a, registry, DeviceID(b.PublicKey), "https://127.0.0.1:1")
+	if got, want := client.DeviceID(), DeviceID(b.PublicKey); got != want {
+		t.Fatalf("DeviceID = %q, want the expected remote device %q", got, want)
+	}
+	client.Close()
+	client.Close()
+}

@@ -783,3 +783,21 @@ func TestRestoredRegistryAuthorizesARealTwoRankAllReduce(t *testing.T) {
 		}
 	}
 }
+
+// Tenant, Rank and Size are what a caller uses to label and shard work; they must
+// report the ring as constructed, and Members must hand back a copy.
+func TestRingAccessorsReportConstruction(t *testing.T) {
+	set := newRingSet(t, 2, "tenant-accessors", time.Second, []bool{false, false})
+	ring := set.rings[0]
+	if got := ring.Tenant(); got != "tenant-accessors" {
+		t.Fatalf("Tenant() = %q, want tenant-accessors", got)
+	}
+	if ring.Size() != 2 {
+		t.Fatalf("Size() = %d, want 2", ring.Size())
+	}
+	members := ring.Members()
+	members[0].Tenant = "mutated"
+	if ring.Members()[0].Tenant != "tenant-accessors" {
+		t.Fatal("mutating the Members() result changed the ring")
+	}
+}

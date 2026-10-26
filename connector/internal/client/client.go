@@ -178,6 +178,9 @@ type StatusError struct {
 	Message string
 }
 
+// ErrorCode is the coordinator's machine-readable error code ("" when it sent none).
+func (e *StatusError) ErrorCode() string { return e.Code }
+
 func (e *StatusError) Error() string {
 	if e.Message != "" {
 		return fmt.Sprintf("coordinator rejected request (HTTP %d): %s", e.Status, e.Message)

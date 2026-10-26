@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -130,6 +131,34 @@ type Manager struct {
 	// Run may be replaced by a test harness. Production uses the fixed executable.
 	Run  func(context.Context, string, string) error
 	Poll time.Duration
+	// IdleRetry is how long to wait after the coordinator says no runtime is assigned to this
+	// host (or the feature is not set up). Default 15 minutes: asking every 30 seconds cannot help.
+	IdleRetry time.Duration
+	// Logger, when set, records each change in why no runtime is running (logged once, not per retry).
+	Logger *slog.Logger
+}
+
+// idleCodes are coordinator answers that mean "nothing to run here", not a failure.
+var idleCodes = map[string]bool{"runtime_unassigned": true, "runtime_storage_unconfigured": true}
+
+// codedError is the coordinator's typed rejection (client.StatusError).
+type codedError interface{ ErrorCode() string }
+
+// idle reports whether err means no runtime is assigned, and the reason to log.
+func idle(err error) (bool, string) {
+	if err == nil {
+		return false, ""
+	}
+	var c codedError
+	if errors.As(err, &c) {
+		if idleCodes[c.ErrorCode()] {
+			return true, c.ErrorCode()
+		}
+		if c.ErrorCode() != "" {
+			return false, c.ErrorCode()
+		}
+	}
+	return false, err.Error()
 }
 
 func (m Manager) RunLoop(ctx context.Context) error {
@@ -166,15 +195,35 @@ func (m Manager) RunLoop(ctx context.Context) error {
 	if m.Run == nil {
 		m.Run = runProcess
 	}
+	if m.IdleRetry <= 0 {
+		m.IdleRetry = 15 * time.Minute
+	}
+	last := ""
 	for ctx.Err() == nil {
+		var err error
 		if m.Connected() {
-			_ = m.once(ctx)
+			err = m.once(ctx)
 		}
+		waiting, reason := idle(err)
+		if reason != last && m.Logger != nil && ctx.Err() == nil {
+			switch {
+			case reason == "":
+				m.Logger.Info("private runtime available again")
+			case waiting:
+				m.Logger.Info("no private runtime assigned to this Mac; checking again later", "reason", reason, "retry", m.IdleRetry.String())
+			default:
+				m.Logger.Warn("private runtime unavailable", "reason", reason)
+			}
+		}
+		last = reason
 		delay := m.Poll
 		// No tight download/exec loop when the coordinator is unconfigured or a
 		// runtime fails: each retry still begins a fresh authenticated session.
 		if m.Connected() {
 			delay = 30 * time.Second
+			if waiting {
+				delay = m.IdleRetry
+			}
 		}
 		timer := time.NewTimer(delay)
 		select {

@@ -681,7 +681,8 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 	}()
 	go func() {
 		defer wg.Done()
-		manager := privateruntime.Manager{API: api, HostID: c.HostID, Root: filepath.Join(filepath.Dir(*path), "runtime-sessions"), Connected: learningConnected}
+		manager := privateruntime.Manager{API: api, HostID: c.HostID, Root: filepath.Join(filepath.Dir(*path), "runtime-sessions"), Connected: learningConnected,
+			Logger: logger.With("component", "private-runtime")}
 		if err := manager.RunLoop(ctx); err != nil {
 			logger.Warn("private runtime bootstrap stopped", "reason", "bootstrap_unavailable")
 		}

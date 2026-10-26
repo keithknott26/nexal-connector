@@ -331,3 +331,32 @@ func TestControlPlaneErrorsDoNotLeakTheOriginOrToken(t *testing.T) {
 		t.Fatalf("transport error leaked or was nil: %v", err)
 	}
 }
+
+func TestValidateKeyAcceptsAndRejects(t *testing.T) {
+	valid := []string{"a", "docs/readme.txt", "a/b/c", ".hidden", "a..b", "name with space", "üñí/çødé", strings.Repeat("k", maxDriveKeyLength)}
+	for _, key := range valid {
+		if err := ValidateKey(key); err != nil {
+			t.Errorf("ValidateKey(%q) = %v, want nil", key, err)
+		}
+	}
+	invalid := map[string]string{
+		"empty":            "",
+		"too long":         strings.Repeat("k", maxDriveKeyLength+1),
+		"leading slash":    "/a",
+		"trailing slash":   "a/",
+		"empty segment":    "a//b",
+		"backslash":        `a\b`,
+		"dot segment":      "a/./b",
+		"leading dot dot":  "../a",
+		"trailing dot dot": "a/..",
+		"only dot":         ".",
+		"newline":          "a\nb",
+		"nul":              "a\x00b",
+		"delete":           "a\x7fb",
+	}
+	for name, key := range invalid {
+		if err := ValidateKey(key); err == nil {
+			t.Errorf("%s: ValidateKey(%q) = nil, want error", name, key)
+		}
+	}
+}

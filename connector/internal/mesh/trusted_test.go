@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestTrustedExecutableRejectsUnknownName(t *testing.T) {
@@ -44,5 +45,17 @@ func TestRunErrorMessageAndUnwrap(t *testing.T) {
 func TestExecRunnerRejectsUnknownCommand(t *testing.T) {
 	if err := (ExecRunner{}).Run(context.Background(), "sh", "-c", "true"); err == nil {
 		t.Error("ExecRunner.Run(sh) succeeded, want unsupported runtime error")
+	}
+}
+
+func TestProbeTTLKeepsLoopbackFresh(t *testing.T) {
+	if got := probeTTL("127.0.0.1"); got != time.Minute {
+		t.Errorf("probeTTL(loopback) = %v, want %v", got, time.Minute)
+	}
+	if got := probeTTL("100.64.0.7"); got != serviceProbeTTL {
+		t.Errorf("probeTTL(peer) = %v, want %v", got, serviceProbeTTL)
+	}
+	if time.Minute >= serviceProbeTTL {
+		t.Error("loopback TTL must be shorter than the peer TTL")
 	}
 }

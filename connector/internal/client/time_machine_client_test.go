@@ -142,3 +142,41 @@ func TestTimeMachineSMBCredentialValidatesAgainstExpectedDestination(t *testing.
 		t.Fatalf("invalid host id must be rejected before any request: %v", err)
 	}
 }
+
+func TestTimeMachineCredentialsValidatesResponse(t *testing.T) {
+	good := func() map[string]any {
+		return map[string]any{
+			"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST",
+			"bucket": "b", "prefix": "p/", "permission": "object-read-write",
+			"endpoint": "https://s3.example.com", "ttlSeconds": 900, "maxTtlSeconds": 3600,
+			"expiresAt": time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339Nano),
+		}
+	}
+	body := good()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method+" "+r.URL.Path != "POST /api/v2/devices/host1/time-machine/credentials" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer s.Close()
+	c, err := New(s.URL, "host-token-123456", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	creds, err := c.TimeMachineCredentials(ctx, "host1")
+	if err != nil || creds.Bucket != "b" || creds.SecretAccessKey != "SK" {
+		t.Fatalf("valid credentials: %+v %v", creds, err)
+	}
+	body = good()
+	body["endpoint"] = "http://insecure.example.com"
+	creds, err = c.TimeMachineCredentials(ctx, "host1")
+	if err == nil || creds.SecretAccessKey != "" || creds.AccessKeyID != "" || creds.SessionToken != "" {
+		t.Fatalf("invalid credentials must be rejected and empty: %+v %v", creds, err)
+	}
+	if _, err := c.TimeMachineCredentials(ctx, "../x"); err == nil {
+		t.Fatal("invalid host id must be rejected")
+	}
+}

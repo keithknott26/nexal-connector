@@ -7,8 +7,10 @@ does that bounce, at most once per COOLDOWN, after saving what it saw (so the ca
 
   black hole  a connected peer we sent at least MIN_SENT bytes to over the last WINDOW seconds answered with no
               more than MAX_REPLY bytes (WireGuard keepalives alone stay under it; any TCP exchange does not)
-  pending     a connected peer has reported quantumReason session-pending (or
-              exchange-pending) continuously for PENDING_FOR seconds
+  pending     a connected peer has reported a stuck ML-KEM lease (quantumReason session-pending,
+              exchange-pending, peer-unreachable or evidence-expired) continuously for PENDING_FOR seconds.
+              A gated session drops the peer's data while its lease is invalid, so the link looks up
+              (Connected, fresh handshakes) but every connection times out.
 
 Evidence goes to /var/log/nexal-mesh-watchdog/<time>-<peer>.log; one summary line per action to the journal.
 Pass --dry-run to report without bouncing. Standard library only.
@@ -23,11 +25,12 @@ import time
 STATE = "/var/lib/nexal-mesh-watchdog/state.json"
 LOGDIR = "/var/log/nexal-mesh-watchdog"
 WINDOW = 120          # seconds of counters compared for a black hole
-MIN_SENT = 1500       # bytes sent to the peer in WINDOW before silence counts
+MIN_SENT = 600        # bytes sent to the peer in WINDOW before silence counts: a client retrying TCP
+                      # connects (a few SYNs a minute) must count; keepalives alone stay far below
 MAX_REPLY = 400       # bytes back from it in WINDOW that still count as silence (keepalives)
-PENDING_FOR = 300     # seconds a session may stay pending
+PENDING_FOR = 180     # seconds a lease may stay stuck (leases last about 3 minutes)
 COOLDOWN = 600        # seconds between bounces
-PENDING = {"session-pending", "exchange-pending"}
+PENDING = {"session-pending", "exchange-pending", "peer-unreachable", "evidence-expired"}
 
 
 def status():

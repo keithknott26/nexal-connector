@@ -49,6 +49,17 @@ class Decide(unittest.TestCase):
         samples = [peer(100, 100, reason="session-pending" if i % 4 == 0 else "") for i in range(30)]
         self.assertIsNone(self.run_samples(samples))
 
+    def test_retried_connects_with_no_answer_are_a_black_hole(self):
+        # A client retrying TCP connects every few seconds sends a few hundred bytes a minute and gets nothing.
+        got = self.run_samples([peer(1000 + 32 * i, 5000 + 200 * i) for i in range(6)])
+        self.assertIsNotNone(got)
+        self.assertIn("black hole", got[1])
+
+    def test_stuck_unreachable_lease(self):
+        got = self.run_samples([peer(100, 100, reason="peer-unreachable") for _ in range(8)])
+        self.assertIsNotNone(got)
+        self.assertIn("peer-unreachable", got[1])
+
     def test_disconnected_peer_ignored(self):
         self.assertIsNone(self.run_samples([peer(0, 5000 + 900 * i, status="Connecting") for i in range(8)]))
 

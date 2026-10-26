@@ -358,6 +358,50 @@ final class AppModel: ObservableObject {
         Task { await rejoinNetworkIfEnrolled() }
     }
 
+    // MARK: Stuck quantum-safe sessions
+    //
+    // The secure network only carries a peer's traffic while that link's ML-KEM lease is valid. When renewal
+    // gets stuck (for example the peer's key-exchange listener moved when it restarted, and this Mac backed off
+    // with "peer-unreachable"), the peer still shows Connected with fresh handshakes but every connection to it
+    // times out, until someone presses Refresh. Do that automatically: a connected peer that stays degraded for
+    // one of these reasons for PQStuckBeforeHealing gets a fresh key exchange, at most once per PQHealCooldown.
+    static let stuckPQReasons: Set<String> = ["peer-unreachable", "evidence-expired", "exchange-pending", "session-pending"]
+    static let pqStuckBeforeHealing: TimeInterval = 180
+    static let pqHealCooldown: TimeInterval = 600
+    private var pqStuckSince: [String: Date] = [:]
+    private var lastPQHeal: Date?
+
+    /// Updates when each peer's lease became stuck, and returns the peers stuck for long enough.
+    static func stuckQuantumPeers(_ peers: [ConnectorStatus.MeshPeer], since: inout [String: Date], now: Date = Date()) -> [String] {
+        var next: [String: Date] = [:]
+        var stuck: [String] = []
+        for p in peers where (p.lifecycle == "connected" || p.lifecycle == "degraded") && p.pq == "degraded"
+            && stuckPQReasons.contains(p.pqReason ?? "") {
+            let start = since[p.id] ?? now
+            next[p.id] = start
+            if now.timeIntervalSince(start) >= pqStuckBeforeHealing { stuck.append(p.name) }
+        }
+        since = next
+        return stuck
+    }
+
+    private func healStuckQuantumSessions() {
+        guard let mesh = status?.mesh, mesh.providerAvailable, !busy else { return }
+        let stuck = Self.stuckQuantumPeers(mesh.peers, since: &pqStuckSince)
+        guard !stuck.isEmpty else { return }
+        if let last = lastPQHeal, Date().timeIntervalSince(last) < Self.pqHealCooldown { return }
+        guard Self.mayRekey(last: lastRekeyAt) else { return }
+        lastPQHeal = Date()
+        lastRekeyAt = Date()
+        AgentLog.note("quantum-safe session stuck with \(stuck.joined(separator: ", ")); renewing it")
+        Task { [weak self] in
+            guard let self else { return }
+            do { _ = try await self.invoke(.rekeyNetwork) }
+            catch { AgentLog.note("quantum-safe renewal failed: \(error.localizedDescription)") }
+            self.pqStuckSince = [:]
+        }
+    }
+
     func chooseConnector() {
         let panel = NSOpenPanel()
         panel.title = "Choose the neXal connector"
@@ -768,6 +812,7 @@ final class AppModel: ObservableObject {
             try await updateStatus()
             consecutivePollFailures = 0
             healMeshIfDown()
+            healStuckQuantumSessions()
         } catch {
             consecutivePollFailures += 1
             // One slow or failed poll (the connector busy for a moment) keeps what is on screen.

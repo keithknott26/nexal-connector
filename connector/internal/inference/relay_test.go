@@ -55,3 +55,25 @@ func TestValidateAlsoListen(t *testing.T) {
 		}
 	}
 }
+
+func TestShareAddressesClassifiesAndNeverOverlaps(t *testing.T) {
+	meshAddrs, lanAddrs := ShareAddresses()
+	_, cgnat, _ := net.ParseCIDR("100.64.0.0/10")
+	seen := map[string]bool{}
+	for _, a := range meshAddrs {
+		ip := net.ParseIP(a).To4()
+		if ip == nil || !cgnat.Contains(ip) {
+			t.Errorf("mesh address %q is not in 100.64.0.0/10", a)
+		}
+		seen[a] = true
+	}
+	for _, a := range lanAddrs {
+		ip := net.ParseIP(a).To4()
+		if ip == nil || !ip.IsPrivate() || ip.IsLoopback() {
+			t.Errorf("lan address %q is not a private IPv4", a)
+		}
+		if seen[a] {
+			t.Errorf("address %q listed as both mesh and lan", a)
+		}
+	}
+}

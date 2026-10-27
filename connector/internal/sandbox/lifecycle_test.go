@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -525,5 +526,53 @@ func TestRecoverReconcilesEveryPersistedSandbox(t *testing.T) {
 		if _, err := os.Stat(m.diskPath(id)); !os.IsNotExist(err) {
 			t.Fatalf("%s: ephemeral disk must be wiped when its VM is gone", id)
 		}
+	}
+}
+
+type errGuest struct{ err error }
+
+func (e errGuest) Send(context.Context, Handle, GuestCommand) (GuestReply, error) {
+	return GuestReply{}, e.err
+}
+
+func TestRejoinVMAppliesTheKeyThroughTheGuestOfALiveVM(t *testing.T) {
+	g := &fakeGuest{rep: GuestReply{MeshIP: "100.64.0.9"}}
+	m := newTestManager(t, &fakeHyp{}, nil, g)
+	put(m, &record{ID: "sb1", State: StateRunning, Kind: SandboxVM, AwaitKey: true, Handle: Handle{Label: "l-sb1"}})
+
+	m.rejoinVM(context.Background(), Task{TaskID: "t1", SandboxID: "sb1", SetupKey: "key"}, true)
+
+	if len(g.cmds) != 1 || g.cmds[0].Op != GuestOpMeshRejoin || g.cmds[0].Key != "key" {
+		t.Fatalf("guest must get exactly one mesh rejoin carrying the key: %+v", g.cmds)
+	}
+	if r := snap(m, "sb1"); r.AwaitKey || r.State != StateRunning || r.MeshIP != "100.64.0.9" {
+		t.Fatalf("a successful rejoin must clear AwaitKey and record the mesh IP: %+v", r)
+	}
+}
+
+func TestRejoinVMAsksForAFreshKeyWhenTheGuestRefuses(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, errGuest{err: errors.New("guest unreachable")})
+	put(m, &record{ID: "sb1", State: StateRunning, Kind: SandboxVM, Handle: Handle{Label: "l-sb1"}})
+
+	m.rejoinVM(context.Background(), Task{TaskID: "t1", SandboxID: "sb1", SetupKey: "key"}, true)
+
+	if r := snap(m, "sb1"); !r.AwaitKey || r.State != StateRunning {
+		t.Fatalf("a failed rejoin must leave the sandbox awaiting a fresh key: %+v", r)
+	}
+}
+
+func TestRejoinVMAsksForAFreshKeyWhenAStoppedVMCannotRestart(t *testing.T) {
+	g := &fakeGuest{}
+	m := newTestManager(t, &fakeHyp{}, nil, g)
+	// No Boot info, so the restart cannot proceed and the guest must never be asked.
+	put(m, &record{ID: "sb1", State: StateRunning, Kind: SandboxVM})
+
+	m.rejoinVM(context.Background(), Task{TaskID: "t1", SandboxID: "sb1", SetupKey: "key"}, false)
+
+	if len(g.cmds) != 0 {
+		t.Fatalf("guest must not be contacted when the VM could not restart: %+v", g.cmds)
+	}
+	if r := snap(m, "sb1"); !r.AwaitKey {
+		t.Fatalf("a failed restart must leave the sandbox awaiting a fresh key: %+v", r)
 	}
 }

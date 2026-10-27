@@ -20,6 +20,7 @@ func TestProbeServicesReportsOpenPortsAndCaches(t *testing.T) {
 		calls.Add(1)
 		return addr == "100.64.0.9:22" || addr == "100.64.0.9:445"
 	}
+	forgetServices("100.64.0.9") // the cache is package-global; stay valid under -count=N
 	got := probeServices("100.64.0.9")
 	if len(got) != 2 || got[0] != "ssh" || got[1] != "smb" {
 		t.Fatalf("services = %v", got)
@@ -84,6 +85,7 @@ func TestForgetServicesForcesReprobe(t *testing.T) {
 	prev := dialService
 	defer func() { dialService = prev }()
 	dialService = func(string) bool { calls.Add(1); return false }
+	forgetServices("100.64.0.77") // the cache is package-global; stay valid under -count=N
 	probeServices("100.64.0.77")
 	probeServices("100.64.0.77")
 	n := calls.Load()

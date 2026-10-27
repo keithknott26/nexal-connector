@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func testSeed() SeedParams {
@@ -140,6 +141,19 @@ func TestParseFirstBootLine(t *testing.T) {
 	}
 	if _, ok, failed, _ := ParseFirstBootLine("random console noise"); ok || failed {
 		t.Fatal("noise misparsed")
+	}
+}
+
+func TestParseFirstBootFailureReasonIsBounded(t *testing.T) {
+	// Console output is untrusted: an over-long reason is capped at 200 bytes.
+	_, _, failed, why := ParseFirstBootLine(FirstBootFailedPrefix + " " + strings.Repeat("a", 500))
+	if !failed || len(why) != 200 {
+		t.Fatalf("failed=%v len=%d, want a 200-byte reason", failed, len(why))
+	}
+	// A multi-byte rune straddling the cut is dropped whole, never left as invalid UTF-8.
+	_, _, failed, why = ParseFirstBootLine(FirstBootFailedPrefix + " " + strings.Repeat("a", 199) + strings.Repeat("é", 10))
+	if !failed || !utf8.ValidString(why) || why != strings.Repeat("a", 199) {
+		t.Fatalf("failed=%v reason=%q, want 199 'a' and valid UTF-8", failed, why)
 	}
 }
 

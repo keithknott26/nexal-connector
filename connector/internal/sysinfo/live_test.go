@@ -1,7 +1,10 @@
 package sysinfo
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -184,5 +187,24 @@ func TestIdleChangedOnlyAtSixtySecondBoundary(t *testing.T) {
 		if got := idleChanged(c.a, c.b); got != c.want {
 			t.Errorf("%s: idleChanged = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestCollectLiveIsNoOpOffDarwin(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin collects live metrics through its tools")
+	}
+	calls := 0
+	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return nil, errors.New("must not run")
+	}}
+	info := Info{MemoryBytes: 1 << 30}
+	c.collectLive(context.Background(), &info)
+	if calls != 0 {
+		t.Fatal("collectLive ran darwin-only tools off darwin", calls)
+	}
+	if info.CPUUsagePercent != nil || info.MemoryUsedBytes != nil || info.IdleSeconds != nil || info.LoadAverage1m != nil || info.LastTimeMachineBackupAt != "" {
+		t.Fatal("live metrics set off darwin", info)
 	}
 }

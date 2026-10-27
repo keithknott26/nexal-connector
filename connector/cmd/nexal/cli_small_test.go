@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -81,5 +82,59 @@ func TestBundleCommandValidatesFlagsBeforeLoadingConfig(t *testing.T) {
 				t.Fatalf("expected %q error, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+func decodeEmitted(t *testing.T, out string) map[string]any {
+	t.Helper()
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output is not one JSON object: %v\n%s", err, out)
+	}
+	return got
+}
+
+func TestCanaryCommandStatusEnableDisableReportsState(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	run := func(action string) map[string]any {
+		var err error
+		out := captureStdout(t, func() {
+			err = canaryCommand(context.Background(), []string{"--config", cfg, "--action", action})
+		})
+		if err != nil {
+			t.Fatalf("canary %s: %v", action, err)
+		}
+		return decodeEmitted(t, out)
+	}
+	if got := run("status"); got["enabled"] != false {
+		t.Fatalf("fresh canary should be disabled: %v", got)
+	}
+	if got := run("enable"); got["enabled"] != true {
+		t.Fatalf("enable should report enabled: %v", got)
+	}
+	got := run("disable")
+	if got["enabled"] != false {
+		t.Fatalf("disable should report disabled: %v", got)
+	}
+	if d, _ := got["description"].(string); !strings.Contains(d, "Does not scan documents") {
+		t.Fatalf("description missing scope disclaimer: %v", got["description"])
+	}
+}
+
+func TestHoneypotCommandStatusReportsEmptyRecentAsList(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	var err error
+	out := captureStdout(t, func() {
+		err = honeypotCommand(context.Background(), []string{"--config", cfg})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decodeEmitted(t, out)
+	if got["enabled"] != false {
+		t.Fatalf("fresh honeypot should be disabled: %v", got)
+	}
+	if recent, ok := got["recent"].([]any); !ok || len(recent) != 0 {
+		t.Fatalf("recent should be an empty list, not null: %#v", got["recent"])
 	}
 }

@@ -187,6 +187,39 @@ func TestRunKillRequestsReturnsWhenContextEnds(t *testing.T) {
 	}
 }
 
+func TestRunKillRequestsPollsAllRequestDirs(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	var paths []string
+	for _, d := range []string{m.killRequestsDir(), m.stopRequestsDir(), m.startRequestsDir()} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(d, "bad name") // invalid IDs are discarded on the first poll
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.RunKillRequests(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(killPollEvery + 5*time.Second)
+	for time.Now().Before(deadline) {
+		left := 0
+		for _, p := range paths {
+			if _, err := os.Lstat(p); err == nil {
+				left++
+			}
+		}
+		if left == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Error("RunKillRequests did not poll the kill, stop and start request directories")
+}
+
 func TestFirstBootTimeoutFollowsCaps(t *testing.T) {
 	m := newTestManager(t, &fakeHyp{}, nil, nil)
 	if got, want := m.firstBootTimeout(), DefaultCaps().FirstBootTimeout; got != want {

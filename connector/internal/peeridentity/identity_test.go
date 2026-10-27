@@ -354,3 +354,33 @@ func TestStorableSecretBounds(t *testing.T) {
 		}
 	}
 }
+
+// A backend that refuses the write must surface the error from both
+// StoreIdentity and EnsureIdentity, and must not report an identity as created.
+func TestPutFailureIsPropagatedAndNothingIsReportedCreated(t *testing.T) {
+	ctx := context.Background()
+	putErr := errors.New("keychain write denied")
+
+	m := newMem()
+	m.putErr = putErr
+	id, err := pool.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := StoreIdentity(ctx, m, id); !errors.Is(err, putErr) {
+		t.Fatalf("StoreIdentity error = %v, want %v", err, putErr)
+	}
+
+	m = newMem()
+	m.putErr = putErr
+	got, created, err := EnsureIdentity(ctx, m, "")
+	if !errors.Is(err, putErr) {
+		t.Fatalf("EnsureIdentity error = %v, want %v", err, putErr)
+	}
+	if created || got.PrivateKey != nil {
+		t.Fatal("EnsureIdentity reported an identity after a failed write")
+	}
+	if err := StoreIdentity(ctx, nil, id); err == nil {
+		t.Fatal("StoreIdentity accepted a nil secrets store")
+	}
+}

@@ -121,3 +121,19 @@ func TestExclusiveLock(t *testing.T) {
 		t.Fatal("second connector lock succeeded")
 	}
 }
+
+func TestDefaultPathUnderHomeAndError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(got) || !strings.HasPrefix(got, home+string(filepath.Separator)) || filepath.Base(got) != "config.json" {
+		t.Fatalf("unexpected default path %q", got)
+	}
+	t.Setenv("HOME", "")
+	if p, err := DefaultPath(); err == nil {
+		t.Fatalf("expected error without a home directory, got %q", p)
+	}
+}

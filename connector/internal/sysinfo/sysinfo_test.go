@@ -323,3 +323,20 @@ func TestNonDarwinStaticAndThermalSkipExternalCommands(t *testing.T) {
 		t.Fatalf("thermal = %q, want empty off macOS", got)
 	}
 }
+
+func TestNonDarwinStaticAndThermalSkipSystemTools(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin runs the real system tools")
+	}
+	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("no system tool may run off darwin")
+		return nil, nil
+	}}
+	info := c.readStatic(context.Background())
+	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() || info.Chip != "" || info.Serial != "" {
+		t.Fatalf("static info = %+v", info)
+	}
+	if got := c.thermal(context.Background()); got != "" {
+		t.Fatalf("thermal = %q, want empty off darwin", got)
+	}
+}

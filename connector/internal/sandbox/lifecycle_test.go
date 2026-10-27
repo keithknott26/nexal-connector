@@ -504,3 +504,26 @@ func TestHeartbeatThrottlesAndSkipsBusyAndIdleSandboxes(t *testing.T) {
 		t.Fatalf("heartbeat after the interval must run, lastHB=%v", m.lastHB)
 	}
 }
+
+func TestRecoverReconcilesEveryPersistedSandbox(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	for _, id := range []string{"sb1", "sb2"} {
+		if err := os.MkdirAll(m.boxDir(id), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(m.diskPath(id), []byte("disk"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		put(m, &record{ID: id, State: StateRunning, Kind: SandboxVM, Lifecycle: LifecycleEphemeral,
+			Handle: Handle{Label: "l-" + id}, Boot: &BootInfo{Hostname: "h"}})
+	}
+	m.recover()
+	for _, id := range []string{"sb1", "sb2"} {
+		if r := snap(m, id); r.State != StateProvisioning || !r.AwaitKey {
+			t.Fatalf("%s not reconciled after restart: %+v", id, r)
+		}
+		if _, err := os.Stat(m.diskPath(id)); !os.IsNotExist(err) {
+			t.Fatalf("%s: ephemeral disk must be wiped when its VM is gone", id)
+		}
+	}
+}

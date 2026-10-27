@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -110,3 +112,27 @@ func TestHoneypotIgnoresLoopbackInProduction(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestHoneypotServiceListDefaultsAndOverride(t *testing.T) {
+	if got := (Honeypot{}).serviceList(); len(got) != len(DefaultHoneypotServices) {
+		t.Fatalf("default services = %d, want %d", len(got), len(DefaultHoneypotServices))
+	}
+	custom := []HoneypotService{{"ssh", 0, []byte("x")}}
+	if got := (Honeypot{services: custom}).serviceList(); len(got) != 1 || got[0].Name != "ssh" {
+		t.Fatalf("override ignored: %+v", got)
+	}
+}
+
+func TestHoneypotRejectsGroupAccessibleStateDirectory(t *testing.T) {
+	dir := t.TempDir()
+	state := filepath.Join(dir, "security-honeypot")
+	if err := os.Mkdir(state, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(state, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Honeypot{Directory: dir}).Status(); err == nil || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("err = %v, want unsafe directory", err)
+	}
+}

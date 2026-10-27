@@ -45,3 +45,45 @@ func TestTimeMachineCoordinatorContract(t *testing.T) {
 		t.Fatalf("%+v", reported)
 	}
 }
+
+func TestTimeMachineStatusRejectsBadHostAndUnacceptedReport(t *testing.T) {
+	calls := 0
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]bool{"accepted": false})
+	}))
+	defer s.Close()
+	c, err := New(s.URL, "host-token-123456", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.TimeMachineConfig(context.Background(), "bad/id"); err == nil {
+		t.Fatal("TimeMachineConfig accepted an invalid host id")
+	}
+	if err := c.ReportTimeMachineStatus(context.Background(), "bad/id", timemachine.Status{}); err == nil {
+		t.Fatal("ReportTimeMachineStatus accepted an invalid host id")
+	}
+	if calls != 0 {
+		t.Fatalf("invalid host ids reached the coordinator %d times", calls)
+	}
+	if err := c.ReportTimeMachineStatus(context.Background(), "host1", timemachine.Status{}); err == nil {
+		t.Fatal("an unaccepted status report returned nil")
+	}
+}
+
+func TestStatusErrorTextAndCode(t *testing.T) {
+	plain := &StatusError{Status: 409, Code: "no_wake_relay"}
+	if plain.ErrorCode() != "no_wake_relay" {
+		t.Fatalf("code = %q", plain.ErrorCode())
+	}
+	if got := plain.Error(); got != "coordinator rejected request (HTTP 409)" {
+		t.Fatalf("plain = %q", got)
+	}
+	withMsg := &StatusError{Status: 400, Message: "bad input"}
+	if got := withMsg.Error(); got != "coordinator rejected request (HTTP 400): bad input" {
+		t.Fatalf("with message = %q", got)
+	}
+	if withMsg.ErrorCode() != "" {
+		t.Fatalf("code = %q, want empty", withMsg.ErrorCode())
+	}
+}

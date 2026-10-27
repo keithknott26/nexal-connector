@@ -404,3 +404,66 @@ func TestErrorTypesCarryOnlyCodesNotServerText(t *testing.T) {
 		t.Error("isHandshakeError must match only wrapped HandshakeError")
 	}
 }
+
+func TestWriteTextRejectsOversizeAndInvalidUTF8(t *testing.T) {
+	c := &Conn{max: 8}
+	if err := c.WriteText(make([]byte, 9)); !errors.Is(err, ErrMessageTooBig) {
+		t.Fatalf("oversize write = %v, want ErrMessageTooBig", err)
+	}
+	if err := c.WriteText([]byte{0xff, 0xfe}); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("invalid UTF-8 write = %v, want UTF-8 error", err)
+	}
+}
+
+func TestWriteFrameLengthEncodings(t *testing.T) {
+	for _, size := range []int{125, 126, 65535, 65536} {
+		client, server := net.Pipe()
+		c := &Conn{conn: client, max: 1 << 20}
+		payload := make([]byte, size)
+		for i := range payload {
+			payload[i] = byte(i)
+		}
+		errc := make(chan error, 1)
+		go func() { errc <- c.writeFrame(opBinary, payload) }()
+		br := bufio.NewReader(server)
+		hdr := make([]byte, 2)
+		if _, err := io.ReadFull(br, hdr); err != nil {
+			t.Fatal(err)
+		}
+		if hdr[0] != 0x80|opBinary || hdr[1]&0x80 == 0 {
+			t.Fatalf("size %d: bad header % x (want FIN+binary, masked)", size, hdr)
+		}
+		var n int
+		switch l := hdr[1] & 0x7f; l {
+		case 126:
+			b := make([]byte, 2)
+			io.ReadFull(br, b)
+			n = int(binary.BigEndian.Uint16(b))
+		case 127:
+			b := make([]byte, 8)
+			io.ReadFull(br, b)
+			n = int(binary.BigEndian.Uint64(b))
+		default:
+			n = int(l)
+		}
+		if n != size {
+			t.Fatalf("size %d: encoded length %d", size, n)
+		}
+		mask := make([]byte, 4)
+		io.ReadFull(br, mask)
+		body := make([]byte, n)
+		if _, err := io.ReadFull(br, body); err != nil {
+			t.Fatal(err)
+		}
+		for i := range body {
+			if body[i]^mask[i%4] != payload[i] {
+				t.Fatalf("size %d: payload mismatch at %d", size, i)
+			}
+		}
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+		client.Close()
+		server.Close()
+	}
+}

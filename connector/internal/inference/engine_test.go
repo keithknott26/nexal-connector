@@ -645,3 +645,34 @@ func TestLinkReportBoundariesAndUnknowns(t *testing.T) {
 		t.Errorf("empty path = %q", got)
 	}
 }
+
+func TestLinkReportOfflineAndDefaults(t *testing.T) {
+	offline := Host{ID: "p", Name: "P", Online: false}
+	up := Link{Lifecycle: "connected", Path: "direct", LatencyKnown: true, LatencyMS: 3, BandwidthKnown: true, BandwidthMbps: 800}
+
+	// An offline peer is unusable even when its last link state says connected.
+	if r := buildLinkReport(offline, &up); r.Quality != "unusable" || r.Online {
+		t.Errorf("offline peer with up link: quality=%s online=%v", r.Quality, r.Online)
+	}
+	// No link info and offline stays unusable (online is "poor", tested above).
+	if r := buildLinkReport(offline, nil); r.Quality != "unusable" || r.Path != "unknown" || r.PQ != "unknown" {
+		t.Errorf("offline, no link: %+v", r)
+	}
+
+	// Empty path and PQ strings are reported as "unknown"; unmeasured values stay nil.
+	r := buildLinkReport(Host{ID: "p", Online: true}, &Link{Lifecycle: "connected"})
+	if r.Path != "unknown" || r.PQ != "unknown" {
+		t.Errorf("empty path/pq = %q/%q, want unknown", r.Path, r.PQ)
+	}
+	if r.LatencyMS != nil || r.BandwidthMbps != nil || r.PacketLossPercent != nil {
+		t.Errorf("unmeasured values must be nil: %+v", r)
+	}
+
+	// Known measurements are copied through.
+	l := up
+	l.LossKnown, l.PacketLossPercent = true, 0.5
+	r = buildLinkReport(Host{ID: "p", Online: true}, &l)
+	if r.LatencyMS == nil || *r.LatencyMS != 3 || r.BandwidthMbps == nil || *r.BandwidthMbps != 800 || r.PacketLossPercent == nil || *r.PacketLossPercent != 0.5 {
+		t.Errorf("measurements not copied: %+v", r)
+	}
+}

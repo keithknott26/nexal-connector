@@ -60,3 +60,21 @@ func TestStateReportWireNames(t *testing.T) {
 		t.Errorf("legacy name still sent: %s", b)
 	}
 }
+
+func TestParseFirstBootRejectsMalformedReports(t *testing.T) {
+	key, _ := testHostKey()
+	// a blob whose outer type says ssh-ed25519 but whose inner type string differs
+	badInner := base64.StdEncoding.EncodeToString(append([]byte{0, 0, 0, 11}, "ssh-ed25518"...))
+	for name, line := range map[string]string{
+		"bad json":         `NEXAL-FIRSTBOOT {"meshIp":`,
+		"missing meshIp":   `NEXAL-FIRSTBOOT {"hostKey":"` + key + `"}`,
+		"bad meshIp":       `NEXAL-FIRSTBOOT {"meshIp":"not-an-ip"}`,
+		"bad fingerprint":  `NEXAL-FIRSTBOOT {"meshIp":"100.64.1.7","hostKeyFingerprint":"MD5:abc"}`,
+		"inner type wrong": `NEXAL-FIRSTBOOT {"meshIp":"100.64.1.7","hostKey":"ssh-ed25519 ` + badInner + `"}`,
+		"key without blob": `NEXAL-FIRSTBOOT {"meshIp":"100.64.1.7","hostKey":"ssh-ed25519"}`,
+	} {
+		if _, ok, failed, _ := ParseFirstBootLine(line); ok || failed {
+			t.Errorf("%s: ok=%v failed=%v, want both false", name, ok, failed)
+		}
+	}
+}

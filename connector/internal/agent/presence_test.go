@@ -146,3 +146,32 @@ func TestWakeInfoUnsupportedAndFailure(t *testing.T) {
 		t.Fatal("reported wake info without a lanKey")
 	}
 }
+
+type errPresence struct{ fakePresence }
+
+func (errPresence) Run(context.Context) error { return errors.New("stream down") }
+
+// TestRunPresenceReturnsWhenUnconfiguredFailedOrCancelled pins that runPresence
+// never blocks the agent: no source returns at once, a failing stream returns
+// its error path, and a healthy stream stops when the context ends.
+func TestRunPresenceReturnsWhenUnconfiguredFailedOrCancelled(t *testing.T) {
+	waitReturn := func(name string, a *Agent, ctx context.Context) {
+		t.Helper()
+		done := make(chan struct{})
+		go func() { a.runPresence(ctx); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: runPresence did not return", name)
+		}
+	}
+	a, _ := testAgent(t)
+	a.presence = nil
+	waitReturn("nil source", a, context.Background())
+	a.presence = errPresence{}
+	waitReturn("failing stream", a, context.Background())
+	a.presence = fakePresence{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	waitReturn("cancelled stream", a, ctx)
+}

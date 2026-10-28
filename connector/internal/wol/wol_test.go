@@ -358,3 +358,18 @@ func TestSkipReason(t *testing.T) {
 		}
 	}
 }
+
+func TestHexNibbleBoundaries(t *testing.T) {
+	valid := map[byte]byte{'0': 0, '9': 9, 'a': 10, 'f': 15, 'A': 10, 'F': 15}
+	for c, want := range valid {
+		if got, ok := hexNibble(c); !ok || got != want {
+			t.Errorf("hexNibble(%q) = %d, %v; want %d, true", c, got, ok, want)
+		}
+	}
+	// Bytes just outside each accepted range, plus separators and whitespace.
+	for _, c := range []byte{'/', ':', '@', 'G', '`', 'g', ' ', '-', 0, 0xff} {
+		if got, ok := hexNibble(c); ok || got != 0 {
+			t.Errorf("hexNibble(%q) = %d, %v; want 0, false", c, got, ok)
+		}
+	}
+}

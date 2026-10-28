@@ -98,3 +98,23 @@ func TestTransferRejectsUnacceptedAndInvalidIDs(t *testing.T) {
 		t.Fatal("expected invalid id error")
 	}
 }
+
+func TestTransferPathBuildsAndRejectsIdentities(t *testing.T) {
+	cases := []struct {
+		host, id, want string
+		ok             bool
+	}{
+		{"recv1", "", "/api/hosts/recv1/bundle-transfers", true},
+		{"recv1", "tr1", "/api/hosts/recv1/bundle-transfers/tr1", true},
+		{"", "", "", false},
+		{"recv1", "../x", "", false},
+		{"re/cv", "tr1", "", false},
+		{"recv1", "tr 1", "", false},
+	}
+	for _, c := range cases {
+		got, err := transferPath(c.host, c.id)
+		if (err == nil) != c.ok || got != c.want {
+			t.Errorf("transferPath(%q, %q) = %q, %v; want %q ok=%v", c.host, c.id, got, err, c.want, c.ok)
+		}
+	}
+}

@@ -292,3 +292,19 @@ func TestStartAcceptsLoopbackCollectorAndShutsDown(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 }
+
+func TestOperationClassifiesEveryAllowlistedFamily(t *testing.T) {
+	for _, family := range []string{"/api/hosts", "/api/attempts", "/api/drive", "/api/v2", "/api/home", "/api/mcp", "/api/enrollments", "/api/transfers"} {
+		if got := Operation(family); got != family {
+			t.Fatalf("Operation(%q) = %q, want exact family", family, got)
+		}
+		if got := Operation(family + "/abc/def"); got != family {
+			t.Fatalf("Operation(%q) = %q, want family without parameters", family+"/abc/def", got)
+		}
+	}
+	for _, path := range []string{"", "/", "/api", "/api/unknown", "/health"} {
+		if got := Operation(path); got != "other" {
+			t.Fatalf("Operation(%q) = %q, want other", path, got)
+		}
+	}
+}

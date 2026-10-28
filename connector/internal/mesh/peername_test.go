@@ -33,6 +33,11 @@ func TestPlatformSerial(t *testing.T) {
 	if got := platformSerial([]byte("nothing")); got != "" {
 		t.Fatalf("got %q", got)
 	}
+	// A line naming the key without a value must yield nothing, and must not fall through to a later line.
+	malformed := []byte("    \"IOPlatformSerialNumber\"\n    \"IOPlatformSerialNumber\" = \"C02XK1ABCD12\"\n")
+	if got := platformSerial(malformed); got != "" {
+		t.Fatalf("malformed line: got %q", got)
+	}
 }
 
 func TestStartupSetsHostnameOnlyWhenKnown(t *testing.T) {

@@ -138,3 +138,28 @@ func TestHoneypotCommandStatusReportsEmptyRecentAsList(t *testing.T) {
 		t.Fatalf("recent should be an empty list, not null: %#v", got["recent"])
 	}
 }
+
+func TestIdentityCommandRejectsBadInputBeforeTouchingKeys(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown flag", []string{"--config", cfg, "--rotate"}, "invalid command flags"},
+		{"positional argument", []string{"--config", cfg, "extra"}, "unexpected positional arguments"},
+		{"relative config", []string{"--config", "relative.json"}, "absolute path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := identityCommand(context.Background(), tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q error, got %v", tc.want, err)
+			}
+		})
+	}
+	// A rejected invocation must not have created the config file or its lock.
+	if entries, _ := filepath.Glob(cfg + "*"); len(entries) != 0 {
+		t.Fatalf("rejected identity call created files: %v", entries)
+	}
+}

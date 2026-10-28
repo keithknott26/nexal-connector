@@ -72,7 +72,11 @@ func TestBundleCommandValidatesFlagsBeforeLoadingConfig(t *testing.T) {
 		{"send relative bundle", "bundle-send", []string{"--transfer", id, "--bundle", "rel", "--receiver-key-sha256", strings.Repeat("b", 64)}, "bundle-send requires"},
 		{"send short fingerprint", "bundle-send", []string{"--transfer", id, "--bundle", "/tmp/x", "--receiver-key-sha256", "abc"}, "bundle-send requires"},
 		{"send rejects donor", "bundle-send", []string{"--from-host", id, "--transfer", id, "--bundle", "/tmp/x", "--receiver-key-sha256", strings.Repeat("b", 64)}, "bundle-send requires"},
+		{"send rejects path-only", "bundle-send", []string{"--transfer", id, "--bundle", "/tmp/x", "--receiver-key-sha256", strings.Repeat("b", 64), "--path-only"}, "bundle-send requires"},
 		{"receive missing donor", "bundle-receive", nil, "bundle-receive requires"},
+		{"receive rejects bundle", "bundle-receive", []string{"--from-host", id, "--bundle", "/tmp/x"}, "bundle-receive requires"},
+		{"receive rejects fingerprint", "bundle-receive", []string{"--from-host", id, "--receiver-key-sha256", strings.Repeat("b", 64)}, "bundle-receive requires"},
+		{"receive rejects malformed donor", "bundle-receive", []string{"--from-host", "bad/id"}, "bundle-receive requires"},
 		{"receive rejects sender flags", "bundle-receive", []string{"--from-host", id, "--transfer", id}, "bundle-receive requires"},
 	}
 	for _, tc := range cases {

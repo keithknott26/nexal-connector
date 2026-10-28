@@ -676,3 +676,30 @@ func TestLinkReportOfflineAndDefaults(t *testing.T) {
 		t.Errorf("measurements not copied: %+v", r)
 	}
 }
+
+func TestLinkQualityBandwidthAndLatencyBoundaries(t *testing.T) {
+	online := Host{ID: "p", Name: "P", Online: true}
+	base := Link{Lifecycle: "connected", Path: "direct", LatencyKnown: true, LatencyMS: 3, BandwidthKnown: true, BandwidthMbps: 800}
+
+	// Bandwidth exactly at the slow threshold is not slow; just under is fair.
+	l := base
+	l.BandwidthMbps = slowLinkMbps
+	if got := buildLinkReport(online, &l).Quality; got != "good" {
+		t.Errorf("bandwidth at threshold = %s", got)
+	}
+	l.BandwidthMbps = slowLinkMbps - 1
+	if got := buildLinkReport(online, &l).Quality; got != "fair" {
+		t.Errorf("bandwidth under threshold = %s", got)
+	}
+
+	// Latency exactly at the high threshold is not high; just over is fair.
+	l = base
+	l.LatencyMS = highLatencyMS
+	if got := buildLinkReport(online, &l).Quality; got != "good" {
+		t.Errorf("latency at threshold = %s", got)
+	}
+	l.LatencyMS = highLatencyMS + 1
+	if got := buildLinkReport(online, &l).Quality; got != "fair" {
+		t.Errorf("latency over threshold = %s", got)
+	}
+}

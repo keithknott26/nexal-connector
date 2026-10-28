@@ -340,3 +340,20 @@ func TestNonDarwinStaticAndThermalSkipSystemTools(t *testing.T) {
 		t.Fatalf("thermal = %q, want empty off darwin", got)
 	}
 }
+
+func TestThermalReportsUnknownWhenPmsetFailsAndParsesOtherwise(t *testing.T) {
+	failing := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("absent") }}
+	ok := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("CPU_Speed_Limit = 70\n"), nil
+	}}
+	wantFail, wantOK := ThermalUnknown, ThermalThrottled
+	if runtime.GOOS != "darwin" {
+		wantFail, wantOK = "", ""
+	}
+	if got := failing.thermal(context.Background()); got != wantFail {
+		t.Errorf("thermal with failing pmset = %q, want %q", got, wantFail)
+	}
+	if got := ok.thermal(context.Background()); got != wantOK {
+		t.Errorf("thermal with throttled pmset = %q, want %q", got, wantOK)
+	}
+}

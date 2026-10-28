@@ -611,3 +611,14 @@ func TestBuildManifestMemoryTerms(t *testing.T) {
 		t.Errorf("zero safety term accepted: %v", err)
 	}
 }
+
+func TestBuildManifestRefusesUninstallableEntry(t *testing.T) {
+	e := CatalogEntry{ID: "m", Installable: false, InstallBlockedReason: "unpinned revision"}
+	m, warns, err := BuildManifest(e)
+	if err == nil || !strings.Contains(err.Error(), "m is not installable: unpinned revision") {
+		t.Fatalf("uninstallable entry accepted or wrong error: %v", err)
+	}
+	if m.ModelID != "" || warns != nil {
+		t.Errorf("expected zero manifest and no warnings, got %+v %v", m, warns)
+	}
+}

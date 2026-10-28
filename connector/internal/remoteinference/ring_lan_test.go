@@ -167,3 +167,36 @@ func TestLanIPNetsOnlyPrivateIPv4(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanRingFailsWhenTheNexalAddressCannotBeListenedOn(t *testing.T) {
+	r := &Runner{}
+	ring := []string{"100.86.0.1:8010", "100.86.0.2:8011"}
+	// 192.0.2.0/24 (TEST-NET-1) is never assigned to a local interface, so the mesh relay cannot bind.
+	plan, err := r.planRing(context.Background(), ring, nil, 0, 8010, "192.0.2.1")
+	if err == nil {
+		plan.close()
+		t.Fatalf("planRing succeeded on an address this Mac does not own: %+v", plan)
+	}
+	if plan != nil {
+		t.Fatalf("planRing returned a plan with its error: %+v", plan)
+	}
+}
+
+func TestRingPlanCloseClosesEveryRelay(t *testing.T) {
+	a, err := ringRelay(context.Background(), freeAddr(t), "127.0.0.1:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listen := freeAddr(t)
+	b, err := ringRelay(context.Background(), listen, "127.0.0.1:1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	(&ringPlan{relays: []io.Closer{a, b}}).close()
+	l, err := net.Listen("tcp", listen)
+	if err != nil {
+		t.Fatalf("relay still holds %s after close: %v", listen, err)
+	}
+	l.Close()
+	(&ringPlan{}).close() // no relays: nothing to do
+}

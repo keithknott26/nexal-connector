@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -227,4 +228,20 @@ func readDiag(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestLogDirIsUnderHomeAndPlatformSpecific(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := LogDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".local", "state", "nexal", "logs")
+	if runtime.GOOS == "darwin" {
+		want = filepath.Join(home, "Library", "Logs", "Nexal")
+	}
+	if got != want {
+		t.Fatalf("LogDir() = %q, want %q", got, want)
+	}
 }

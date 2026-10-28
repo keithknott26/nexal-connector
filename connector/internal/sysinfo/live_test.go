@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLiveParsers(t *testing.T) {
@@ -206,5 +207,23 @@ func TestCollectLiveIsNoOpOffDarwin(t *testing.T) {
 	}
 	if info.CPUUsagePercent != nil || info.MemoryUsedBytes != nil || info.IdleSeconds != nil || info.LoadAverage1m != nil || info.LastTimeMachineBackupAt != "" {
 		t.Fatal("live metrics set off darwin", info)
+	}
+}
+
+func TestParseBackupSuffixFutureAndUTC(t *testing.T) {
+	at := time.Date(2025, 1, 2, 3, 4, 5, 0, time.Local)
+	stamp := at.Format("2006-01-02-150405")
+	want := at.UTC().Format(time.RFC3339)
+	for _, in := range []string{stamp, stamp + ".backup", "/Volumes/x/Backups.backupdb/Mac/" + stamp + ".backup\n"} {
+		if got := parseBackup([]byte(in)); got != want {
+			t.Errorf("parseBackup(%q) = %q, want %q", in, got, want)
+		}
+	}
+	future := time.Now().Add(time.Hour).Format("2006-01-02-150405")
+	if got := parseBackup([]byte(future)); got != "" {
+		t.Errorf("future backup timestamp accepted: %q", got)
+	}
+	if got := parseBackup(nil); got != "" {
+		t.Errorf("empty input accepted: %q", got)
 	}
 }

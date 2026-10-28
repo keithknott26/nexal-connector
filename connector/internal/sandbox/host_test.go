@@ -1,6 +1,8 @@
 package sandbox
 
 import (
+	"context"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -73,5 +75,18 @@ func TestValidateTask(t *testing.T) {
 		if ValidateTask(bad) == nil {
 			t.Errorf("expected rejection of %+v", bad)
 		}
+	}
+}
+
+func TestSystemHostFactsReportsMemoryFailureWithCPUs(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("hw.memsize exists on macOS; the failure path needs another OS")
+	}
+	f, err := SystemHost{}.Facts(context.Background(), t.TempDir())
+	if err == nil || err.Error() != "cannot read host memory" {
+		t.Fatalf("Facts err = %v, want cannot read host memory", err)
+	}
+	if f.CPUs != runtime.NumCPU() || f.MemoryMB != 0 {
+		t.Fatalf("Facts = %+v, want CPUs filled and nothing else", f)
 	}
 }

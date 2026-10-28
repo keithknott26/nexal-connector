@@ -169,3 +169,29 @@ func TestCancelledObservationsCannotRestoreFreshness(t *testing.T) {
 		t.Fatal("cancelled heartbeat accepted")
 	}
 }
+
+func TestUnchangedHeartbeatSuppressionSkipsSendWithoutRefreshingLease(t *testing.T) {
+	a, _ := testAgent(t)
+	sent := 0
+	a.api = &heartbeatAPI{send: func(context.Context, client.Heartbeat) error { sent++; return nil }}
+	ctx := context.Background()
+	if err := a.hostHeartbeat(ctx, true); err != nil || sent != 1 {
+		t.Fatalf("first heartbeat: err=%v sent=%d", err, sent)
+	}
+	a.mu.Lock()
+	lease := a.lastHeartbeat
+	a.mu.Unlock()
+	if err := a.hostHeartbeat(ctx, true); err != nil || sent != 1 {
+		t.Fatalf("unchanged heartbeat should be suppressed: err=%v sent=%d", err, sent)
+	}
+	a.mu.Lock()
+	refreshed := !a.lastHeartbeat.Equal(lease)
+	a.mu.Unlock()
+	if refreshed {
+		t.Fatal("suppressed heartbeat refreshed the coordinator lease")
+	}
+	// Without the opt-in the same payload is still sent.
+	if err := a.hostHeartbeat(ctx); err != nil || sent != 2 {
+		t.Fatalf("non-suppressed heartbeat: err=%v sent=%d", err, sent)
+	}
+}

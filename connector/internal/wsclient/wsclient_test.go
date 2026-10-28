@@ -324,6 +324,21 @@ func TestProtocolViolations(t *testing.T) {
 		"fragmented control":  {func(p *peer) { p.frame(false, opPing, []byte("x")) }, ErrProtocol},
 		"unknown opcode":      {func(p *peer) { p.frame(true, 0x3, []byte("x")) }, ErrProtocol},
 		"bad close code":      {func(p *peer) { p.frame(true, opClose, []byte{0x03, 0xED}) }, ErrProtocol}, // 1005 on the wire
+		"non-minimal 16-bit length": {func(p *peer) {
+			_, _ = p.rw.Write(append([]byte{0x81, 126, 0, 5}, "hello"...))
+			_ = p.rw.Flush()
+		}, ErrProtocol},
+		"non-minimal 64-bit length": {func(p *peer) {
+			_, _ = p.rw.Write(append([]byte{0x81, 127, 0, 0, 0, 0, 0, 0, 0, 5}, "hello"...))
+			_ = p.rw.Flush()
+		}, ErrProtocol},
+		"oversized control frame": {func(p *peer) { p.frame(true, opPing, make([]byte, 126)) }, ErrProtocol},
+		"one-byte close payload":  {func(p *peer) { p.frame(true, opClose, []byte{0x03}) }, ErrProtocol},
+		"close reason not utf8":   {func(p *peer) { p.frame(true, opClose, []byte{0x03, 0xE8, 0xff}) }, ErrProtocol},
+		"data frame inside fragmented message": {func(p *peer) {
+			p.frame(false, opText, []byte("a"))
+			p.frame(true, opText, []byte("b"))
+		}, ErrProtocol},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

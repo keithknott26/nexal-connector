@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -32,6 +33,12 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 		return 0, errors.New("diagnostic output limit exceeded")
 	}
 	return b.Buffer.Write(p)
+}
+
+// ReadFrom shadows the promoted bytes.Buffer.ReadFrom, which io.Copy would
+// otherwise prefer and which bypasses the limit enforced in Write.
+func (b *boundedBuffer) ReadFrom(r io.Reader) (int64, error) {
+	return io.Copy(struct{ io.Writer }{b}, r)
 }
 func diagnostic(ctx context.Context, path string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)

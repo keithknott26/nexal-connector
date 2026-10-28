@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -100,5 +101,24 @@ func TestMemoryParsingRejectsUnsupportedPageSizeAndDuplicates(t *testing.T) {
 func TestParseIdleRejectsOversizedInput(t *testing.T) {
 	if _, err := ParseIdle(make([]byte, 256<<10+1)); err == nil {
 		t.Fatal("expected oversized idle telemetry to be rejected")
+	}
+}
+
+func TestDiagnosticRejectsOutputOverLimit(t *testing.T) {
+	head := "/usr/bin/head"
+	if _, err := os.Stat(head); err != nil {
+		t.Skip("head not available")
+	}
+	out, err := diagnostic(context.Background(), head, "-c", "300000", "/dev/zero")
+	if err == nil || err.Error() != "telemetry unavailable" || out != nil {
+		t.Fatalf("oversized output accepted: len=%d err=%v", len(out), err)
+	}
+}
+
+func TestParseFreeMemoryRejectsCombinedOverflow(t *testing.T) {
+	// Each count is individually under the 1 TiB cap but their sum is not.
+	in := "page size of 4096 bytes\nPages free: 150000000.\nPages speculative: 150000000."
+	if _, err := ParseFreeMemory([]byte(in)); err == nil {
+		t.Fatal("combined free+speculative overflow accepted")
 	}
 }

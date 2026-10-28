@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -478,5 +479,24 @@ func TestFindBinaryUsesManagedRuntime(t *testing.T) {
 	}
 	if !strings.Contains(devPath(e, ""), managed+":") {
 		t.Fatal("child processes (devpod -> docker) need the managed runtime on PATH")
+	}
+}
+
+func TestDevErrorCodeUnwrapsDevErrorsOnly(t *testing.T) {
+	base := devErr(DevErrInvalid, "bad %s", "spec")
+	if got := DevErrorCode(base); got != DevErrInvalid {
+		t.Fatalf("DevErrorCode(devErr) = %q, want %q", got, DevErrInvalid)
+	}
+	if got := DevErrorCode(fmt.Errorf("up: %w", base)); got != DevErrInvalid {
+		t.Fatalf("DevErrorCode(wrapped) = %q, want %q", got, DevErrInvalid)
+	}
+	if got := DevErrorCode(nil); got != "" {
+		t.Fatalf("DevErrorCode(nil) = %q, want empty", got)
+	}
+	if got := DevErrorCode(errors.New("plain")); got != "" {
+		t.Fatalf("DevErrorCode(plain) = %q, want empty", got)
+	}
+	if got := base.Error(); got != DevErrInvalid+": bad spec" {
+		t.Fatalf("DevError.Error() = %q", got)
 	}
 }

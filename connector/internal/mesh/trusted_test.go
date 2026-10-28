@@ -3,6 +3,8 @@ package mesh
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -57,5 +59,49 @@ func TestProbeTTLKeepsLoopbackFresh(t *testing.T) {
 	}
 	if time.Minute >= serviceProbeTTL {
 		t.Error("loopback TTL must be shorter than the peer TTL")
+	}
+}
+
+func TestTrustedExecutableChecksSiblingPermissions(t *testing.T) {
+	for _, fallback := range []string{"/usr/local/bin/netbird", "/opt/homebrew/bin/netbird"} {
+		if _, err := os.Stat(fallback); err == nil {
+			t.Skipf("%s exists; fallback would mask the sibling checks", fallback)
+		}
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Skip("cannot locate test executable")
+	}
+	sibling := filepath.Join(filepath.Dir(self), "nexal-network")
+	if _, err := os.Lstat(sibling); err == nil {
+		t.Skip("sibling already exists")
+	}
+	if err := os.WriteFile(sibling, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Skipf("cannot create sibling: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(sibling) })
+
+	cases := []struct {
+		mode os.FileMode
+		ok   bool
+	}{
+		{0o600, false}, // not executable
+		{0o777, false}, // writable by group and others
+		{0o775, false}, // group-writable
+		{0o757, false}, // other-writable
+		{0o755, true},
+		{0o700, true},
+	}
+	for _, c := range cases {
+		if err := os.Chmod(sibling, c.mode); err != nil {
+			t.Fatal(err)
+		}
+		path, err := trustedExecutable("nexal-network")
+		if c.ok && (err != nil || path != sibling) {
+			t.Errorf("mode %o: got (%q, %v), want %q", c.mode, path, err, sibling)
+		}
+		if !c.ok && (err == nil || path != "") {
+			t.Errorf("mode %o: got (%q, %v), want rejection", c.mode, path, err)
+		}
 	}
 }

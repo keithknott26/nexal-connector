@@ -98,3 +98,18 @@ func TestServeValidationRejectsBeforeListening(t *testing.T) {
 		}
 	}
 }
+
+func TestServeValidationReportsSensorUnavailableWhenMeshIPCannotBind(t *testing.T) {
+	r := validationGrant()
+	r.Module = "network_canary"
+	// A CGNAT address that is not assigned to any local interface cannot be bound.
+	r.TargetIP = "100.127.255.254"
+	called := false
+	executed, reason, err := ServeValidation(context.Background(), r,
+		func(context.Context) bool { called = true; return true },
+		func(context.Context) error { called = true; return nil },
+		func(context.Context, Event) error { called = true; return nil })
+	if executed || reason != "sensor_unavailable" || err == nil || called {
+		t.Fatalf("executed=%v reason=%q err=%v callbacks=%v", executed, reason, err, called)
+	}
+}

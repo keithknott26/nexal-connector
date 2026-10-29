@@ -576,3 +576,43 @@ func TestRejoinVMAsksForAFreshKeyWhenAStoppedVMCannotRestart(t *testing.T) {
 		t.Fatalf("a failed restart must leave the sandbox awaiting a fresh key: %+v", r)
 	}
 }
+
+// RunPower reports the hosting state on its first tick (an awake lid, so
+// awake=true) and returns once its context ends.
+func TestRunPowerReportsAwakeAndStopsOnCancel(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, &fakeDev{}, &fakeGuest{})
+	m.opts.Lid = func(context.Context) (bool, bool) { return false, true }
+	pc := &powerCoord{}
+	m.mu.Lock()
+	m.coord = pc
+	m.hostID = "h1"
+	m.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.RunPower(ctx); close(done) }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		pc.mu.Lock()
+		called, host, awake := pc.called, pc.host, pc.awake
+		pc.mu.Unlock()
+		if called {
+			if host != "h1" || !awake {
+				t.Fatalf("first report: host=%q awake=%v", host, awake)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("RunPower never reported hosting state")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunPower did not return after ctx cancel")
+	}
+}

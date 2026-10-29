@@ -29,6 +29,7 @@ type Overflow struct {
 	Enabled    bool
 	GPUPeers   map[string]bool // peer IPs allowed to use the GPU tier; "*" is everyone
 	CloudPeers map[string]bool // peer IPs allowed to use the cloud tier (a separate consent)
+	Always     bool            // every chat request goes to the GPU tier (for peers allowed it)
 	HardAlias  string          // a request naming this model asks for the GPU tier outright
 	MaxWait    time.Duration   // go to the GPU when the local queue would take longer than this
 	MaxPrompt  int             // go to the GPU when the prompt is over this many (estimated) tokens; 0 = never
@@ -62,7 +63,7 @@ func (o *Overflow) Plan(peer, model string, promptTokens, inflight int) (tiers [
 	wait := time.Duration(inflight) * o.avg
 	slow := o.MaxWait > 0 && wait > o.MaxWait
 	big := o.MaxPrompt > 0 && promptTokens > o.MaxPrompt
-	if !(hard || slow || big) {
+	if !(hard || slow || big || o.Always) {
 		return nil, false, false
 	}
 	if o.GPU != nil && (o.GPUPeers["*"] || o.GPUPeers[peer]) {

@@ -106,3 +106,11 @@ func TestOverflowDailyLimit(t *testing.T) {
 		t.Fatal(r.StatusCode)
 	}
 }
+
+func TestOverflowAlwaysSendsEverythingToGPU(t *testing.T) {
+	f, o := setup(t, ok("gpu"), ok("cloud"))
+	o.Always = true
+	if r, b := chat(t, f, "qwen3-4b"); b != "gpu" || r.Header.Get("x-nexal-backend") != "gpu" {
+		t.Fatal(b)
+	}
+}

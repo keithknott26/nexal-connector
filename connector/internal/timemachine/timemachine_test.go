@@ -1,6 +1,7 @@
 package timemachine
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -160,5 +161,20 @@ func TestCoordinatorStateMapsStatus(t *testing.T) {
 		if state != c.state || detail != c.detail {
 			t.Errorf("%+v: got (%q,%q), want (%q,%q)", c.in, state, detail, c.state, c.detail)
 		}
+	}
+}
+
+func TestFirstPrefersTheValueAndFallsBackOnlyWhenEmpty(t *testing.T) {
+	if got := first("observed", "fallback"); got != "observed" {
+		t.Errorf("first(non-empty) = %q, want observed", got)
+	}
+	if got := first("", "fallback"); got != "fallback" {
+		t.Errorf("first(empty) = %q, want fallback", got)
+	}
+}
+
+func TestPlatformReportsTheRuntimeOS(t *testing.T) {
+	if got := Platform(); got != runtime.GOOS {
+		t.Errorf("Platform() = %q, want %q", got, runtime.GOOS)
 	}
 }

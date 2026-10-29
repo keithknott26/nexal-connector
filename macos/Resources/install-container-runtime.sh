@@ -167,9 +167,46 @@ PLIST
     || launchctl kickstart -k "gui/$(id -u)/$AGENT_LABEL" >/dev/null 2>&1
 }
 
+# Weekly cleanup so unused images/containers/build cache cannot grow the Colima disk
+# without bound. Volumes are never pruned (no --volumes): they can hold dev data.
+PRUNE_LABEL="systems.nexal.docker-prune"
+PRUNE_PLIST="$HOME/Library/LaunchAgents/$PRUNE_LABEL.plist"
+install_prune_agent() {
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs/Nexal" || return 1
+  cat > "$PRUNE_PLIST.new" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$PRUNE_LABEL</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>for s in "\$HOME/.colima/default/docker.sock" "\$HOME/.colima/docker.sock"; do [ -S "\$s" ] &amp;&amp; exec docker --host "unix://\$s" system prune -af --filter until=168h; done</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>$RT/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key><dict>
+    <key>Weekday</key><integer>0</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>17</integer>
+  </dict>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/Nexal/docker-prune.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/Nexal/docker-prune.log</string>
+</dict></plist>
+PLIST
+  # Idempotent: this runs on every app start, so only touch launchd when the plist changed
+  # or the job is not loaded.
+  if cmp -s "$PRUNE_PLIST.new" "$PRUNE_PLIST" 2>/dev/null \
+     && launchctl print "gui/$(id -u)/$PRUNE_LABEL" >/dev/null 2>&1; then
+    rm -f "$PRUNE_PLIST.new"; return 0
+  fi
+  mv -f "$PRUNE_PLIST.new" "$PRUNE_PLIST" || return 1
+  launchctl bootout "gui/$(id -u)/$PRUNE_LABEL" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$PRUNE_PLIST" >/dev/null 2>&1 || true
+}
+
 # ---------- decide ----------
 
 if serving; then
+  install_prune_agent || true
   command -v devpod >/dev/null 2>&1 && exit 0
   say "Installing devpod…"
   TMP="$(mktemp -d -t nexal-runtime)" && mkdir -p "$RT/bin" \
@@ -192,6 +229,7 @@ if [ -x "$RT/bin/colima" ] || ! command -v brew >/dev/null 2>&1; then
   managed_install || exit 1
   say "Starting Colima (the first start downloads a small Linux image)…"
   install_agent || { say "Could not register Colima to start at login."; exit 1; }
+  install_prune_agent || true
   if wait_serving 240; then say "Container runtime ready (Colima)."; exit 0; fi
   say "Colima was installed but did not start; see ~/Library/Logs/Nexal/colima.log."
   exit 1
@@ -212,6 +250,6 @@ command -v docker >/dev/null 2>&1 || { say "Installing the docker command-line t
 command -v devpod >/dev/null 2>&1 || { say "Installing devpod…"; brew install devpod || { say "Installing devpod failed."; exit 1; }; }
 say "Starting Colima (the first start downloads a small Linux image)…"
 start_colima || true
-if wait_serving 180; then say "Container runtime ready (Colima)."; exit 0; fi
+if wait_serving 180; then install_prune_agent || true; say "Container runtime ready (Colima)."; exit 0; fi
 say "Colima was installed but did not start; run 'colima start' in Terminal to see why."
 exit 1

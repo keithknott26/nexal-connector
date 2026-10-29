@@ -58,11 +58,16 @@ func overflowCommand(ctx context.Context, args []string) error {
 			maxWorkers: *pWorkers, idleSeconds: *pIdle, recreate: *recreate, forget: *forget})
 	}
 
-	unlock, err := config.Lock(*path)
-	if err != nil {
-		return err
+	// The running agent holds the configuration lock for its whole life, so taking it plainly failed with
+	// "another connector process holds this configuration" whenever the Mac was connected. Reading needs no
+	// lock; changing settings stops the agent (it reads these settings only at start, so it must restart anyway).
+	if action != "status" {
+		unlock, err := lockStoppingAgent(ctx, *path)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
-	defer unlock()
 	c, err := config.Load(*path)
 	if err != nil {
 		return err

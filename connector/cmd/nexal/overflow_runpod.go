@@ -34,11 +34,6 @@ type runPodOptions struct {
 // prompt to a third party stays the owner's separate choice.
 func overflowRunPod(ctx context.Context, action, path string, opt runPodOptions) error {
 	read := func() (config.Config, config.Secrets, error) {
-		unlock, err := config.Lock(path)
-		if err != nil {
-			return config.Config{}, nil, err
-		}
-		defer unlock()
 		c, err := config.Load(path)
 		if err != nil {
 			return c, nil, err
@@ -47,7 +42,7 @@ func overflowRunPod(ctx context.Context, action, path string, opt runPodOptions)
 		return c, secrets, err
 	}
 	update := func(change func(*config.OverflowConfig)) (config.Config, config.Secrets, error) {
-		unlock, err := config.Lock(path)
+		unlock, err := lockStoppingAgent(ctx, path)
 		if err != nil {
 			return config.Config{}, nil, err
 		}

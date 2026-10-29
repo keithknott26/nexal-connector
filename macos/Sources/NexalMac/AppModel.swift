@@ -553,7 +553,7 @@ final class AppModel: ObservableObject {
 
     /// `nexal overflow ...` (GPU / cloud overflow settings). The API key, when given, goes on stdin only.
     func overflow(action: String, args: [String] = [], input: Data? = nil) async throws -> Data {
-        guard ["status", "set", "set-key", "clear-key"].contains(action) else { throw InferenceInstallError.invalidModelID }
+        guard ["status", "set", "set-key", "clear-key", "provision", "deprovision", "check"].contains(action) else { throw InferenceInstallError.invalidModelID }
         return try await invoke(.overflow(action: action, args: args), input: input)
     }
 

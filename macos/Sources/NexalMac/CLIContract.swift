@@ -138,6 +138,8 @@ enum CLICommand {
         if case .inferencePinLatest = self { return 3600 }
         if case .inferenceReview = self { return 3600 }
         if case .inferenceServe = self { return 7 * 24 * 3600 }
+        // Creating or removing the RunPod endpoint is a few REST calls to RunPod (2 min backstop in the connector).
+        if case let .overflow(action, _) = self, ["provision", "deprovision", "check"].contains(action) { return 150 }
         if case .remoteInferenceTest = self { return 240 }
         if case .remoteInferenceSweep = self { return 1800 }
         return 20

@@ -18,6 +18,16 @@ struct OverflowStatus: Decodable, Equatable {
         var cloud: Tier?
         var gpuPeers: [String]?
         var cloudPeers: [String]?
+        var runpod: RunPod?
+    }
+    /// What one-click setup created in the owner's RunPod account (ids only; the key stays in the Keychain).
+    struct RunPod: Decodable, Equatable {
+        var endpointId: String
+        var templateId: String?
+        var preset: String?
+        var model: String
+        var maxWorkers: Int?
+        var createdAt: String?
     }
     var overflow: Settings
     var gpuKeyStored: Bool
@@ -59,9 +69,27 @@ enum OverflowMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// The ready-made GPU choices for one-click setup (the connector holds the model and GPU lists).
+enum RunPodPreset: String, CaseIterable, Identifiable {
+    case standard, light
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .standard: return "Standard: Qwen3 32B on a 48 GB GPU"
+        case .light: return "Light: Qwen3 14B on a 24 GB GPU (cheaper)"
+        }
+    }
+}
+
 /// Builds the `nexal overflow set` arguments from what the owner typed. Pure, so it is unit-tested.
 enum OverflowArguments {
     private static func number(_ s: String) -> String { String(max(0, Int(s.trimmingCharacters(in: .whitespaces)) ?? 0)) }
+
+    /// `nexal overflow provision` arguments. The worker cap is the cost limit, so it is kept between 1 and 10.
+    static func provision(preset: RunPodPreset, maxWorkers: String) -> [String] {
+        let workers = min(10, max(1, Int(maxWorkers.trimmingCharacters(in: .whitespaces)) ?? 1))
+        return ["--preset", preset.rawValue, "--max-workers", String(workers)]
+    }
 
     /// How traffic is offloaded.
     static func offload(mode: OverflowMode, maxWait: String, maxPrompt: String) -> [String] {
@@ -104,6 +132,9 @@ final class OverflowModel: ObservableObject {
     @Published var cloudPeers = ""
     @Published var message: String?
     @Published var busy = false
+    @Published var preset = RunPodPreset.standard
+    @Published var maxWorkers = "1"
+    @Published var runpod: OverflowStatus.RunPod?
 
     var gpuConfigured: Bool { gpuKeyStored && !gpuURL.isEmpty && !gpuModel.isEmpty }
 
@@ -121,6 +152,7 @@ final class OverflowModel: ObservableObject {
         cloudPeers = (s.overflow.cloudPeers ?? []).joined(separator: ", ")
         gpuKeyStored = s.gpuKeyStored
         cloudKeyStored = s.cloudKeyStored
+        runpod = s.overflow.runpod
     }
 
     func refresh(_ app: AppModel) async {
@@ -164,6 +196,53 @@ final class OverflowModel: ObservableObject {
             apply(try JSONDecoder().decode(OverflowStatus.self, from: data))
             message = "Saved."
         } catch { message = "Not saved: \(error.localizedDescription)" }
+    }
+
+    /// One click: stores the RunPod key (stdin only), then has the connector create the endpoint and fill in the GPU tier.
+    /// Offloading itself stays off until the owner turns it on and chooses which peers may use it.
+    func setUpRunPod(_ app: AppModel) async {
+        busy = true
+        defer { busy = false }
+        message = "Setting up the GPU endpoint\u{2026}"
+        do {
+            let k = gpuKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !k.isEmpty {
+                _ = try await app.overflow(action: "set-key", args: ["--tier", "gpu"], input: Data(k.utf8))
+                gpuKey = ""
+                gpuKeyStored = true
+            }
+            guard gpuKeyStored else {
+                message = "Paste your RunPod API key first."
+                return
+            }
+            let data = try await app.overflow(action: "provision", args: OverflowArguments.provision(preset: preset, maxWorkers: maxWorkers))
+            apply(try JSONDecoder().decode(OverflowStatus.self, from: data))
+            message = "Ready. The GPU is configured; turn offloading on under AI inference when you want to use it."
+        } catch { message = "Setup failed: \(error.localizedDescription)" }
+    }
+
+    /// Deletes the endpoint and its template from the owner's RunPod account and clears the GPU tier.
+    func removeRunPod(_ app: AppModel) async {
+        busy = true
+        defer { busy = false }
+        message = "Removing the GPU endpoint\u{2026}"
+        do {
+            let data = try await app.overflow(action: "deprovision")
+            apply(try JSONDecoder().decode(OverflowStatus.self, from: data))
+            message = "Removed from your RunPod account."
+        } catch { message = "Not removed: \(error.localizedDescription)" }
+    }
+
+    /// Asks RunPod whether the endpoint still exists (the owner may have deleted it in RunPod's console).
+    func checkRunPod(_ app: AppModel) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let data = try await app.overflow(action: "check")
+            struct Check: Decodable { var runpodEndpointExists: Bool? }
+            let exists = try JSONDecoder().decode(Check.self, from: data).runpodEndpointExists ?? false
+            message = exists ? "The endpoint is running normally (it scales to zero when idle)." : "The endpoint is gone from RunPod. Set it up again."
+        } catch { message = "Could not check: \(error.localizedDescription)" }
     }
 
     func removeKey(_ tier: String, _ app: AppModel) async {
@@ -227,7 +306,8 @@ struct OverflowProvidersView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            GroupBox("Serverless GPU (RunPod)") {
+            oneClickSetup
+            GroupBox("Serverless GPU (RunPod), manual") {
                 tierFields(url: $model.gpuURL, modelId: $model.gpuModel, key: $model.gpuKey, stored: model.gpuKeyStored,
                            peers: $model.gpuPeers, tier: "gpu", urlHint: "https://api.runpod.ai/v2/<endpoint id>/openai/v1",
                            modelHint: "Qwen/Qwen3-32B")
@@ -254,6 +334,74 @@ struct OverflowProvidersView: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .task { await model.refresh(app) }
+    }
+
+    @State private var confirmSetup = false
+    @State private var confirmRemove = false
+
+    /// Creates the RunPod endpoint for the owner: paste the key, pick a size, click once.
+    private var oneClickSetup: some View {
+        GroupBox("One-click GPU setup (RunPod)") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let rp = model.runpod {
+                    Label("GPU endpoint ready: \(rp.model)", systemImage: "checkmark.seal")
+                        .font(.callout).foregroundStyle(.green)
+                    Text("Endpoint \(rp.endpointId). It scales to zero, so it costs nothing while idle; you pay RunPod per second while a GPU works"
+                         + (rp.maxWorkers.map { ", at most \($0) at a time." } ?? "."))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Check") { Task { await model.checkRunPod(app) } }
+                        Button("Remove endpoint", role: .destructive) { confirmRemove = true }
+                        Spacer()
+                    }
+                    .disabled(model.busy)
+                } else {
+                    Text("Paste your RunPod API key and click once. neXal creates a serverless GPU endpoint in your RunPod account and fills in the settings below.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.gpuKeyStored ? "RunPod API key \u{2713} saved in the Keychain (type to replace)" : "RunPod API key")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        SecureField("Paste your RunPod API key", text: $model.gpuKey).textFieldStyle(.roundedBorder)
+                    }
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Size").font(.caption2).foregroundStyle(.secondary)
+                            Picker("Size", selection: $model.preset) {
+                                ForEach(RunPodPreset.allCases) { Text($0.title).tag($0) }
+                            }
+                            .labelsHidden()
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Most GPUs at once (cost cap)").font(.caption2).foregroundStyle(.secondary)
+                            TextField("1", text: $model.maxWorkers).textFieldStyle(.roundedBorder).frame(maxWidth: 80)
+                        }
+                    }
+                    HStack {
+                        Button("Set up GPU endpoint") { confirmSetup = true }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.busy || (!model.gpuKeyStored && model.gpuKey.trimmingCharacters(in: .whitespaces).isEmpty))
+                        Spacer()
+                    }
+                }
+                if let m = model.message { Text(m).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                Text("Offloading stays off until you turn it on under AI inference and choose which peers may use it. The first request after the GPU has been idle waits while the model loads.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(8)
+            // One alert per view: SwiftUI honors only the last of several alerts on the same view.
+            .alert("Remove the GPU endpoint?", isPresented: $confirmRemove) {
+                Button("Remove", role: .destructive) { Task { await model.removeRunPod(app) } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This deletes the endpoint and its worker template from your RunPod account. Your API key stays saved.")
+            }
+        }
+        .alert("Create a GPU endpoint in your RunPod account?", isPresented: $confirmSetup) {
+            Button("Create endpoint") { Task { await model.setUpRunPod(app) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This creates a billable RunPod serverless endpoint. It runs no GPU until a request arrives and stops when idle, with at most \(model.maxWorkers) GPU(s) at once.")
+        }
     }
 
     private func field(_ title: String, _ text: Binding<String>, _ prompt: String) -> some View {

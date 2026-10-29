@@ -144,7 +144,7 @@ func TestHandleRequest(t *testing.T) {
 		seen := map[int]bool{}
 		for i := 0; len(ids) < 4; i++ {
 			id := "bw_" + strconv.Itoa(i)
-			if !seen[SlotPort(id)] {
+			if !seen[SlotPort(id)] && slotPortFree(SlotPort(id)) {
 				seen[SlotPort(id)] = true
 				ids = append(ids, id)
 			}
@@ -173,6 +173,17 @@ func TestHandleRequest(t *testing.T) {
 			t.Fatalf("second OpenSlot = %v, want ErrSlotBusy", err)
 		}
 	})
+}
+
+// slotPortFree reports whether the port is unused; the slot range sits in the ephemeral range
+// on some systems, so a parallel test run can occupy one.
+func slotPortFree(port int) bool {
+	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = l.Close()
+	return true
 }
 
 func TestSlotPortStaysInRange(t *testing.T) {

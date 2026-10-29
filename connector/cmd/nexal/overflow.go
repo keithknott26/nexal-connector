@@ -28,6 +28,7 @@ func overflowCommand(ctx context.Context, args []string) error {
 	}
 	var (
 		enabled                         = f.Bool("enabled", false, "turn overflow on or off")
+		always                          = f.Bool("always", false, "send every request to the GPU tier")
 		hard                            = f.String("hard-alias", "", "model name that asks for the GPU tier outright")
 		maxWait                         = f.Int("max-wait-seconds", 0, "send to the GPU when the local queue would take longer than this")
 		maxPrompt                       = f.Int("max-prompt-tokens", 0, "send to the GPU when the prompt is bigger than this")
@@ -92,6 +93,9 @@ func overflowCommand(ctx context.Context, args []string) error {
 		}
 		if set["enabled"] {
 			o.Enabled = *enabled
+		}
+		if set["always"] {
+			o.Always = *always
 		}
 		if set["hard-alias"] {
 			o.HardAlias = *hard
@@ -204,7 +208,7 @@ func buildOverflow(ctx context.Context, c config.Config, secrets config.Secrets)
 		}
 		return m
 	}
-	ov := &remoteinference.Overflow{Enabled: true, HardAlias: o.HardAlias, MaxWait: time.Duration(o.MaxWaitSeconds) * time.Second,
+	ov := &remoteinference.Overflow{Enabled: true, Always: o.Always, HardAlias: o.HardAlias, MaxWait: time.Duration(o.MaxWaitSeconds) * time.Second,
 		MaxPrompt: o.MaxPromptTokens, DailyLimit: o.DailyLimit, GPUPeers: set(o.GPUPeers), CloudPeers: set(o.CloudPeers),
 		GPU: tier(o.GPU, "overflow-gpu"), Cloud: tier(o.Cloud, "overflow-cloud")}
 	if ov.GPU == nil && ov.Cloud == nil {

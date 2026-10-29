@@ -13,6 +13,7 @@ import (
 // are never stored here (see the "overflow-gpu" and "overflow-cloud" secrets).
 type OverflowConfig struct {
 	Enabled         bool          `json:"enabled"`
+	Always          bool          `json:"always,omitempty"`          // send every chat request to the GPU tier (still only for listed peers)
 	HardAlias       string        `json:"hardAlias,omitempty"`       // a request naming this model asks for the GPU tier
 	MaxWaitSeconds  int           `json:"maxWaitSeconds,omitempty"`  // go to the GPU when the local queue would take longer
 	MaxPromptTokens int           `json:"maxPromptTokens,omitempty"` // ... or when the prompt is bigger than this

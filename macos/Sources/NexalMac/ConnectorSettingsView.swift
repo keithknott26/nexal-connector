@@ -122,6 +122,12 @@ struct ConnectorSettingsView: View {
             .tag(3)
 
             ScrollView {
+                OverflowProvidersView().padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .tabItem { Label("AI Offload", systemImage: "bolt.horizontal") }
+            .tag(5)
+
+            ScrollView {
                 subscriptionSettings.padding(20)
             }
             .tabItem { Label("Subscription", systemImage: "creditcard") }

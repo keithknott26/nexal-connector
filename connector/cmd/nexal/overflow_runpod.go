@@ -189,7 +189,7 @@ func runPodSpec(opt runPodOptions) (runpod.Spec, config.RunPodRecord, error) {
 	} else {
 		p, ok := runpod.PresetByID(opt.preset)
 		if !ok {
-			return s, rec, errors.New("--preset must be standard, light or custom")
+			return s, rec, errors.New("--preset must be budget, standard, light or custom")
 		}
 		s = runpod.Spec{Model: p.Model, Quantization: p.Quantization, GPUTypes: p.GPUTypes, MaxModelLen: p.MaxModelLen, DiskGB: p.DiskGB}
 	}

@@ -48,6 +48,12 @@ type Preset struct {
 
 // Presets are the one-click choices. The Hugging Face ids are public (no token needed).
 var Presets = []Preset{
+	// Cheapest first: RunPod's 16 GB tier is its lowest serverless price (about $0.58/h while a worker runs, none
+	// while idle), then the 24 GB tier (about $0.75/h). A 14B AWQ model (about 9 GB) fits both with an 8k context.
+	{ID: "budget", Title: "Budget: Qwen3 14B (AWQ), cheapest GPUs (16 GB, then 24 GB)", Model: "Qwen/Qwen3-14B-AWQ", Quantization: "awq",
+		GPUTypes: []string{"NVIDIA RTX A4000", "NVIDIA RTX A4500", "NVIDIA RTX 4000 Ada Generation", "NVIDIA RTX 2000 Ada Generation",
+			"NVIDIA L4", "NVIDIA RTX A5000", "NVIDIA GeForce RTX 3090"},
+		MaxModelLen: 8192, DiskGB: 40},
 	{ID: "standard", Title: "Standard: Qwen3 32B (AWQ), 48 GB GPU", Model: "Qwen/Qwen3-32B-AWQ", Quantization: "awq",
 		GPUTypes:    []string{"NVIDIA A40", "NVIDIA RTX A6000", "NVIDIA L40", "NVIDIA L40S", "NVIDIA RTX 6000 Ada Generation"},
 		MaxModelLen: 16384, DiskGB: 80},

@@ -40,7 +40,7 @@ func overflowCommand(ctx context.Context, args []string) error {
 		gpuPeers, cloudPeers            = f.String("gpu-peers", "", "comma-separated neXal IPs allowed to use the GPU tier, or *"), f.String("cloud-peers", "", "comma-separated neXal IPs allowed to use the cloud tier, or *")
 		tierFlag                        = f.String("tier", "", "gpu or cloud (set-key and clear-key)")
 		noGPU, noCloud                  = f.Bool("remove-gpu", false, "remove the GPU tier"), f.Bool("remove-cloud", false, "remove the cloud tier")
-		preset                          = f.String("preset", "standard", "provision: standard, light or custom")
+		preset                          = f.String("preset", "budget", "provision: budget (cheapest GPUs), standard, light or custom")
 		pModel, pQuant                  = f.String("model", "", "provision: Hugging Face model id (preset custom)"), f.String("quantization", "", "provision: awq, gptq, ... (preset custom)")
 		pGPUs                           = f.String("gpu-types", "", "provision: comma-separated RunPod GPU types in the order to try (preset custom)")
 		pWorkers, pIdle                 = f.Int("max-workers", 1, "provision: most GPUs running at once (the cost cap)"), f.Int("idle-seconds", 0, "provision: seconds an idle GPU waits before it stops (0: 30)")

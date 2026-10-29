@@ -43,6 +43,7 @@ final class OverflowSettingsTests: XCTestCase {
     }
 
     func testProvisionArguments() {
+        XCTAssertEqual(OverflowArguments.provision(preset: .budget, maxWorkers: "1"), ["--preset", "budget", "--max-workers", "1"])
         XCTAssertEqual(OverflowArguments.provision(preset: .standard, maxWorkers: "2"), ["--preset", "standard", "--max-workers", "2"])
         XCTAssertEqual(OverflowArguments.provision(preset: .light, maxWorkers: "0"), ["--preset", "light", "--max-workers", "1"], "the cost cap is never below 1")
         XCTAssertEqual(OverflowArguments.provision(preset: .light, maxWorkers: "99"), ["--preset", "light", "--max-workers", "10"], "nor above 10")

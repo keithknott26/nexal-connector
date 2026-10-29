@@ -71,10 +71,11 @@ enum OverflowMode: String, CaseIterable, Identifiable {
 
 /// The ready-made GPU choices for one-click setup (the connector holds the model and GPU lists).
 enum RunPodPreset: String, CaseIterable, Identifiable {
-    case standard, light
+    case budget, standard, light
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .budget: return "Budget: Qwen3 14B on the cheapest GPUs (about $0.58 per hour of use)"
         case .standard: return "Standard: Qwen3 32B on a 48 GB GPU"
         case .light: return "Light: Qwen3 14B on a 24 GB GPU (cheaper)"
         }
@@ -132,7 +133,7 @@ final class OverflowModel: ObservableObject {
     @Published var cloudPeers = ""
     @Published var message: String?
     @Published var busy = false
-    @Published var preset = RunPodPreset.standard
+    @Published var preset = RunPodPreset.budget
     @Published var maxWorkers = "1"
     @Published var runpod: OverflowStatus.RunPod?
 

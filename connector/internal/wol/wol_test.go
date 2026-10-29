@@ -373,3 +373,39 @@ func TestHexNibbleBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestSendDetailedBoundPerInterface(t *testing.T) {
+	up := net.FlagUp | net.FlagBroadcast
+	shared := &fakeUDP{}
+	withFakes(t, []ifaceV4{
+		{Name: "en0", Flags: up, Prefix: netip.MustParsePrefix("192.168.1.23/24")},
+		{Name: "en1", Flags: up, Prefix: netip.MustParsePrefix("192.168.1.99/24")}, // same broadcast as en0
+		{Name: "utun3", Flags: up, Prefix: netip.MustParsePrefix("10.8.0.2/24")},
+	}, nil, shared)
+	bindPerInterface = true
+	own := map[netip.Addr]*fakeUDP{}
+	oldFrom := openUDPFrom
+	t.Cleanup(func() { openUDPFrom = oldFrom })
+	openUDPFrom = func(ip netip.Addr) (udpSender, error) {
+		u := &fakeUDP{}
+		own[ip] = u
+		return u, nil
+	}
+	a, _ := ParseMAC("3c:22:fb:01:02:03")
+	rep, err := SendDetailed([]net.HardwareAddr{a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(own) != 1 {
+		t.Fatalf("opened %d bound sockets, want 1 (duplicate and virtual interfaces skipped)", len(own))
+	}
+	if len(shared.sent) != 0 {
+		t.Fatalf("shared socket used %d times despite a bound interface", len(shared.sent))
+	}
+	if len(rep.Attempts) != 2 || !rep.Attempts[0].Bound || !rep.Attempts[1].Limited {
+		t.Fatalf("attempts = %+v, want a bound directed attempt then a bound limited one", rep.Attempts)
+	}
+	if len(rep.Skipped) != 2 {
+		t.Fatalf("skipped = %+v, want the duplicate and the virtual interface", rep.Skipped)
+	}
+}

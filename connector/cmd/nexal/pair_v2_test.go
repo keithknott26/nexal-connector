@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"nexal/connector/internal/client"
 	"nexal/connector/internal/config"
@@ -54,5 +55,20 @@ func TestV2EnrollmentSupersedesStaleCloudflaredConfiguration(t *testing.T) {
 	}
 	if shouldRunLegacyTunnel(config.Config{Tunnel: legacy, Enrollment: &config.EnrollmentState{SchemaVersion: 2, Status: "joining"}}) {
 		t.Fatal("stale cloudflared configuration can still abort a v2 mesh connector")
+	}
+}
+
+func TestMeshReconnectedGivesUpOnCancelAndExpiredWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if meshReconnected(ctx, time.Minute) {
+		t.Fatal("a cancelled context must not report the mesh as reconnected")
+	}
+	if meshReconnected(context.Background(), 0) {
+		t.Fatal("an expired wait without a connected runtime must not report reconnected")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("meshReconnected did not return promptly: %v", time.Since(start))
 	}
 }

@@ -36,3 +36,17 @@ func TestDiscoveryOptionsLocalAddressesHook(t *testing.T) {
 		t.Errorf("localAddresses = %v, want [%v]", got, want)
 	}
 }
+
+// Without a hook, localAddresses enumerates the real interfaces; whatever the
+// host has, the result is valid, unmapped, never loopback and capped at 64.
+func TestDiscoveryOptionsLocalAddressesFallsBackToInterfaces(t *testing.T) {
+	got := (&DiscoveryOptions{}).localAddresses()
+	if len(got) > 64 {
+		t.Errorf("localAddresses returned %d addresses, want at most 64", len(got))
+	}
+	for _, addr := range got {
+		if !addr.IsValid() || addr.IsLoopback() || addr.Is4In6() {
+			t.Errorf("unexpected address %v from interface enumeration", addr)
+		}
+	}
+}

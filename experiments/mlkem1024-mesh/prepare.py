@@ -47,6 +47,9 @@ subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpa
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'rosenpass-handshake.patch')], cwd=opts.output / 'rosenpass', check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-resilience.patch')], cwd=opts.output / 'netbird', check=True)
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-quiet-activity.patch')], cwd=opts.output / 'netbird', check=True)
+# Make-before-break renewal (2026-10-29): the handler no longer revokes the key it is
+# replacing right before installing the new one, which ended the gated.14 overlap at once.
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-renewal-overlap.patch')], cwd=opts.output / 'netbird', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'
@@ -106,3 +109,4 @@ print('Prepared isolated experimental sources. No installed runtime or productio
 
 shutil.copyfile(root / "netbird_reconnect_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_reconnect_test.go")
 shutil.copyfile(root / "netbird_resilience_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_resilience_test.go")
+shutil.copyfile(root / "netbird_overlap_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_overlap_test.go")

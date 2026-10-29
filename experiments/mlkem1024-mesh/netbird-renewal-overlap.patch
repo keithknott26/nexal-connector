@@ -1,0 +1,47 @@
+--- a/client/internal/rosenpass/netbird_handler.go
++++ b/client/internal/rosenpass/netbird_handler.go
+@@ -174,20 +174,23 @@
+ 	// chainKey tracks the shared exchange output regardless of the local write
+ 	// outcome, so both ends still converge on the next expiry.
+ 	peer.chainKey = &psk
+-	h.revokeQuantumLocked(peer)
+-	peer.installedAt = time.Time{}
+-	peer.expiresAt = time.Time{}
+ 	peer.expiries = 0
+ 	installed := time.Now().UTC()
+ 	expires := installed.Add(rp.RejectAfterTime)
+ 	installer, ok := h.iface.(quantumKeyInstaller)
+ 	if !ok {
+-		peer.reason = ReasonKeyInstallFailed
++		h.failInstallLocked(peer)
+ 		return
+ 	}
++	// Make-before-break, as in IKEv2 rekeying: the key being replaced stays
++	// usable until the new key's session exists or its own lease ends, so the
++	// key must NOT be revoked before the new one is installed. InstallQuantumKey
++	// starts a new generation and keeps the replaced one for exactly that
++	// overlap; a revocation here would end the overlap at once and deny
++	// application data for every renewal. Only a failed install fails closed.
+ 	if err := installer.InstallQuantumKey(wgtypes.Key(peer.PublicKey).String(), psk, expires); err != nil {
+ 		log.Errorf("quantum key installation failed: %v", err)
+-		peer.reason = ReasonKeyInstallFailed
++		h.failInstallLocked(peer)
+ 		return
+ 	}
+ 	peer.initialized = true
+@@ -196,6 +199,15 @@
+ 	peer.reason = ""
+ }
+ 
++// failInstallLocked closes the gate after an exchange whose key could not be
++// installed: nothing may stay admitted under a key the peers no longer share.
++func (h *NetbirdHandler) failInstallLocked(peer *wireGuardPeer) {
++	h.revokeQuantumLocked(peer)
++	peer.installedAt = time.Time{}
++	peer.expiresAt = time.Time{}
++	peer.reason = ReasonKeyInstallFailed
++}
++
+ // HandshakeExpired replaces the expired key. The renewal exchange runs over
+ // the tunnel keyed by the PSK itself, so the replacement must be derivable on
+ // both ends without communication: the first expiry ratchets the last shared

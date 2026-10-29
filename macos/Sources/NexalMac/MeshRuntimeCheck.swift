@@ -7,7 +7,7 @@ import SwiftUI
 /// runtime with the build this app expects.
 enum MeshRuntimeCheck {
     /// Keep in step with experiments/mlkem1024-mesh/RUNTIME_VERSION (a test enforces it).
-    static let expectedVersion = "0.79.0-nexal-mlkem1024-gated.14"
+    static let expectedVersion = "0.79.0-nexal-mlkem1024-gated.15"
     static let fixCommand = "bash macos/scripts/update-runtime.sh"
 
     /// The N in "...gated.N[-suffix]", or nil when the version has no gate number.

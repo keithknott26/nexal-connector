@@ -287,3 +287,21 @@ func TestWaitListeningSeesAPortThatComesUpMidWait(t *testing.T) {
 		t.Fatalf("polls = %d, want 2", polls)
 	}
 }
+
+func TestWaitListeningReturnsFalseWhenContextEnds(t *testing.T) {
+	s := &stub{uid: 0, goos: "darwin"}
+	install(t, s)
+	ctx, cancel := context.WithCancel(context.Background())
+	polls := 0
+	listening = func(context.Context, string) bool {
+		polls++
+		cancel()
+		return false
+	}
+	if waitListening(ctx, ScreenSharing) {
+		t.Fatal("waitListening = true, want false when the context ends before the port answers")
+	}
+	if polls != 1 {
+		t.Fatalf("polls = %d, want 1: a cancelled wait must stop probing", polls)
+	}
+}

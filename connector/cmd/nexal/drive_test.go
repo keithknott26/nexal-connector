@@ -57,3 +57,47 @@ func TestDriveKeyInfoRejectsRelativeConfig(t *testing.T) {
 		t.Fatalf("relative config error = %v", err)
 	}
 }
+
+// Every refusal below happens before driveClient loads configuration or
+// contacts the coordinator, so the test needs no enrolled host or network.
+func TestDrivePutGetRefuseBadArgumentsBeforeAnyNetworkUse(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	subdir := filepath.Join(dir, "sub")
+	if err := os.Mkdir(subdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(dir, "exists.txt")
+	if err := os.WriteFile(existing, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		run  func(context.Context, []string) error
+		args []string
+		want string
+	}{
+		{"put missing key", drivePut, []string{"--config", cfg, "--file", existing}, "both --key and --file are required"},
+		{"put missing file", drivePut, []string{"--config", cfg, "--key", "a/b"}, "both --key and --file are required"},
+		{"put relative file", drivePut, []string{"--config", cfg, "--key", "a/b", "--file", "rel.txt"}, "--file must be an absolute path"},
+		{"put nonexistent file", drivePut, []string{"--config", cfg, "--key", "a/b", "--file", filepath.Join(dir, "nope")}, "cannot read"},
+		{"put directory", drivePut, []string{"--config", cfg, "--key", "a/b", "--file", subdir}, "is a directory"},
+		{"put positional", drivePut, []string{"--config", cfg, "extra"}, "unexpected positional arguments"},
+		{"get missing out", driveGet, []string{"--config", cfg, "--key", "a/b"}, "both --key and --out are required"},
+		{"get relative out", driveGet, []string{"--config", cfg, "--key", "a/b", "--out", "rel.txt"}, "--out must be an absolute path"},
+		{"get refuses overwrite", driveGet, []string{"--config", cfg, "--key", "a/b", "--out", existing}, "already exists"},
+		{"get relative config", driveGet, []string{"--config", "rel.json", "--key", "a/b", "--out", filepath.Join(dir, "new")}, "--config must be an absolute path"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(context.Background(), tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+	if b, err := os.ReadFile(existing); err != nil || string(b) != "keep" {
+		t.Fatalf("existing file was modified: %q, %v", b, err)
+	}
+}

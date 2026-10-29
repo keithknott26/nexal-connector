@@ -77,7 +77,10 @@ type Config struct {
 	// A configured address is a dial hint, never authorization (§30.2): the
 	// fingerprint is what peer TLS pins, and the coordinator's list still decides
 	// AllowedPeers.
-	StaticPeers []StaticPeer     `json:"staticPeers,omitempty"`
+	StaticPeers []StaticPeer `json:"staticPeers,omitempty"`
+	// Overflow is absent by default, and absent means off: no prompt leaves this Mac for a GPU or cloud API
+	// until the owner enables it and lists the peers allowed to use each tier. See overflow.go.
+	Overflow    *OverflowConfig  `json:"overflow,omitempty"`
 	Enrollment  *EnrollmentState `json:"enrollment,omitempty"`
 	GuestAccess *GuestAccess     `json:"guestAccess,omitempty"`
 	// RecoveryAuthorityPublicKey is the coordinator's public Ed25519 key in
@@ -254,6 +257,9 @@ func (c Config) Validate() error {
 		return err
 	}
 	if err := ValidateStaticPeers(c.StaticPeers); err != nil {
+		return err
+	}
+	if err := c.Overflow.Validate(); err != nil {
 		return err
 	}
 	if c.Enrollment != nil {

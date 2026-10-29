@@ -26,6 +26,14 @@ type Forwarder struct {
 	inflight int
 	last     time.Time // the last request start or response byte
 	model    string    // see SetModel
+	overflow *Overflow // nil: everything goes to the local server
+}
+
+// SetOverflow lets the forwarder send some requests to a serverless GPU or cloud tier (see Overflow).
+func (f *Forwarder) SetOverflow(o *Overflow) {
+	f.mu.Lock()
+	f.overflow = o
+	f.mu.Unlock()
 }
 
 // SetModel makes the forwarder answer /v1/models itself with this model id, and pass a request that names it to
@@ -109,8 +117,11 @@ func (f *Forwarder) Close() { _ = f.srv.Close() }
 
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	up, notice, model := f.upstream, f.notice, f.model
+	up, notice, model, ov, busy := f.upstream, f.notice, f.model, f.overflow, f.inflight
 	f.mu.Unlock()
+	if ov != nil && ov.Serve(w, r, busy) {
+		return
+	}
 	if up == "" {
 		fail(w, http.StatusServiceUnavailable, notice)
 		return
@@ -130,7 +141,16 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.inflight++
 	f.last = time.Now()
 	f.mu.Unlock()
-	defer func() { f.mu.Lock(); f.inflight--; f.last = time.Now(); f.mu.Unlock() }()
+	began := time.Now()
+	defer func() {
+		f.mu.Lock()
+		f.inflight--
+		f.last = time.Now()
+		f.mu.Unlock()
+		if ov != nil {
+			ov.Observe(time.Since(began))
+		}
+	}()
 	rp := &httputil.ReverseProxy{
 		Director:      func(q *http.Request) { q.URL.Scheme, q.URL.Host = "http", up; q.Host = up },
 		FlushInterval: -1, // stream tokens as they arrive

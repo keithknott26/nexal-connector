@@ -1,0 +1,52 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"nexal/connector/internal/config"
+)
+
+type memSecrets map[string]string
+
+func (m memSecrets) Get(_ context.Context, n string) (string, error) {
+	if v, ok := m[n]; ok {
+		return v, nil
+	}
+	return "", errors.New("none")
+}
+func (m memSecrets) Put(_ context.Context, n, v string) error { m[n] = v; return nil }
+func (m memSecrets) Delete(_ context.Context, n string) error { delete(m, n); return nil }
+
+func TestBuildOverflow(t *testing.T) {
+	ctx := context.Background()
+	gpu := &config.OverflowTier{Name: "gpu", BaseURL: "https://api.runpod.ai/v2/x/openai/v1", Model: "m", FirstByteSeconds: 30}
+	on := config.Config{Overflow: &config.OverflowConfig{Enabled: true, GPU: gpu, GPUPeers: []string{"10.0.0.2"}, MaxWaitSeconds: 60, DailyLimit: 5}}
+	if buildOverflow(ctx, config.Config{}, memSecrets{}) != nil {
+		t.Fatal("absent config must be off")
+	}
+	if buildOverflow(ctx, on, memSecrets{}) != nil {
+		t.Fatal("a tier without a key must not be used")
+	}
+	ov := buildOverflow(ctx, on, memSecrets{"overflow-gpu": "0123456789abcdef"})
+	if ov == nil || ov.GPU == nil || ov.Cloud != nil || !ov.GPUPeers["10.0.0.2"] || ov.GPUPeers["10.0.0.3"] || ov.DailyLimit != 5 {
+		t.Fatalf("%+v", ov)
+	}
+	on.Overflow.Enabled = false
+	if buildOverflow(ctx, on, memSecrets{"overflow-gpu": "0123456789abcdef"}) != nil {
+		t.Fatal("disabled must be off")
+	}
+}
+
+func TestOverflowStatusNeverCarriesKeys(t *testing.T) {
+	st := overflowStatus(context.Background(), config.Config{}, memSecrets{"overflow-gpu": "SECRETSECRETSECRET"})
+	if st["gpuKeyStored"] != true || st["cloudKeyStored"] != false {
+		t.Fatal(st)
+	}
+	if b, _ := json.Marshal(st); strings.Contains(string(b), "SECRETSECRET") {
+		t.Fatal("key leaked into status")
+	}
+}

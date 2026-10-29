@@ -211,6 +211,7 @@ struct InferenceSection: View {
                 InferenceQuickStartView(installedIDs: installedModelIDs) { installed.refresh(model) }
                 Divider()
                 RemoteInferenceContent()
+                OverflowSettingsView()
                 ModelReviewView()
                 Divider()
                 Text(InferencePresentation.intro)

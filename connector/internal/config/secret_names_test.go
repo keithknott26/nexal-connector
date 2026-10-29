@@ -10,7 +10,7 @@ import (
 func TestSecretNameAllowlist(t *testing.T) {
 	uuid := "123e4567-e89b-12d3-a456-426614174000"
 	for name, want := range map[string]bool{
-		"admin": true, "host": true, "peer-identity": true, "mesh-credential": true,
+		"admin": true, "host": true, "peer-identity": true, "mesh-credential": true, "overflow-gpu": true, "overflow-cloud": true, "overflow-": false, "overflow": false,
 		"enrollment-session-" + uuid: true,
 		"":                           false, "Admin": false, "../host": false, "host/": false,
 		"enrollment-session-":                             false,

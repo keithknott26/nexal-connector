@@ -102,7 +102,9 @@ type Runner struct {
 	WakeGrace  time.Duration // how long after waking from sleep ring and stall checks are held off (default 60 s)
 	Rejoin     time.Duration // how long a member that left the pool waits before offering to join again (default 5 s)
 	Logger     *slog.Logger
-	LogDir     string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
+	// Overflow, when set, lets each model server send some requests to a serverless GPU or cloud tier (overflow.go).
+	Overflow *Overflow
+	LogDir   string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
 	// Lease opens (true) or closes (false) the storage-host lease: TCP 8001-8099 from the neXal storage host to
 	// this Mac, and its network name there. The runner holds it while this Mac answers a request (a single serve,
 	// or rank 0 of a pool), whichever helper is running, so a pool switching helpers never drops it.
@@ -713,6 +715,14 @@ func poolExit(out string, err error) string {
 // forwarder answers on addr:port (the neXal address), loopback and this Mac's LAN addresses on the same port.
 // A LAN address that cannot be used (taken port, address gone) is dropped rather than failing the model.
 func (r *Runner) forwarder(ctx context.Context, addr string, port int) (*Forwarder, error) {
+	f, err := r.listen(ctx, addr, port)
+	if err == nil && r.Overflow != nil {
+		f.SetOverflow(r.Overflow)
+	}
+	return f, err
+}
+
+func (r *Runner) listen(ctx context.Context, addr string, port int) (*Forwarder, error) {
 	p := strconv.Itoa(port)
 	var base []string
 	if ip := net.ParseIP(addr); ip == nil || !ip.IsLoopback() { // already loopback: a second listen would collide

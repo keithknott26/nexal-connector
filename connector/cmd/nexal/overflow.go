@@ -19,7 +19,7 @@ import (
 // printed, put in config.json or passed on a command line.
 func overflowCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal overflow status|set|set-key|clear-key  (see --help on each)")
+		return errors.New("usage: nexal overflow status|set|set-key|clear-key|provision|deprovision|check  (see --help on each)")
 	}
 	action := args[0]
 	f, path, err := flags("overflow " + action)
@@ -40,12 +40,23 @@ func overflowCommand(ctx context.Context, args []string) error {
 		gpuPeers, cloudPeers            = f.String("gpu-peers", "", "comma-separated neXal IPs allowed to use the GPU tier, or *"), f.String("cloud-peers", "", "comma-separated neXal IPs allowed to use the cloud tier, or *")
 		tierFlag                        = f.String("tier", "", "gpu or cloud (set-key and clear-key)")
 		noGPU, noCloud                  = f.Bool("remove-gpu", false, "remove the GPU tier"), f.Bool("remove-cloud", false, "remove the cloud tier")
+		preset                          = f.String("preset", "standard", "provision: standard, light or custom")
+		pModel, pQuant                  = f.String("model", "", "provision: Hugging Face model id (preset custom)"), f.String("quantization", "", "provision: awq, gptq, ... (preset custom)")
+		pGPUs                           = f.String("gpu-types", "", "provision: comma-separated RunPod GPU types in the order to try (preset custom)")
+		pWorkers, pIdle                 = f.Int("max-workers", 1, "provision: most GPUs running at once (the cost cap)"), f.Int("idle-seconds", 0, "provision: seconds an idle GPU waits before it stops (0: 30)")
+		recreate, forget                = f.Bool("recreate", false, "provision: replace the endpoint set up earlier"), f.Bool("forget", false, "deprovision: only drop the saved endpoint, without calling RunPod")
 	)
 	if err := parse(f, args[1:], path); err != nil {
 		return err
 	}
 	set := map[string]bool{}
 	f.Visit(func(x *flag.Flag) { set[x.Name] = true })
+
+	switch action {
+	case "provision", "deprovision", "check":
+		return overflowRunPod(ctx, action, *path, runPodOptions{preset: *preset, model: *pModel, quantization: *pQuant, gpuTypes: splitList(*pGPUs),
+			maxWorkers: *pWorkers, idleSeconds: *pIdle, recreate: *recreate, forget: *forget})
+	}
 
 	unlock, err := config.Lock(*path)
 	if err != nil {
@@ -159,7 +170,7 @@ func overflowCommand(ctx context.Context, args []string) error {
 		st["appliesAt"] = "the next time the model server starts; a model already being served keeps its settings"
 		return emit(st)
 	}
-	return errors.New("unknown overflow action; use status, set, set-key or clear-key")
+	return errors.New("unknown overflow action; use status, set, set-key, clear-key, provision, deprovision or check")
 }
 
 func splitList(s string) []string {

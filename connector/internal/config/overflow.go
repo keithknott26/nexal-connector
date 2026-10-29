@@ -20,8 +20,45 @@ type OverflowConfig struct {
 	DailyLimit      int           `json:"dailyLimit,omitempty"`      // paid-tier requests per UTC day; 0 = no cap
 	GPU             *OverflowTier `json:"gpu,omitempty"`
 	Cloud           *OverflowTier `json:"cloud,omitempty"`
+	RunPod          *RunPodRecord `json:"runpod,omitempty"`     // the endpoint "set up" created in the owner's RunPod account
 	GPUPeers        []string      `json:"gpuPeers,omitempty"`   // neXal IPs, or "*" for every peer
 	CloudPeers      []string      `json:"cloudPeers,omitempty"` // a separate consent from GPUPeers
+}
+
+// RunPodRecord remembers what one-click setup created, so it can be checked and removed again. It holds ids
+// only: the API key lives in the Keychain.
+type RunPodRecord struct {
+	EndpointID string `json:"endpointId"`
+	TemplateID string `json:"templateId"`
+	Preset     string `json:"preset,omitempty"`
+	Model      string `json:"model"`
+	MaxWorkers int    `json:"maxWorkers,omitempty"`
+	CreatedAt  string `json:"createdAt,omitempty"`
+}
+
+func validResourceID(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *RunPodRecord) validate() error {
+	if r == nil {
+		return nil
+	}
+	if !validResourceID(r.EndpointID) || (r.TemplateID != "" && !validResourceID(r.TemplateID)) {
+		return errors.New("overflow runpod: invalid endpoint or template id")
+	}
+	if len(r.Model) > 200 || len(r.Preset) > 40 || r.MaxWorkers < 0 || r.MaxWorkers > 10 {
+		return errors.New("overflow runpod: invalid record")
+	}
+	return nil
 }
 
 // OverflowTier is one OpenAI-compatible endpoint.
@@ -78,6 +115,9 @@ func (o *OverflowConfig) Validate() error {
 		return err
 	}
 	if err := o.Cloud.validate("overflow cloud"); err != nil {
+		return err
+	}
+	if err := o.RunPod.validate(); err != nil {
 		return err
 	}
 	if err := validOverflowPeers("overflow gpuPeers", o.GPUPeers); err != nil {

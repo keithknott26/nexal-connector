@@ -59,4 +59,12 @@ final class MeshHealTests: XCTestCase {
         _ = AppModel.stuckQuantumPeers([fine], since: &since, now: now.addingTimeInterval(100))
         XCTAssertEqual(AppModel.stuckQuantumPeers([stuck], since: &since, now: now.addingTimeInterval(250)), [])
     }
+
+    func testRenewalIsSkippedWhileAnotherPeerIsWorking() {
+        let working = peer("gw", pq: "protected", reason: nil, lifecycle: "connected")
+        let sleepingPhone = peer("iphone", pq: "degraded", reason: "session-pending")
+        XCTAssertTrue(AppModel.healWouldInterrupt([working, sleepingPhone]))
+        XCTAssertFalse(AppModel.healWouldInterrupt([sleepingPhone]))
+        XCTAssertFalse(AppModel.healWouldInterrupt([peer("m2", pq: "degraded", reason: "evidence-expired", lifecycle: "connected")]))
+    }
 }

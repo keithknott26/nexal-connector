@@ -385,10 +385,19 @@ final class AppModel: ObservableObject {
         return stuck
     }
 
+    /// True when a quantum-safe peer is currently connected and protected, so restarting the connection would cut it off.
+    static func healWouldInterrupt(_ peers: [ConnectorStatus.MeshPeer]) -> Bool {
+        peers.contains { $0.lifecycle == "connected" && $0.pq == "protected" }
+    }
+
     private func healStuckQuantumSessions() {
         guard let mesh = status?.mesh, mesh.providerAvailable, !busy else { return }
         let stuck = Self.stuckQuantumPeers(mesh.peers, since: &pqStuckSince)
         guard !stuck.isEmpty else { return }
+        // Renewing restarts this Mac's whole connection, which drops every peer for several seconds (Screen Sharing,
+        // SSH). Never do that to repair one peer while another is working: a sleeping phone sits in `session-pending`
+        // for hours, and the stuck peer recovers by itself within a lease or two anyway.
+        guard !Self.healWouldInterrupt(mesh.peers) else { return }
         if let last = lastPQHeal, Date().timeIntervalSince(last) < Self.pqHealCooldown { return }
         guard Self.mayRekey(last: lastRekeyAt) else { return }
         lastPQHeal = Date()

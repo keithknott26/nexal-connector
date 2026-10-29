@@ -2,9 +2,11 @@ package cybersecurity
 
 import (
 	"context"
+	"errors"
 	"github.com/google/uuid"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,5 +113,42 @@ func TestServeValidationReportsSensorUnavailableWhenMeshIPCannotBind(t *testing.
 		func(context.Context, Event) error { called = true; return nil })
 	if executed || reason != "sensor_unavailable" || err == nil || called {
 		t.Fatalf("executed=%v reason=%q err=%v callbacks=%v", executed, reason, err, called)
+	}
+}
+
+func TestValidationHandlerRejectsMalformedRequestsAndSurfacesReportFailure(t *testing.T) {
+	r := validationGrant()
+	r.Module = "network_canary"
+	r.TargetIP = "100.86.1.2"
+	reportErr := errors.New("evidence store down")
+	reports := 0
+	h, result := validationHandler(context.Background(), r, func(context.Context) bool { return true }, func(context.Context, Event) error { reports++; return reportErr })
+	do := func(method, path, body string) int {
+		req := httptest.NewRequest(method, "http://mesh"+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+r.Nonce)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	for name, code := range map[string]int{
+		"wrong method": do("GET", "/validation/"+r.ID, ""),
+		"wrong path":   do("POST", "/validation/"+uuid.NewString(), ""),
+		"with body":    do("POST", "/validation/"+r.ID, "x"),
+	} {
+		if code != 404 {
+			t.Fatalf("%s: code = %d, want 404", name, code)
+		}
+	}
+	if reports != 0 {
+		t.Fatalf("malformed requests reached report: %d", reports)
+	}
+	if code := do("POST", "/validation/"+r.ID, ""); code != 503 {
+		t.Fatalf("report failure code = %d, want 503", code)
+	}
+	if err := <-result; !errors.Is(err, reportErr) {
+		t.Fatalf("result = %v, want report error", err)
+	}
+	if code := do("POST", "/validation/"+r.ID, ""); code != 404 || reports != 1 {
+		t.Fatalf("nonce reusable after failed report: code=%d reports=%d", code, reports)
 	}
 }

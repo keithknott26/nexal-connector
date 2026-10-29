@@ -274,3 +274,16 @@ func TestLabelAndPortFallThroughForUnknownService(t *testing.T) {
 		}
 	}
 }
+
+func TestWaitListeningSeesAPortThatComesUpMidWait(t *testing.T) {
+	s := &stub{uid: 0, goos: "darwin"}
+	install(t, s)
+	polls := 0
+	listening = func(context.Context, string) bool { polls++; return polls >= 2 }
+	if !waitListening(context.Background(), ScreenSharing) {
+		t.Fatal("waitListening = false, want true once the port answers")
+	}
+	if polls != 2 {
+		t.Fatalf("polls = %d, want 2", polls)
+	}
+}

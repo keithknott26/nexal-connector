@@ -1,6 +1,8 @@
 package inference
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"nexal/connector/internal/pool"
@@ -67,5 +69,29 @@ func TestSha256Hex(t *testing.T) {
 		if got := sha256Hex([]byte(in)); got != want {
 			t.Errorf("sha256Hex(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+func TestManifestBytesSortedKeysAndRoundTrip(t *testing.T) {
+	m := Manifest{
+		SchemaVersion: 1, ModelID: "m", Revision: "r", License: "mit", ModelType: "qwen3",
+		Files:  map[string]string{"z.json": "bb", "a.json": "aa", "m.safetensors": "cc"},
+		Memory: ManifestMemory{WeightsBytes: 1, KVBytesPerToken: 2, ActivationBytes: 3, BufferBytes: 4, LoadPeakBytes: 5, SafetyBytes: 6},
+	}
+	b, err := m.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	a, mm, z := strings.Index(s, `"a.json"`), strings.Index(s, `"m.safetensors"`), strings.Index(s, `"z.json"`)
+	if a < 0 || !(a < mm && mm < z) {
+		t.Errorf("file keys not sorted in %s", s)
+	}
+	var back Manifest
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Memory != m.Memory || back.ModelID != m.ModelID || len(back.Files) != 3 || back.Files["a.json"] != "aa" {
+		t.Errorf("round trip changed the manifest: %+v", back)
 	}
 }

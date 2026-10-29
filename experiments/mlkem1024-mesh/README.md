@@ -223,6 +223,21 @@ the current generation, so a peer shows `session-pending` during the overlap.
 Tests: `TestNexalRenewalKeepsPreviousSessionUntilLeaseEnds`,
 `TestNexalRenewalDoesNotBlackOutData` (fails without the overlap).
 
+### Renewal overlap actually takes effect — 2026-10-29
+
+`netbird-renewal-overlap.patch` (applied last by `prepare.py`). The gated.14 overlap in
+WireGuard never ran in the real runtime: `HandshakeCompleted` revoked the key it was
+replacing immediately before `InstallQuantumKey`, and revocation ends the overlap at once,
+so every renewal still denied application data until the new session existed (seconds when
+the two ends installed at different moments, tens of seconds on a lossy path). The handler
+now installs without revoking first; only a failed install revokes (fail closed). Expiry,
+reconnection and `SetInterface` still revoke. Lease lengths are unchanged, so no session
+carries data longer than 180 s after the exchange that keyed it.
+Test: `TestNexalRenewalKeepsDataFlowingWhilePeersDisagree` (two real gated WireGuard
+devices, one end renews first; fails on the old handler, passes now).
+RUNTIME_VERSION is not bumped here: build and publish the runtime, then bump it together
+with `MeshRuntimeCheck.swift` and the sidecar `Dockerfile` (as gated.14 did).
+
 ### Status probe network budget
 
 `prepare.py` also applies `netbird-health-budget.patch`: concurrent status readers

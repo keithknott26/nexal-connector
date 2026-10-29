@@ -22,6 +22,10 @@ set -uo pipefail
 COLIMA_VERSION="v0.10.3"
 LIMA_VERSION="2.2.0"
 DEVPOD_VERSION="v0.6.15"
+# devpod v0.6.15 predates GitHub's per-asset digests, so there is no published checksum to compare against and
+# the installer used to refuse it. These pin the exact binaries (computed from the release assets; bump with DEVPOD_VERSION).
+DEVPOD_SHA256_ARM64="0c50934f4199732ff37e89708bc5c028ecda75d854a151cb2644e4ba39f4d7f7"
+DEVPOD_SHA256_AMD64="1205fc8626d9daa011479ded3ce7271359714f0d011acfcf739adf90901a6ee8"
 DOCKER_VERSION="29.8.2"
 
 RT="$HOME/Library/Application Support/Nexal/runtime"
@@ -61,8 +65,8 @@ wait_serving() { # seconds
 # ---------- neXal-managed install (no Homebrew) ----------
 
 case "$(uname -m)" in
-  arm64) A_COLIMA=arm64; A_LIMA=arm64; A_DEVPOD=arm64; A_DOCKER=aarch64; DOCKER_PIN="${NEXAL_DOCKER_SHA256_ARM64:-}" ;;
-  x86_64) A_COLIMA=x86_64; A_LIMA=x86_64; A_DEVPOD=amd64; A_DOCKER=x86_64; DOCKER_PIN="${NEXAL_DOCKER_SHA256_X86_64:-}" ;;
+  arm64) A_COLIMA=arm64; A_LIMA=arm64; A_DEVPOD=arm64; DEVPOD_PIN="$DEVPOD_SHA256_ARM64"; A_DOCKER=aarch64; DOCKER_PIN="${NEXAL_DOCKER_SHA256_ARM64:-}" ;;
+  x86_64) A_COLIMA=x86_64; A_LIMA=x86_64; A_DEVPOD=amd64; DEVPOD_PIN="$DEVPOD_SHA256_AMD64"; A_DOCKER=x86_64; DOCKER_PIN="${NEXAL_DOCKER_SHA256_X86_64:-}" ;;
   *) say "Unsupported Mac architecture $(uname -m)."; exit 1 ;;
 esac
 
@@ -101,6 +105,11 @@ fetch_github() { # owner/repo tag asset dest label
   verify "$4" "$(github_digest "$1" "$2" "$3")" "$5"
 }
 
+fetch_devpod() { # dest: the pinned devpod binary
+  fetch "https://github.com/loft-sh/devpod/releases/download/$DEVPOD_VERSION/devpod-darwin-$A_DEVPOD" "$1" || { say "Could not download devpod."; return 1; }
+  verify "$1" "$DEVPOD_PIN" "devpod"
+}
+
 managed_install() {
   TMP="$(mktemp -d -t nexal-runtime)" || return 1
   mkdir -p "$RT/bin" || return 1
@@ -133,7 +142,7 @@ managed_install() {
 
   if [ ! -x "$RT/bin/devpod" ]; then
     say "Downloading devpod $DEVPOD_VERSION…"
-    fetch_github loft-sh/devpod "$DEVPOD_VERSION" "devpod-darwin-$A_DEVPOD" "$TMP/devpod" "devpod" || return 1
+    fetch_devpod "$TMP/devpod" || return 1
     install -m 755 "$TMP/devpod" "$RT/bin/devpod" || return 1
   fi
   return 0
@@ -210,7 +219,7 @@ if serving; then
   command -v devpod >/dev/null 2>&1 && exit 0
   say "Installing devpod…"
   TMP="$(mktemp -d -t nexal-runtime)" && mkdir -p "$RT/bin" \
-    && fetch_github loft-sh/devpod "$DEVPOD_VERSION" "devpod-darwin-$A_DEVPOD" "$TMP/devpod" "devpod" \
+    && fetch_devpod "$TMP/devpod" \
     && install -m 755 "$TMP/devpod" "$RT/bin/devpod" && { say "Container runtime ready; devpod installed."; exit 0; }
   say "Installing devpod failed."; exit 1
 fi

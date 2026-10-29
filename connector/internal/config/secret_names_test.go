@@ -75,3 +75,22 @@ func TestFileSecretsDeleteIsIdempotentAndScoped(t *testing.T) {
 		t.Fatal("get accepted a name outside the allowlist")
 	}
 }
+
+// The Keychain backend must refuse out-of-scope names and malformed secrets
+// before it ever runs /usr/bin/security, so these checks hold on any OS.
+func TestKeychainRejectsBadInputBeforeExec(t *testing.T) {
+	k := Keychain{Service: "com.nexal.connector.test"}
+	ctx := context.Background()
+	if _, err := k.Get(ctx, "../host"); err == nil || !strings.Contains(err.Error(), "invalid credential scope") {
+		t.Errorf("Get out-of-scope name: err = %v", err)
+	}
+	if err := k.Delete(ctx, "Admin"); err == nil || !strings.Contains(err.Error(), "invalid credential scope") {
+		t.Errorf("Delete out-of-scope name: err = %v", err)
+	}
+	if err := k.Put(ctx, "other", "0123456789abcdef0123"); err == nil || !strings.Contains(err.Error(), "invalid credential") {
+		t.Errorf("Put out-of-scope name: err = %v", err)
+	}
+	if err := k.Put(ctx, "admin", "short"); err == nil || !strings.Contains(err.Error(), "invalid credential") {
+		t.Errorf("Put too-short secret: err = %v", err)
+	}
+}

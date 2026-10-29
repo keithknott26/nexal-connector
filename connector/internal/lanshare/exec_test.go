@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func shPath(t *testing.T) string {
@@ -58,5 +59,17 @@ func TestExecRunnerHonoursContextAndMissingProgram(t *testing.T) {
 	}
 	if _, err := (ExecRunner{}).Run(context.Background(), "/nonexistent/nexal-tool"); err == nil {
 		t.Fatal("missing program accepted")
+	}
+}
+
+func TestExecRunnerTruncationKeepsValidUTF8(t *testing.T) {
+	sh := shPath(t)
+	// One leading byte puts a 2-byte rune across the 2048-byte cut.
+	out, err := ExecRunner{}.Run(context.Background(), sh, "-c", "printf x; i=0; while [ $i -lt 2000 ]; do printf 'é'; i=$((i+1)); done; exit 1")
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	if !strings.HasSuffix(out, "… (truncated)") || !utf8.ValidString(out) {
+		t.Fatalf("truncated output is not valid UTF-8 (len=%d)", len(out))
 	}
 }

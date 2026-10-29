@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 )
 
 // ExecRunner runs commands for real.
@@ -29,7 +30,12 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) (string,
 		// The command's own output is the useful part; the exit status alone says
 		// nothing actionable. Bounded so a runaway program cannot flood a terminal.
 		if len(text) > 2048 {
-			text = text[:2048] + "… (truncated)"
+			// Back up to a rune boundary so a multi-byte character is never split.
+			cut := 2048
+			for cut > 0 && !utf8.RuneStart(text[cut]) {
+				cut--
+			}
+			text = text[:cut] + "… (truncated)"
 		}
 		if text == "" {
 			return "", err

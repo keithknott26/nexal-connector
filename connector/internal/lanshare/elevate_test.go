@@ -219,3 +219,30 @@ func TestPlanNeedsRootOnlyWhenAStepDoes(t *testing.T) {
 		t.Error("a plan with a privileged step does not need root")
 	}
 }
+
+func TestShellQuoteStrictAcceptsAllowlistAndQuotes(t *testing.T) {
+	cases := map[string]string{
+		"":                       "''",
+		"/usr/sbin/sharing":      "'/usr/sbin/sharing'",
+		"My Share_1-a.b":         "'My Share_1-a.b'",
+		"/Volumes/Backup Disk/x": "'/Volumes/Backup Disk/x'",
+	}
+	for in, want := range cases {
+		got, err := shellQuoteStrict(in)
+		if err != nil {
+			t.Errorf("shellQuoteStrict(%q) error: %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("shellQuoteStrict(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestShellQuoteStrictRejectsShellMetacharacters(t *testing.T) {
+	for _, in := range []string{"a'b", "a;b", "a$b", "a`b", "a\"b", "a\\b", "a\nb", "a&b", "a|b", "a*b", "é"} {
+		if got, err := shellQuoteStrict(in); err == nil {
+			t.Errorf("shellQuoteStrict(%q) = %q, want error", in, got)
+		}
+	}
+}

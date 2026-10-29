@@ -145,6 +145,8 @@ func run(ctx context.Context, args []string) error {
 		return doctorCommand(ctx, args[1:])
 	case "static-peers":
 		return staticPeersCommand(ctx, args[1:])
+	case "overflow":
+		return overflowCommand(ctx, args[1:])
 	case "peers":
 		return peersCommand(ctx, args[1:])
 	case "share":
@@ -738,6 +740,7 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		if d, err := diaglog.LogDir(); err == nil {
 			ri.LogDir = d
 		}
+		ri.Overflow = buildOverflow(ctx, c, secrets)
 		hostID := c.HostID
 		ri.Lease = func(ctx context.Context, open bool) error {
 			_, err := api.InferenceGateway(ctx, hostID, open)

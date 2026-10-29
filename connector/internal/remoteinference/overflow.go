@@ -1,0 +1,189 @@
+package remoteinference
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Tier is one OpenAI-compatible chat endpoint a request can be sent to besides the local Mac: a serverless GPU
+// (RunPod: https://api.runpod.ai/v2/<endpoint id>/openai/v1) or a cloud API (OpenAI, Gemini's and Anthropic's
+// OpenAI-compatible bases). All speak the same protocol, so one client serves them all.
+type Tier struct {
+	Name      string
+	BaseURL   string        // up to and including /v1; "/chat/completions" is appended
+	APIKey    string        // sent as a Bearer token; read from the Keychain by the caller, never logged
+	Model     string        // the model id this tier answers to; the request's "model" is rewritten to it
+	FirstByte time.Duration // how long to wait for response headers before trying the next tier (0: 90s)
+}
+
+// Overflow routes a request to the local pool, a bigger serverless-GPU model, or a cloud API. It is off until
+// Enabled, and a peer is served by a paid tier only if listed (CONTRACT.md: no automatic paid fallback).
+type Overflow struct {
+	mu         sync.Mutex
+	Enabled    bool
+	GPUPeers   map[string]bool // peer IPs allowed to use the GPU tier; "*" is everyone
+	CloudPeers map[string]bool // peer IPs allowed to use the cloud tier (a separate consent)
+	HardAlias  string          // a request naming this model asks for the GPU tier outright
+	MaxWait    time.Duration   // go to the GPU when the local queue would take longer than this
+	MaxPrompt  int             // go to the GPU when the prompt is over this many (estimated) tokens; 0 = never
+	DailyLimit int             // paid-tier requests per day; 0 = unlimited
+	GPU, Cloud *Tier
+
+	avg  time.Duration // moving average of a local request's duration
+	day  string
+	used int
+}
+
+// Observe records how long a local request took, for the queue-wait estimate.
+func (o *Overflow) Observe(d time.Duration) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.avg == 0 {
+		o.avg = d
+	} else {
+		o.avg = (o.avg*7 + d) / 8
+	}
+}
+
+// Plan is the ordered tiers to try for a request; empty means the local pool.
+func (o *Overflow) Plan(peer, model string, promptTokens, inflight int) (tiers []*Tier, hard, limited bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.Enabled {
+		return nil, false, false
+	}
+	hard = o.HardAlias != "" && model == o.HardAlias
+	wait := time.Duration(inflight) * o.avg
+	slow := o.MaxWait > 0 && wait > o.MaxWait
+	big := o.MaxPrompt > 0 && promptTokens > o.MaxPrompt
+	if !(hard || slow || big) {
+		return nil, false, false
+	}
+	if o.GPU != nil && (o.GPUPeers["*"] || o.GPUPeers[peer]) {
+		tiers = append(tiers, o.GPU)
+	}
+	if o.Cloud != nil && (o.CloudPeers["*"] || o.CloudPeers[peer]) {
+		tiers = append(tiers, o.Cloud)
+	}
+	if len(tiers) > 0 && o.DailyLimit > 0 {
+		today := time.Now().UTC().Format("2006-01-02")
+		if o.day != today {
+			o.day, o.used = today, 0
+		}
+		if o.used >= o.DailyLimit {
+			return nil, hard, true
+		}
+		o.used++
+	}
+	return tiers, hard, false
+}
+
+// Serve tries the overflow tiers for a chat request; it returns true when it answered. A false return means
+// the request is untouched (body restored) and should go to the local pool.
+func (o *Overflow) Serve(w http.ResponseWriter, r *http.Request, inflight int) bool {
+	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/chat/completions") || r.Body == nil {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20+1))
+	_ = r.Body.Close()
+	restore := func() {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+	}
+	if err != nil || len(body) > 64<<20 {
+		restore()
+		return false
+	}
+	var m map[string]json.RawMessage
+	var model string
+	if json.Unmarshal(body, &m) != nil || json.Unmarshal(m["model"], &model) != nil {
+		restore()
+		return false
+	}
+	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
+	tiers, hard, limited := o.Plan(peer, model, len(body)/4, inflight)
+	if len(tiers) == 0 {
+		restore()
+		if limited {
+			fail(w, http.StatusTooManyRequests, "The daily limit for the large model is used up.")
+			return true
+		}
+		if hard { // asked for the GPU model, which this peer may not use
+			fail(w, http.StatusForbidden, "The "+o.HardAlias+" model is not enabled for this peer.")
+			return true
+		}
+		return false
+	}
+	for _, t := range tiers {
+		if o.try(w, r, t, m) {
+			return true
+		}
+	}
+	if hard {
+		fail(w, http.StatusBadGateway, "The large model did not answer in time.")
+		return true
+	}
+	restore()
+	return false
+}
+
+// try sends the request to one tier; false means nothing reached the caller (the tier timed out or errored
+// before its headers), so the next tier or the local pool can answer instead.
+func (o *Overflow) try(w http.ResponseWriter, r *http.Request, t *Tier, m map[string]json.RawMessage) bool {
+	out := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	out["model"], _ = json.Marshal(t.Model)
+	payload, err := json.Marshal(out)
+	if err != nil {
+		return false
+	}
+	fb := t.FirstByte
+	if fb <= 0 {
+		fb = 90 * time.Second
+	}
+	c := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: fb}}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, strings.TrimRight(t.BaseURL, "/")+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("authorization", "Bearer "+t.APIKey)
+	resp, err := c.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+		return false
+	}
+	for k, v := range resp.Header {
+		if strings.EqualFold(k, "content-length") {
+			continue
+		}
+		w.Header()[k] = v
+	}
+	w.Header().Set("x-nexal-backend", t.Name) // a caller can always see where its prompt ran
+	w.WriteHeader(resp.StatusCode)
+	buf := make([]byte, 4096)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			_, _ = w.Write(buf[:n])
+			if fl, ok := w.(http.Flusher); ok {
+				fl.Flush()
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return true
+}

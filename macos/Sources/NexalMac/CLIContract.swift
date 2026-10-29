@@ -64,6 +64,8 @@ enum CLICommand {
     case sandbox(action: String, id: String?, kind: String?)
     /// Peer names: `list`, or `set` with a mesh address (the name is read from stdin; empty removes it).
     case peerNames(action: String, address: String?)
+    /// Overflow to a serverless GPU / cloud API: `status`, `set` (flags), `set-key` (key on stdin) or `clear-key`.
+    case overflow(action: String, args: [String])
     /// Diagnostic mode: switch the agent's Debug logging on or off (no restart),
     /// report it, or write a redacted bundle to an absolute path.
     case diagnostics(DiagnosticsAction)
@@ -198,6 +200,8 @@ enum CLICommand {
                 + (kind.map { ["--kind", $0] } ?? []) + (action != "connect" || kind == "vnc" ? [] : ["--public-key-stdin"])
         case let .peerNames(action, address):
             command = ["peer-names", "--action", action] + (address.map { ["--address", $0] } ?? [])
+        case let .overflow(action, args):
+            command = ["overflow", action] + args
         case let .exitRoute(tunnelAddress, enabled, targetDeviceID):
             command = ["exit-route", "--tunnel", tunnelAddress] + (enabled ? [] : ["--disable"]) + (targetDeviceID.map { ["--target-device", $0] } ?? [])
         case let .wake(tunnelAddress):

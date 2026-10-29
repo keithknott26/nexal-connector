@@ -76,7 +76,7 @@ type FileSecrets struct{ Dir string }
 //     and because on macOS this routes it to the Keychain rather than to a file
 //     the way a bespoke key store would have.
 func secretName(name string) bool {
-	if name == "admin" || name == "host" || name == "peer-identity" || name == "mesh-credential" {
+	if name == "admin" || name == "host" || name == "peer-identity" || name == "mesh-credential" || name == "overflow-gpu" || name == "overflow-cloud" {
 		return true
 	}
 	if strings.HasPrefix(name, "enrollment-session-") {

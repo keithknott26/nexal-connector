@@ -103,4 +103,10 @@ Budget {coreMonthlyCents,founderMonthlyCents,engineeringMonthlyCents,reserveMont
 - D1 conditional updates/batches + unique keys guard leases, one-use invites, idempotency and exactly-once ledger effects.
 - Only fixed built-in Monte Carlo job is enabled initially; no arbitrary shell, URLs, Python or model downloads from jobs.
 - Metering is illustrative non-cash ledger; external billing/payouts disabled, no automatic paid fallback.
+- Model overflow (`overflow` in config.json) is the one owner-enabled exception to "no cloud fallback": a Mac owner may
+  let their own model server send requests to a serverless GPU and, separately, a cloud API they pay for with their
+  own keys. It is absent/off by default; each tier serves only the peer IPs the owner lists for it (GPU and cloud are
+  separate consents); API keys live in the Keychain (`overflow-gpu`, `overflow-cloud`), never in config or argv; every
+  reply from such a tier carries `x-nexal-backend`; a daily request cap applies. It never applies to marketplace jobs
+  or private pooled/MLX placement, and a tier without a stored key is not used. This is not coordinator-billed.
 - All unresolved requirements must be explicit in release status matrix.

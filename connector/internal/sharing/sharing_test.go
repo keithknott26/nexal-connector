@@ -287,8 +287,6 @@ func TestWaitListeningSeesAPortThatComesUpMidWait(t *testing.T) {
 		t.Fatalf("polls = %d, want 2", polls)
 	}
 }
-<<<<<<< HEAD
-
 func TestWaitListeningReturnsFalseWhenContextEnds(t *testing.T) {
 	s := &stub{uid: 0, goos: "darwin"}
 	install(t, s)
@@ -306,5 +304,3 @@ func TestWaitListeningReturnsFalseWhenContextEnds(t *testing.T) {
 		t.Fatalf("polls = %d, want 1: a cancelled wait must stop probing", polls)
 	}
 }
-=======
->>>>>>> 50ddc10 (sharing: test waitListening returns true once the port answers mid-wait)

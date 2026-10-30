@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"nexal/connector/internal/config"
 )
 
 func TestAddrListIsRepeatable(t *testing.T) {
@@ -166,4 +168,30 @@ func TestIdentityCommandRejectsBadInputBeforeTouchingKeys(t *testing.T) {
 	if entries, _ := filepath.Glob(cfg + "*"); len(entries) != 0 {
 		t.Fatalf("rejected identity call created files: %v", entries)
 	}
+}
+
+func TestBundleCommandRejectsUnenrolledHostAndSelfDonor(t *testing.T) {
+	id := strings.Repeat("a", 32)
+	save := func(t *testing.T, hostID string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "private", "config.json")
+		c := config.Config{Version: 1, Coordinator: "http://127.0.0.1:1", Name: "Mac", HostID: hostID, Listen: "127.0.0.1:8788",
+			Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+		if err := config.Save(path, c); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	t.Run("unenrolled host", func(t *testing.T) {
+		err := bundleCommand(context.Background(), "bundle-receive", []string{"--config", save(t, ""), "--from-host", id})
+		if err == nil || !strings.Contains(err.Error(), "enroll this Mac") {
+			t.Fatalf("expected enrollment error, got %v", err)
+		}
+	})
+	t.Run("donor equals receiver", func(t *testing.T) {
+		err := bundleCommand(context.Background(), "bundle-receive", []string{"--config", save(t, id), "--from-host", id})
+		if err == nil || !strings.Contains(err.Error(), "must be different") {
+			t.Fatalf("expected distinct-host error, got %v", err)
+		}
+	})
 }

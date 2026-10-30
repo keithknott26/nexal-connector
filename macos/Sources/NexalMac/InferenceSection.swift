@@ -214,6 +214,8 @@ struct InferenceSection: View {
                 Divider()
                 OverflowOffloadView()
                 Divider()
+                InferenceThroughputView()
+                Divider()
                 ModelReviewView()
                 Divider()
                 Text(InferencePresentation.intro)

@@ -104,7 +104,9 @@ type Runner struct {
 	Logger     *slog.Logger
 	// Overflow, when set, lets each model server send some requests to a serverless GPU or cloud tier (overflow.go).
 	Overflow *Overflow
-	LogDir   string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
+	// Meter, when set, measures the tokens returned by this Mac's model and by offloaded requests (meter.go).
+	Meter  *Meter
+	LogDir string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
 	// Lease opens (true) or closes (false) the storage-host lease: TCP 8001-8099 from the neXal storage host to
 	// this Mac, and its network name there. The runner holds it while this Mac answers a request (a single serve,
 	// or rank 0 of a pool), whichever helper is running, so a pool switching helpers never drops it.
@@ -718,6 +720,12 @@ func (r *Runner) forwarder(ctx context.Context, addr string, port int) (*Forward
 	f, err := r.listen(ctx, addr, port)
 	if err == nil && r.Overflow != nil {
 		f.SetOverflow(r.Overflow)
+	}
+	if err == nil && r.Meter != nil {
+		f.SetMeter(r.Meter)
+		if r.Overflow != nil {
+			r.Overflow.SetMeter(r.Meter)
+		}
 	}
 	return f, err
 }

@@ -35,10 +35,18 @@ type Overflow struct {
 	MaxPrompt  int             // go to the GPU when the prompt is over this many (estimated) tokens; 0 = never
 	DailyLimit int             // paid-tier requests per day; 0 = unlimited
 	GPU, Cloud *Tier
+	Meter      *Meter // nil: offloaded answers are not measured
 
 	avg  time.Duration // moving average of a local request's duration
 	day  string
 	used int
+}
+
+// SetMeter makes offloaded answers count in m.
+func (o *Overflow) SetMeter(m *Meter) {
+	o.mu.Lock()
+	o.Meter = m
+	o.mu.Unlock()
 }
 
 // Observe records how long a local request took, for the queue-wait estimate.
@@ -174,9 +182,17 @@ func (o *Overflow) try(w http.ResponseWriter, r *http.Request, t *Tier, m map[st
 	w.Header().Set("x-nexal-backend", t.Name) // a caller can always see where its prompt ran
 	w.WriteHeader(resp.StatusCode)
 	buf := make([]byte, 4096)
+	o.mu.Lock()
+	meter := o.Meter
+	o.mu.Unlock()
+	var tl tally
+	count := resp.StatusCode < 400 // an error body is not an answer
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
+			if count {
+				meter.Add(Offload, tl.feed(buf[:n], resp.Header))
+			}
 			_, _ = w.Write(buf[:n])
 			if fl, ok := w.(http.Flusher); ok {
 				fl.Flush()
@@ -185,6 +201,9 @@ func (o *Overflow) try(w http.ResponseWriter, r *http.Request, t *Tier, m map[st
 		if err != nil {
 			break
 		}
+	}
+	if count && tl.size > 0 {
+		meter.Done(Offload, tl.finish(resp.Header), t.Name)
 	}
 	return true
 }

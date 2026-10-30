@@ -27,6 +27,14 @@ type Forwarder struct {
 	last     time.Time // the last request start or response byte
 	model    string    // see SetModel
 	overflow *Overflow // nil: everything goes to the local server
+	meter    *Meter    // nil: throughput is not measured
+}
+
+// SetMeter makes the forwarder count the tokens it returns (see Meter).
+func (f *Forwarder) SetMeter(m *Meter) {
+	f.mu.Lock()
+	f.meter = m
+	f.mu.Unlock()
 }
 
 // SetOverflow lets the forwarder send some requests to a serverless GPU or cloud tier (see Overflow).
@@ -117,7 +125,7 @@ func (f *Forwarder) Close() { _ = f.srv.Close() }
 
 func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	up, notice, model, ov, busy := f.upstream, f.notice, f.model, f.overflow, f.inflight
+	up, notice, model, ov, busy, meter := f.upstream, f.notice, f.model, f.overflow, f.inflight, f.meter
 	f.mu.Unlock()
 	if ov != nil && ov.Serve(w, r, busy) {
 		return
@@ -158,20 +166,40 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusBadGateway, "The model stopped answering. If the pool lost a Mac it is restarting on the remaining Macs; try again in a minute.")
 		},
 	}
-	rp.ServeHTTP(&activityWriter{ResponseWriter: w, f: f}, r)
+	aw := &activityWriter{ResponseWriter: w, f: f, meter: meter}
+	rp.ServeHTTP(aw, r)
+	aw.finish()
 }
 
 // activityWriter notes every response byte so the pool can tell a long answer from a stuck one.
 type activityWriter struct {
 	http.ResponseWriter
-	f *Forwarder
+	f      *Forwarder
+	meter  *Meter // nil: not measured
+	status int
+	tally  tally
+}
+
+func (a *activityWriter) WriteHeader(code int) {
+	a.status = code
+	a.ResponseWriter.WriteHeader(code)
 }
 
 func (a *activityWriter) Write(p []byte) (int, error) {
 	a.f.mu.Lock()
 	a.f.last = time.Now()
 	a.f.mu.Unlock()
+	if a.meter != nil && a.status < 400 { // an error body is not an answer
+		a.meter.Add(Local, a.tally.feed(p, a.ResponseWriter.Header()))
+	}
 	return a.ResponseWriter.Write(p)
+}
+
+// finish counts the request once its answer has been returned (not one that failed).
+func (a *activityWriter) finish() {
+	if a.meter != nil && a.tally.size > 0 && a.status < 400 {
+		a.meter.Done(Local, a.tally.finish(a.ResponseWriter.Header()), "")
+	}
 }
 func (a *activityWriter) Flush() {
 	if fl, ok := a.ResponseWriter.(http.Flusher); ok {

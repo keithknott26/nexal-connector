@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -250,7 +251,12 @@ func errorMessage(raw []byte) string {
 	}
 	msg = strings.Join(strings.Fields(msg), " ")
 	if len(msg) > 300 {
-		msg = msg[:300]
+		// Cut on a rune boundary so a multi-byte character is never split.
+		cut := 300
+		for cut > 0 && !utf8.RuneStart(msg[cut]) {
+			cut--
+		}
+		msg = msg[:cut]
 	}
 	return msg
 }

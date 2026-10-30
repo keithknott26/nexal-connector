@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 const testKey = "rpa_SECRETSECRETSECRET1234"
@@ -207,5 +208,27 @@ func TestPresetsAreComplete(t *testing.T) {
 	}
 	if _, ok := PresetByID("nope"); ok {
 		t.Fatal("unknown preset")
+	}
+}
+
+func TestErrorMessageAndErrorText(t *testing.T) {
+	if got := errorMessage([]byte(`{"message":"  two \n spaces "}`)); got != "two spaces" {
+		t.Fatalf("message fallback and whitespace collapse: %q", got)
+	}
+	if got := errorMessage([]byte(`not json`)); got != "" {
+		t.Fatalf("non-JSON body should give no message, got %q", got)
+	}
+	long := errorMessage([]byte(`{"error":"` + strings.Repeat("é", 400) + `"}`))
+	if len(long) > 300 || !utf8.ValidString(long) {
+		t.Fatalf("truncation must stay within 300 bytes and valid UTF-8: len=%d valid=%v", len(long), utf8.ValidString(long))
+	}
+	if got := (&Error{Status: 429}).Error(); !strings.Contains(got, "rate limiting") {
+		t.Fatalf("429 text: %q", got)
+	}
+	if got := (&Error{Status: 500}).Error(); got != "RunPod returned 500" {
+		t.Fatalf("bare status text: %q", got)
+	}
+	if got := (&Error{Status: 400, Message: "bad"}).Error(); got != "RunPod returned 400: bad" {
+		t.Fatalf("status with message: %q", got)
 	}
 }

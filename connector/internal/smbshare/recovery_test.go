@@ -356,3 +356,36 @@ func TestNormalizeCodeOnlyAppliesReadAloudRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialBurnDiscardsCodeAndExposesOnlyNonsecretFacts(t *testing.T) {
+	now := time.Now()
+	credential, err := NewCredential("session-a", "owner@example.test", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := credential.Username(); got != "owner@example.test" {
+		t.Fatalf("Username = %q", got)
+	}
+	if got := credential.ExpiresAt(); !got.Equal(now.Add(CredentialTTL)) {
+		t.Fatalf("ExpiresAt = %v, want %v", got, now.Add(CredentialTTL))
+	}
+	code, err := credential.Display()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	credential.Burn()
+	if err := credential.Verify("session-a", code, now); err == nil {
+		t.Fatal("the correct code worked after Burn")
+	}
+	if _, err := credential.Password(); err == nil {
+		t.Fatal("a burned credential still yielded a password")
+	}
+	if _, err := credential.Display(); err == nil {
+		t.Fatal("a burned credential still displayed its code")
+	}
+	// Burn is idempotent and nil-safe (session teardown may race a never-minted credential).
+	credential.Burn()
+	var none *Credential
+	none.Burn()
+}

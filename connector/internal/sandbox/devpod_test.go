@@ -500,3 +500,54 @@ func TestDevErrorCodeUnwrapsDevErrorsOnly(t *testing.T) {
 		t.Fatalf("DevError.Error() = %q", got)
 	}
 }
+
+func TestAwaitJoinFailurePaths(t *testing.T) {
+	spec := upSpec()
+	spec.Timeout = time.Millisecond
+	cases := map[string]struct {
+		logs, alive string
+		want        string
+	}{
+		"reported failure": {logs: "dns lookup failed\nNEXAL-FIRSTBOOT-FAILED key rejected\n", alive: "side1\n",
+			want: "mesh join failed: key rejected"},
+		"sidecar exited": {logs: "starting\n", alive: "", want: "exited before joining"},
+		"timed out":      {logs: "starting\n", alive: "side1\n", want: "timed out waiting"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			env := fakeEnv(&fakeRun{})
+			env.Run = func(_ context.Context, _ []string, _ string, args ...string) ([]byte, error) {
+				switch args[0] {
+				case "logs":
+					return []byte(c.logs), nil
+				case "ps":
+					return []byte(c.alive), nil
+				}
+				return nil, nil
+			}
+			d := NewDevPod(DevConfig{Env: env, StateDir: t.TempDir(), MeshImage: "m", Sleep: func(time.Duration) {}})
+			_, err := d.awaitJoin(context.Background(), devTools{docker: "docker"}, spec)
+			if DevErrorCode(err) != DevErrMeshFailed || err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestAwaitJoinStopsWhenContextEnds(t *testing.T) {
+	env := fakeEnv(&fakeRun{})
+	env.Run = func(_ context.Context, _ []string, _ string, args ...string) ([]byte, error) {
+		if args[0] == "ps" {
+			return []byte("side1\n"), nil
+		}
+		return []byte("starting\n"), nil
+	}
+	d := NewDevPod(DevConfig{Env: env, StateDir: t.TempDir(), MeshImage: "m", Sleep: func(time.Duration) {}})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	spec := upSpec()
+	spec.Timeout = time.Hour
+	if _, err := d.awaitJoin(ctx, devTools{docker: "docker"}, spec); !errors.Is(err, context.Canceled) {
+		t.Fatalf("%v", err)
+	}
+}

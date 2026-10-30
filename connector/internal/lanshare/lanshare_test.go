@@ -287,3 +287,20 @@ func TestTempDirIsNotAValidShareRoot(t *testing.T) {
 		t.Fatalf("shareDir produced a path ValidateSharePath rejects: %v", err)
 	}
 }
+
+func TestDesiredValidate(t *testing.T) {
+	dir := shareDir(t)
+	if err := (Desired{Path: dir, Name: "Backups"}).Validate(); err != nil {
+		t.Fatalf("valid Desired rejected: %v", err)
+	}
+	if err := (Desired{Path: dir, Name: "bad name"}).Validate(); err == nil {
+		t.Error("a share name with a space must be rejected")
+	}
+	if err := (Desired{Path: "relative/dir", Name: "Backups"}).Validate(); err == nil {
+		t.Error("a relative path must be rejected")
+	}
+	// The name is checked first, so a bad name wins over a bad path.
+	if err := (Desired{Path: "relative/dir", Name: ""}).Validate(); err == nil {
+		t.Error("an empty name must be rejected")
+	}
+}

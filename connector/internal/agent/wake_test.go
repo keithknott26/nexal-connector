@@ -52,3 +52,27 @@ func TestWithMeshProviderIgnoresNil(t *testing.T) {
 		t.Fatal("provider not installed")
 	}
 }
+
+// wakeStatusLocked is what the local API serializes: MACs must be a non-nil
+// slice, the network setting must default to "unknown", and the returned MACs
+// must be a copy so callers cannot mutate the agent's own record.
+func TestWakeStatusLockedDefaultsAndCopiesMACs(t *testing.T) {
+	a, _ := testAgent(t)
+	a.mu.Lock()
+	a.wake = WakeStatus{}
+	got := a.wakeStatusLocked()
+	a.mu.Unlock()
+	if got.MACs == nil || len(got.MACs) != 0 || got.WakeForNetwork != "unknown" {
+		t.Fatalf("empty wake status = %+v", got)
+	}
+
+	a.mu.Lock()
+	a.wake = WakeStatus{MACs: []string{"3c:22:fb:01:02:03"}, WakeForNetwork: "enabled", Reported: true}
+	got = a.wakeStatusLocked()
+	got.MACs[0] = "mutated"
+	again := a.wakeStatusLocked()
+	a.mu.Unlock()
+	if again.MACs[0] != "3c:22:fb:01:02:03" || again.WakeForNetwork != "enabled" || !again.Reported {
+		t.Fatalf("wake status aliased or altered: %+v", again)
+	}
+}

@@ -73,3 +73,22 @@ func TestSplitListTrimsAndDropsEmpties(t *testing.T) {
 		}
 	}
 }
+
+func TestOverflowCommandRejectsBadInvocationBeforeTouchingConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	cfg := t.TempDir() + "/missing.json"
+	for _, c := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no action", nil, "usage: nexal overflow"},
+		{"unknown flag", []string{"status", "--config", cfg, "--bogus"}, "invalid command flags"},
+		{"positional argument", []string{"status", "--config", cfg, "extra"}, "unexpected positional arguments"},
+	} {
+		err := overflowCommand(context.Background(), c.args)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want containing %q", c.name, err, c.want)
+		}
+	}
+}

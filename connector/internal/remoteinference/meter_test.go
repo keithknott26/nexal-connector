@@ -115,6 +115,12 @@ func TestForwarderMeasuresLocalAndOffloadedAnswersSeparately(t *testing.T) {
 	o.SetMeter(m)
 	chat(t, f, "qwen3-4b")   // this Mac
 	chat(t, f, "qwen-large") // asked for the GPU
+	// chat reads only the first chunk, so the handler may still be finishing its count; wait for both requests.
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if tot := m.Snapshot().Totals; tot.LocalRequests == 1 && tot.OffloadRequests == 1 {
+			break
+		}
+	}
 	tot := m.Snapshot().Totals
 	if tot.LocalTokens != 5 || tot.LocalRequests != 1 || tot.OffloadTokens != 9 || tot.OffloadRequests != 1 {
 		t.Fatalf("totals: %+v", tot)

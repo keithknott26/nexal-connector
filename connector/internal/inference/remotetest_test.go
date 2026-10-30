@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,5 +47,25 @@ func TestRemoteTestMeasuresAndChecksTheAnswer(t *testing.T) {
 	}
 	if r.Model != "qwen3-4b" || r.Tokens != 2 || !r.CapabilityOK || r.Reply != "42" || r.FirstTokenMs <= 0 || r.TotalMs < r.FirstTokenMs {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestOwnAddress(t *testing.T) {
+	for _, host := range []string{"", "localhost", "not-an-ip", "127.0.0.1", "::1", "203.0.113.77"} {
+		if ownAddress(host) {
+			t.Errorf("ownAddress(%q) = true, want false", host)
+		}
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Skipf("no interface addresses: %v", err)
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && !n.IP.IsLoopback() {
+			if !ownAddress(n.IP.String()) {
+				t.Errorf("ownAddress(%s) = false, want true for a local interface address", n.IP)
+			}
+			return
+		}
 	}
 }

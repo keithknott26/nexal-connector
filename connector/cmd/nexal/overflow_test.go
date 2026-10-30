@@ -50,3 +50,26 @@ func TestOverflowStatusNeverCarriesKeys(t *testing.T) {
 		t.Fatal("key leaked into status")
 	}
 }
+
+func TestSplitListTrimsAndDropsEmpties(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{" , ,", nil},
+		{"a", []string{"a"}},
+		{" a , b,,c ", []string{"a", "b", "c"}},
+	}
+	for _, c := range cases {
+		got := splitList(c.in)
+		if len(got) != len(c.want) {
+			t.Fatalf("splitList(%q) = %q, want %q", c.in, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("splitList(%q) = %q, want %q", c.in, got, c.want)
+			}
+		}
+	}
+}

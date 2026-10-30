@@ -289,3 +289,19 @@ func TestLocalityString(t *testing.T) {
 		}
 	}
 }
+
+func TestSourceString(t *testing.T) {
+	cases := map[Source]string{
+		SourceMDNS:       "mdns",
+		SourceRendezvous: "rendezvous",
+		SourceBoth:       "both",
+		SourceStatic:     "static",
+		Source(0):        "unknown",
+		Source(200):      "unknown",
+	}
+	for s, want := range cases {
+		if got := s.String(); got != want {
+			t.Errorf("Source(%d).String() = %q, want %q", s, got, want)
+		}
+	}
+}

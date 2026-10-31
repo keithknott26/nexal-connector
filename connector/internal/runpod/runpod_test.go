@@ -2,7 +2,10 @@ package runpod
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -230,5 +233,56 @@ func TestErrorMessageAndErrorText(t *testing.T) {
 	}
 	if got := (&Error{Status: 400, Message: "bad"}).Error(); got != "RunPod returned 400: bad" {
 		t.Fatalf("status with message: %q", got)
+	}
+}
+
+func TestValidIDAndValidModelAcceptOnlySafeShapes(t *testing.T) {
+	for _, s := range []string{"abc123", "a_b-C", strings.Repeat("a", 64)} {
+		if !ValidID(s) {
+			t.Errorf("ValidID(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "a/b", "../x", "a b", "a?b", strings.Repeat("a", 65)} {
+		if ValidID(s) {
+			t.Errorf("ValidID(%q) = true, want false", s)
+		}
+	}
+	for _, s := range []string{"Qwen/Qwen3-14B-AWQ", "a/b", "org.x/model_1.5"} {
+		if !ValidModel(s) {
+			t.Errorf("ValidModel(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"", "noslash", "a/b/c", "/b", "a/", "-a/b", "a/-b", "a b/c", "a/b;rm"} {
+		if ValidModel(s) {
+			t.Errorf("ValidModel(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestBaseURLForAndIsNotFound(t *testing.T) {
+	if got, want := BaseURLFor("ep1"), "https://api.runpod.ai/v2/ep1/openai/v1"; got != want {
+		t.Errorf("BaseURLFor = %q, want %q", got, want)
+	}
+	if !IsNotFound(&Error{Status: 404}) {
+		t.Error("a 404 Error must be NotFound")
+	}
+	if !IsNotFound(fmt.Errorf("wrapped: %w", &Error{Status: 404})) {
+		t.Error("a wrapped 404 Error must be NotFound")
+	}
+	if IsNotFound(&Error{Status: 500}) || IsNotFound(errors.New("plain")) || IsNotFound(nil) {
+		t.Error("non-404 errors must not be NotFound")
+	}
+}
+
+func TestSuffixIsEightHexCharsAndVaries(t *testing.T) {
+	a, b := suffix(), suffix()
+	if len(a) != 8 || len(b) != 8 {
+		t.Fatalf("suffix lengths = %d, %d, want 8", len(a), len(b))
+	}
+	if _, err := hex.DecodeString(a); err != nil {
+		t.Errorf("suffix %q is not hex: %v", a, err)
+	}
+	if a == b {
+		t.Errorf("two suffixes were identical: %q", a)
 	}
 }

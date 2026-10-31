@@ -125,3 +125,15 @@ func TestExerciseJournalDropsStaleInvalidEventsButKeepsFreshOnes(t *testing.T) {
 		t.Fatal("stale journal still present")
 	}
 }
+
+func TestExerciseChecksRejectsCancelledContextAndUnusableDirectory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if checks, err := (Canary{Directory: t.TempDir()}).ExerciseChecks(ctx); !errors.Is(err, context.Canceled) || checks != nil {
+		t.Fatalf("cancelled context not honoured: %v %+v", err, checks)
+	}
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if checks, err := (Canary{Directory: missing}).ExerciseChecks(context.Background()); err == nil || checks != nil {
+		t.Fatalf("unusable directory accepted: %v %+v", err, checks)
+	}
+}

@@ -104,3 +104,46 @@ func TestConcurrentInvitationConsumedOnce(t *testing.T) {
 		t.Fatalf("invitation consumed %d times", successes.Load())
 	}
 }
+
+func TestRestoreRegistryRejectsCorruptState(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := DeviceID(pub)
+	enrolled := now.Add(-time.Hour)
+	revokedEarly := enrolled.Add(-time.Minute)
+	goodMember := Member{DeviceID: id, PublicKey: pub, Roles: []Role{Contributor}, EnrolledAt: enrolled}
+	goodInvite := Invitation{ID: "inv", Challenge: "c", ExpectedDeviceID: id, Roles: []Role{Contributor}, ExpiresAt: now.Add(time.Hour)}
+
+	with := func(m func(*Member)) Member { v := goodMember; m(&v); return v }
+	cases := []struct {
+		name  string
+		state RegistrySnapshot
+		want  error
+	}{
+		{"invite without id", RegistrySnapshot{Invitations: []Invitation{{Challenge: "c", ExpectedDeviceID: id, Roles: []Role{Contributor}, ExpiresAt: goodInvite.ExpiresAt}}}, ErrInvalid},
+		{"duplicate invite", RegistrySnapshot{Invitations: []Invitation{goodInvite, goodInvite}}, ErrConflict},
+		{"member fingerprint mismatch", RegistrySnapshot{Members: []Member{with(func(m *Member) { m.DeviceID = "bogus" })}}, ErrUnauthorized},
+		{"member bad roles", RegistrySnapshot{Members: []Member{with(func(m *Member) { m.Roles = nil })}}, ErrInvalid},
+		{"member no enrollment time", RegistrySnapshot{Members: []Member{with(func(m *Member) { m.EnrolledAt = time.Time{} })}}, ErrInvalid},
+		{"revoked before enrolled", RegistrySnapshot{Members: []Member{with(func(m *Member) { m.RevokedAt = &revokedEarly })}}, ErrInvalid},
+		{"duplicate member", RegistrySnapshot{Members: []Member{goodMember, goodMember}}, ErrConflict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := RestoreRegistry(clock, tc.state); !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+
+	expired := goodInvite
+	expired.ID, expired.Challenge = "", ""
+	expired.ExpiresAt = now.Add(-time.Second)
+	if _, err := RestoreRegistry(clock, RegistrySnapshot{Invitations: []Invitation{expired}}); err != nil {
+		t.Fatalf("expired malformed invitation should be skipped, got %v", err)
+	}
+}

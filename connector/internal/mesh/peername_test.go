@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -54,5 +55,18 @@ func TestStartupSetsHostnameOnlyWhenKnown(t *testing.T) {
 	i := slices.Index(args, "--hostname")
 	if i < 0 || i+1 >= len(args) || args[i+1] != plan.Hostname {
 		t.Fatalf("missing hostname: %v", args)
+	}
+}
+
+// LocalPeerName shells out to macOS tools; wherever they are missing it must
+// degrade to the OS hostname instead of failing, and always return a name that
+// is a single valid DNS label.
+func TestLocalPeerNameIsAValidLabel(t *testing.T) {
+	name := LocalPeerName(context.Background())
+	if len(name) > maxPeerNameLength {
+		t.Fatalf("LocalPeerName() = %q, longer than %d", name, maxPeerNameLength)
+	}
+	if name != sanitizeLabel(name) {
+		t.Fatalf("LocalPeerName() = %q, not a sanitized label", name)
 	}
 }

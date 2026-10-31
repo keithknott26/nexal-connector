@@ -206,3 +206,38 @@ func TestFreeDiskBytesReadsARealFilesystem(t *testing.T) {
 		t.Fatalf("test directory disturbed: %v", err)
 	}
 }
+
+// TestSeveralWithholdingConditionsAreAllNamedInTheSummary pins the composed
+// sentence: every withholding dimension is named, in evaluation order, joined
+// with commas and a final "and", and a clear dimension is left out.
+func TestSeveralWithholdingConditionsAreAllNamedInTheSummary(t *testing.T) {
+	s := fresh()
+	s.Power, s.BatteryPercent, s.BatteryPresent = PowerBattery, 40, true
+	s.Thermal, s.ThermalSpeedLimit = ThermalThrottled, 70
+	s.DiskKnown, s.FreeDiskBytes = true, 1<<30
+	d := Evaluate(s, Policy{}, time.Now(), false)
+	want := "not contributing right now: power, thermal and free disk"
+	if !strings.HasPrefix(d.Summary, want) {
+		t.Fatalf("summary = %q, want prefix %q", d.Summary, want)
+	}
+	if strings.Contains(d.Summary, "owner activity") {
+		t.Errorf("a clear dimension was named as withholding: %q", d.Summary)
+	}
+}
+
+// TestObservationAtTheStaleBoundaryIsStillTrusted: staleness is strictly
+// greater-than, so a reading exactly StaleAfter old still decides while one a
+// nanosecond older is Unknown.
+func TestObservationAtTheStaleBoundaryIsStillTrusted(t *testing.T) {
+	now := time.Now()
+	s := fresh()
+	s.Power, s.BatteryPercent, s.BatteryPresent = PowerBattery, 40, true
+	s.At = now.Add(-StaleAfter)
+	if d := Evaluate(s, Policy{}, now, false); !d.Withholding {
+		t.Errorf("reading exactly StaleAfter old should still decide: %s", d.Summary)
+	}
+	s.At = now.Add(-StaleAfter - time.Nanosecond)
+	if d := Evaluate(s, Policy{}, now, false); d.Withholding {
+		t.Errorf("reading older than StaleAfter should be unknown: %s", d.Summary)
+	}
+}

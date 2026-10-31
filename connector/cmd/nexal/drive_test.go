@@ -101,3 +101,28 @@ func TestDrivePutGetRefuseBadArgumentsBeforeAnyNetworkUse(t *testing.T) {
 		t.Fatalf("existing file was modified: %q, %v", b, err)
 	}
 }
+
+// list and usage share driveClient, so a bad invocation
+// must fail before any credential lookup or network use.
+func TestDriveListUsageRefuseBadInvocation(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	cases := []struct {
+		name string
+		run  func(context.Context, []string) error
+		args []string
+		want string
+	}{
+		{"list relative config", driveList, []string{"--config", "rel.json"}, "--config must be an absolute path"},
+		{"list positional", driveList, []string{"--config", cfg, "extra"}, "unexpected positional arguments"},
+		{"usage relative config", driveUsage, []string{"--config", "rel.json"}, "--config must be an absolute path"},
+		{"usage positional", driveUsage, []string{"--config", cfg, "extra"}, "unexpected positional arguments"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run(context.Background(), tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}

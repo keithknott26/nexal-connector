@@ -195,3 +195,41 @@ func TestBundleCommandRejectsUnenrolledHostAndSelfDonor(t *testing.T) {
 		}
 	})
 }
+
+func TestIdentityCommandCreatesOnceThenReusesFingerprint(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "private", "config.json")
+	seed := config.Config{Version: 1, Coordinator: "http://127.0.0.1:1", Name: "Mac", Listen: "127.0.0.1:8788",
+		Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+	if err := config.Save(cfg, seed); err != nil {
+		t.Fatal(err)
+	}
+	run := func(extra ...string) string {
+		var err error
+		out := captureStdout(t, func() {
+			err = identityCommand(context.Background(), append([]string{"--config", cfg}, extra...))
+		})
+		if err != nil {
+			t.Fatalf("identity %v: %v", extra, err)
+		}
+		return out
+	}
+	first := decodeEmitted(t, run())
+	fp, _ := first["deviceFingerprint"].(string)
+	if len(fp) != 64 || first["created"] != true {
+		t.Fatalf("first run should create a 64-hex fingerprint: %v", first)
+	}
+	if note, ok := first["privateKey"].(string); !ok || strings.Contains(note, fp) {
+		t.Fatalf("privateKey field must be a description, never key material: %v", first)
+	}
+	second := decodeEmitted(t, run())
+	if second["deviceFingerprint"] != fp || second["created"] != false {
+		t.Fatalf("second run must reuse the pinned fingerprint: %v", second)
+	}
+	if got := strings.TrimSpace(run("--fingerprint-only")); got != `"`+fp+`"` {
+		t.Fatalf("--fingerprint-only = %s, want %q", got, fp)
+	}
+	c, err := config.Load(cfg)
+	if err != nil || c.Discovery == nil || c.Discovery.DeviceFingerprint != fp {
+		t.Fatalf("fingerprint not persisted to config: %v %+v", err, c.Discovery)
+	}
+}

@@ -127,12 +127,12 @@ sudo chown -R "$(id -un)" "$APP"
 # Apple's timestamp server; skip them for local development identities.
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmnet"
-# The main executable goes last among the nested code: signing it validates every helper, and an unsigned one fails it.
-codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 # nexal-vmhost needs the virtualization entitlement, or macOS refuses to start a VM.
 codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmhost"
 codesign -d --entitlements - "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | grep -q com.apple.security.virtualization \
   || { echo "nexal-vmhost is missing the virtualization entitlement"; exit 1; }
+# The main executable goes last among the nested code: signing it validates every helper, and an unsigned one fails it.
+codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 touch "$APP"

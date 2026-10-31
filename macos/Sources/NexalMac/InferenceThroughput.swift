@@ -198,7 +198,7 @@ struct InferenceThroughputView: View {
             }
         }
         .onAppear { restart(); loadServed() }
-        .onChange(of: source) { _ in restart() }
+        .onChange(of: source) { restart() }
         .onDisappear { model.stop() }
         .accessibilityIdentifier("inference-throughput")
     }

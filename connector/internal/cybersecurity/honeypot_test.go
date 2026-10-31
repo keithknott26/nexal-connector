@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -134,5 +135,43 @@ func TestHoneypotRejectsGroupAccessibleStateDirectory(t *testing.T) {
 	}
 	if _, err := (Honeypot{Directory: dir}).Status(); err == nil || !strings.Contains(err.Error(), "unsafe") {
 		t.Fatalf("err = %v, want unsafe directory", err)
+	}
+}
+
+func TestHoneypotRejectsCorruptOrOversizedState(t *testing.T) {
+	for name, content := range map[string]string{
+		"corrupt":   "{not json",
+		"oversized": `{"status":"` + strings.Repeat("a", 70000) + `"}`,
+	} {
+		dir := t.TempDir()
+		state := filepath.Join(dir, "security-honeypot")
+		if err := os.Mkdir(state, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(state, "state.json"), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := (Honeypot{Directory: dir}).Status(); err == nil || !strings.Contains(err.Error(), "invalid honeypot state") {
+			t.Fatalf("%s: err = %v, want invalid honeypot state", name, err)
+		}
+	}
+}
+
+func TestHoneypotReportsBusyWhenStateLockIsHeld(t *testing.T) {
+	dir := t.TempDir()
+	h := Honeypot{Directory: dir}
+	if _, err := h.Status(); err != nil { // creates the directory and lock file
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(filepath.Join(dir, "security-honeypot", "lock"), os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Status(); err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("err = %v, want busy", err)
 	}
 }

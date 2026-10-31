@@ -172,6 +172,8 @@ struct InferenceThroughputView: View {
     @State private var reports: [InferenceThroughput.RemoteHost] = []
     @State private var remoteProblem: String?
     @State private var remoteLoaded = false
+    /// Your other Macs (name and host id), so a Mac that serves the model is listed before it has reported anything.
+    @State private var otherMacs: [(hostId: String, name: String)] = []
 
     private let localColor = Color.blue
     private let offloadColor = Color.orange
@@ -199,7 +201,7 @@ struct InferenceThroughputView: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             } else if !source.isEmpty {
-                Text(remoteProblem ?? (remoteLoaded ? "That Mac has not reported any AI throughput lately. It reports with its heartbeat once it has answered a request, from a build that includes this."
+                Text(remoteProblem ?? (remoteLoaded ? "\(chosenName) has not reported any AI throughput yet. A Mac reports with its regular heartbeat once its model has answered a request, so it appears here after its next heartbeat. It needs the current neXal Connector build, and the coordinator must be updated too."
                                                     : "Loading…"))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
@@ -211,6 +213,7 @@ struct InferenceThroughputView: View {
         .onDisappear { model.stop() }
         // One read of the coordinator when the view opens, then every 30 s only while another Mac is chosen. The
         // reports themselves arrive in that Mac's ordinary heartbeats, so this adds nothing to what the Macs send.
+        .task { await loadMacs() }
         .task(id: source) {
             while !Task.isCancelled {
                 await loadReports()
@@ -233,6 +236,18 @@ struct InferenceThroughputView: View {
         return "Reported by \(r.name) \(when), one point per minute. It travels with that Mac's regular heartbeat, so it updates as often as the heartbeat does (every few minutes while the Mac is idle). Totals since its connector started."
     }
 
+    private var chosenName: String {
+        reports.first { $0.hostId == source }?.name ?? otherMacs.first { $0.hostId == source }?.name ?? "That Mac"
+    }
+
+    private func loadMacs() async {
+        guard let data = try? await app.inferencePreflight(), let report = try? InferenceReport.decode(data) else { return }
+        otherMacs = report.machines.compactMap { m in
+            guard !m.isSelf, let id = m.hostId, !id.isEmpty else { return nil }
+            return (id, m.name)
+        }
+    }
+
     private func loadReports() async {
         do {
             let data = try await app.remoteInference(.remoteInferenceStats)
@@ -240,7 +255,7 @@ struct InferenceThroughputView: View {
             remoteProblem = nil
         } catch {
             reports = []
-            remoteProblem = "Could not read the report from the coordinator: \(error.localizedDescription)"
+            remoteProblem = "Could not read throughput reports from the coordinator: \(error.localizedDescription). If the coordinator has not been updated with throughput reports yet, this is expected."
         }
         remoteLoaded = true
     }
@@ -250,8 +265,14 @@ struct InferenceThroughputView: View {
         Picker("Show", selection: $source) {
             Text("This Mac").tag("")
             // Every Mac that has reported, plus the saved choice if it has not reported lately.
+            // Macs that reported first, then your other Macs that have not reported yet, then a saved choice that is neither.
             ForEach(reports) { r in Text(r.name).tag(r.hostId) }
-            if !source.isEmpty, !reports.contains(where: { $0.hostId == source }) { Text("Saved Mac").tag(source) }
+            ForEach(otherMacs.filter { m in !reports.contains { $0.hostId == m.hostId } }, id: \.hostId) { m in
+                Text("\(m.name) (no report yet)").tag(m.hostId)
+            }
+            if !source.isEmpty, !reports.contains(where: { $0.hostId == source }), !otherMacs.contains(where: { $0.hostId == source }) {
+                Text("Saved Mac").tag(source)
+            }
         }
         .pickerStyle(.menu).fixedSize()
         .accessibilityIdentifier("throughput-source")

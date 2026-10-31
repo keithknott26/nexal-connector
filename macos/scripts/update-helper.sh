@@ -27,6 +27,11 @@ ids=$(security find-identity -v -p codesigning)
 IDENTITY=${1:-$(printf '%s\n' "$ids" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}
 [ -n "$IDENTITY" ] || IDENTITY=$(printf '%s\n' "$ids" | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)
 [ -n "$IDENTITY" ] || IDENTITY=-
+if [ "$IDENTITY" != "-" ] && ! printf '%s\n' "$ids" | grep -qF "\"$IDENTITY\""; then
+  echo "no signing identity named \"$IDENTITY\" in this Mac's keychain. Available:"
+  printf '%s\n' "$ids" | sed -n 's/.*"\(.*\)".*/  \1/p'
+  exit 1
+fi
 echo "== signing as: $IDENTITY"
 [ -x "$APP/Contents/Helpers/nexal" ] || { echo "$APP has no Contents/Helpers/nexal"; exit 1; }
 OUT=$(mktemp -d)

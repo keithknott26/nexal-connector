@@ -28,7 +28,7 @@ import (
 // own `nexal inference` commands, under its own owner policy, on its neXal address only.
 func inferenceRemote(ctx context.Context, args []string) error {
 	var to, pool, mode *string
-	var wait, asJSON *bool
+	var wait, asJSON, shareGPU *bool
 	var maxPrompt, maxWait *int
 	needID := args[0] != "remote-list" && args[0] != "remote-stats"
 	id, _, path, err := parseModelArgs(args[0], args[1:], needID, func(f *flag.FlagSet) {
@@ -37,6 +37,7 @@ func inferenceRemote(ctx context.Context, args []string) error {
 		wait = f.Bool("wait", false, "wait until the model is being served or fails")
 		asJSON = f.Bool("json", false, "print JSON")
 		mode = f.String("mode", "", "remote-offload: off, large or always")
+		shareGPU = f.Bool("share-gpu", false, "remote-offload: lend this Mac's GPU tier (API key sealed to that Mac) when it has none")
 		maxPrompt = f.Int("max-prompt", 0, "remote-offload --mode large: prompts over this many tokens go to the GPU")
 		maxWait = f.Int("max-wait", 0, "remote-offload --mode large: a local queue longer than this many seconds goes to the GPU")
 	})
@@ -93,10 +94,15 @@ func inferenceRemote(ctx context.Context, args []string) error {
 			return &codedError{code: "invalid_arguments", err: errors.New("--max-prompt must be 0-10000000 and --max-wait 0-3600")}
 		}
 		p := remoteinference.OffloadPolicy{Mode: *mode, MaxPromptTokens: *maxPrompt, MaxWaitSeconds: *maxWait}
+		shared := ""
+		if *shareGPU && p.Mode != "off" {
+			g, why := shareableGPU(ctx, api, c, secrets, id)
+			p.GPU, shared = g, why
+		}
 		if err := api.SetRemoteOffload(ctx, c.HostID, id, p); err != nil {
 			return &codedError{code: "remote_failed", err: err}
 		}
-		_ = enc.Encode(map[string]any{"ok": true, "requestId": id, "mode": p.Mode})
+		_ = enc.Encode(map[string]any{"ok": true, "requestId": id, "mode": p.Mode, "sharedGpu": p.GPU != nil, "shareNote": shared})
 	case "remote-stats":
 		hosts, err := api.InferenceStats(ctx, c.HostID)
 		if err != nil {
@@ -183,4 +189,40 @@ func servePool(ctx context.Context, api *client.Client, self, model string, host
 		return &codedError{code: "remote_failed", err: errors.New(tasks[0].Detail)}
 	}
 	return nil
+}
+
+// shareableGPU seals this Mac's GPU tier (endpoint and API key) to the Mac serving the request, or says why it
+// cannot: this Mac has no tier, or that Mac has not published its key yet (it does when it answers a policy).
+func shareableGPU(ctx context.Context, api *client.Client, c config.Config, secrets config.Secrets, taskID string) (*remoteinference.SharedGPU, string) {
+	if c.Overflow == nil || c.Overflow.GPU == nil {
+		return nil, "this Mac has no GPU tier to lend"
+	}
+	key, err := secrets.Get(ctx, "overflow-gpu")
+	if err != nil || key == "" {
+		return nil, "this Mac has no GPU API key to lend"
+	}
+	tasks, err := api.AllRemoteInference(ctx, c.HostID)
+	if err != nil {
+		return nil, "could not read the request"
+	}
+	for _, t := range tasks {
+		if t.ID != taskID {
+			continue
+		}
+		if t.OffloadKey == "" {
+			return nil, "waiting for that Mac's key"
+		}
+		sender, sealed, err := remoteinference.Seal(t.OffloadKey, key)
+		if err != nil {
+			return nil, "that Mac's key is not usable"
+		}
+		g := c.Overflow.GPU
+		name := g.Name
+		if name == "" {
+			name = "the GPU"
+		}
+		return &remoteinference.SharedGPU{Name: name, BaseURL: g.BaseURL, Model: g.Model, FirstByteSeconds: g.FirstByteSeconds,
+			SenderKey: sender, SealedKey: sealed}, ""
+	}
+	return nil, "no such request"
 }

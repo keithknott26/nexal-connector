@@ -38,6 +38,8 @@ type Overflow struct {
 	GPU, Cloud *Tier
 	Meter      *Meter // nil: offloaded answers are not measured
 
+	shared bool // GPU came from another Mac (UseSharedGPU), not this Mac's own settings
+
 	avg  time.Duration // moving average of a local request's duration
 	day  string
 	used int
@@ -50,6 +52,27 @@ func (o *Overflow) SetMeter(m *Meter) {
 	maxPrompt := o.MaxPrompt
 	o.mu.Unlock()
 	m.SetThreshold(maxPrompt)
+}
+
+// HasGPU reports whether there is a GPU or cloud tier to offload to.
+func (o *Overflow) HasGPU() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.GPU != nil || o.Cloud != nil
+}
+
+// HasOwnGPU reports whether this Mac's own settings provide a tier (a shared one never replaces those).
+func (o *Overflow) HasOwnGPU() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return (o.GPU != nil && !o.shared) || o.Cloud != nil
+}
+
+// UseSharedGPU makes t, a GPU tier another Mac shared, the GPU tier. It is never stored.
+func (o *Overflow) UseSharedGPU(t *Tier) {
+	o.mu.Lock()
+	o.GPU, o.shared = t, true
+	o.mu.Unlock()
 }
 
 // Apply switches offloading to a policy another Mac set, live: the next request follows it. Peers allowed to use the

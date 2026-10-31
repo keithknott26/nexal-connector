@@ -2,6 +2,8 @@ package remoteinference
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"io"
 	"log/slog"
 	"sync"
@@ -12,6 +14,7 @@ type offloadCoord struct {
 	mu    sync.Mutex
 	tasks []Task
 	notes []string
+	keys  []string
 }
 
 func (o *offloadCoord) RemoteInferenceTasks(context.Context, string) ([]Task, error) {
@@ -20,9 +23,10 @@ func (o *offloadCoord) RemoteInferenceTasks(context.Context, string) ([]Task, er
 	return append([]Task(nil), o.tasks...), nil
 }
 func (o *offloadCoord) ReportRemoteInference(context.Context, string, Report) error { return nil }
-func (o *offloadCoord) ReportRemoteOffload(_ context.Context, _, _, note string) error {
+func (o *offloadCoord) ReportRemoteOffload(_ context.Context, _, _, note, publicKey string) error {
 	o.mu.Lock()
 	o.notes = append(o.notes, note)
+	o.keys = append(o.keys, publicKey)
 	o.mu.Unlock()
 	return nil
 }
@@ -91,5 +95,67 @@ func TestRunnerSaysWhenThereIsNoGPU(t *testing.T) {
 	quietRunner(c, nil).applyOffload(context.Background(), c.tasks)
 	if len(c.notes) != 1 || c.notes[0] != noGPUNote {
 		t.Fatalf("%v", c.notes)
+	}
+}
+
+// A compile-time check: the fake must satisfy the optional reporter, or the runner silently never answers.
+var _ offloadReporter = (*offloadCoord)(nil)
+
+func TestSealOpensOnlyForItsRecipient(t *testing.T) {
+	m4, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	other, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	sender, sealed, err := Seal(PublicKey(m4), "rpa_SECRET")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Open(m4, sender, sealed); err != nil || got != "rpa_SECRET" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if _, err := Open(other, sender, sealed); err == nil {
+		t.Fatal("another key must not open it")
+	}
+	if _, _, err := Seal("not-a-key", "x"); err == nil {
+		t.Fatal("a bad recipient key must be refused")
+	}
+}
+
+func TestAMacWithoutAGPUPublishesItsKeyThenUsesTheSharedTier(t *testing.T) {
+	key, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	c := &offloadCoord{tasks: []Task{{ID: "rinf_1", TargetHostID: "m4", State: "ready",
+		Offload: &OffloadPolicy{Mode: "always", SetAt: "1"}}}}
+	ov := &Overflow{}
+	r := quietRunner(c, ov)
+	r.BoxKey = func() (*ecdh.PrivateKey, error) { return key, nil }
+	r.applyOffload(context.Background(), c.tasks)
+	if c.notes[0] != noGPUNote || c.keys[0] != PublicKey(key) {
+		t.Fatalf("no GPU: say so and publish the key: %v %v", c.notes, c.keys)
+	}
+	sender, sealed, _ := Seal(c.keys[0], "rpa_SECRET")
+	c.tasks[0].Offload = &OffloadPolicy{Mode: "always", SetAt: "2", GPU: &SharedGPU{Name: "RunPod",
+		BaseURL: "https://api.runpod.ai/v2/ep1/openai/v1", Model: "Qwen/Qwen3-14B-AWQ", FirstByteSeconds: 180, SenderKey: sender, SealedKey: sealed}}
+	r.applyOffload(context.Background(), c.tasks)
+	if c.notes[1] != "Applied: every request goes to RunPod." || c.keys[1] != "" {
+		t.Fatalf("%v %v", c.notes, c.keys)
+	}
+	if ov.GPU == nil || ov.GPU.APIKey != "rpa_SECRET" || ov.HasOwnGPU() {
+		t.Fatalf("the shared tier is in use, marked as shared: %+v", ov.GPU)
+	}
+	if tiers, _, _ := ov.Plan("10.0.0.9", "x", 10, 0); len(tiers) != 1 {
+		t.Fatal("requests now go to the shared GPU")
+	}
+}
+
+func TestASharedTierNeverReplacesThisMacsOwn(t *testing.T) {
+	key, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	own := &Tier{Name: "Mine", APIKey: "own"}
+	sender, sealed, _ := Seal(PublicKey(key), "theirs")
+	c := &offloadCoord{tasks: []Task{{ID: "rinf_1", TargetHostID: "m4", State: "ready", Offload: &OffloadPolicy{Mode: "always", SetAt: "1",
+		GPU: &SharedGPU{Name: "RunPod", BaseURL: "https://x/v1", SenderKey: sender, SealedKey: sealed}}}}}
+	ov := &Overflow{GPU: own}
+	r := quietRunner(c, ov)
+	r.BoxKey = func() (*ecdh.PrivateKey, error) { return key, nil }
+	r.applyOffload(context.Background(), c.tasks)
+	if ov.GPU != own {
+		t.Fatal("this Mac's own tier stays")
 	}
 }

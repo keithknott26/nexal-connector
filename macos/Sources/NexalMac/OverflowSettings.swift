@@ -366,19 +366,34 @@ struct OverflowOffloadView: View {
         if mode == "large" && prompt == 0 && wait == 0 { remoteMessage = "Enter a limit first."; return }
         sending = true
         defer { sending = false }
-        do {
-            _ = try await app.remoteInference(.remoteInferenceOffload(requestId: r.id, mode: mode, maxPrompt: prompt, maxWait: wait))
-        } catch { remoteMessage = "Not sent: \(error.localizedDescription)"; return }
+        // When this Mac has a GPU tier, it is lent to the other Mac if that one has none of its own (the API key is
+        // sealed to that Mac; the coordinator cannot read it). That Mac's own settings always win.
+        let lend = model.gpuConfigured
+        func send() async -> Bool {
+            do {
+                _ = try await app.remoteInference(.remoteInferenceOffload(requestId: r.id, mode: mode, maxPrompt: prompt, maxWait: wait, shareGPU: lend))
+                return true
+            } catch { remoteMessage = "Not sent: \(error.localizedDescription)"; return false }
+        }
+        guard await send() else { return }
         let who = names[r.targetHostId] ?? "the other Mac"
         remoteMessage = "Sent. Waiting for \(who) to apply it (up to 15 s)…"
-        for _ in 0..<8 {
+        var lent = false
+        for _ in 0..<12 {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard let data = try? await app.remoteInference(.remoteInferenceList) else { continue }
-            if let now = RemoteInferenceRequest.decodeLines(data).first(where: { $0.id == r.id }), let note = now.offloadNote {
-                served = served.map { $0.id == r.id ? now : $0 }
-                remoteMessage = "\(who): \(note)"
-                return
+            guard let now = RemoteInferenceRequest.decodeLines(data).first(where: { $0.id == r.id }), let note = now.offloadNote else { continue }
+            served = served.map { $0.id == r.id ? now : $0 }
+            // It has no GPU and has published its key: send again, this time with this Mac's GPU tier sealed to it.
+            if note.hasPrefix("No GPU"), lend, !lent, now.offloadKey != nil {
+                lent = true
+                remoteMessage = "\(who) has no GPU set up; lending it this Mac's RunPod endpoint…"
+                guard await send() else { return }
+                continue
             }
+            if lent && note.hasPrefix("No GPU") { continue }  // the earlier answer, until the new one arrives
+            remoteMessage = "\(who): \(note)"
+            return
         }
         remoteMessage = "Sent, but \(who) has not answered yet. It needs the current neXal Connector build."
     }

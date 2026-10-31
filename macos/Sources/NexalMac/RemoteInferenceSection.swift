@@ -47,6 +47,8 @@ struct RemoteInferenceRequest: Decodable, Identifiable, Equatable {
     struct Offload: Decodable, Equatable { let mode: String; let maxPromptTokens: Int?; let maxWaitSeconds: Int? }
     let offload: Offload?
     let offloadNote: String?
+    /// The serving Mac's public key, published when it has no GPU tier of its own so this Mac can lend its own.
+    let offloadKey: String?
 
     var isDone: Bool { state == "ready" || state == "failed" || state == "cancelled" }
     static func decodeLines(_ data: Data) -> [RemoteInferenceRequest] {

@@ -741,6 +741,11 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 			ri.LogDir = d
 		}
 		ri.Overflow = buildOverflow(ctx, c, secrets)
+		if ri.Overflow == nil {
+			// No GPU tier of its own: kept off, so another Mac controlling this one can share its tier (applyOffload).
+			ri.Overflow = &remoteinference.Overflow{}
+		}
+		ri.BoxKey = offloadBoxKey(ctx, secrets)
 		// What this Mac's model returns, and what is offloaded, as tokens per second for the app's graph.
 		ri.Meter = remoteinference.NewMeter()
 		go ri.Meter.Publish(ctx.Done(), filepath.Join(filepath.Dir(*path), "inference-throughput.json"), 2*time.Second)

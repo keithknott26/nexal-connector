@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"nexal/connector/internal/config"
@@ -234,4 +238,34 @@ func buildOverflow(ctx context.Context, c config.Config, secrets config.Secrets)
 		return nil
 	}
 	return ov
+}
+
+// offloadBoxKey returns this Mac's X25519 key (kept in the Keychain as "offload-box", made on first use). Another Mac
+// seals its GPU API key to the public half when this Mac has no GPU tier of its own (remoteinference.Seal).
+func offloadBoxKey(ctx context.Context, s config.Secrets) func() (*ecdh.PrivateKey, error) {
+	var once sync.Once
+	var key *ecdh.PrivateKey
+	var kerr error
+	return func() (*ecdh.PrivateKey, error) {
+		once.Do(func() {
+			if v, err := s.Get(ctx, "offload-box"); err == nil && v != "" {
+				if raw, err := base64.RawStdEncoding.DecodeString(v); err == nil {
+					if k, err := ecdh.X25519().NewPrivateKey(raw); err == nil {
+						key = k
+						return
+					}
+				}
+			}
+			k, err := ecdh.X25519().GenerateKey(rand.Reader)
+			if err == nil {
+				err = s.Put(ctx, "offload-box", base64.RawStdEncoding.EncodeToString(k.Bytes()))
+			}
+			if err != nil {
+				kerr = err
+				return
+			}
+			key = k
+		})
+		return key, kerr
+	}
 }

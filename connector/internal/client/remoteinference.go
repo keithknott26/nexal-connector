@@ -174,11 +174,14 @@ func (c *Client) SetRemoteOffload(ctx context.Context, hostID, taskID string, p 
 	if p.MaxWaitSeconds > 0 {
 		body["maxWaitSeconds"] = p.MaxWaitSeconds
 	}
+	if p.GPU != nil {
+		body["gpu"] = p.GPU
+	}
 	return c.callLenient(ctx, http.MethodPost, path, body, nil)
 }
 
 // ReportRemoteOffload is POST .../remote-inference/:task/offload-state: what the serving Mac made of the policy.
-func (c *Client) ReportRemoteOffload(ctx context.Context, hostID, taskID, note string) error {
+func (c *Client) ReportRemoteOffload(ctx context.Context, hostID, taskID, note, publicKey string) error {
 	if !ValidID(taskID) {
 		return errors.New("invalid request id")
 	}
@@ -186,5 +189,9 @@ func (c *Client) ReportRemoteOffload(ctx context.Context, hostID, taskID, note s
 	if err != nil {
 		return err
 	}
-	return c.callLenient(ctx, http.MethodPost, path, map[string]string{"note": note}, nil)
+	body := map[string]string{"note": note}
+	if publicKey != "" {
+		body["publicKey"] = publicKey
+	}
+	return c.callLenient(ctx, http.MethodPost, path, body, nil)
 }

@@ -106,7 +106,8 @@ enum CLICommand {
     case remoteInferenceStats
     /// `nexal inference remote-offload <request> --mode off|large|always [--max-prompt N] [--max-wait S] --json`: how the
     /// Mac serving that request uses its GPU tier. It reads the setting in the request list it already polls.
-    case remoteInferenceOffload(requestId: String, mode: String, maxPrompt: Int, maxWait: Int)
+    /// With shareGPU, this Mac lends its GPU tier (API key sealed to that Mac) when that Mac has none of its own.
+    case remoteInferenceOffload(requestId: String, mode: String, maxPrompt: Int, maxWait: Int, shareGPU: Bool)
     /// `nexal inference remote-stop <request> --json`: cancels a request and the server it started.
     case remoteInferenceStop(requestId: String)
     /// `nexal inference remote-test <endpoint> --json`: reachability, first-token time, speed and a capability probe.
@@ -254,9 +255,9 @@ enum CLICommand {
             command = ["inference", "remote-list", "--json"]
         case .remoteInferenceStats:
             command = ["inference", "remote-stats", "--json"]
-        case let .remoteInferenceOffload(requestId, mode, maxPrompt, maxWait):
+        case let .remoteInferenceOffload(requestId, mode, maxPrompt, maxWait, shareGPU):
             command = ["inference", "remote-offload", requestId, "--mode", mode, "--max-prompt", String(maxPrompt),
-                       "--max-wait", String(maxWait), "--json"]
+                       "--max-wait", String(maxWait)] + (shareGPU ? ["--share-gpu"] : []) + ["--json"]
         case let .remoteInferenceStop(requestId):
             command = ["inference", "remote-stop", requestId, "--json"]
         case let .remoteInferenceTest(endpoint):

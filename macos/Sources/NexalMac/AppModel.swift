@@ -555,7 +555,7 @@ final class AppModel: ObservableObject {
         case let .remoteInferenceSweep(endpoint, calls):
             guard RemoteInferenceID.isMeshEndpoint(endpoint), (2...60).contains(calls) else { throw InferenceInstallError.invalidModelID }
         case .remoteInferenceList, .remoteInferenceStats: break
-        case let .remoteInferenceOffload(id, mode, maxPrompt, maxWait):
+        case let .remoteInferenceOffload(id, mode, maxPrompt, maxWait, _):
             guard RemoteInferenceID.isValid(id), ["off", "large", "always"].contains(mode),
                   (0...10_000_000).contains(maxPrompt), (0...3600).contains(maxWait) else { throw InferenceInstallError.invalidModelID }
         default: preconditionFailure("not a remote inference command")

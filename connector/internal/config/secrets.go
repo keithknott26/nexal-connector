@@ -70,13 +70,17 @@ type FileSecrets struct{ Dir string }
 //
 //   - admin: the local HTTP API bearer token
 //   - host:  the coordinator host credential
+//   - overflow-gpu / overflow-cloud / overflow-hf: API keys for offloading (RunPod or another GPU, a cloud tier,
+//     and the Hugging Face token RunPod workers download gated models with)
+//   - offload-box: this Mac's X25519 key, which opens a GPU API key another Mac shares with it
 //   - peer-identity: the ed25519 seed for this host's peer identity, whose
 //     public half hashes to the deviceFingerprint peers pin. Stored alongside
 //     the other two because it has the same lifetime and the same blast radius,
 //     and because on macOS this routes it to the Keychain rather than to a file
 //     the way a bespoke key store would have.
 func secretName(name string) bool {
-	if name == "admin" || name == "host" || name == "peer-identity" || name == "mesh-credential" || name == "overflow-gpu" || name == "overflow-cloud" {
+	if name == "admin" || name == "host" || name == "peer-identity" || name == "mesh-credential" || name == "overflow-gpu" || name == "overflow-cloud" ||
+		name == "overflow-hf" || name == "offload-box" {
 		return true
 	}
 	if strings.HasPrefix(name, "enrollment-session-") {

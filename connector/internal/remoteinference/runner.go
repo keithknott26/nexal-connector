@@ -7,6 +7,7 @@ package remoteinference
 import (
 	"bufio"
 	"context"
+	"crypto/ecdh"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,8 @@ type Task struct {
 	// OffloadNote is what this Mac last said about it.
 	Offload     *OffloadPolicy `json:"offload,omitempty"`
 	OffloadNote string         `json:"offloadNote,omitempty"`
+	// OffloadKey is the serving Mac's X25519 public key (base64), for sealing a shared GPU tier's API key to it.
+	OffloadKey string `json:"offloadKey,omitempty"`
 }
 
 // OffloadPolicy is how the Mac serving a model uses its GPU tier, as set from another Mac (coordinator
@@ -65,11 +68,13 @@ type OffloadPolicy struct {
 	MaxPromptTokens int    `json:"maxPromptTokens"`
 	MaxWaitSeconds  int    `json:"maxWaitSeconds"`
 	SetAt           string `json:"setAt"`
+	// GPU is the controlling Mac's GPU tier, used only when this Mac has none of its own.
+	GPU *SharedGPU `json:"gpu,omitempty"`
 }
 
 // offloadReporter is the optional part of the coordinator API that takes the serving Mac's answer to a policy.
 type offloadReporter interface {
-	ReportRemoteOffload(ctx context.Context, hostID, taskID, note string) error
+	ReportRemoteOffload(ctx context.Context, hostID, taskID, note, publicKey string) error
 }
 
 // Report is the body of POST /api/v2/hosts/:id/remote-inference-state.
@@ -125,6 +130,8 @@ type Runner struct {
 	Overflow *Overflow
 	// offloadSetAt is the SetAt of the last policy applied from another Mac (see applyOffload).
 	offloadSetAt string
+	// BoxKey returns this Mac's X25519 key for opening a GPU tier's API key that another Mac shares (nil: never shared).
+	BoxKey func() (*ecdh.PrivateKey, error)
 	// Meter, when set, measures the tokens returned by this Mac's model and by offloaded requests (meter.go).
 	Meter  *Meter
 	LogDir string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
@@ -842,13 +849,31 @@ func (r *Runner) applyOffload(ctx context.Context, tasks []Task) {
 	if same {
 		return
 	}
-	note := noGPUNote
+	note, publicKey := noGPUNote, ""
+	var key *ecdh.PrivateKey
+	if r.BoxKey != nil {
+		key, _ = r.BoxKey()
+	}
 	if r.Overflow != nil {
-		note = r.Overflow.Apply(*pick.Offload)
+		// No GPU tier of this Mac's own: use the one the controlling Mac shared, its key opened with this Mac's key.
+		if g := pick.Offload.GPU; g != nil && !r.Overflow.HasOwnGPU() && key != nil {
+			if apiKey, err := Open(key, g.SenderKey, g.SealedKey); err == nil {
+				r.Overflow.UseSharedGPU(&Tier{Name: g.Name, BaseURL: g.BaseURL, APIKey: apiKey, Model: g.Model,
+					FirstByte: time.Duration(g.FirstByteSeconds) * time.Second})
+			} else {
+				r.Logger.Warn("could not open the shared GPU key", "error", err.Error())
+			}
+		}
+		if r.Overflow.HasGPU() {
+			note = r.Overflow.Apply(*pick.Offload)
+		}
+	}
+	if note == noGPUNote && key != nil {
+		publicKey = PublicKey(key) // lets the controlling Mac share its GPU tier with this one
 	}
 	r.Logger.Info("GPU offload set from another Mac", "model", pick.ModelID, "mode", pick.Offload.Mode, "result", note)
 	if rep, ok := r.Coord.(offloadReporter); ok {
-		if err := rep.ReportRemoteOffload(ctx, r.HostID, pick.ID, clean(note, 280)); err != nil {
+		if err := rep.ReportRemoteOffload(ctx, r.HostID, pick.ID, clean(note, 280), publicKey); err != nil {
 			r.Logger.Debug("remote offload report failed", "error", err.Error())
 		}
 	}

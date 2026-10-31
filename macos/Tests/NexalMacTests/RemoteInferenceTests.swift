@@ -14,8 +14,10 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(CLICommand.inferenceReview(modelId: "qwen3-4b-q4", revision: String(repeating: "a", count: 40), out: "/r/reviewed-pins.json").arguments(config: config),
                        ["inference", "review", "qwen3-4b-q4", "--revision", String(repeating: "a", count: 40), "--out", "/r/reviewed-pins.json", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceList.arguments(config: config), ["inference", "remote-list", "--json", "--config", "/tmp/c.json"])
-        XCTAssertEqual(CLICommand.remoteInferenceOffload(requestId: "rinf_1", mode: "always", maxPrompt: 0, maxWait: 0).arguments(config: config),
+        XCTAssertEqual(CLICommand.remoteInferenceOffload(requestId: "rinf_1", mode: "always", maxPrompt: 0, maxWait: 0, shareGPU: false).arguments(config: config),
                        ["inference", "remote-offload", "rinf_1", "--mode", "always", "--max-prompt", "0", "--max-wait", "0", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.remoteInferenceOffload(requestId: "rinf_1", mode: "always", maxPrompt: 0, maxWait: 0, shareGPU: true).arguments(config: config),
+                       ["inference", "remote-offload", "rinf_1", "--mode", "always", "--max-prompt", "0", "--max-wait", "0", "--share-gpu", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceStats.arguments(config: config), ["inference", "remote-stats", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceStop(requestId: "rinf_1").arguments(config: config),
                        ["inference", "remote-stop", "rinf_1", "--json", "--config", "/tmp/c.json"])

@@ -33,7 +33,12 @@ if [ "$IDENTITY" != "-" ] && ! printf '%s\n' "$ids" | grep -qF "\"$IDENTITY\""; 
   printf '%s\n' "$ids" | sed -n 's/.*"\(.*\)".*/  \1/p'
   exit 1
 fi
-echo "== signing as: $IDENTITY"
+# Two certificates with the same name make codesign fail as "ambiguous": sign by the first one's hash.
+if [ "$IDENTITY" != "-" ]; then
+  HASH=$(printf '%s\n' "$ids" | grep -F "\"$IDENTITY\"" | awk '{print $2}' | head -1)
+  [ -n "$HASH" ] && IDENTITY_NAME=$IDENTITY && IDENTITY=$HASH
+fi
+echo "== signing as: ${IDENTITY_NAME:-$IDENTITY}${IDENTITY_NAME:+ ($IDENTITY)}"
 [ -x "$APP/Contents/Helpers/nexal" ] || { echo "$APP has no Contents/Helpers/nexal"; exit 1; }
 OUT=$(mktemp -d)
 STAGE=test

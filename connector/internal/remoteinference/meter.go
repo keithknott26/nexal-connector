@@ -157,19 +157,23 @@ func (s Snapshot) busy() bool {
 }
 
 // Publish writes the snapshot to path (mode 0600, replaced atomically) every interval until ctx ends, so the app
-// can draw it without asking the running connector. While nothing has happened for the whole window it stops
-// rewriting an unchanged file.
+// can draw it without asking the running connector. While nothing has happened for the whole window it rewrites
+// the file only every 10 s, enough to show the connector is alive.
 func (m *Meter) Publish(done <-chan struct{}, path string, every time.Duration) {
 	if m == nil {
 		return
 	}
-	wroteIdle := false
+	// While idle the file still gets a fresh "updated" time every idleEvery: the app treats a snapshot older than
+	// 20 s as "the connector is not running", so a file written once and then left alone would hide the graph
+	// whenever the model has been quiet for half a minute.
+	const idleEvery = 10 * time.Second
+	var lastWrite time.Time
 	write := func() {
 		s := m.Snapshot()
-		if !s.busy() && wroteIdle {
+		if !s.busy() && !lastWrite.IsZero() && time.Since(lastWrite) < idleEvery {
 			return
 		}
-		wroteIdle = !s.busy()
+		lastWrite = time.Now()
 		data, err := json.Marshal(s)
 		if err != nil {
 			return

@@ -88,7 +88,8 @@ type cmdRunner func(ctx context.Context, name string, args ...string) ([]byte, e
 // is never cancelled, so without it a hung command leaves a VM "Stopping" forever.
 const cmdTimeout = 20 * time.Second
 
-func execRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
+// execRunner is a variable so tests can stub the system tools SystemHost reads.
+var execRunner cmdRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, cmdTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)

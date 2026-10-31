@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"testing"
@@ -88,5 +89,59 @@ func TestSystemHostFactsReportsMemoryFailureWithCPUs(t *testing.T) {
 	}
 	if f.CPUs != runtime.NumCPU() || f.MemoryMB != 0 {
 		t.Fatalf("Facts = %+v, want CPUs filled and nothing else", f)
+	}
+}
+
+func TestSystemHostFactsWithStubbedTools(t *testing.T) {
+	orig := execRunner
+	t.Cleanup(func() { execRunner = orig })
+	stub := func(batt []byte, battErr error) {
+		execRunner = func(_ context.Context, name string, _ ...string) ([]byte, error) {
+			switch name {
+			case "/usr/sbin/sysctl":
+				return []byte("17179869184\n"), nil
+			case "/bin/df":
+				return []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/x 10 5 7 40% /\n"), nil
+			case "/usr/bin/pmset":
+				return batt, battErr
+			}
+			return nil, errors.New("unexpected tool " + name)
+		}
+	}
+
+	stub([]byte("Now drawing from 'Battery Power'\n"), nil)
+	f, err := SystemHost{}.Facts(context.Background(), "/tmp")
+	if err != nil || f.MemoryMB != 16384 || f.FreeDisk != 7<<10 || !f.OnBattery || f.PowerUnknown {
+		t.Fatalf("battery facts = %+v err %v", f, err)
+	}
+
+	// A failing pmset (desktop Mac, sandboxed) is non-fatal: power is unknown.
+	stub(nil, errors.New("no pmset"))
+	f, err = SystemHost{}.Facts(context.Background(), "/tmp")
+	if err != nil || !f.PowerUnknown || f.OnBattery {
+		t.Fatalf("unknown-power facts = %+v err %v", f, err)
+	}
+}
+
+func TestSystemHostFactsToolFailures(t *testing.T) {
+	orig := execRunner
+	t.Cleanup(func() { execRunner = orig })
+	for name, c := range map[string]struct{ memOut, failTool string }{
+		"sysctl fails":   {"1\n", "/usr/sbin/sysctl"},
+		"sysctl garbage": {"lots\n", ""},
+		"df fails":       {"1048576\n", "/bin/df"},
+	} {
+		execRunner = func(_ context.Context, tool string, _ ...string) ([]byte, error) {
+			if tool == c.failTool {
+				return nil, errors.New("boom")
+			}
+			if tool == "/usr/sbin/sysctl" {
+				return []byte(c.memOut), nil
+			}
+			return []byte("garbage"), nil
+		}
+		if _, err := (SystemHost{}).Facts(context.Background(), "/tmp"); err == nil {
+			t.Errorf("%s: expected error", name)
+		}
 	}
 }

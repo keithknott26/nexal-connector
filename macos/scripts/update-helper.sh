@@ -39,6 +39,13 @@ if [ "$IDENTITY" != "-" ]; then
   [ -n "$HASH" ] && IDENTITY_NAME=$IDENTITY && IDENTITY=$HASH
 fi
 echo "== signing as: ${IDENTITY_NAME:-$IDENTITY}${IDENTITY_NAME:+ ($IDENTITY)}"
+# A locked login keychain (after sleep, a timeout, or over SSH) makes codesign fail with errSecInternalComponent
+# minutes into the build: unlock it now, asking for the login password once.
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+if [ "$IDENTITY" != "-" ] && ! security show-keychain-info "$KEYCHAIN" >/dev/null 2>&1; then
+  echo "== the login keychain is locked; enter your Mac login password to unlock it for signing"
+  security unlock-keychain "$KEYCHAIN"
+fi
 [ -x "$APP/Contents/Helpers/nexal" ] || { echo "$APP has no Contents/Helpers/nexal"; exit 1; }
 OUT=$(mktemp -d)
 STAGE=test

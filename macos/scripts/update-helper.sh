@@ -20,7 +20,8 @@ fi
 APP=${APP:-/Applications/neXal-Connector.app}
 STAGE=build
 # Once the app has been stopped, a failure leaves a half-updated app: say where the old binaries are.
-trap 'rc=$?; if [ "$rc" != 0 ]; then echo "update FAILED at line $LINENO during \"$STAGE\" (exit $rc)."; if [ "$STAGE" = install ]; then echo "The app was stopped and may be half-updated. Previous binaries: $OUT (nexal.previous, NexalMac.previous). Re-run this script after fixing the error above."; else echo "Nothing was installed or stopped; the app is as it was."; fi; fi' EXIT
+trap 'FAIL_LINE=$LINENO' ERR
+trap 'rc=$?; if [ "$rc" != 0 ]; then echo "update FAILED at line $FAIL_LINE during \"$STAGE\" (exit $rc)."; if [ "$STAGE" = install ]; then echo "The app was stopped and may be half-updated. Previous binaries: $OUT (nexal.previous, NexalMac.previous). Re-run this script after fixing the error above."; else echo "Nothing was installed or stopped; the app is as it was."; fi; fi' EXIT
 # Developer ID if this Mac has one, else Apple Development, else ad hoc ("-"): a local
 # build only needs a valid signature that carries nexal-vmhost's entitlement.
 ids=$(security find-identity -v -p codesigning)
@@ -125,8 +126,9 @@ sudo chown -R "$(id -un)" "$APP"
 # Secure timestamps are only needed for notarized Developer ID builds and need
 # Apple's timestamp server; skip them for local development identities.
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal"
-codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmnet"
+# The main executable goes last among the nested code: signing it validates every helper, and an unsigned one fails it.
+codesign --force --options runtime "$TS" --sign "$IDENTITY" "$APP/Contents/MacOS/NexalMac"
 # nexal-vmhost needs the virtualization entitlement, or macOS refuses to start a VM.
 codesign --force --options runtime "$TS" --entitlements "$ROOT/macos/NexalVMHost.entitlements" --sign "$IDENTITY" "$APP/Contents/Helpers/nexal-vmhost"
 codesign -d --entitlements - "$APP/Contents/Helpers/nexal-vmhost" 2>/dev/null | grep -q com.apple.security.virtualization \

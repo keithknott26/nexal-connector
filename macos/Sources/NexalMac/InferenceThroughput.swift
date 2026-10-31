@@ -50,6 +50,39 @@ struct InferenceThroughput: Decodable, Equatable {
         return try? JSONDecoder().decode(InferenceThroughput.self, from: data)
     }
 
+    /// The stats URL for a Mac's model endpoint ("http://100.x.y.z:8001/v1", or just "100.x.y.z:8001"), or nil
+    /// unless it is a neXal-network or loopback address.
+    static func remoteURL(_ endpoint: String) -> URL? {
+        let t = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        let full = t.contains("://") ? t : "http://" + t
+        guard RemoteInferenceID.isMeshEndpoint(full), let u = URL(string: full), let host = u.host, let port = u.port else { return nil }
+        return URL(string: "http://\(host):\(port)/nexal/throughput")
+    }
+
+    /// Asks another Mac's model server for its snapshot. Throws a short, readable reason.
+    static func fetch(endpoint: String) async throws -> InferenceThroughput {
+        guard let url = remoteURL(endpoint) else { throw FetchError.badAddress }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
+        req.httpMethod = "GET"
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let code = (resp as? HTTPURLResponse)?.statusCode else { throw FetchError.unreachable }
+        guard code == 200 else { throw code == 404 ? FetchError.needsUpdate : FetchError.unreachable }
+        guard data.count <= 1 << 20, let snap = try? JSONDecoder().decode(InferenceThroughput.self, from: data) else { throw FetchError.unreachable }
+        return snap
+    }
+
+    enum FetchError: LocalizedError {
+        case badAddress, unreachable, needsUpdate
+        var errorDescription: String? {
+            switch self {
+            case .badAddress: return "Use a neXal address like 100.x.y.z:8001."
+            case .unreachable: return "Could not reach that Mac's model server."
+            case .needsUpdate: return "That Mac answered but does not share throughput yet. Update neXal Connector there."
+            }
+        }
+    }
+
     var offloadLabel: String { offloadName.isEmpty ? "Offloaded" : offloadName }
     static let localLabel = "This Mac"
 
@@ -91,14 +124,31 @@ struct InferenceThroughput: Decodable, Equatable {
 @MainActor
 final class InferenceThroughputModel: ObservableObject {
     @Published private(set) var snapshot: InferenceThroughput?
+    /// Why the other Mac's numbers are not shown; nil for this Mac or when they are.
+    @Published private(set) var problem: String?
     private var timer: Timer?
+    private var fetching = false
 
-    func start(config: URL) {
+    /// `remote` nil: this Mac's own file. Otherwise the model endpoint of the Mac that serves the model.
+    func start(config: URL, remote: String? = nil) {
         stop()
-        snapshot = InferenceThroughput.read(besides: config)
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.snapshot = InferenceThroughput.read(besides: config) }
+        snapshot = nil
+        problem = nil
+        func tick() {
+            if let remote {
+                guard !fetching else { return }
+                fetching = true
+                Task { @MainActor in
+                    defer { fetching = false }
+                    do { snapshot = try await InferenceThroughput.fetch(endpoint: remote); problem = nil }
+                    catch { snapshot = nil; problem = error.localizedDescription }
+                }
+            } else {
+                snapshot = InferenceThroughput.read(besides: config)
+            }
         }
+        tick()
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in Task { @MainActor in tick() } }
     }
 
     func stop() {
@@ -112,6 +162,10 @@ final class InferenceThroughputModel: ObservableObject {
 struct InferenceThroughputView: View {
     @EnvironmentObject private var app: AppModel
     @StateObject private var model = InferenceThroughputModel()
+    /// "": this Mac. Otherwise the model endpoint of another Mac (remembered between launches).
+    @AppStorage("throughputSource") private var source = ""
+    @State private var served: [String] = []
+    @State private var typed = ""
 
     private let localColor = Color.blue
     private let offloadColor = Color.orange
@@ -119,7 +173,8 @@ struct InferenceThroughputView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("THROUGHPUT").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
-            if let s = model.snapshot, !s.isStale() {
+            sourcePicker
+            if let s = model.snapshot, !(source.isEmpty && s.isStale()) {
                 if s.hasActivity {
                     chart(s)
                     HStack(alignment: .top, spacing: 16) {
@@ -135,14 +190,45 @@ struct InferenceThroughputView: View {
                     Text("No requests yet. Answers returned by this Mac's model, and by the GPU when you offload, appear here.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
+            } else if !source.isEmpty {
+                Text(model.problem ?? "Loading…").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Start the connector to see throughput.")
+                Text("Start the connector to see throughput. If another Mac serves the model, choose it above.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .onAppear { model.start(config: app.selectedConfig) }
+        .onAppear { restart(); loadServed() }
+        .onChange(of: source) { _ in restart() }
         .onDisappear { model.stop() }
         .accessibilityIdentifier("inference-throughput")
+    }
+
+    private func restart() { model.start(config: app.selectedConfig, remote: source.isEmpty ? nil : source) }
+
+    /// The model endpoints of Macs this Mac has asked to serve a model, for the picker.
+    private func loadServed() {
+        Task {
+            guard let data = try? await app.remoteInference(.remoteInferenceList) else { return }
+            let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(data))
+            served = cards.filter { $0.state == "ready" }.compactMap { $0.addresses.first { RemoteInferenceID.kind($0) == "neXal network" } }
+        }
+    }
+
+    @ViewBuilder
+    private var sourcePicker: some View {
+        HStack(spacing: 8) {
+            Picker("Show", selection: $source) {
+                Text("This Mac").tag("")
+                ForEach(Array(Set(served + (source.isEmpty || served.contains(source) ? [] : [source]))).sorted(), id: \.self) { e in
+                    Text(URL(string: e)?.host ?? e).tag(e)
+                }
+            }
+            .pickerStyle(.menu).fixedSize()
+            TextField("Mac serving the model, e.g. 100.64.0.5:8001", text: $typed)
+                .textFieldStyle(.roundedBorder).font(.caption)
+                .onSubmit { if InferenceThroughput.remoteURL(typed) != nil { source = typed.contains("://") ? typed : "http://" + typed; typed = "" } }
+        }
+        .accessibilityIdentifier("throughput-source")
     }
 
     /// Each request as a dot at its prompt size (blue: answered here, orange: offloaded) and the offload limit as a

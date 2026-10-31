@@ -30,6 +30,9 @@ type Forwarder struct {
 	meter    *Meter    // nil: throughput is not measured
 }
 
+// ThroughputPath is where the forwarder serves its Meter snapshot to other Macs.
+const ThroughputPath = "/nexal/throughput"
+
 // SetMeter makes the forwarder count the tokens it returns (see Meter).
 func (f *Forwarder) SetMeter(m *Meter) {
 	f.mu.Lock()
@@ -127,6 +130,17 @@ func (f *Forwarder) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	up, notice, model, ov, busy, meter := f.upstream, f.notice, f.model, f.overflow, f.inflight, f.meter
 	f.mu.Unlock()
+	// Other Macs on the mesh read this Mac's throughput here (token counts and prompt sizes, no text).
+	if r.Method == http.MethodGet && r.URL.Path == ThroughputPath {
+		if meter == nil {
+			fail(w, http.StatusNotFound, "This Mac is not measuring throughput.")
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		w.Header().Set("cache-control", "no-store")
+		_ = json.NewEncoder(w).Encode(meter.Snapshot())
+		return
+	}
 	if ov != nil && ov.Serve(w, r, busy) {
 		return
 	}

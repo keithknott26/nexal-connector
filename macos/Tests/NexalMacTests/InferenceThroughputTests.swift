@@ -73,4 +73,12 @@ final class InferenceThroughputTests: XCTestCase {
         try Data("not json".utf8).write(to: dir.appendingPathComponent(InferenceThroughput.fileName))
         XCTAssertNil(InferenceThroughput.read(besides: config), "a broken file is ignored")
     }
+
+    func testRemoteURLAcceptsOnlyMeshAddresses() {
+        XCTAssertEqual(InferenceThroughput.remoteURL("http://100.64.0.5:8001/v1")?.absoluteString, "http://100.64.0.5:8001/nexal/throughput")
+        XCTAssertEqual(InferenceThroughput.remoteURL("100.64.0.5:8001")?.absoluteString, "http://100.64.0.5:8001/nexal/throughput")
+        XCTAssertNil(InferenceThroughput.remoteURL("http://8.8.8.8:8001/v1"))
+        XCTAssertNil(InferenceThroughput.remoteURL("http://100.64.0.5/v1"))
+        XCTAssertNil(InferenceThroughput.remoteURL(""))
+    }
 }

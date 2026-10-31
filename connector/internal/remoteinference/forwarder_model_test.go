@@ -45,3 +45,23 @@ func TestForwarderNamesThePoolModel(t *testing.T) {
 		t.Fatalf("other name changed: %s", got)
 	}
 }
+
+func TestForwarderServesItsThroughputToOtherMacs(t *testing.T) {
+	addr := freeAddr(t)
+	f, err := NewForwarder(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if code, _ := get(t, "http://"+addr+ThroughputPath); code != http.StatusNotFound {
+		t.Fatalf("without a meter want 404, got %d", code)
+	}
+	m := NewMeter()
+	m.SetThreshold(6000)
+	m.Prompt(Local, 1200)
+	f.SetMeter(m)
+	code, body := get(t, "http://"+addr+ThroughputPath)
+	if code != 200 || !strings.Contains(body, `"maxPromptTokens":6000`) || !strings.Contains(body, `"promptTokens":1200`) {
+		t.Fatalf("got %d %s", code, body)
+	}
+}

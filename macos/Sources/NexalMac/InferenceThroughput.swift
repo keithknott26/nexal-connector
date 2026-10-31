@@ -20,12 +20,22 @@ struct InferenceThroughput: Decodable, Equatable {
         let offloadRequests: Int
         let offloadTokens: Int
     }
+    /// One chat request: its (estimated) prompt size and where it was answered.
+    struct Request: Decodable, Equatable {
+        let t: Int
+        let promptTokens: Int
+        let offloaded: Bool
+    }
     let updated: Int
     let since: Int
     let bucketSeconds: Int
     let offloadName: String
     let points: [Point]
     let totals: Totals
+    /// Recent requests and the "long prompt" limit above which they are offloaded. Absent in files written by an
+    /// older connector.
+    let requests: [Request]?
+    let maxPromptTokens: Int?
 
     static let fileName = "inference-throughput.json"
     /// The connector rewrites the file every 2 s while there is activity; this much older means it is not running.
@@ -120,6 +130,7 @@ struct InferenceThroughputView: View {
                     }
                     Text("Tokens returned per second over the last 10 minutes (about one per streamed chunk). Totals since the connector started.")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    promptSection(s)
                 } else {
                     Text("No requests yet. Answers returned by this Mac's model, and by the GPU when you offload, appear here.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -132,6 +143,49 @@ struct InferenceThroughputView: View {
         .onAppear { model.start(config: app.selectedConfig) }
         .onDisappear { model.stop() }
         .accessibilityIdentifier("inference-throughput")
+    }
+
+    /// Each request as a dot at its prompt size (blue: answered here, orange: offloaded) and the offload limit as a
+    /// red line: raise the limit in the offload settings and the line moves up, and fewer dots turn orange.
+    @ViewBuilder
+    private func promptSection(_ s: InferenceThroughput) -> some View {
+        let reqs = s.requests ?? []
+        let limit = s.maxPromptTokens ?? 0
+        if limit > 0 || !reqs.isEmpty {
+            let top = Double(max(limit * 5 / 4, (reqs.map(\.promptTokens).max() ?? 0) * 11 / 10, 100))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("PROMPT SIZE AND THE OFFLOAD LIMIT").font(.caption2.weight(.semibold)).tracking(0.6)
+                    .foregroundStyle(.secondary)
+                Chart {
+                    ForEach(Array(reqs.enumerated()), id: \.offset) { _, r in
+                        PointMark(x: .value("Time", Date(timeIntervalSince1970: Double(r.t))),
+                                  y: .value("Prompt tokens", r.promptTokens))
+                            .foregroundStyle(r.offloaded ? offloadColor : localColor)
+                    }
+                    if limit > 0 {
+                        RuleMark(y: .value("Offload limit", limit))
+                            .foregroundStyle(.red)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                            .annotation(position: .top, alignment: .trailing) {
+                                Text("offloaded above \(limit) tokens").font(.caption2).foregroundStyle(.red)
+                            }
+                    }
+                }
+                .chartYScale(domain: 0...top)
+                .chartYAxisLabel("prompt tokens", position: .top, alignment: .leading)
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .minute, count: 2)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.hour().minute())
+                    }
+                }
+                .frame(height: 110)
+                Text(limit > 0
+                     ? "Each dot is a request. Prompts longer than the red line are sent to \(s.offloadLabel)."
+                     : "Each dot is a request. No long-prompt limit is set under Offload.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private func chart(_ s: InferenceThroughput) -> some View {

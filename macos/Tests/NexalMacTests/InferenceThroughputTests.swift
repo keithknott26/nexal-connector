@@ -21,6 +21,23 @@ final class InferenceThroughputTests: XCTestCase {
         XCTAssertTrue(s.hasActivity)
     }
 
+    func testDecodesPromptSizesAndTheOffloadLimit() throws {
+        let withLimit = json.replacingOccurrences(
+            of: "\"totals\":{\"localRequests\":1,\"localTokens\":50,\"offloadRequests\":1,\"offloadTokens\":100}",
+            with: "\"totals\":{\"localRequests\":1,\"localTokens\":50,\"offloadRequests\":1,\"offloadTokens\":100},"
+                + "\"maxPromptTokens\":2000,"
+                + "\"requests\":[{\"t\":1800000090,\"promptTokens\":300,\"offloaded\":false},"
+                + "{\"t\":1800000095,\"promptTokens\":5000,\"offloaded\":true}]")
+        let s = try JSONDecoder().decode(InferenceThroughput.self, from: Data(withLimit.utf8))
+        XCTAssertEqual(s.maxPromptTokens, 2000)
+        XCTAssertEqual(s.requests?.count, 2)
+        XCTAssertEqual(s.requests?.last?.offloaded, true)
+        // an older connector's file has neither field
+        let old = try decode()
+        XCTAssertNil(old.maxPromptTokens)
+        XCTAssertNil(old.requests)
+    }
+
     func testTwoLinesOneForThisMacAndOneForTheOffload() throws {
         let samples = try decode().samples()
         XCTAssertEqual(samples.count, 4)

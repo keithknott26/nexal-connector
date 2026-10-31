@@ -46,7 +46,9 @@ type Overflow struct {
 func (o *Overflow) SetMeter(m *Meter) {
 	o.mu.Lock()
 	o.Meter = m
+	maxPrompt := o.MaxPrompt
 	o.mu.Unlock()
+	m.SetThreshold(maxPrompt)
 }
 
 // Observe records how long a local request took, for the queue-wait estimate.
@@ -117,8 +119,15 @@ func (o *Overflow) Serve(w http.ResponseWriter, r *http.Request, inflight int) b
 	}
 	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
 	tiers, hard, limited := o.Plan(peer, model, len(body)/4, inflight)
+	o.mu.Lock()
+	meter, maxPrompt := o.Meter, o.MaxPrompt
+	o.mu.Unlock()
+	meter.SetThreshold(maxPrompt)
 	if len(tiers) == 0 {
 		restore()
+		if !limited && !hard {
+			meter.Prompt(Local, len(body)/4)
+		}
 		if limited {
 			fail(w, http.StatusTooManyRequests, "The daily limit for the large model is used up.")
 			return true
@@ -131,6 +140,7 @@ func (o *Overflow) Serve(w http.ResponseWriter, r *http.Request, inflight int) b
 	}
 	for _, t := range tiers {
 		if o.try(w, r, t, m) {
+			meter.Prompt(Offload, len(body)/4)
 			return true
 		}
 	}
@@ -139,6 +149,7 @@ func (o *Overflow) Serve(w http.ResponseWriter, r *http.Request, inflight int) b
 		return true
 	}
 	restore()
+	meter.Prompt(Local, len(body)/4) // every tier failed: the local pool answers
 	return false
 }
 

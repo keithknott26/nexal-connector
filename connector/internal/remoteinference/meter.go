@@ -42,6 +42,41 @@ type Meter struct {
 	buckets map[int64]*bucket // keyed by bucket start, unix seconds
 	total   [2]struct{ tokens, requests int64 }
 	offload string // the name of the tier that last answered an offloaded request
+
+	reqs      []promptSample // recent requests: how big the prompt was and where it was answered
+	threshold int            // the "long prompt" limit (estimated tokens) above which requests are offloaded; 0 = none
+}
+
+const maxPromptSamples = 400
+
+type promptSample struct {
+	t      int64
+	tokens int
+	off    bool
+}
+
+// Prompt records one chat request's (estimated) prompt size and where it was answered, so the app can show the
+// offload limit against the requests around it. No prompt text is kept.
+func (m *Meter) Prompt(b Backend, tokens int) {
+	if m == nil || tokens <= 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reqs = append(m.reqs, promptSample{t: m.now().Unix(), tokens: tokens, off: b == Offload})
+	if len(m.reqs) > maxPromptSamples {
+		m.reqs = m.reqs[len(m.reqs)-maxPromptSamples:]
+	}
+}
+
+// SetThreshold sets the prompt-size limit the app draws as a line (0: none).
+func (m *Meter) SetThreshold(tokens int) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.threshold = tokens
+	m.mu.Unlock()
 }
 
 // NewMeter returns an empty meter.
@@ -112,6 +147,13 @@ type Totals struct {
 	OffloadTokens   int64 `json:"offloadTokens"`
 }
 
+// Request is one chat request in the graph of prompt sizes.
+type Request struct {
+	T            int64 `json:"t"` // unix seconds
+	PromptTokens int   `json:"promptTokens"`
+	Offloaded    bool  `json:"offloaded"`
+}
+
 // Snapshot is what the app draws.
 type Snapshot struct {
 	Updated       int64   `json:"updated"` // unix seconds
@@ -120,6 +162,9 @@ type Snapshot struct {
 	OffloadName   string  `json:"offloadName"` // "" until something has been offloaded
 	Points        []Point `json:"points"`      // oldest first, one per step including quiet ones
 	Totals        Totals  `json:"totals"`
+	// The prompt-size graph: recent requests, and the limit above which they are offloaded (0: no limit set).
+	Requests        []Request `json:"requests"`
+	MaxPromptTokens int       `json:"maxPromptTokens"`
 }
 
 // Snapshot returns the last ten minutes, quiet steps included so the line is continuous.
@@ -132,7 +177,13 @@ func (m *Meter) Snapshot() Snapshot {
 	s := Snapshot{Updated: m.now().Unix(), Since: m.since.Unix(), BucketSeconds: int(step), OffloadName: m.offload,
 		Points: make([]Point, 0, n),
 		Totals: Totals{LocalRequests: m.total[Local].requests, LocalTokens: m.total[Local].tokens,
-			OffloadRequests: m.total[Offload].requests, OffloadTokens: m.total[Offload].tokens}}
+			OffloadRequests: m.total[Offload].requests, OffloadTokens: m.total[Offload].tokens},
+		Requests: []Request{}, MaxPromptTokens: m.threshold}
+	for _, r := range m.reqs {
+		if r.t >= m.now().Unix()-int64(meterWindow/time.Second) {
+			s.Requests = append(s.Requests, Request{T: r.t, PromptTokens: r.tokens, Offloaded: r.off})
+		}
+	}
 	for i := n - 1; i >= 0; i-- {
 		t := nowT - int64(i)*step
 		p := Point{T: t}

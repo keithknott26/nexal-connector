@@ -178,3 +178,38 @@ func TestPublishWritesAPrivateSnapshotAndStops(t *testing.T) {
 		t.Fatalf("temp files left behind: %v", left)
 	}
 }
+
+func TestSnapshotCarriesPromptSizesAndTheOffloadLimit(t *testing.T) {
+	m := NewMeter()
+	m.SetThreshold(2000)
+	m.Prompt(Local, 300)
+	m.Prompt(Offload, 5000)
+	m.Prompt(Local, 0) // nothing to plot
+	s := m.Snapshot()
+	if s.MaxPromptTokens != 2000 {
+		t.Fatalf("limit %d, want 2000", s.MaxPromptTokens)
+	}
+	if len(s.Requests) != 2 {
+		t.Fatalf("%d requests, want 2", len(s.Requests))
+	}
+	if s.Requests[0].Offloaded || s.Requests[0].PromptTokens != 300 {
+		t.Fatalf("first request %+v", s.Requests[0])
+	}
+	if !s.Requests[1].Offloaded || s.Requests[1].PromptTokens != 5000 {
+		t.Fatalf("second request %+v", s.Requests[1])
+	}
+	data, err := json.Marshal(s)
+	if err != nil || !strings.Contains(string(data), `"maxPromptTokens":2000`) || !strings.Contains(string(data), `"promptTokens":5000`) {
+		t.Fatalf("snapshot JSON %s (%v)", data, err)
+	}
+}
+
+func TestPromptSamplesAreBounded(t *testing.T) {
+	m := NewMeter()
+	for i := 0; i < maxPromptSamples+50; i++ {
+		m.Prompt(Local, 10)
+	}
+	if got := len(m.Snapshot().Requests); got != maxPromptSamples {
+		t.Fatalf("kept %d samples, want %d", got, maxPromptSamples)
+	}
+}

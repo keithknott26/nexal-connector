@@ -644,3 +644,45 @@ func TestDecodeAddressDirect(t *testing.T) {
 		}
 	}
 }
+
+func TestUDPExchangerRejectsBadServerAddresses(t *testing.T) {
+	e, err := NewUDPExchanger()
+	if err != nil {
+		t.Skipf("UDP socket unavailable in this sandbox: %v", err)
+	}
+	defer e.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, server := range []string{"127.0.0.1", "127.0.0.1:0", "127.0.0.1:70000"} {
+		if _, err := e.Exchange(ctx, server, []byte{0}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Exchange(%q) err = %v, want ErrInvalid", server, err)
+		}
+	}
+}
+
+// An oversized datagram from the target is refused rather than truncated.
+func TestUDPExchangerBoundsReplySize(t *testing.T) {
+	e, err := NewUDPExchanger()
+	if err != nil {
+		t.Skipf("UDP socket unavailable in this sandbox: %v", err)
+	}
+	defer e.Close()
+	server, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Skipf("loopback UDP unavailable: %v", err)
+	}
+	defer server.Close()
+	go func() {
+		buf := make([]byte, 64)
+		_, from, err := server.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		server.WriteToUDP(make([]byte, maxMessageBytes+1), from)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := e.Exchange(ctx, server.LocalAddr().String(), []byte{1, 2, 3}); !errors.Is(err, ErrResponseSize) {
+		t.Fatalf("err = %v, want ErrResponseSize", err)
+	}
+}

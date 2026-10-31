@@ -30,3 +30,20 @@ func TestReviewRefusesMutableRevisionAndWrongFile(t *testing.T) {
 		t.Fatal("the file was changed by a refused review")
 	}
 }
+
+func TestReviewLatestRejectsBadArgsAndUnknownModel(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	for name, tc := range map[string]struct {
+		args []string
+		code string
+	}{
+		"no model id":     {[]string{"--config", cfg}, "invalid_arguments"},
+		"relative config": {[]string{"qwen3-4b-q4", "--config", "config.json"}, "invalid_arguments"},
+		"unknown model":   {[]string{"not-a-catalog-model", "--config", cfg}, "model_not_found"},
+	} {
+		err := inferenceReviewLatest(context.Background(), tc.args)
+		if err == nil || errCode(err) != tc.code {
+			t.Errorf("%s: want code %s, got %v", name, tc.code, err)
+		}
+	}
+}

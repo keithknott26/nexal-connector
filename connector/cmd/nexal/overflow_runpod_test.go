@@ -80,7 +80,7 @@ func putKey(t *testing.T, path string) {
 	}
 }
 
-func TestProvisionFillsTheGPUTierButNeverTurnsOffloadingOn(t *testing.T) {
+func TestProvisionFillsTheGPUTierAndTurnsLongPromptOffloadOn(t *testing.T) {
 	path, f := runPodEnv(t)
 	ctx := context.Background()
 	if err := overflowRunPod(ctx, "provision", path, runPodOptions{preset: "standard", maxWorkers: 1}); err == nil ||
@@ -102,8 +102,10 @@ func TestProvisionFillsTheGPUTierButNeverTurnsOffloadingOn(t *testing.T) {
 	if o.GPU == nil || o.GPU.BaseURL != "https://api.runpod.ai/v2/ep1/openai/v1" || o.GPU.Model != "Qwen/Qwen3-32B-AWQ" || o.GPU.FirstByteSeconds != 180 {
 		t.Fatalf("tier not configured: %+v", o.GPU)
 	}
-	if o.Enabled || o.Always || len(o.GPUPeers) != 0 || len(o.CloudPeers) != 0 {
-		t.Fatalf("setting up must not enable offloading or add peers: %+v", o)
+	// One-click setup (the owner's two keys and nothing else) switches long-prompt offload on for every peer, with the
+	// data-exposure notice shown in the app; it never chooses "always" for the owner.
+	if !o.Enabled || o.Always || len(o.GPUPeers) != 1 || o.GPUPeers[0] != "*" || len(o.CloudPeers) != 0 || o.MaxPromptTokens != 6000 {
+		t.Fatalf("setting up must turn on long-prompt offload only: %+v", o)
 	}
 	raw, _ := os.ReadFile(path)
 	if strings.Contains(string(raw), rpKey) {

@@ -101,7 +101,17 @@ enum OverflowArguments {
     }
 
     /// Where traffic goes (no keys: those travel on stdin).
-    static func providers(hardAlias: String, dailyLimit: String, gpuURL: String, gpuModel: String, cloudURL: String,
+    /// The remote policy for a model another Mac serves: (mode, max prompt tokens, max queue wait seconds).
+    static func remote(mode: OverflowMode, maxWait: String, maxPrompt: String) -> (String, Int, Int) {
+        switch mode {
+        case .off: return ("off", 0, 0)
+        case .always: return ("always", 0, 0)
+        default:
+            return ("large", mode.usesPrompt ? Int(number(maxPrompt)) ?? 0 : 0, mode.usesWait ? min(3600, Int(number(maxWait)) ?? 0) : 0)
+        }
+    }
+
+        static func providers(hardAlias: String, dailyLimit: String, gpuURL: String, gpuModel: String, cloudURL: String,
                           cloudModel: String, gpuPeers: String, cloudPeers: String) -> [String] {
         var a = ["--hard-alias", hardAlias.trimmingCharacters(in: .whitespaces), "--daily-limit", number(dailyLimit),
                  "--gpu-peers", gpuPeers.trimmingCharacters(in: .whitespaces), "--cloud-peers", cloudPeers.trimmingCharacters(in: .whitespaces)]
@@ -266,13 +276,28 @@ final class OverflowModel: ObservableObject {
 struct OverflowOffloadView: View {
     @EnvironmentObject private var app: AppModel
     @ObservedObject private var model = OverflowModel.shared
+    /// "": this Mac's own model. Otherwise the id of a request this Mac made, so the setting goes to the Mac serving it.
+    @AppStorage("offloadTarget") private var target = ""
+    @State private var served: [RemoteInferenceRequest] = []
+    @State private var names: [String: String] = [:]
+    @State private var remoteMessage: String?
+    @State private var sending = false
+
+    private var remote: RemoteInferenceRequest? { served.first { $0.id == target } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("OFFLOAD TO A GPU").font(.caption2.weight(.semibold)).tracking(0.6).foregroundStyle(.secondary)
-            Text("Send requests this Mac's model cannot handle to a bigger model on a serverless GPU (RunPod). Off by default.")
+            Text("Send requests a model cannot handle to a bigger model on a serverless GPU (RunPod). Off by default.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if !model.gpuConfigured {
+            if !served.isEmpty {
+                Picker("Model", selection: $target) {
+                    Text("The model on this Mac").tag("")
+                    ForEach(served) { r in Text("\(r.modelId) on \(names[r.targetHostId] ?? "another Mac")").tag(r.id) }
+                }
+                .accessibilityIdentifier("overflow-target")
+            }
+            if remote == nil && !model.gpuConfigured {
                 Label("Add your RunPod endpoint and API key in Settings \u{203A} AI Offload first.", systemImage: "key")
                     .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
@@ -293,13 +318,69 @@ struct OverflowOffloadView: View {
                     .font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Button("Save") { Task { await model.saveOffload(app) } }
-                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.busy)
-                if let m = model.message { Text(m).font(.caption).foregroundStyle(.secondary) }
+                Button("Save") { Task { if remote == nil { await model.saveOffload(app) } else { await sendRemote() } } }
+                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.busy || sending)
+                if let m = remote == nil ? model.message : remoteMessage {
+                    Text(m).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer()
             }
         }
         .task { await model.refresh(app) }
+        .task { await loadServed(); if target.isEmpty, let first = served.first { target = first.id } }
+        .onChange(of: target) { showRemotePolicy() }
+    }
+
+    /// Models this Mac asked another Mac to serve (ready ones), with that Mac's name.
+    private func loadServed() async {
+        if let data = try? await app.remoteInference(.remoteInferenceList) {
+            served = RemoteInferenceRequest.decodeLines(data).filter { $0.state == "ready" && ($0.poolRank ?? 0) == 0 }
+        }
+        if let data = try? await app.inferencePreflight(), let report = try? InferenceReport.decode(data) {
+            names = Dictionary(report.machines.compactMap { m in m.hostId.map { ($0, m.name) } }, uniquingKeysWith: { a, _ in a })
+        }
+        if !target.isEmpty && remote == nil { target = "" }
+        showRemotePolicy()
+    }
+
+    /// Shows the remote model's current policy and that Mac's answer to it.
+    private func showRemotePolicy() {
+        guard let r = remote else { remoteMessage = nil; return }
+        if let p = r.offload {
+            let prompt = p.maxPromptTokens ?? 0, wait = p.maxWaitSeconds ?? 0
+            switch p.mode {
+            case "always": model.mode = .always
+            case "large": model.mode = prompt > 0 && wait > 0 ? .busyOrLarge : prompt > 0 ? .large : .busy
+            default: model.mode = .off
+            }
+            if prompt > 0 { model.maxPrompt = String(prompt) }
+            if wait > 0 { model.maxWait = String(wait) }
+        }
+        remoteMessage = r.offloadNote
+    }
+
+    /// Sends the setting to the Mac serving the chosen model, then waits for its answer (it polls every 15 s).
+    private func sendRemote() async {
+        guard let r = remote else { return }
+        let (mode, prompt, wait) = OverflowArguments.remote(mode: model.mode, maxWait: model.maxWait, maxPrompt: model.maxPrompt)
+        if mode == "large" && prompt == 0 && wait == 0 { remoteMessage = "Enter a limit first."; return }
+        sending = true
+        defer { sending = false }
+        do {
+            _ = try await app.remoteInference(.remoteInferenceOffload(requestId: r.id, mode: mode, maxPrompt: prompt, maxWait: wait))
+        } catch { remoteMessage = "Not sent: \(error.localizedDescription)"; return }
+        let who = names[r.targetHostId] ?? "the other Mac"
+        remoteMessage = "Sent. Waiting for \(who) to apply it (up to 15 s)…"
+        for _ in 0..<8 {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let data = try? await app.remoteInference(.remoteInferenceList) else { continue }
+            if let now = RemoteInferenceRequest.decodeLines(data).first(where: { $0.id == r.id }), let note = now.offloadNote {
+                served = served.map { $0.id == r.id ? now : $0 }
+                remoteMessage = "\(who): \(note)"
+                return
+            }
+        }
+        remoteMessage = "Sent, but \(who) has not answered yet. It needs the current neXal Connector build."
     }
 
     private func limit(_ title: String, _ text: Binding<String>) -> some View {

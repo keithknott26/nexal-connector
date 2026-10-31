@@ -287,7 +287,6 @@ func TestSuffixIsEightHexCharsAndVaries(t *testing.T) {
 	}
 }
 
-
 func TestProvisionPassesAHuggingFaceTokenToTheWorker(t *testing.T) {
 	f, c := newFake(t)
 	spec := standard()

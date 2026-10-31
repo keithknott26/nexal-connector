@@ -104,6 +104,9 @@ enum CLICommand {
     /// `nexal inference remote-stats`: the AI throughput the Macs reported in their heartbeats, as one JSON document
     /// ({"hosts": [...]}). Read from the coordinator; nothing is sent to the serving Mac.
     case remoteInferenceStats
+    /// `nexal inference remote-offload <request> --mode off|large|always [--max-prompt N] [--max-wait S] --json`: how the
+    /// Mac serving that request uses its GPU tier. It reads the setting in the request list it already polls.
+    case remoteInferenceOffload(requestId: String, mode: String, maxPrompt: Int, maxWait: Int)
     /// `nexal inference remote-stop <request> --json`: cancels a request and the server it started.
     case remoteInferenceStop(requestId: String)
     /// `nexal inference remote-test <endpoint> --json`: reachability, first-token time, speed and a capability probe.
@@ -251,6 +254,9 @@ enum CLICommand {
             command = ["inference", "remote-list", "--json"]
         case .remoteInferenceStats:
             command = ["inference", "remote-stats", "--json"]
+        case let .remoteInferenceOffload(requestId, mode, maxPrompt, maxWait):
+            command = ["inference", "remote-offload", requestId, "--mode", mode, "--max-prompt", String(maxPrompt),
+                       "--max-wait", String(maxWait), "--json"]
         case let .remoteInferenceStop(requestId):
             command = ["inference", "remote-stop", requestId, "--json"]
         case let .remoteInferenceTest(endpoint):

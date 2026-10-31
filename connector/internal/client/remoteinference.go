@@ -157,3 +157,34 @@ func (c *Client) InferenceStats(ctx context.Context, hostID string) ([]Inference
 	}
 	return out.Hosts, nil
 }
+
+// SetRemoteOffload is POST .../remote-inference/:task/offload: how the Mac serving that request uses its GPU tier.
+func (c *Client) SetRemoteOffload(ctx context.Context, hostID, taskID string, p remoteinference.OffloadPolicy) error {
+	if !ValidID(taskID) {
+		return errors.New("invalid request id")
+	}
+	path, err := remoteInferencePath(hostID, "remote-inference/"+url.PathEscape(taskID)+"/offload")
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"mode": p.Mode}
+	if p.MaxPromptTokens > 0 {
+		body["maxPromptTokens"] = p.MaxPromptTokens
+	}
+	if p.MaxWaitSeconds > 0 {
+		body["maxWaitSeconds"] = p.MaxWaitSeconds
+	}
+	return c.callLenient(ctx, http.MethodPost, path, body, nil)
+}
+
+// ReportRemoteOffload is POST .../remote-inference/:task/offload-state: what the serving Mac made of the policy.
+func (c *Client) ReportRemoteOffload(ctx context.Context, hostID, taskID, note string) error {
+	if !ValidID(taskID) {
+		return errors.New("invalid request id")
+	}
+	path, err := remoteInferencePath(hostID, "remote-inference/"+url.PathEscape(taskID)+"/offload-state")
+	if err != nil {
+		return err
+	}
+	return c.callLenient(ctx, http.MethodPost, path, map[string]string{"note": note}, nil)
+}

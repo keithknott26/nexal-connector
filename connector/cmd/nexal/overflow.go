@@ -197,14 +197,16 @@ func overflowStatus(ctx context.Context, c config.Config, secrets config.Secrets
 	}
 	return map[string]any{"overflow": o, "gpuKeyStored": has("overflow-gpu"), "cloudKeyStored": has("overflow-cloud"),
 		"hfKeyStored": has("overflow-hf"),
-		"privacy": "when on, a listed peer's prompt can leave your network for the GPU or cloud provider; callers see x-nexal-backend on every reply"}
+		"privacy":     "when on, a listed peer's prompt can leave your network for the GPU or cloud provider; callers see x-nexal-backend on every reply"}
 }
 
 // buildOverflow turns the saved settings into the router the model server uses; nil means off. A tier whose
 // key is missing is left out rather than sent unauthenticated.
 func buildOverflow(ctx context.Context, c config.Config, secrets config.Secrets) *remoteinference.Overflow {
 	o := c.Overflow
-	if o == nil || !o.Enabled {
+	// A configured tier with its key is kept ready even while offloading is off here (Enabled false), so another Mac
+	// that controls this one can switch it on for the model this Mac serves (remoteinference.Overflow.Apply).
+	if o == nil {
 		return nil
 	}
 	tier := func(t *config.OverflowTier, secret string) *remoteinference.Tier {
@@ -225,7 +227,7 @@ func buildOverflow(ctx context.Context, c config.Config, secrets config.Secrets)
 		}
 		return m
 	}
-	ov := &remoteinference.Overflow{Enabled: true, Always: o.Always, HardAlias: o.HardAlias, MaxWait: time.Duration(o.MaxWaitSeconds) * time.Second,
+	ov := &remoteinference.Overflow{Enabled: o.Enabled, Always: o.Always, HardAlias: o.HardAlias, MaxWait: time.Duration(o.MaxWaitSeconds) * time.Second,
 		MaxPrompt: o.MaxPromptTokens, DailyLimit: o.DailyLimit, GPUPeers: set(o.GPUPeers), CloudPeers: set(o.CloudPeers),
 		GPU: tier(o.GPU, "overflow-gpu"), Cloud: tier(o.Cloud, "overflow-cloud")}
 	if ov.GPU == nil && ov.Cloud == nil {

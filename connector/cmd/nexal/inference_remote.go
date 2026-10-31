@@ -19,20 +19,26 @@ import (
 //	nexal inference remote-serve <model-id> --to <host-id> [--wait] [--json]
 //	nexal inference remote-list [--json]
 //	nexal inference remote-stop <request-id>
+//	nexal inference remote-offload <request-id> --mode off|large|always [--max-prompt N] [--max-wait S]
+//	                                                      (how the Mac serving that request uses its GPU tier)
 //	nexal inference remote-stats                          (AI throughput the Macs reported, as one JSON document)
 //	nexal inference remote-test <endpoint> [--json]        (inference_run.go)
 //
 // The coordinator only queues the request. The other Mac's connector installs and serves the model with its
 // own `nexal inference` commands, under its own owner policy, on its neXal address only.
 func inferenceRemote(ctx context.Context, args []string) error {
-	var to, pool *string
+	var to, pool, mode *string
 	var wait, asJSON *bool
+	var maxPrompt, maxWait *int
 	needID := args[0] != "remote-list" && args[0] != "remote-stats"
 	id, _, path, err := parseModelArgs(args[0], args[1:], needID, func(f *flag.FlagSet) {
 		to = f.String("to", "", "host id of the Mac that should serve the model")
 		pool = f.String("pool", "", "comma-separated host ids that serve the model together, the first one answering (instead of --to)")
 		wait = f.Bool("wait", false, "wait until the model is being served or fails")
 		asJSON = f.Bool("json", false, "print JSON")
+		mode = f.String("mode", "", "remote-offload: off, large or always")
+		maxPrompt = f.Int("max-prompt", 0, "remote-offload --mode large: prompts over this many tokens go to the GPU")
+		maxWait = f.Int("max-wait", 0, "remote-offload --mode large: a local queue longer than this many seconds goes to the GPU")
 	})
 	if err != nil {
 		return err
@@ -73,6 +79,24 @@ func inferenceRemote(ctx context.Context, args []string) error {
 		for _, t := range tasks {
 			show(t)
 		}
+	case "remote-offload":
+		switch *mode {
+		case "off", "always":
+		case "large":
+			if *maxPrompt <= 0 && *maxWait <= 0 {
+				return &codedError{code: "invalid_arguments", err: errors.New("--mode large needs --max-prompt or --max-wait")}
+			}
+		default:
+			return &codedError{code: "invalid_arguments", err: errors.New("--mode must be off, large or always")}
+		}
+		if *maxPrompt < 0 || *maxPrompt > 10_000_000 || *maxWait < 0 || *maxWait > 3600 {
+			return &codedError{code: "invalid_arguments", err: errors.New("--max-prompt must be 0-10000000 and --max-wait 0-3600")}
+		}
+		p := remoteinference.OffloadPolicy{Mode: *mode, MaxPromptTokens: *maxPrompt, MaxWaitSeconds: *maxWait}
+		if err := api.SetRemoteOffload(ctx, c.HostID, id, p); err != nil {
+			return &codedError{code: "remote_failed", err: err}
+		}
+		_ = enc.Encode(map[string]any{"ok": true, "requestId": id, "mode": p.Mode})
 	case "remote-stats":
 		hosts, err := api.InferenceStats(ctx, c.HostID)
 		if err != nil {

@@ -36,8 +36,12 @@ func TestBuildOverflow(t *testing.T) {
 		t.Fatalf("%+v", ov)
 	}
 	on.Overflow.Enabled = false
-	if buildOverflow(ctx, on, memSecrets{"overflow-gpu": "0123456789abcdef"}) != nil {
-		t.Fatal("disabled must be off")
+	off := buildOverflow(ctx, on, memSecrets{"overflow-gpu": "0123456789abcdef"})
+	if off == nil || off.Enabled {
+		t.Fatal("disabled keeps the tier ready but does not offload")
+	}
+	if tiers, _, _ := off.Plan("10.0.0.2", "m", 1<<20, 0); len(tiers) != 0 {
+		t.Fatal("disabled must not offload")
 	}
 }
 

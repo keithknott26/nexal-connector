@@ -3,6 +3,7 @@ package remoteinference
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -49,6 +50,41 @@ func (o *Overflow) SetMeter(m *Meter) {
 	maxPrompt := o.MaxPrompt
 	o.mu.Unlock()
 	m.SetThreshold(maxPrompt)
+}
+
+// Apply switches offloading to a policy another Mac set, live: the next request follows it. Peers allowed to use the
+// GPU stay as configured here, or everyone when none were. It returns what to tell that Mac.
+func (o *Overflow) Apply(p OffloadPolicy) string {
+	o.mu.Lock()
+	o.Enabled = p.Mode == "always" || p.Mode == "large"
+	o.Always = p.Mode == "always"
+	o.MaxPrompt, o.MaxWait = 0, 0
+	if p.Mode == "large" {
+		o.MaxPrompt, o.MaxWait = p.MaxPromptTokens, time.Duration(p.MaxWaitSeconds)*time.Second
+	}
+	if o.Enabled && len(o.GPUPeers) == 0 && len(o.CloudPeers) == 0 {
+		o.GPUPeers = map[string]bool{"*": true}
+	}
+	meter, maxPrompt, name := o.Meter, o.MaxPrompt, "the GPU"
+	if o.GPU != nil && o.GPU.Name != "" {
+		name = o.GPU.Name
+	} else if o.GPU == nil && o.Cloud != nil && o.Cloud.Name != "" {
+		name = o.Cloud.Name
+	}
+	o.mu.Unlock()
+	meter.SetThreshold(maxPrompt)
+	switch {
+	case p.Mode == "always":
+		return "Applied: every request goes to " + name + "."
+	case p.Mode == "large" && p.MaxPromptTokens > 0 && p.MaxWaitSeconds > 0:
+		return fmt.Sprintf("Applied: prompts over %d tokens, or a queue over %d s, go to %s.", p.MaxPromptTokens, p.MaxWaitSeconds, name)
+	case p.Mode == "large" && p.MaxPromptTokens > 0:
+		return fmt.Sprintf("Applied: prompts over %d tokens go to %s.", p.MaxPromptTokens, name)
+	case p.Mode == "large":
+		return fmt.Sprintf("Applied: requests go to %s when the queue here is over %d s.", name, p.MaxWaitSeconds)
+	default:
+		return "Applied: offloading is off; this Mac's model answers every request."
+	}
 }
 
 // Observe records how long a local request took, for the queue-wait estimate.

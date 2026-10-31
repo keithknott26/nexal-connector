@@ -42,6 +42,7 @@ type PQ struct {
 	Verified   bool   `json:"verified"`
 	Protocol   string `json:"protocol"`
 }
+
 // InferenceStats is the throughput summary carried in a heartbeat.
 type InferenceStats = remoteinference.Stats
 

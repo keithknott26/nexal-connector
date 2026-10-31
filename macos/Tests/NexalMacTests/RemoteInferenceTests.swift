@@ -14,6 +14,9 @@ final class RemoteInferenceTests: XCTestCase {
         XCTAssertEqual(CLICommand.inferenceReview(modelId: "qwen3-4b-q4", revision: String(repeating: "a", count: 40), out: "/r/reviewed-pins.json").arguments(config: config),
                        ["inference", "review", "qwen3-4b-q4", "--revision", String(repeating: "a", count: 40), "--out", "/r/reviewed-pins.json", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceList.arguments(config: config), ["inference", "remote-list", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.remoteInferenceOffload(requestId: "rinf_1", mode: "always", maxPrompt: 0, maxWait: 0).arguments(config: config),
+                       ["inference", "remote-offload", "rinf_1", "--mode", "always", "--max-prompt", "0", "--max-wait", "0", "--json", "--config", "/tmp/c.json"])
+        XCTAssertEqual(CLICommand.remoteInferenceStats.arguments(config: config), ["inference", "remote-stats", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceStop(requestId: "rinf_1").arguments(config: config),
                        ["inference", "remote-stop", "rinf_1", "--json", "--config", "/tmp/c.json"])
         XCTAssertEqual(CLICommand.remoteInferenceTest(endpoint: "http://100.86.1.2:8001/v1").arguments(config: config),
@@ -133,5 +136,19 @@ final class RemoteInferenceTests: XCTestCase {
         let cards = RemoteInferenceCard.cards(RemoteInferenceRequest.decodeLines(Data(line.utf8)))
         XCTAssertEqual(cards[0].addresses.count, 3)
         XCTAssertEqual(cards[0].addresses.map(RemoteInferenceID.kind), ["neXal network", "LAN", "That Mac only"])
+    }
+
+    func testTheOffloadModesMapToTheRemotePolicy() {
+        XCTAssertTrue(OverflowArguments.remote(mode: .always, maxWait: "120", maxPrompt: "6000") == ("always", 0, 0))
+        XCTAssertTrue(OverflowArguments.remote(mode: .off, maxWait: "120", maxPrompt: "6000") == ("off", 0, 0))
+        XCTAssertTrue(OverflowArguments.remote(mode: .large, maxWait: "120", maxPrompt: "6000") == ("large", 6000, 0))
+        XCTAssertTrue(OverflowArguments.remote(mode: .busyOrLarge, maxWait: "9999", maxPrompt: "6000") == ("large", 6000, 3600))
+    }
+
+    func testARequestCarriesTheOffloadPolicyAndTheAnswer() {
+        let line = #"{"id":"rinf_1","targetHostId":"m4","modelId":"qwen3-4b-q4","state":"ready","offload":{"mode":"always","maxPromptTokens":0,"maxWaitSeconds":0,"setAt":"x"},"offloadNote":"Applied: every request goes to RunPod."}"#
+        let r = RemoteInferenceRequest.decodeLines(Data(line.utf8))
+        XCTAssertEqual(r.first?.offload?.mode, "always")
+        XCTAssertEqual(r.first?.offloadNote, "Applied: every request goes to RunPod.")
     }
 }

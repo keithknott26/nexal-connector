@@ -43,6 +43,10 @@ struct RemoteInferenceRequest: Decodable, Identifiable, Equatable {
     let poolId: String?
     let poolRank: Int?
     let poolSize: Int?
+    /// The GPU-offload policy a controlling Mac set for this model, and what the serving Mac said about it.
+    struct Offload: Decodable, Equatable { let mode: String; let maxPromptTokens: Int?; let maxWaitSeconds: Int? }
+    let offload: Offload?
+    let offloadNote: String?
 
     var isDone: Bool { state == "ready" || state == "failed" || state == "cancelled" }
     static func decodeLines(_ data: Data) -> [RemoteInferenceRequest] {

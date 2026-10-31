@@ -51,6 +51,25 @@ type Task struct {
 	PoolEndpoint string   `json:"poolEndpoint,omitempty"`
 	CreatedAt    string   `json:"createdAt,omitempty"`
 	UpdatedAt    string   `json:"updatedAt,omitempty"`
+	// Offload is the GPU-offload policy a controlling Mac set for this model (nil: this Mac's own settings stand);
+	// OffloadNote is what this Mac last said about it.
+	Offload     *OffloadPolicy `json:"offload,omitempty"`
+	OffloadNote string         `json:"offloadNote,omitempty"`
+}
+
+// OffloadPolicy is how the Mac serving a model uses its GPU tier, as set from another Mac (coordinator
+// remote-inference.ts setRemoteOffload): Mode "off", "large" (prompts over MaxPromptTokens, or a local queue longer
+// than MaxWaitSeconds) or "always".
+type OffloadPolicy struct {
+	Mode            string `json:"mode"`
+	MaxPromptTokens int    `json:"maxPromptTokens"`
+	MaxWaitSeconds  int    `json:"maxWaitSeconds"`
+	SetAt           string `json:"setAt"`
+}
+
+// offloadReporter is the optional part of the coordinator API that takes the serving Mac's answer to a policy.
+type offloadReporter interface {
+	ReportRemoteOffload(ctx context.Context, hostID, taskID, note string) error
 }
 
 // Report is the body of POST /api/v2/hosts/:id/remote-inference-state.
@@ -104,6 +123,8 @@ type Runner struct {
 	Logger     *slog.Logger
 	// Overflow, when set, lets each model server send some requests to a serverless GPU or cloud tier (overflow.go).
 	Overflow *Overflow
+	// offloadSetAt is the SetAt of the last policy applied from another Mac (see applyOffload).
+	offloadSetAt string
 	// Meter, when set, measures the tokens returned by this Mac's model and by offloaded requests (meter.go).
 	Meter  *Meter
 	LogDir string // when set, each model server's output also goes to <LogDir>/inference-<port>.log
@@ -243,6 +264,7 @@ func (r *Runner) Once(ctx context.Context) {
 	r.mu.Lock()
 	r.latest = snapshot
 	r.mu.Unlock()
+	r.applyOffload(ctx, tasks)
 	r.holdLease(ctx, tasks)
 	for _, t := range tasks {
 		live[t.ID] = true
@@ -791,4 +813,43 @@ func lanAddresses() []string {
 		}
 	}
 	return out
+}
+
+// noGPUNote is the answer when another Mac asks this one to offload but no GPU tier (key and endpoint) is set up here.
+const noGPUNote = "No GPU is set up on this Mac yet. Set up RunPod once in neXal Connector on this Mac (Offload to a GPU: " +
+	"RunPod key), and this setting applies."
+
+// applyOffload applies the newest GPU-offload policy another Mac set for a model this Mac serves, live (no restart),
+// and tells the coordinator once what became of it. The policy arrives in the request list this Mac polls anyway.
+func (r *Runner) applyOffload(ctx context.Context, tasks []Task) {
+	var pick *Task
+	for i := range tasks {
+		t := &tasks[i]
+		if t.Offload == nil || (t.TargetHostID != "" && t.TargetHostID != r.HostID) {
+			continue
+		}
+		if pick == nil || t.Offload.SetAt > pick.Offload.SetAt {
+			pick = t
+		}
+	}
+	if pick == nil {
+		return
+	}
+	r.mu.Lock()
+	same := r.offloadSetAt == pick.Offload.SetAt
+	r.offloadSetAt = pick.Offload.SetAt
+	r.mu.Unlock()
+	if same {
+		return
+	}
+	note := noGPUNote
+	if r.Overflow != nil {
+		note = r.Overflow.Apply(*pick.Offload)
+	}
+	r.Logger.Info("GPU offload set from another Mac", "model", pick.ModelID, "mode", pick.Offload.Mode, "result", note)
+	if rep, ok := r.Coord.(offloadReporter); ok {
+		if err := rep.ReportRemoteOffload(ctx, r.HostID, pick.ID, clean(note, 280)); err != nil {
+			r.Logger.Debug("remote offload report failed", "error", err.Error())
+		}
+	}
 }

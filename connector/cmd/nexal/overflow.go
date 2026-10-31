@@ -80,8 +80,8 @@ func overflowCommand(ctx context.Context, args []string) error {
 	case "status":
 		return emit(overflowStatus(ctx, c, secrets))
 	case "set-key", "clear-key":
-		if *tierFlag != "gpu" && *tierFlag != "cloud" {
-			return errors.New("usage: nexal overflow " + action + " --tier gpu|cloud   (set-key reads the key from stdin)")
+		if *tierFlag != "gpu" && *tierFlag != "cloud" && *tierFlag != "hf" {
+			return errors.New("usage: nexal overflow " + action + " --tier gpu|cloud|hf   (set-key reads the key from stdin; hf is a Hugging Face token)")
 		}
 		name := "overflow-" + *tierFlag
 		if action == "clear-key" {
@@ -196,6 +196,7 @@ func overflowStatus(ctx context.Context, c config.Config, secrets config.Secrets
 		o = &config.OverflowConfig{}
 	}
 	return map[string]any{"overflow": o, "gpuKeyStored": has("overflow-gpu"), "cloudKeyStored": has("overflow-cloud"),
+		"hfKeyStored": has("overflow-hf"),
 		"privacy": "when on, a listed peer's prompt can leave your network for the GPU or cloud provider; callers see x-nexal-backend on every reply"}
 }
 

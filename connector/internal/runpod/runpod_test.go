@@ -286,3 +286,24 @@ func TestSuffixIsEightHexCharsAndVaries(t *testing.T) {
 		t.Errorf("two suffixes were identical: %q", a)
 	}
 }
+
+
+func TestProvisionPassesAHuggingFaceTokenToTheWorker(t *testing.T) {
+	f, c := newFake(t)
+	spec := standard()
+	spec.HFToken = "hf_testtoken"
+	if _, err := c.Provision(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	env := f.calls[0].Body["env"].(map[string]any)
+	if env["HF_TOKEN"] != "hf_testtoken" {
+		t.Fatalf("worker env %+v", env)
+	}
+	f2, c2 := newFake(t)
+	if _, err := c2.Provision(context.Background(), standard()); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := f2.calls[0].Body["env"].(map[string]any)["HF_TOKEN"]; has {
+		t.Fatal("no token was given, so none must be sent")
+	}
+}

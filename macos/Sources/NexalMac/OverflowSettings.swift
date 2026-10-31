@@ -32,6 +32,7 @@ struct OverflowStatus: Decodable, Equatable {
     var overflow: Settings
     var gpuKeyStored: Bool
     var cloudKeyStored: Bool
+    var hfKeyStored: Bool?
 }
 
 /// How traffic is offloaded from the model running on this Mac.
@@ -125,6 +126,8 @@ final class OverflowModel: ObservableObject {
     @Published var gpuModel = ""
     @Published var gpuKey = ""
     @Published var gpuKeyStored = false
+    @Published var hfKey = ""
+    @Published var hfKeyStored = false
     @Published var gpuPeers = "*"
     @Published var cloudURL = ""
     @Published var cloudModel = ""
@@ -153,6 +156,7 @@ final class OverflowModel: ObservableObject {
         cloudPeers = (s.overflow.cloudPeers ?? []).joined(separator: ", ")
         gpuKeyStored = s.gpuKeyStored
         cloudKeyStored = s.cloudKeyStored
+        hfKeyStored = s.hfKeyStored ?? false
         runpod = s.overflow.runpod
     }
 
@@ -212,13 +216,19 @@ final class OverflowModel: ObservableObject {
                 gpuKey = ""
                 gpuKeyStored = true
             }
+            let hf = hfKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !hf.isEmpty {
+                _ = try await app.overflow(action: "set-key", args: ["--tier", "hf"], input: Data(hf.utf8))
+                hfKey = ""
+                hfKeyStored = true
+            }
             guard gpuKeyStored else {
                 message = "Paste your RunPod API key first."
                 return
             }
             let data = try await app.overflow(action: "provision", args: OverflowArguments.provision(preset: preset, maxWorkers: maxWorkers))
             apply(try JSONDecoder().decode(OverflowStatus.self, from: data))
-            message = "Ready. The GPU is configured; turn offloading on under AI inference when you want to use it."
+            message = "Ready. The GPU is set up and offloading is on for the peers on this network. Restart the model for it to take effect."
         } catch { message = "Setup failed: \(error.localizedDescription)" }
     }
 
@@ -364,6 +374,12 @@ struct OverflowProvidersView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                         SecureField("Paste your RunPod API key", text: $model.gpuKey).textFieldStyle(.roundedBorder)
                     }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.hfKeyStored ? "Hugging Face token \u{2713} saved in the Keychain (type to replace)"
+                                               : "Hugging Face token (optional; only for gated or private models)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        SecureField("Paste your Hugging Face token", text: $model.hfKey).textFieldStyle(.roundedBorder)
+                    }
                     HStack(alignment: .bottom) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Size").font(.caption2).foregroundStyle(.secondary)
@@ -385,7 +401,7 @@ struct OverflowProvidersView: View {
                     }
                 }
                 if let m = model.message { Text(m).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-                Text("Offloading stays off until you turn it on under AI inference and choose which peers may use it. The first request after the GPU has been idle waits while the model loads.")
+                Text("Setting this up turns offloading on for the peers on your neXal network; prompts from them can leave your network for your RunPod endpoint. Change who, or turn it off, under Overflow. The first request after the GPU has been idle waits while the model loads.")
                     .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             .padding(8)

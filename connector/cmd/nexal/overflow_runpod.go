@@ -132,6 +132,9 @@ func overflowRunPod(ctx context.Context, action, path string, opt runPodOptions)
 	if err != nil {
 		return err
 	}
+	if hf, _ := secrets.Get(ctx, "overflow-hf"); hf != "" {
+		spec.HFToken = hf // the worker needs it only for gated or private models; the presets are public
+	}
 	client := newRunPod(key)
 	if existing != nil {
 		if opt.recreate {
@@ -163,6 +166,16 @@ func overflowRunPod(ctx context.Context, action, path string, opt runPodOptions)
 		if o.HardAlias == "" {
 			o.HardAlias = "qwen-large"
 		}
+		// One-click means ready to use: turn offloading on for the peers on this neXal network, and offload when
+		// the local queue is long or a prompt is large (under the endpoint's context). Anything the owner set
+		// before is kept.
+		o.Enabled = true
+		if len(o.GPUPeers) == 0 {
+			o.GPUPeers = []string{"*"}
+		}
+		if !o.Always && o.MaxWaitSeconds == 0 && o.MaxPromptTokens == 0 {
+			o.MaxWaitSeconds, o.MaxPromptTokens = 20, 6000
+		}
 	})
 	if err != nil {
 		// Do not leave a billable endpoint behind that the app has no record of.
@@ -173,7 +186,7 @@ func overflowRunPod(ctx context.Context, action, path string, opt runPodOptions)
 	}
 	st := overflowStatus(ctx, c, secrets)
 	st["created"] = true
-	st["note"] = "the GPU tier is configured; offloading stays off until you turn it on and choose which peers may use it. The first request after idle waits for the model to load"
+	st["note"] = "the GPU tier is configured and offloading is on for the peers on this neXal network (change who under Overflow). The first request after idle waits for the model to load"
 	return emit(st)
 }
 

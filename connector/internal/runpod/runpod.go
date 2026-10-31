@@ -84,6 +84,7 @@ type Spec struct {
 	IdleSeconds  int      // 0: 30. How long a worker waits for another request before it is stopped.
 	MinCUDA      string   // "": DefaultMinCUDA
 	Image        string   // "": WorkerImage
+	HFToken      string   // "": none. Passed to the worker as HF_TOKEN, so it can download gated or private models.
 }
 
 // Result is what was created.
@@ -326,6 +327,9 @@ func (c *Client) Provision(ctx context.Context, s Spec) (Result, error) {
 	}
 	if s.MaxModelLen > 0 {
 		env["MAX_MODEL_LEN"] = fmt.Sprint(s.MaxModelLen)
+	}
+	if s.HFToken != "" {
+		env["HF_TOKEN"] = s.HFToken
 	}
 	name := "nexal-overflow-" + suffix()
 

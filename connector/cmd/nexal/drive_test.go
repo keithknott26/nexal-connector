@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"nexal/connector/internal/config"
 )
 
 func TestDriveCommandDispatchErrors(t *testing.T) {
@@ -122,6 +124,27 @@ func TestDriveListUsageRefuseBadInvocation(t *testing.T) {
 			err := tc.run(context.Background(), tc.args)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Without a host credential every drive command must stop with the enrol hint
+// rather than attempt a request.
+func TestDriveCommandsRefuseWhenNotEnrolled(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "private", "config.json")
+	seed := config.Config{Version: 1, Coordinator: "http://127.0.0.1:1", Name: "Mac", Listen: "127.0.0.1:8788",
+		Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+	if err := config.Save(cfg, seed); err != nil {
+		t.Fatal(err)
+	}
+	for name, run := range map[string]func(context.Context, []string) error{
+		"list": driveList, "usage": driveUsage,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := run(context.Background(), []string{"--config", cfg})
+			if err == nil || !strings.Contains(err.Error(), "not enrolled") {
+				t.Fatalf("error = %v, want not-enrolled refusal", err)
 			}
 		})
 	}

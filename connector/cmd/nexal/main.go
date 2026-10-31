@@ -744,6 +744,8 @@ func runCommandWithMachineLock(ctx context.Context, args []string, lockMachine f
 		// What this Mac's model returns, and what is offloaded, as tokens per second for the app's graph.
 		ri.Meter = remoteinference.NewMeter()
 		go ri.Meter.Publish(ctx.Done(), filepath.Join(filepath.Dir(*path), "inference-throughput.json"), 2*time.Second)
+		// The same numbers ride this Mac's normal heartbeat, so other Macs can chart them from the coordinator.
+		a.SetInferenceStats(ri.Meter.Stats)
 		hostID := c.HostID
 		ri.Lease = func(ctx context.Context, open bool) error {
 			_, err := api.InferenceGateway(ctx, hostID, open)

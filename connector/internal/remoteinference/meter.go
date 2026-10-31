@@ -318,3 +318,81 @@ func (t *tally) finish(h http.Header) int {
 	}
 	return len(t.body.Bytes()) / 4
 }
+
+// Stats is the compact summary a Mac serving a model attaches to its coordinator heartbeat (no extra request), so
+// another Mac can chart it without talking to this one. Per-minute counts, the latest prompt sizes and the
+// offload limit; no prompt or answer text. The coordinator validates every field (src/inference-stats.ts).
+type Stats struct {
+	At              int64         `json:"at"`
+	Since           int64         `json:"since"`
+	OffloadName     string        `json:"offloadName"`
+	LocalRequests   int64         `json:"localRequests"`
+	LocalTokens     int64         `json:"localTokens"`
+	OffloadRequests int64         `json:"offloadRequests"`
+	OffloadTokens   int64         `json:"offloadTokens"`
+	MaxPromptTokens int           `json:"maxPromptTokens"`
+	Minutes         []StatsMinute `json:"minutes"`
+	Prompts         []StatsPrompt `json:"prompts"`
+}
+
+// StatsMinute is one minute: tokens (lt, ot) and finished requests (lr, or) answered here and offloaded.
+type StatsMinute struct {
+	T  int64 `json:"t"`
+	LT int64 `json:"lt"`
+	OT int64 `json:"ot"`
+	LR int   `json:"lr"`
+	OR int   `json:"or"`
+}
+
+// StatsPrompt is one chat request: estimated prompt tokens and whether it was offloaded.
+type StatsPrompt struct {
+	T int64 `json:"t"`
+	P int   `json:"p"`
+	O bool  `json:"o"`
+}
+
+const (
+	statsMinutes = 12 // the coordinator accepts at most this many
+	statsPrompts = 24
+)
+
+// Stats returns the summary, or nil while nothing has been answered (there is nothing to report yet).
+func (m *Meter) Stats() *Stats {
+	if m == nil {
+		return nil
+	}
+	s := m.Snapshot()
+	if s.Totals == (Totals{}) && len(s.Requests) == 0 {
+		return nil
+	}
+	st := &Stats{At: s.Updated, Since: s.Since, OffloadName: s.OffloadName, MaxPromptTokens: s.MaxPromptTokens,
+		LocalRequests: s.Totals.LocalRequests, LocalTokens: s.Totals.LocalTokens,
+		OffloadRequests: s.Totals.OffloadRequests, OffloadTokens: s.Totals.OffloadTokens,
+		Minutes: []StatsMinute{}, Prompts: []StatsPrompt{}}
+	if len(st.OffloadName) > 40 {
+		st.OffloadName = st.OffloadName[:40]
+	}
+	step := float64(s.BucketSeconds)
+	for _, p := range s.Points {
+		minute := p.T / 60 * 60
+		if n := len(st.Minutes); n == 0 || st.Minutes[n-1].T != minute {
+			st.Minutes = append(st.Minutes, StatsMinute{T: minute})
+		}
+		cur := &st.Minutes[len(st.Minutes)-1]
+		cur.LT += int64(p.LocalTPS*step + 0.5)
+		cur.OT += int64(p.OffloadTPS*step + 0.5)
+		cur.LR += p.LocalReqs
+		cur.OR += p.OffReqs
+	}
+	if len(st.Minutes) > statsMinutes {
+		st.Minutes = st.Minutes[len(st.Minutes)-statsMinutes:]
+	}
+	reqs := s.Requests
+	if len(reqs) > statsPrompts {
+		reqs = reqs[len(reqs)-statsPrompts:]
+	}
+	for _, r := range reqs {
+		st.Prompts = append(st.Prompts, StatsPrompt{T: r.T, P: r.PromptTokens, O: r.Offloaded})
+	}
+	return st
+}

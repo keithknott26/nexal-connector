@@ -19,6 +19,7 @@ import (
 //	nexal inference remote-serve <model-id> --to <host-id> [--wait] [--json]
 //	nexal inference remote-list [--json]
 //	nexal inference remote-stop <request-id>
+//	nexal inference remote-stats                          (AI throughput the Macs reported, as one JSON document)
 //	nexal inference remote-test <endpoint> [--json]        (inference_run.go)
 //
 // The coordinator only queues the request. The other Mac's connector installs and serves the model with its
@@ -26,7 +27,7 @@ import (
 func inferenceRemote(ctx context.Context, args []string) error {
 	var to, pool *string
 	var wait, asJSON *bool
-	needID := args[0] != "remote-list"
+	needID := args[0] != "remote-list" && args[0] != "remote-stats"
 	id, _, path, err := parseModelArgs(args[0], args[1:], needID, func(f *flag.FlagSet) {
 		to = f.String("to", "", "host id of the Mac that should serve the model")
 		pool = f.String("pool", "", "comma-separated host ids that serve the model together, the first one answering (instead of --to)")
@@ -72,6 +73,15 @@ func inferenceRemote(ctx context.Context, args []string) error {
 		for _, t := range tasks {
 			show(t)
 		}
+	case "remote-stats":
+		hosts, err := api.InferenceStats(ctx, c.HostID)
+		if err != nil {
+			return &codedError{code: "remote_failed", err: err}
+		}
+		if hosts == nil {
+			hosts = []client.InferenceHostStats{}
+		}
+		_ = enc.Encode(map[string]any{"hosts": hosts})
 	case "remote-stop":
 		if err := api.CancelRemoteInference(ctx, c.HostID, id); err != nil {
 			return &codedError{code: "remote_failed", err: err}

@@ -131,6 +131,10 @@ type Agent struct {
 	// payload, used to suppress duplicate sends when nothing changed. A
 	// keepalive is still sent at least once per heartbeatMaxSilence.
 	lastHeartbeatPayload uint64
+	// inferenceStats supplies the AI throughput summary attached to a heartbeat (nil: none). inferenceOffUntil
+	// stops attaching it for a while after a coordinator that predates the field rejected it.
+	inferenceStats    func() *client.InferenceStats
+	inferenceOffUntil time.Time
 	// A consent change fences asynchronous observations started under the old
 	// policy. Per-operation sequence numbers also prevent out-of-order results.
 	stateGeneration     uint64
@@ -580,6 +584,13 @@ func (a *Agent) WakeSelfTest() {
 	case a.selfTestWake <- struct{}{}:
 	default:
 	}
+}
+
+// SetInferenceStats makes every heartbeat that is sent anyway carry the summary fn returns (nil: none yet).
+func (a *Agent) SetInferenceStats(fn func() *client.InferenceStats) {
+	a.mu.Lock()
+	a.inferenceStats = fn
+	a.mu.Unlock()
 }
 
 // WakeHeartbeat nudges the heartbeat loop to send an immediate heartbeat.
@@ -1043,7 +1054,15 @@ func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) er
 	hostID := a.cfg.HostID
 	enrolledMesh := a.cfg.Enrollment != nil
 	provider := a.meshProvider
+	statsFn := a.inferenceStats
+	if time.Now().Before(a.inferenceOffUntil) {
+		statsFn = nil
+	}
 	a.mu.Unlock()
+	// Attached after the change-detection hash above, so a changing request count never forces a heartbeat of its own.
+	if statsFn != nil {
+		h.Inference = statsFn()
+	}
 	if gate, ok := provider.(interface{ Enrolled() bool }); ok {
 		// Pairing runs in another process; trust the saved enrollment over the
 		// configuration this agent loaded at start.
@@ -1066,6 +1085,16 @@ func (a *Agent) hostHeartbeat(ctx context.Context, suppressUnchanged ...bool) er
 		}
 	}
 	resp, err := a.api.Heartbeat(ctx, hostID, h)
+	var rejected *client.StatusError
+	if err != nil && h.Inference != nil && errors.As(err, &rejected) && rejected.Status == http.StatusBadRequest {
+		// An older coordinator refuses the unknown field, which would read as this Mac being offline: retry without
+		// it now, and leave it out for an hour.
+		a.mu.Lock()
+		a.inferenceOffUntil = time.Now().Add(time.Hour)
+		a.mu.Unlock()
+		h.Inference = nil
+		resp, err = a.api.Heartbeat(ctx, hostID, h)
+	}
 	if err == nil && h.TunnelStatus != nil {
 		if resp.TunnelStatusAcked {
 			// Coordinator processed the embedded report; no separate call needed.

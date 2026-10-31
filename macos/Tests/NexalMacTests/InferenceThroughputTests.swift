@@ -74,11 +74,29 @@ final class InferenceThroughputTests: XCTestCase {
         XCTAssertNil(InferenceThroughput.read(besides: config), "a broken file is ignored")
     }
 
-    func testRemoteURLAcceptsOnlyMeshAddresses() {
-        XCTAssertEqual(InferenceThroughput.remoteURL("http://100.64.0.5:8001/v1")?.absoluteString, "http://100.64.0.5:8001/nexal/throughput")
-        XCTAssertEqual(InferenceThroughput.remoteURL("100.64.0.5:8001")?.absoluteString, "http://100.64.0.5:8001/nexal/throughput")
-        XCTAssertNil(InferenceThroughput.remoteURL("http://8.8.8.8:8001/v1"))
-        XCTAssertNil(InferenceThroughput.remoteURL("http://100.64.0.5/v1"))
-        XCTAssertNil(InferenceThroughput.remoteURL(""))
+    func testARemoteReportBecomesTheSameSnapshotTheLocalFileGives() throws {
+        let json = """
+        {"hosts":[{"hostId":"h1","name":"mac-mini-m4","reportedAt":"2026-10-31T20:00:00.000Z",
+        "stats":{"at":1800000000,"since":1799999000,"offloadName":"RunPod","localRequests":5,"localTokens":900,
+        "offloadRequests":2,"offloadTokens":400,"maxPromptTokens":6000,
+        "minutes":[{"t":1799999940,"lt":600,"ot":0,"lr":3,"or":0},{"t":1800000000,"lt":300,"ot":420,"lr":2,"or":2}],
+        "prompts":[{"t":1799999950,"p":800,"o":false},{"t":1800000000,"p":9000,"o":true}]}}]}
+        """
+        let hosts = InferenceThroughput.remoteHosts(Data(json.utf8))
+        XCTAssertEqual(hosts.map(\.name), ["mac-mini-m4"])
+        XCTAssertNotNil(hosts[0].reportedDate)
+        let s = InferenceThroughput(hosts[0].stats)
+        XCTAssertEqual(s.bucketSeconds, 60)
+        XCTAssertEqual(s.points.map(\.localTps), [10, 5])
+        XCTAssertEqual(s.points.map(\.offloadTps), [0, 7])
+        XCTAssertEqual(s.maxPromptTokens, 6000)
+        XCTAssertEqual(s.requests?.map(\.offloaded), [false, true])
+        XCTAssertEqual(s.totals.offloadRequests, 2)
+        XCTAssertEqual(s.offloadLabel, "RunPod")
+        XCTAssertTrue(s.hasActivity)
+    }
+
+    func testAnUnreadableRemoteAnswerIsAnEmptyList() {
+        XCTAssertTrue(InferenceThroughput.remoteHosts(Data("nope".utf8)).isEmpty)
     }
 }

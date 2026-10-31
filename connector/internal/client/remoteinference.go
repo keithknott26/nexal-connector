@@ -134,3 +134,26 @@ func (c *Client) InferenceGateway(ctx context.Context, hostID string, open bool)
 	}
 	return &out, nil
 }
+
+// InferenceHostStats is one Mac's latest AI throughput as the coordinator stored it from that Mac's heartbeat.
+type InferenceHostStats struct {
+	HostID     string                `json:"hostId"`
+	Name       string                `json:"name"`
+	ReportedAt string                `json:"reportedAt"`
+	Stats      remoteinference.Stats `json:"stats"`
+}
+
+// InferenceStats is GET .../inference-stats: the Macs in this organization that reported AI throughput lately.
+func (c *Client) InferenceStats(ctx context.Context, hostID string) ([]InferenceHostStats, error) {
+	p, err := remoteInferencePath(hostID, "inference-stats")
+	if err != nil {
+		return nil, err
+	}
+	var out struct {
+		Hosts []InferenceHostStats `json:"hosts"`
+	}
+	if err := c.callLenient(ctx, "GET", p, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Hosts, nil
+}

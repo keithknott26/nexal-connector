@@ -19,6 +19,7 @@ import (
 
 	"nexal/connector/internal/config"
 	"nexal/connector/internal/observability"
+	"nexal/connector/internal/remoteinference"
 )
 
 type Attempt struct {
@@ -41,6 +42,9 @@ type PQ struct {
 	Verified   bool   `json:"verified"`
 	Protocol   string `json:"protocol"`
 }
+// InferenceStats is the throughput summary carried in a heartbeat.
+type InferenceStats = remoteinference.Stats
+
 type Heartbeat struct {
 	AcceptJobsUntil      string `json:"acceptJobsUntil,omitempty"`
 	OwnerActive          bool   `json:"ownerActive"`
@@ -53,6 +57,10 @@ type Heartbeat struct {
 	// separate ReportTunnelStatus call when TunnelStatusAcked is false in the
 	// response.
 	TunnelStatus *TunnelStatusReport `json:"tunnelStatus,omitempty"`
+	// Inference is this Mac's AI throughput (see remoteinference.Stats), attached only while it has something to
+	// report and only to a heartbeat that is being sent anyway: no extra request. A coordinator that predates it
+	// answers 400; the agent then stops sending it for an hour (agent.hostHeartbeat).
+	Inference *InferenceStats `json:"inference,omitempty"`
 }
 type Renewal struct {
 	OK              bool      `json:"ok"`

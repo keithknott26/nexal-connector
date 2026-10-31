@@ -32,3 +32,25 @@ func TestBundleCommandRejectsBadFlagsBeforeReadingConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestBundleCommandAcceptsValidFlagsThenFailsOnMissingConfig(t *testing.T) {
+	fingerprint := strings.Repeat("a", 64)
+	missing := "/private/tmp/nonexistent-nexal-test-config.json"
+	cases := []struct {
+		command string
+		args    []string
+	}{
+		{"bundle-send", []string{"--transfer", bundleTestID, "--bundle", "/tmp/b", "--receiver-key-sha256", fingerprint, "--config", missing}},
+		{"bundle-receive", []string{"--from-host", bundleTestID, "--config", missing}},
+		{"bundle-receive", []string{"--from-host", bundleTestID, "--path-only", "--config", missing}},
+	}
+	for _, tc := range cases {
+		err := bundleCommand(context.Background(), tc.command, tc.args)
+		if err == nil {
+			t.Fatalf("%s %v: want an error for the missing config", tc.command, tc.args)
+		}
+		if strings.Contains(err.Error(), tc.command+" requires") {
+			t.Fatalf("%s %v: valid flags must pass validation, got %v", tc.command, tc.args, err)
+		}
+	}
+}

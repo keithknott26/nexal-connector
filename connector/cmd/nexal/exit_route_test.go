@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"nexal/connector/internal/client"
+	"nexal/connector/internal/config"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -51,5 +53,21 @@ func TestExitRouteErrorMapsKnownCodesAndPassesOthersThrough(t *testing.T) {
 	plain := errors.New("dial failed")
 	if got := exitRouteError(plain); got != plain {
 		t.Fatalf("non-status error was rewritten: %v", got)
+	}
+}
+
+func TestExitRouteRequiresEnrolledHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	err := exitRouteCommand(context.Background(), []string{"--tunnel", "100.64.0.2", "--config", path})
+	if err == nil || !strings.Contains(err.Error(), "enroll this host") {
+		t.Fatalf("unenrolled host not refused before credential access: %v", err)
 	}
 }

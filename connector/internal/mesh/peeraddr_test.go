@@ -1,6 +1,9 @@
 package mesh
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestPeerAddressFromStatus(t *testing.T) {
 	status := []byte(`{"peers":{"details":[
@@ -24,5 +27,13 @@ func TestPeerAddressFromStatus(t *testing.T) {
 	}
 	if ip, ok := peerAddressFromStatus([]byte("not json"), "x"); ok || ip != "" {
 		t.Errorf("malformed status: got (%q, %v)", ip, ok)
+	}
+}
+
+func TestPeerAddressByNameRejectsBlankNameWithoutRuntime(t *testing.T) {
+	for _, name := range []string{"", "  ", ".", " . "} {
+		if ip, ok := PeerAddressByName(context.Background(), name); ok || ip != "" {
+			t.Errorf("PeerAddressByName(%q) = %q, %v; want empty, false", name, ip, ok)
+		}
 	}
 }

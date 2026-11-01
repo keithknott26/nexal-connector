@@ -1,6 +1,9 @@
 package discovery
 
 import (
+	"io"
+	"log/slog"
+	"net"
 	"net/netip"
 	"strings"
 	"testing"
@@ -291,4 +294,43 @@ func TestMulticastGroupsMatchTheContract(t *testing.T) {
 	if ServiceName != "_nexal._tcp.local." {
 		t.Fatalf("service name is %s", ServiceName)
 	}
+}
+
+// TestHandleDeliversResponsesToTheSinkAndIgnoresEverythingElse drives the
+// datagram handler directly: a peer's response reaches the sink as a validated
+// candidate, while a browse query, garbage and a nil sink never deliver anything
+// or panic.
+func TestHandleDeliversResponsesToTheSinkAndIgnoresEverythingElse(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	clock := func() time.Time { return now }
+	r, err := NewResponder(sampleAdvertisement(), clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Skipf("loopback UDP unavailable: %v", err)
+	}
+	defer conn.Close()
+	m := &MDNS{responder: r, logger: slog.New(slog.NewTextHandler(io.Discard, nil)), now: clock}
+	from := netip.MustParseAddrPort("192.168.4.7:5353")
+
+	var got [][]Candidate
+	sink := func(c []Candidate) { got = append(got, c) }
+
+	m.handle(responsePacket(t, peerAdvertisement()), from, conn, sink)
+	if len(got) != 1 || len(got[0]) != 1 || got[0][0].Fingerprint != fpPeer || !got[0][0].SeenAt.Equal(now) {
+		t.Fatalf("response did not reach the sink as a candidate: %+v", got)
+	}
+
+	got = nil
+	m.handle(queryPacket(t), from, conn, sink)
+	m.handle([]byte{0xde, 0xad, 0xbe, 0xef}, from, conn, sink)
+	if len(got) != 0 {
+		t.Fatalf("a query or garbage produced candidates: %+v", got)
+	}
+
+	// A nil sink must be tolerated for both a response and a query.
+	m.handle(responsePacket(t, peerAdvertisement()), from, conn, nil)
+	m.handle(queryPacket(t), from, conn, nil)
 }

@@ -120,3 +120,14 @@ func TestServeCommandValidation(t *testing.T) {
 		t.Fatal("hugging face must be offline while serving")
 	}
 }
+
+func TestExecCommanderReturnsCombinedOutputAndExitError(t *testing.T) {
+	out, err := ExecCommander(context.Background(), "sh", "-c", "echo out; echo err >&2")
+	if err != nil || !strings.Contains(string(out), "out") || !strings.Contains(string(out), "err") {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	out, err = ExecCommander(context.Background(), "sh", "-c", "echo boom >&2; exit 3")
+	if err == nil || !strings.Contains(string(out), "boom") {
+		t.Fatalf("a failing command must return its output and an error: out=%q err=%v", out, err)
+	}
+}

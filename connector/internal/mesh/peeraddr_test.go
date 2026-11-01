@@ -37,3 +37,14 @@ func TestPeerAddressByNameRejectsBlankNameWithoutRuntime(t *testing.T) {
 		}
 	}
 }
+
+// With no trusted nexal-network runtime installed (the test environment),
+// a non-blank name must fail closed rather than return an address.
+func TestPeerAddressByNameFailsClosedWithoutRuntime(t *testing.T) {
+	if _, err := trustedExecutable("nexal-network"); err == nil {
+		t.Skip("a trusted runtime is installed; cannot exercise the missing-runtime path")
+	}
+	if ip, ok := PeerAddressByName(context.Background(), "studio.mesh.example"); ok || ip != "" {
+		t.Errorf("PeerAddressByName without runtime = (%q, %v); want empty, false", ip, ok)
+	}
+}

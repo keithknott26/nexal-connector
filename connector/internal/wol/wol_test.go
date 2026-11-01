@@ -409,3 +409,17 @@ func TestSendDetailedBoundPerInterface(t *testing.T) {
 		t.Fatalf("skipped = %+v, want the duplicate and the virtual interface", rep.Skipped)
 	}
 }
+
+// Output larger than the 256 KiB guard is refused rather than parsed, so a
+// runaway or hostile pmset/networksetup cannot be mined for a plausible line.
+func TestParsersRejectOversizeOutput(t *testing.T) {
+	pad := bytes.Repeat([]byte("x\n"), 140<<10) // 280 KiB of filler
+	womp := append([]byte(" womp 1\n"), pad...)
+	if got := ParseWomp(womp); got != WakeUnknown {
+		t.Fatalf("oversize pmset output read as %q, want unknown", got)
+	}
+	hw := append([]byte("Ethernet Address: 3C:22:FB:0A:0B:0C\n"), pad...)
+	if got := ParseHardwarePorts(hw); got != nil {
+		t.Fatalf("oversize networksetup output yielded %v, want nil", got)
+	}
+}

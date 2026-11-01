@@ -73,3 +73,26 @@ func TestExecRunnerTruncationKeepsValidUTF8(t *testing.T) {
 		t.Fatalf("truncated output is not valid UTF-8 (len=%d)", len(out))
 	}
 }
+
+func TestAvailableMatchesPresenceOfSystemTools(t *testing.T) {
+	missing := ""
+	for _, p := range []string{SharingPath, DiskutilPath, LaunchctlPath} {
+		if _, err := exec.LookPath(p); err != nil {
+			missing = p
+			break
+		}
+	}
+	err := Available()
+	if missing == "" {
+		if err != nil {
+			t.Fatalf("Available() = %v, want nil when every tool is present", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatalf("Available() = nil, want an error because %s is missing", missing)
+	}
+	if !strings.Contains(err.Error(), "requires macOS") {
+		t.Fatalf("Available() error %q does not explain the macOS requirement", err)
+	}
+}

@@ -361,7 +361,22 @@ struct OverflowOffloadView: View {
 
     /// Sends the setting to the Mac serving the chosen model, then waits for its answer (it polls every 15 s).
     private func sendRemote() async {
-        guard let r = remote else { return }
+        guard let picked = remote else { return }
+        // The list can be stale: stopping and starting the model (here or on the other Mac) makes a new request with
+        // a new id, and the old one answers "No such open request" (404). Re-read it and follow the same model on the
+        // same Mac to its current request.
+        if let data = try? await app.remoteInference(.remoteInferenceList) {
+            let fresh = RemoteInferenceRequest.decodeLines(data).filter { $0.state == "ready" && ($0.poolRank ?? 0) == 0 }
+            served = fresh
+            if !fresh.contains(where: { $0.id == picked.id }),
+               let now = fresh.first(where: { $0.modelId == picked.modelId && $0.targetHostId == picked.targetHostId }) {
+                target = now.id
+            }
+        }
+        guard let r = remote else {
+            remoteMessage = "\(picked.modelId) is no longer being served on \(names[picked.targetHostId] ?? "that Mac"). Start it again, then save."
+            return
+        }
         let (mode, prompt, wait) = OverflowArguments.remote(mode: model.mode, maxWait: model.maxWait, maxPrompt: model.maxPrompt)
         if mode == "large" && prompt == 0 && wait == 0 { remoteMessage = "Enter a limit first."; return }
         sending = true

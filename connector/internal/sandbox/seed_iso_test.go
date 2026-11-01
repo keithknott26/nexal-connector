@@ -33,3 +33,20 @@ func TestHdiutilISORejectsNonISOPathBeforeTouchingFiles(t *testing.T) {
 		t.Fatalf("existing file must be left alone: %q %v", b, rerr)
 	}
 }
+
+func TestHdiutilISOWrapsBuilderFailureAndClearsStaleImage(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/hdiutil"); err == nil {
+		t.Skip("hdiutil present; this test covers the missing-binary failure path")
+	}
+	out := filepath.Join(t.TempDir(), "seed.iso")
+	if err := os.WriteFile(out, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := HdiutilISO(context.Background(), t.TempDir(), out)
+	if err == nil || !strings.Contains(err.Error(), "building seed image failed") {
+		t.Fatalf("expected wrapped builder failure, got %v", err)
+	}
+	if _, serr := os.Stat(out); !os.IsNotExist(serr) {
+		t.Fatalf("stale seed image must be removed before building, stat err=%v", serr)
+	}
+}

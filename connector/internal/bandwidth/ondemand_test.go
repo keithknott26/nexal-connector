@@ -330,3 +330,43 @@ func waitClosed(t *testing.T, srv *Server, within time.Duration) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Once maxOpenSlots ports are held open, further requests are refused rather than opening
+// yet another listener.
+func TestHandleRequestRefusesWhenSlotCapReached(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewRunner(slog.New(slog.DiscardHandler))
+	r.ctx, r.provider = ctx, staticProvider{mesh.Status{SelfTunnelAddress: "127.0.0.1"}}
+	defer r.server.Stop()
+
+	opened := 0
+	for i := 0; opened < maxOpenSlots && i < 10000; i++ {
+		port := SlotPort("cap_" + strconv.Itoa(i))
+		if !slotPortFree(port) {
+			continue
+		}
+		if err := r.server.OpenSlot(ctx, "127.0.0.1", port, time.Minute); err == nil {
+			opened++
+		}
+	}
+	if got := r.server.OpenSlots(); got < maxOpenSlots {
+		t.Skipf("could only open %d slots, need %d", got, maxOpenSlots)
+	}
+	before := r.server.OpenSlots()
+	for i := 0; i < 20; i++ {
+		r.HandleRequest("over_"+strconv.Itoa(i), "peer-a")
+	}
+	if after := r.server.OpenSlots(); after != before {
+		t.Fatalf("open slots went from %d to %d past the cap", before, after)
+	}
+}
+
+// A duration too small to spread is returned unchanged.
+func TestJitterLeavesTinyDurationsAlone(t *testing.T) {
+	for _, d := range []time.Duration{0, 1, 4} {
+		if got := jitter(d); got != d {
+			t.Fatalf("jitter(%s) = %s, want unchanged", d, got)
+		}
+	}
+}

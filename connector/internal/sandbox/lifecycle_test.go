@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -614,5 +615,48 @@ func TestRunPowerReportsAwakeAndStopsOnCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("RunPower did not return after ctx cancel")
+	}
+}
+
+func TestStopStartRefusalBranches(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	put(m, &record{ID: "dev1", State: StateRunning, Kind: SandboxDevcontainer, Lifecycle: LifecyclePersistent})
+	put(m, &record{ID: "stopped1", State: StateStopped, Kind: SandboxVM, Lifecycle: LifecyclePersistent})
+	put(m, &record{ID: "prov1", State: StateProvisioning, Kind: SandboxVM, Lifecycle: LifecyclePersistent})
+	put(m, &record{ID: "busy1", State: StateRunning, Kind: SandboxVM, Lifecycle: LifecyclePersistent, busy: true})
+	put(m, &record{ID: "busy2", State: StateStopped, Kind: SandboxVM, Lifecycle: LifecyclePersistent, busy: true})
+
+	stops := []struct{ id, want string }{
+		{"bad id!", "invalid sandbox id"},
+		{"nosuch", "sandbox unknown"},
+		{"dev1", "dev container"},
+		{"prov1", "sandbox is "},
+		{"busy1", "busy"},
+	}
+	for _, c := range stops {
+		if err := m.Stop(c.id); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("Stop(%q) = %v, want error containing %q", c.id, err, c.want)
+		}
+	}
+	// Stopping an already-stopped sandbox is an idempotent no-op.
+	if err := m.Stop("stopped1"); err != nil {
+		t.Errorf("Stop of a stopped sandbox = %v, want nil", err)
+	}
+
+	starts := []struct{ id, want string }{
+		{"bad id!", "invalid sandbox id"},
+		{"nosuch", "sandbox unknown"},
+		{"prov1", "not stopped"},
+		{"busy2", "busy"},
+	}
+	for _, c := range starts {
+		if err := m.Start(c.id); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("Start(%q) = %v, want error containing %q", c.id, err, c.want)
+		}
+	}
+	for _, id := range []string{"dev1", "prov1", "busy1", "busy2"} {
+		if r := snap(m, id); r.State == StateStopping {
+			t.Errorf("%s: a refused call must not change state, got %s", id, r.State)
+		}
 	}
 }

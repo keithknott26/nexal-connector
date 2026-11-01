@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,5 +93,31 @@ func TestKeychainRejectsBadInputBeforeExec(t *testing.T) {
 	}
 	if err := k.Put(ctx, "admin", "short"); err == nil || !strings.Contains(err.Error(), "invalid credential") {
 		t.Errorf("Put too-short secret: err = %v", err)
+	}
+}
+
+// A missing file and a stored value that fails validation are distinct,
+// non-leaking errors; Put must refuse a malformed secret without writing it.
+func TestFileSecretsGetAndPutRejectUnusableValues(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "secrets")
+	s := FileSecrets{Dir: dir}
+	ctx := context.Background()
+	if _, err := s.Get(ctx, "admin"); err == nil || err.Error() != "credential unavailable" {
+		t.Fatalf("missing secret: err = %v", err)
+	}
+	if err := s.Put(ctx, "admin", "short"); err == nil || err.Error() != "invalid credential" {
+		t.Fatalf("Put too-short secret: err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "admin")); !os.IsNotExist(err) {
+		t.Fatalf("rejected secret was written: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "admin"), []byte("tooshort"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, "admin"); err == nil || err.Error() != "invalid credential" {
+		t.Fatalf("stored malformed secret: err = %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -25,5 +26,16 @@ func TestExitNodeStatusRequiresExplicitDefaultRouteSelection(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// With no trusted nexal-network runtime installed (the test environment),
+// route status must be "unknown", never a confirmed selection or absence.
+func TestReadExitNodeStatusUnknownWithoutRuntime(t *testing.T) {
+	if _, err := trustedExecutable("nexal-network"); err == nil {
+		t.Skip("a trusted runtime is installed; cannot exercise the missing-runtime path")
+	}
+	if got := ReadExitNodeStatus(context.Background()); got != "unknown" {
+		t.Errorf("ReadExitNodeStatus without runtime = %q; want unknown", got)
 	}
 }

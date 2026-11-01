@@ -80,3 +80,16 @@ func TestQuantumEvidenceRejectsUnverifiedAndExpiredPeers(t *testing.T) {
 		})
 	}
 }
+
+func TestNewRuntimeProviderWiresProductionDefaults(t *testing.T) {
+	p := NewRuntimeProvider()
+	if p.Timeout != 5*time.Second {
+		t.Errorf("Timeout = %v, want 5s", p.Timeout)
+	}
+	if p.Run == nil || p.Now == nil {
+		t.Fatalf("Run/Now must be set: Run nil=%v Now nil=%v", p.Run == nil, p.Now == nil)
+	}
+	if d := time.Since(p.Now()); d < 0 || d > time.Minute {
+		t.Errorf("Now() is not the wall clock: skew %v", d)
+	}
+}

@@ -39,3 +39,35 @@ func TestReadExitNodeStatusUnknownWithoutRuntime(t *testing.T) {
 		t.Errorf("ReadExitNodeStatus without runtime = %q; want unknown", got)
 	}
 }
+
+func TestRouteOutputRejectsWritesPastLimit(t *testing.T) {
+	var out routeOutput
+	if n, err := out.Write([]byte(strings.Repeat("a", maxExitStatusBytes))); err != nil || n != maxExitStatusBytes {
+		t.Fatalf("write at limit = (%d, %v); want (%d, nil)", n, err, maxExitStatusBytes)
+	}
+	if n, err := out.Write([]byte("b")); err == nil || n != 0 {
+		t.Fatalf("write past limit = (%d, %v); want (0, error)", n, err)
+	}
+	if out.Len() != maxExitStatusBytes {
+		t.Errorf("buffer grew past limit: %d", out.Len())
+	}
+}
+
+func TestExitNodeStatusRejectsMalformedRecords(t *testing.T) {
+	tests := []struct{ name, text string }{
+		{"line before any record", "Available Networks:\nNetwork: 0.0.0.0/0\n"},
+		{"duplicate network", "Available Networks:\n  - ID: a\n    Network: 0.0.0.0/0\n    Network: ::/0\n    Status: Selected\n"},
+		{"duplicate domains", "Available Networks:\n  - ID: a\n    Domains: x.test\n    Domains: y.test\n    Status: Selected\n"},
+		{"line without colon", "Available Networks:\n  - ID: a\n    Network: 0.0.0.0/0\n    garbage\n"},
+		{"unknown key without domains", "Available Networks:\n  - ID: a\n    Network: 0.0.0.0/0\n    Extra: v\n    Status: Selected\n"},
+		{"no records", "Available Networks:\n"},
+		{"empty id", "Available Networks:\n  - ID: \n    Network: 0.0.0.0/0\n    Status: Selected\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseExitNodeStatus([]byte(tt.text)); got != "unknown" {
+				t.Fatalf("got %q, want unknown", got)
+			}
+		})
+	}
+}

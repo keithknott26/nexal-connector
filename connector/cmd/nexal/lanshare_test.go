@@ -56,3 +56,15 @@ func TestLanShareDesiredRegistersPathAndNameFlags(t *testing.T) {
 		t.Fatalf("defaults should be empty: %q %q %v", *path, *name, err)
 	}
 }
+
+func TestLanShareStatusAndSetupRejectStrayArgumentsBeforeTouchingTheHost(t *testing.T) {
+	for _, tc := range []struct{ sub, usage string }{
+		{"status", "unexpected positional arguments"},
+		{"setup", "unexpected positional arguments"},
+	} {
+		err := lanShareCommand(context.Background(), []string{tc.sub, "--path", "/tmp/x", "--name", "X", "stray"})
+		if err == nil || !strings.Contains(err.Error(), tc.usage) {
+			t.Fatalf("%s accepted a stray positional argument: %v", tc.sub, err)
+		}
+	}
+}

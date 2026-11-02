@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -677,5 +678,59 @@ func TestFormattedRefusalNamesTheWindow(t *testing.T) {
 	// The message is what a donor sees in a log; it must say WHY, not just "denied".
 	if want := fmt.Sprintf("%d-day window", WindowDays); !bytes.Contains([]byte(err.Error()), []byte(want)) {
 		t.Fatalf("refusal %q should explain the window", err)
+	}
+}
+
+// While stale, the coordinator's published offline floor is honoured only when it is LOWER
+// than the locally derived one; a higher figure must never loosen the cap.
+func TestStaleFloorHonoursOnlyALowerCoordinatorFloor(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		coordFloor  uint64
+		wantLocal   bool
+		wantExactly uint64
+	}{
+		{"lower coordinator floor wins", 50_000, false, 50_000},
+		{"higher coordinator floor is ignored", 10_000_000, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := window(250*gib, 10*gib)
+			w.OfflineFloorBytesPerSecond = tc.coordFloor
+			budget, _, clock := newBudget(t, w)
+			if err := budget.Sync(context.Background()); err != nil {
+				t.Fatalf("Sync: %v", err)
+			}
+			clock.advance(StaleAfter)
+			allowance := budget.Allowance()
+			if !allowance.Stale || !allowance.Capped || allowance.Source != "offline-floor" {
+				t.Fatalf("expected a capped stale offline-floor decision, got %+v", allowance)
+			}
+			local := sustainedFloor(250 * gib)
+			if tc.wantLocal {
+				if allowance.BytesPerSecond != local {
+					t.Fatalf("rate %d, want local floor %d", allowance.BytesPerSecond, local)
+				}
+			} else if allowance.BytesPerSecond != tc.wantExactly {
+				t.Fatalf("rate %d, want coordinator floor %d", allowance.BytesPerSecond, tc.wantExactly)
+			}
+		})
+	}
+}
+
+// The status payload carries a fixed message, never the underlying error text, because
+// that text can contain a coordinator URL or token fragment.
+func TestSnapshotLastErrorDoesNotEchoTheTransportError(t *testing.T) {
+	budget, coordinator, _ := newBudget(t, window(250*gib, 0))
+	coordinator.err = errors.New("dial https://coord.example/api/hosts/h1 token=SECRET123")
+	if err := budget.Sync(context.Background()); err == nil {
+		t.Fatal("Sync should surface the coordinator error to its caller")
+	}
+	status := budget.Snapshot()
+	if status.LastError == "" || strings.Contains(status.LastError, "SECRET123") ||
+		strings.Contains(status.LastError, "coord.example") {
+		t.Fatalf("status leaked or lost the error: %q", status.LastError)
+	}
+	if status.FailedSyncs != 1 {
+		t.Fatalf("FailedSyncs = %d, want 1", status.FailedSyncs)
 	}
 }

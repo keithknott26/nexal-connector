@@ -260,3 +260,53 @@ func TestCloneDiskFailsWithoutFallbackCopy(t *testing.T) {
 		t.Fatal("CloneDisk must not leave a destination disk behind on failure")
 	}
 }
+
+type fakeConverter struct {
+	calls int
+	err   error
+}
+
+func (f *fakeConverter) ToRaw(_ context.Context, _, dst string) error {
+	f.calls++
+	if f.err != nil {
+		_ = os.WriteFile(dst, []byte("partial"), 0o600)
+		return f.err
+	}
+	return os.WriteFile(dst, []byte("raw-converted"), 0o600)
+}
+
+func TestEnsureQCOW2Conversion(t *testing.T) {
+	body := append([]byte("QFI\xfb"), []byte("qcow2 payload")...)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(body) }))
+	defer srv.Close()
+	sum := sha256.Sum256(body)
+	img := Image{URL: srv.URL + "/u.qcow2", SHA256: hex.EncodeToString(sum[:]), Arch: HostArch(), CloudInit: true}
+	newStore := func(conv Converter) *ImageStore {
+		st := NewImageStore(t.TempDir(), conv)
+		st.HTTP = srv.Client()
+		return st
+	}
+
+	if _, _, err := newStore(nil).Ensure(context.Background(), img); err == nil || !strings.Contains(err.Error(), "no converter") {
+		t.Fatalf("nil converter err = %v", err)
+	}
+
+	failing := &fakeConverter{err: os.ErrInvalid}
+	st := newStore(failing)
+	if _, _, err := st.Ensure(context.Background(), img); err == nil || !strings.Contains(err.Error(), "conversion failed") {
+		t.Fatalf("converter failure err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(st.Dir, img.SHA256+".raw.part")); err == nil {
+		t.Fatal("failed conversion left a .part file behind")
+	}
+
+	ok := &fakeConverter{}
+	st = newStore(ok)
+	path, size, err := st.Ensure(context.Background(), img)
+	if err != nil || !strings.HasSuffix(path, ".raw") || size != int64(len("raw-converted")) {
+		t.Fatalf("path=%s size=%d err=%v", path, size, err)
+	}
+	if _, _, err := st.Ensure(context.Background(), img); err != nil || ok.calls != 1 {
+		t.Fatalf("raw not reused: calls=%d err=%v", ok.calls, err)
+	}
+}

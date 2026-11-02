@@ -526,3 +526,33 @@ func TestCloseDoesNotBlockOnStreamingPut(t *testing.T) {
 		t.Fatalf("aborted write left a published object: %v", err)
 	}
 }
+
+func TestRecognizedFileAllowList(t *testing.T) {
+	digest := strings.Repeat("ab", 32)
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{".pool-lock", true},
+		{"cache." + digest, true},
+		{"protected." + digest, true},
+		{".tmp." + digest, true},
+		{"manifest.key." + strings.Repeat("0", 19) + "1.json", true},
+		{"cache.", false},
+		{"cache." + digest[:63], false},
+		{"cache." + strings.ToUpper(digest), false},
+		{"cache." + digest + "x", false},
+		{"other." + digest, false},
+		{".tmp.", false},
+		{".tmp." + digest[:10], false},
+		{"manifest.key.1.json", false},
+		{"manifest.key." + strings.Repeat("0", 20) + ".json", false},
+		{"notes.txt", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := recognizedFile(c.name); got != c.want {
+			t.Errorf("recognizedFile(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

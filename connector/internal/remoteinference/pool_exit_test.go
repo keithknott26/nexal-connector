@@ -35,3 +35,26 @@ func TestRunnerCurrentReportsOnlyRequestsInTheLatestPoll(t *testing.T) {
 		t.Fatal("a request missing from the latest poll must read as cancelled")
 	}
 }
+
+func TestRunnerStopAllCancelsEveryServerAndEmptiesTheMap(t *testing.T) {
+	cancelled := map[string]bool{}
+	r := &Runner{serving: map[string]*serve{}}
+	for _, id := range []string{"a", "b"} {
+		id := id
+		r.serving[id] = &serve{cancel: func() { cancelled[id] = true }}
+	}
+	r.stopAll()
+	if len(r.serving) != 0 || !cancelled["a"] || !cancelled["b"] {
+		t.Fatalf("serving=%v cancelled=%v", r.serving, cancelled)
+	}
+	r.stopAll() // nothing left: must not panic
+}
+
+func TestRunnerDropForgetsOnlyTheNamedServer(t *testing.T) {
+	r := &Runner{serving: map[string]*serve{"a": {}, "b": {}}}
+	r.drop("a")
+	r.drop("missing")
+	if _, ok := r.serving["a"]; ok || r.serving["b"] == nil {
+		t.Fatalf("serving=%v", r.serving)
+	}
+}

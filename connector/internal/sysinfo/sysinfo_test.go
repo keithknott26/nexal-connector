@@ -357,3 +357,21 @@ func TestThermalReportsUnknownWhenPmsetFailsAndParsesOtherwise(t *testing.T) {
 		t.Errorf("thermal with throttled pmset = %q, want %q", got, wantOK)
 	}
 }
+
+func TestThermalSkipsPmsetOffDarwinAndReportsUnknownOnRunnerError(t *testing.T) {
+	calls := 0
+	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return nil, errors.New("pmset missing")
+	}}
+	got := c.thermal(context.Background())
+	if runtime.GOOS != "darwin" {
+		if got != "" || calls != 0 {
+			t.Fatalf("off darwin thermal = %q after %d runner calls, want empty and none", got, calls)
+		}
+		return
+	}
+	if got != ThermalUnknown || calls != 1 {
+		t.Fatalf("thermal = %q after %d calls, want %q after 1", got, calls, ThermalUnknown)
+	}
+}

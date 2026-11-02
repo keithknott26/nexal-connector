@@ -42,3 +42,33 @@ func TestRedactLongMixedRun(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestRedactKeepsHarmlessSecretFieldValues(t *testing.T) {
+	for _, in := range []string{
+		`{"token":true}`,
+		`{"token":null}`,
+		`{"password":""}`,
+		`token=42`,
+		`secret_ttl=3.5`,
+		`{"api_key":"[redacted]"}`,
+	} {
+		if got := Redact(in); got != in {
+			t.Errorf("Redact(%q) = %q, want unchanged", in, got)
+		}
+	}
+}
+
+func TestRedactLongRun(t *testing.T) {
+	mixed := strings.Repeat("aB3", 12) // 36 chars, letters and digits
+	if got := Redact("key " + mixed + " end"); got != "key [redacted] end" {
+		t.Errorf("mixed long run not redacted: %q", got)
+	}
+	digits := strings.Repeat("7", 40)
+	if got := Redact(digits); got != digits {
+		t.Errorf("digit-only run should be kept: %q", got)
+	}
+	letters := strings.Repeat("a", 40)
+	if got := Redact(letters); got != letters {
+		t.Errorf("letter-only run should be kept: %q", got)
+	}
+}

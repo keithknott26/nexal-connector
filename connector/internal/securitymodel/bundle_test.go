@@ -151,3 +151,30 @@ func TestRetrieveRejectsTamperingAndWrongDevice(t *testing.T) {
 		t.Fatal("bundle for a different device accepted")
 	}
 }
+
+func TestValidIDCharsetAndLength(t *testing.T) {
+	long := make([]byte, 65)
+	for i := range long {
+		long[i] = 'a'
+	}
+	cases := []struct {
+		name string
+		in   string
+		max  int
+		want bool
+	}{
+		{"empty", "", 64, false},
+		{"allowed charset", "Aa09_-.", 64, true},
+		{"exactly max", string(long[:64]), 64, true},
+		{"over max", string(long), 64, false},
+		{"space", "a b", 64, false},
+		{"slash", "a/b", 64, false},
+		{"non-ascii", "café", 64, false},
+		{"newline", "a\n", 64, false},
+	}
+	for _, c := range cases {
+		if got := validID(c.in, c.max); got != c.want {
+			t.Errorf("%s: validID(%q,%d)=%v want %v", c.name, c.in, c.max, got, c.want)
+		}
+	}
+}

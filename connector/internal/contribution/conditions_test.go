@@ -241,3 +241,25 @@ func TestObservationAtTheStaleBoundaryIsStillTrusted(t *testing.T) {
 		t.Errorf("reading older than StaleAfter should be unknown: %s", d.Summary)
 	}
 }
+
+func TestPowerConditionValueReportsBatteryPercentOnlyWhenKnown(t *testing.T) {
+	cases := []struct {
+		name        string
+		s           Signals
+		wantValue   string
+		wantWithold bool
+	}{
+		{"battery with percent", Signals{Power: PowerBattery, BatteryPresent: true, BatteryPercent: 42}, "on battery (42%)", true},
+		{"battery without percent", Signals{Power: PowerBattery, BatteryPresent: true, BatteryPercent: -1}, "on battery", true},
+		{"laptop on AC with percent", Signals{Power: PowerAC, BatteryPresent: true, BatteryPercent: 80}, "on AC power (battery 80%)", false},
+		{"laptop on AC without percent", Signals{Power: PowerAC, BatteryPresent: true, BatteryPercent: -1}, "on AC power", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := powerCondition(tc.s, false)
+			if c.Value != tc.wantValue || c.Withholding != tc.wantWithold || !c.Known {
+				t.Fatalf("got value=%q withholding=%v known=%v, want %q/%v/true", c.Value, c.Withholding, c.Known, tc.wantValue, tc.wantWithold)
+			}
+		})
+	}
+}

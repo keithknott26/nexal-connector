@@ -193,3 +193,44 @@ func TestLimiterRejectsUnusableConfiguration(t *testing.T) {
 		t.Error("a reader without a context was accepted")
 	}
 }
+
+// Idle time must refill the bucket only up to Burst: a transfer that sat idle
+// for an hour may not bank an hour of credit and then exceed the policy rate.
+func TestIdleRefillIsCappedAtBurst(t *testing.T) {
+	clock := newFakeClock()
+	limiter, _ := NewLimiter(1000, 100, clock)
+	clock.advance(time.Hour)
+	if delay, err := limiter.reserve(100); err != nil || delay != 0 {
+		t.Fatalf("first burst after idle: delay=%v err=%v, want free", delay, err)
+	}
+	// The bucket held 100 tokens, not 3.6M, so a second burst owes 100ms.
+	delay, err := limiter.reserve(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delay != 100*time.Millisecond {
+		t.Fatalf("second burst delay = %v, want 100ms (idle credit leaked past burst)", delay)
+	}
+}
+
+// SetRate must credit elapsed time at the OLD rate before switching, and keep
+// any outstanding deficit rather than re-basing it.
+func TestSetRateSettlesElapsedTimeAtOldRate(t *testing.T) {
+	clock := newFakeClock()
+	limiter, _ := NewLimiter(1000, 100, clock)
+	if _, err := limiter.reserve(100); err != nil { // drain the bucket
+		t.Fatal(err)
+	}
+	clock.advance(50 * time.Millisecond) // earns 50 tokens at 1000 B/s
+	limiter.SetRate(100)
+	// 50 tokens in hand at the new 100 B/s rate: reserving 100 leaves a 50-token
+	// deficit, i.e. 500ms. Crediting the 50ms at the new rate would give 5 tokens
+	// and a 950ms delay.
+	delay, err := limiter.reserve(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delay != 500*time.Millisecond {
+		t.Fatalf("delay after SetRate = %v, want 500ms", delay)
+	}
+}

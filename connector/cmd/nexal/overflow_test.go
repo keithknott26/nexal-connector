@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -94,5 +95,55 @@ func TestOverflowCommandRejectsBadInvocationBeforeTouchingConfig(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want containing %q", c.name, err, c.want)
 		}
+	}
+}
+
+func TestOverflowKeyActionsRequireAKnownTier(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	secretsDir := t.TempDir()
+	if err := os.Chmod(secretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NEXAL_SECRETS_DIR", secretsDir)
+	path := t.TempDir() + "/private/config.json"
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"set-key", "--config", path},
+		{"set-key", "--tier", "bogus", "--config", path},
+		{"clear-key", "--tier", "GPU", "--config", path},
+	} {
+		err := overflowCommand(context.Background(), args)
+		if err == nil || !strings.Contains(err.Error(), "--tier gpu|cloud|hf") {
+			t.Errorf("%v: err = %v, want tier usage error", args, err)
+		}
+	}
+}
+
+func TestOverflowUnknownActionIsRefused(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	secretsDir := t.TempDir()
+	if err := os.Chmod(secretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NEXAL_SECRETS_DIR", secretsDir)
+	path := t.TempDir() + "/private/config.json"
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	err := overflowCommand(context.Background(), []string{"frobnicate", "--config", path})
+	if err == nil || !strings.Contains(err.Error(), "unknown overflow action") {
+		t.Fatalf("err = %v, want unknown overflow action", err)
 	}
 }

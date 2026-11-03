@@ -564,3 +564,27 @@ func TestBuiltImagesKeepsOnlyWorkspaceBuiltImages(t *testing.T) {
 		t.Fatal("builtImages must look up the workspace's containers by label")
 	}
 }
+
+func TestBuiltImagesReturnsNothingWhenDockerLookupFailsOrFindsNoContainers(t *testing.T) {
+	for name, run := range map[string]func(args []string) ([]byte, error){
+		"ps fails":      func([]string) ([]byte, error) { return nil, errors.New("docker down") },
+		"no containers": func([]string) ([]byte, error) { return []byte("\n"), nil },
+		"inspect fails": func(args []string) ([]byte, error) {
+			if args[0] == "ps" {
+				return []byte("c1\n"), nil
+			}
+			return nil, errors.New("inspect boom")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := fakeEnv(&fakeRun{})
+			env.Run = func(_ context.Context, _ []string, _ string, args ...string) ([]byte, error) {
+				return run(args)
+			}
+			d := NewDevPod(DevConfig{Env: env, StateDir: t.TempDir(), MeshImage: "m", Sleep: func(time.Duration) {}})
+			if got := d.builtImages(context.Background(), devTools{docker: "docker"}, "ws1"); got != nil {
+				t.Fatalf("builtImages = %v, want nil", got)
+			}
+		})
+	}
+}

@@ -501,3 +501,41 @@ func TestGatewayAddressFallsBackToPeerTable(t *testing.T) {
 		t.Fatalf("a name unknown to the peer table stays as is, got %q", got)
 	}
 }
+
+func TestDestinationAppearedPollsUntilListedOrTimeout(t *testing.T) {
+	origCfg, origWait := destinationConfigured, destinationVerifyWait
+	t.Cleanup(func() { destinationConfigured, destinationVerifyWait = origCfg, origWait })
+
+	// Listed on the first probe: returns immediately.
+	destinationConfigured = func(host, share string) bool { return host == "h" && share == "s" }
+	destinationVerifyWait = time.Second
+	if !destinationAppeared(context.Background(), "h", "s") {
+		t.Fatal("immediately listed destination not reported")
+	}
+
+	// Appears after a few polls.
+	calls := 0
+	destinationConfigured = func(string, string) bool { calls++; return calls >= 2 }
+	if !destinationAppeared(context.Background(), "h", "s") || calls != 2 {
+		t.Fatalf("expected success on second poll, calls=%d", calls)
+	}
+
+	// Never appears: gives up after the deadline.
+	destinationConfigured = func(string, string) bool { return false }
+	destinationVerifyWait = 50 * time.Millisecond
+	if destinationAppeared(context.Background(), "h", "s") {
+		t.Fatal("reported a destination that never appeared")
+	}
+
+	// Cancelled context stops polling early.
+	destinationVerifyWait = time.Minute
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if destinationAppeared(ctx, "h", "s") {
+		t.Fatal("cancelled context reported success")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("cancelled context did not stop polling")
+	}
+}

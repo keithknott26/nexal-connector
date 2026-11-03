@@ -89,3 +89,22 @@ func TestGuestJoinRejectsLateOrExpiredLease(t *testing.T) {
 		}
 	}
 }
+
+func TestGuestExpiredErrorNamesInviterWhenKnown(t *testing.T) {
+	with := guestExpiredError(&config.GuestAccess{InviterEmail: "owner@example.com"})
+	if with == nil || !strings.Contains(with.Error(), "owner@example.com") {
+		t.Fatalf("expected inviter in message, got %v", with)
+	}
+	without := guestExpiredError(nil)
+	if without == nil || !strings.Contains(without.Error(), "request a new invitation code") {
+		t.Fatalf("unexpected message without guest: %v", without)
+	}
+}
+
+func TestRootOwnedImmutablePathRejectsRelativeAndUncleanPaths(t *testing.T) {
+	for _, p := range []string{"", "relative/path", "/usr/../usr/bin", "/usr//bin", "/usr/bin/"} {
+		if rootOwnedImmutablePath(p) {
+			t.Fatalf("%q must be rejected", p)
+		}
+	}
+}

@@ -551,3 +551,16 @@ func TestAwaitJoinStopsWhenContextEnds(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+func TestBuiltImagesKeepsOnlyWorkspaceBuiltImages(t *testing.T) {
+	f := &fakeRun{labels: "ubuntu:24.04\nreg.io/team/devpod-abc123\nvsc-proj-9f\nvsc-proj-9f\n"}
+	d := newTestDevPod(f, t.TempDir(), "mesh:1")
+	got := d.builtImages(context.Background(), devTools{docker: "docker"}, "ws1")
+	want := []string{"reg.io/team/devpod-abc123", "vsc-proj-9f"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("builtImages = %v, want %v (shared images kept, duplicates dropped)", got, want)
+	}
+	if !f.saw("ps -aq --filter label=") {
+		t.Fatal("builtImages must look up the workspace's containers by label")
+	}
+}

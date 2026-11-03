@@ -78,3 +78,33 @@ func TestConfigWatcher(t *testing.T) {
 		t.Fatal("unchanged file")
 	}
 }
+
+func TestHostingConfigManagedLimitAndOversizedBody(t *testing.T) {
+	if _, err := ParseHostingConfig([]byte(`{"managed":true,"maxSandboxes":64}`)); err != nil {
+		t.Fatalf("managed server at its cap must be accepted: %v", err)
+	}
+	if _, err := ParseHostingConfig([]byte(`{"managed":true,"maxSandboxes":65}`)); err == nil {
+		t.Fatal("managed server above MaxManagedSandboxes must be rejected")
+	}
+	if _, err := ParseHostingConfig([]byte(`{"maxSandboxes":65}`)); err != nil {
+		t.Fatalf("unmanaged Mac may exceed the managed cap: %v", err)
+	}
+	big := make([]byte, 16<<10+1)
+	for i := range big {
+		big[i] = ' '
+	}
+	if _, err := ParseHostingConfig(big); err == nil {
+		t.Fatal("config over 16 KiB must be rejected")
+	}
+}
+
+func TestHostingConfigManagedCapsRaisesBudget(t *testing.T) {
+	plain := HostingConfig{Enabled: true, MaxSandboxes: 2, Placement: PlacementMembers}.Caps()
+	managed := HostingConfig{Enabled: true, Managed: true, MaxSandboxes: 2, Placement: PlacementMembers}.Caps()
+	if managed.MaxCPUFraction <= plain.MaxCPUFraction || managed.MaxMemFraction <= plain.MaxMemFraction {
+		t.Fatalf("managed caps should allow a larger share: plain=%+v managed=%+v", plain, managed)
+	}
+	if !managed.StrictCPU {
+		t.Fatalf("managed caps must keep the CPU budget strict: %+v", managed)
+	}
+}

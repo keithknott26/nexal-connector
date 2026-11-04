@@ -27,3 +27,22 @@ func TestMeshOpened(t *testing.T) {
 		t.Error("no neXal address: the name would point nowhere that answers")
 	}
 }
+
+func TestMeshOpenedRangeBoundaries(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"100.64.0.0":      true,
+		"100.127.255.255": true,
+		"100.63.255.255":  false,
+		"100.128.0.0":     false,
+		"not-an-ip":       false,
+		"":                false,
+		"::1":             false,
+	} {
+		if got := meshOpened([]string{addr}); got != want {
+			t.Errorf("meshOpened(%q) = %v, want %v", addr, got, want)
+		}
+	}
+	if meshOpened(nil) {
+		t.Error("no addresses answering must not report the mesh as open")
+	}
+}

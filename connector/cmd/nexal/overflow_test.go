@@ -147,3 +147,55 @@ func TestOverflowUnknownActionIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want unknown overflow action", err)
 	}
 }
+
+// `overflow set` only changes the flags that were given, defaults a tier's name to its kind, and removes a
+// tier on --remove-gpu; a second call must keep what the first one saved.
+func TestOverflowSetPersistsAndMergesOnlyGivenFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	secretsDir := t.TempDir()
+	if err := os.Chmod(secretsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NEXAL_SECRETS_DIR", secretsDir)
+	path := t.TempDir() + "/private/config.json"
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := overflowCommand(ctx, []string{"set", "--config", path, "--enabled=true", "--daily-limit", "5",
+		"--gpu-url", "https://example.com/v1", "--gpu-model", "m", "--gpu-peers", " 100.64.0.2 , ,100.64.0.3"}); err != nil {
+		t.Fatalf("first set: %v", err)
+	}
+	got, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := got.Overflow
+	if o == nil || !o.Enabled || o.DailyLimit != 5 || o.GPU == nil || o.GPU.Name != "gpu" || o.GPU.Model != "m" ||
+		len(o.GPUPeers) != 2 || o.GPUPeers[0] != "100.64.0.2" || o.GPUPeers[1] != "100.64.0.3" || o.Cloud != nil {
+		t.Fatalf("after first set: %+v", o)
+	}
+	if err := overflowCommand(ctx, []string{"set", "--config", path, "--gpu-model", "m2"}); err != nil {
+		t.Fatalf("second set: %v", err)
+	}
+	got, _ = config.Load(path)
+	o = got.Overflow
+	if !o.Enabled || o.DailyLimit != 5 || o.GPU.Model != "m2" || o.GPU.BaseURL != "https://example.com/v1" {
+		t.Fatalf("second set lost earlier settings: %+v", o)
+	}
+	if err := overflowCommand(ctx, []string{"set", "--config", path, "--remove-gpu"}); err == nil || !strings.Contains(err.Error(), "needs a gpu or cloud tier") {
+		t.Fatalf("removing the only tier while enabled: err = %v", err)
+	}
+	if err := overflowCommand(ctx, []string{"set", "--config", path, "--remove-gpu", "--enabled=false"}); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	got, _ = config.Load(path)
+	if got.Overflow.GPU != nil || got.Overflow.Enabled {
+		t.Fatalf("remove-gpu: %+v", got.Overflow)
+	}
+}

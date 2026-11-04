@@ -178,3 +178,36 @@ func TestPlatformReportsTheRuntimeOS(t *testing.T) {
 		t.Errorf("Platform() = %q, want %q", got, runtime.GOOS)
 	}
 }
+
+func TestEvaluateBlockedAndDegradedBranches(t *testing.T) {
+	ready := Observation{Platform: "linux", BackendMounted: true, BackendType: BackendJuiceFS, FreeBytes: 600 << 30,
+		AdminAvailable: true, SMBConfigured: true, SMBHealthy: true, Advertised: true}
+	for name, tc := range map[string]struct {
+		cfg    func(*Config)
+		obs    func(*Observation)
+		state  string
+		detail string
+	}{
+		"not entitled":        {func(c *Config) { c.Entitled = false }, nil, "blocked", "paid_entitlement_required"},
+		"invalid config":      {func(c *Config) { c.MountPath = "/" }, nil, "blocked", "invalid_coordinator_config"},
+		"unsupported os":      {nil, func(o *Observation) { o.Platform = "windows" }, "unsupported", "unsupported_platform"},
+		"wrong backend type":  {nil, func(o *Observation) { o.BackendType = "nfs" }, "blocked", "juicefs_mount_required"},
+		"insufficient space":  {nil, func(o *Observation) { o.FreeBytes = MinQuotaBytes - 1 }, "blocked", "insufficient_backend_space"},
+		"admin unavailable":   {nil, func(o *Observation) { o.AdminAvailable = false }, "action_required", "administrator_approval_required"},
+		"smb unhealthy":       {nil, func(o *Observation) { o.SMBHealthy = false }, "degraded", "smb_health_check_failed"},
+		"smb unhealthy coded": {nil, func(o *Observation) { o.SMBHealthy = false; o.LastErrorCode = "smb_auth" }, "degraded", "smb_auth"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, o := validConfig(), ready
+			if tc.cfg != nil {
+				tc.cfg(&c)
+			}
+			if tc.obs != nil {
+				tc.obs(&o)
+			}
+			if got := Evaluate(c, o); got.State != tc.state || got.DetailCode != tc.detail {
+				t.Fatalf("got %+v, want state=%s detail=%s", got, tc.state, tc.detail)
+			}
+		})
+	}
+}

@@ -358,3 +358,24 @@ func TestThermalSkipsPmsetOffDarwinAndReportsUnknownOnRunnerError(t *testing.T) 
 		t.Fatalf("thermal = %q after %d calls, want %q after 1", got, calls, ThermalUnknown)
 	}
 }
+
+func TestThermalAndStaticAreToolFreeOffDarwin(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin reads these through pmset and sysctl")
+	}
+	calls := 0
+	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return nil, errors.New("must not run")
+	}}
+	if got := c.thermal(context.Background()); got != "" {
+		t.Fatalf("thermal off darwin = %q, want empty", got)
+	}
+	info := c.readStatic(context.Background())
+	if calls != 0 {
+		t.Fatal("darwin-only tools ran off darwin", calls)
+	}
+	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
+		t.Fatalf("static info off darwin = %+v", info)
+	}
+}

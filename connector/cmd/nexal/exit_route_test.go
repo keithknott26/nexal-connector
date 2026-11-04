@@ -71,3 +71,25 @@ func TestExitRouteRequiresEnrolledHost(t *testing.T) {
 		t.Fatalf("unenrolled host not refused before credential access: %v", err)
 	}
 }
+
+func TestExitRouteAcceptsValidDisableFormsThenRequiresEnrollment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"--disable", "--tunnel", "100.64.0.2"},
+		{"--disable", "--target-device", "22222222-2222-4222-8222-222222222222"},
+		{"--disable", "--target-device", "AAAAAAAA-2222-4222-8222-222222222222"},
+	} {
+		err := exitRouteCommand(context.Background(), append(args, "--config", path))
+		if err == nil || !strings.Contains(err.Error(), "enroll this host") {
+			t.Fatalf("valid flags %v did not reach the enrollment check: %v", args, err)
+		}
+	}
+}

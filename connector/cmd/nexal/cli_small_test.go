@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -231,5 +232,31 @@ func TestIdentityCommandCreatesOnceThenReusesFingerprint(t *testing.T) {
 	c, err := config.Load(cfg)
 	if err != nil || c.Discovery == nil || c.Discovery.DeviceFingerprint != fp {
 		t.Fatalf("fingerprint not persisted to config: %v %+v", err, c.Discovery)
+	}
+}
+
+func TestPeerNamesCommandRejectsBadInputBeforeLoadingConfig(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json") // never created: validation must fail first
+	for name, args := range map[string][]string{
+		"no action":         {"--config", cfg},
+		"unknown action":    {"--config", cfg, "--action", "explode"},
+		"list with address": {"--config", cfg, "--action", "list", "--address", "100.64.0.1"},
+		"set no address":    {"--config", cfg, "--action", "set"},
+		"set bad address":   {"--config", cfg, "--action", "set", "--address", "10.0.0.1"},
+	} {
+		err := peerNamesCommand(context.Background(), args)
+		var ce *codedError
+		if !errors.As(err, &ce) || ce.code != "invalid_arguments" {
+			t.Errorf("%s: expected invalid_arguments, got %v", name, err)
+		}
+	}
+	if err := peerNamesCommand(context.Background(), []string{"--config", "relative.json", "--action", "list"}); err == nil {
+		t.Fatal("expected relative config path to be rejected")
+	}
+	if err := checkPeerNameArgs("list", ""); err != nil {
+		t.Fatalf("list without address should be valid: %v", err)
+	}
+	if err := checkPeerNameArgs("set", "100.64.0.1"); err != nil {
+		t.Fatalf("set with mesh address should be valid: %v", err)
 	}
 }

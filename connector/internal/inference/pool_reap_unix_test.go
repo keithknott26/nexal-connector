@@ -32,3 +32,26 @@ func TestStopAllTerminatesRunningProcess(t *testing.T) {
 		t.Fatal("process still running after stopAll")
 	}
 }
+
+// A server that ignores SIGTERM must still be gone after stopAll: the grace period expires and the
+// process is force-killed, otherwise it would keep the model and ring ports held.
+func TestStopAllForceKillsProcessIgnoringSIGTERM(t *testing.T) {
+	cmd := exec.Command("sh", "-c", `trap "" TERM; while :; do sleep 0.1; done`)
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start sh: %v", err)
+	}
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	time.Sleep(300 * time.Millisecond) // let the shell install its trap before SIGTERM arrives
+	got := stopAll([]int{cmd.Process.Pid})
+	if len(got) != 1 || got[0] != cmd.Process.Pid {
+		_ = cmd.Process.Kill()
+		t.Fatalf("stopAll returned %v, want [%d]", got, cmd.Process.Pid)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("process ignoring SIGTERM survived stopAll")
+	}
+}

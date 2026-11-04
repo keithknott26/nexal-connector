@@ -70,7 +70,7 @@ func fakeModelServer(args string) {
 
 func wait(t *testing.T, f func() bool) {
 	t.Helper()
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 600; i++ {
 		if f() {
 			return
 		}

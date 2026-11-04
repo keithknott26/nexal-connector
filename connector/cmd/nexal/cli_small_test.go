@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -258,5 +259,18 @@ func TestPeerNamesCommandRejectsBadInputBeforeLoadingConfig(t *testing.T) {
 	}
 	if err := checkPeerNameArgs("set", "100.64.0.1"); err != nil {
 		t.Fatalf("set with mesh address should be valid: %v", err)
+	}
+}
+
+func TestIdentityCommandRejectsBadArgsWithoutCreatingConfig(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	if err := identityCommand(context.Background(), []string{"--config", cfg, "stray"}); err == nil {
+		t.Fatal("expected a positional argument to be rejected")
+	}
+	if err := identityCommand(context.Background(), []string{"--config", "relative.json"}); err == nil {
+		t.Fatal("expected relative config path to be rejected")
+	}
+	if _, err := os.Stat(cfg); !os.IsNotExist(err) {
+		t.Fatalf("rejected invocation must not create the config: %v", err)
 	}
 }

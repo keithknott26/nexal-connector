@@ -409,3 +409,21 @@ func TestPairRejectsContradictoryAndUnknownArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestPairPollIntervalTightensTowardExpiryAndIsClamped(t *testing.T) {
+	cases := []struct {
+		remaining time.Duration
+		want      time.Duration
+	}{
+		{-time.Minute, pairPollMinInterval}, // already expired
+		{0, pairPollMinInterval},
+		{30 * time.Second, pairPollMinInterval}, // remaining/60 below the floor
+		{180 * time.Second, 3 * time.Second},    // proportional band
+		{time.Hour, pairPollMaxInterval},        // capped
+	}
+	for _, c := range cases {
+		if got := pairPollInterval(c.remaining); got != c.want {
+			t.Errorf("pairPollInterval(%v) = %v, want %v", c.remaining, got, c.want)
+		}
+	}
+}

@@ -660,3 +660,23 @@ func TestStopStartRefusalBranches(t *testing.T) {
 		}
 	}
 }
+
+// probeMesh must stop quietly when the manager shuts down mid-probe: a closing
+// manager is not evidence that the peer was dropped, so it must not flag the
+// sandbox as needing a fresh key.
+func TestProbeMeshStopsOnCloseWithoutAskingForKey(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, &fakeGuest{rep: GuestReply{Connected: false}})
+	put(m, &record{ID: "sb1", State: StateRunning, Kind: SandboxVM, Handle: Handle{Label: "l1"}})
+	m.probeMesh("sb1")
+
+	done := make(chan struct{})
+	go func() { m.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not wait out the cancelled probe promptly")
+	}
+	if snap(m, "sb1").AwaitKey {
+		t.Fatal("cancelled probe must not mark the sandbox as awaiting a key")
+	}
+}

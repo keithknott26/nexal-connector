@@ -108,3 +108,12 @@ func TestRootOwnedImmutablePathRejectsRelativeAndUncleanPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestGuestGuardReadyFalseWhenGuardNotInstalled(t *testing.T) {
+	if _, err := os.Lstat(guestGuardExecutable); err == nil {
+		t.Skip("expiry guard is installed on this machine")
+	}
+	if guestGuardReady(context.Background(), filepath.Join(t.TempDir(), "config.json"), config.GuestAccess{}) {
+		t.Fatal("guard reported ready although its root-owned executable is missing")
+	}
+}

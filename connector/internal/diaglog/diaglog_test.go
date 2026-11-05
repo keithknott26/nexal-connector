@@ -245,3 +245,36 @@ func TestLogDirIsUnderHomeAndPlatformSpecific(t *testing.T) {
 		t.Fatalf("LogDir() = %q, want %q", got, want)
 	}
 }
+
+func TestRotatingFileCloseReopensAppendsAndReportsOpenErrors(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "sub", "d.log")
+	r := NewRotatingFile(p, 1024)
+	if err := r.Close(); err != nil {
+		t.Fatalf("close before any write: %v", err)
+	}
+	if _, err := r.Write([]byte("one\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A write after Close reopens in append mode and keeps the earlier bytes.
+	if _, err := r.Write([]byte("two\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	if b, err := os.ReadFile(p); err != nil || string(b) != "one\ntwo\n" {
+		t.Fatalf("contents %q err %v", b, err)
+	}
+
+	// A parent path that is a regular file cannot be created as a directory.
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bad := NewRotatingFile(filepath.Join(blocker, "d.log"), 1024)
+	if n, err := bad.Write([]byte("x")); err == nil || n != 0 {
+		t.Fatalf("expected open error, got n=%d err=%v", n, err)
+	}
+}

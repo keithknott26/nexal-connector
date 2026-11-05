@@ -379,3 +379,25 @@ func TestThermalAndStaticAreToolFreeOffDarwin(t *testing.T) {
 		t.Fatalf("static info off darwin = %+v", info)
 	}
 }
+
+// Off macOS the collector must not shell out to macOS-only tools: static info
+// is just GOOS and the CPU count, and thermal reports "" (not "unknown").
+func TestReadStaticAndThermalOffDarwinRunNothing(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin runs the real macOS probes")
+	}
+	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("no command may run off darwin")
+		return nil, nil
+	}}
+	info := c.readStatic(context.Background())
+	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
+		t.Fatalf("readStatic = %+v, want OS %q and %d cores", info, runtime.GOOS, runtime.NumCPU())
+	}
+	if info.Serial != "" || info.Chip != "" || info.Name != "" {
+		t.Fatalf("readStatic leaked macOS-only fields: %+v", info)
+	}
+	if got := c.thermal(context.Background()); got != "" {
+		t.Fatalf("thermal off darwin = %q, want empty", got)
+	}
+}

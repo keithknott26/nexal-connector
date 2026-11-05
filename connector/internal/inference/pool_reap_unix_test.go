@@ -55,3 +55,18 @@ func TestStopAllForceKillsProcessIgnoringSIGTERM(t *testing.T) {
 		t.Fatal("process ignoring SIGTERM survived stopAll")
 	}
 }
+
+// With no matching server under the given inference directory, both reapers must find nothing
+// and must not signal any process (the test process itself is excluded by pid anyway).
+func TestReapOrphansWithNoMatchingServersReturnsNothing(t *testing.T) {
+	if _, err := exec.LookPath("/bin/ps"); err != nil {
+		t.Skip("/bin/ps not available")
+	}
+	dir := t.TempDir()
+	if got := ReapOrphanPoolServers(dir); len(got) != 0 {
+		t.Fatalf("ReapOrphanPoolServers = %v, want none", got)
+	}
+	if got := ReapOrphanServeServers(dir); len(got) != 0 {
+		t.Fatalf("ReapOrphanServeServers = %v, want none", got)
+	}
+}

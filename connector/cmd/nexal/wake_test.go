@@ -106,3 +106,24 @@ func TestWakeCommandHost(t *testing.T) {
 		t.Fatal("uncoded errors must keep the historic connector_error code")
 	}
 }
+
+func TestWakeCommandRejectsBadTunnelAndUnenrolledHost(t *testing.T) {
+	p := wakeTestConfig(t, "http://127.0.0.1:1")
+	ctx := context.Background()
+	err := wakeCommand(ctx, []string{"--config", p, "--tunnel", "8.8.8.8"})
+	if err == nil || !strings.Contains(err.Error(), "100.64.0.0/10") {
+		t.Fatalf("non-tunnel address not rejected: %v", err)
+	}
+	c, err := config.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.HostID = ""
+	if err := config.Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	err = wakeCommand(ctx, []string{"--config", p, "--host", "h2"})
+	if err == nil || !strings.Contains(err.Error(), "enroll this host") {
+		t.Fatalf("unenrolled host not rejected: %v", err)
+	}
+}

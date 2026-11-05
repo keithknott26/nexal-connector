@@ -152,6 +152,36 @@ func TestPickLANAddressPrefersIPv4PrivateOverLinkLocalAndULA(t *testing.T) {
 	}
 }
 
+type badAddr string
+
+func (badAddr) Network() string  { return "test" }
+func (a badAddr) String() string { return string(a) }
+
+func TestPickLANAddressSkipsInterfacesWithAddrErrorsAndUnparsableAddrs(t *testing.T) {
+	ifaces := []net.Interface{
+		{Name: "en0", Flags: net.FlagUp},
+		{Name: "en1", Flags: net.FlagUp},
+		{Name: "en2", Flags: net.FlagUp},
+	}
+	got := pickLANAddress(ifaces, func(i net.Interface) ([]net.Addr, error) {
+		switch i.Name {
+		case "en0":
+			return nil, errors.New("addrs failed")
+		case "en1":
+			return []net.Addr{badAddr("not-a-prefix")}, nil
+		}
+		return []net.Addr{&net.IPNet{IP: net.ParseIP("192.168.1.7"), Mask: net.CIDRMask(24, 32)}}, nil
+	})
+	if got != "192.168.1.7" {
+		t.Fatalf("got %q, want 192.168.1.7", got)
+	}
+	if got := pickLANAddress(ifaces[:2], func(i net.Interface) ([]net.Addr, error) {
+		return []net.Addr{badAddr("junk")}, nil
+	}); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
 func TestSerialFromProfiler(t *testing.T) {
 	hw := []byte("Hardware Overview:\n      Model Name: Mac mini\n      Serial Number (system): C07ABC123XYZ\n")
 	if got := profilerField(hw, "Serial Number (system)"); !validSerial(got) || got != "C07ABC123XYZ" {

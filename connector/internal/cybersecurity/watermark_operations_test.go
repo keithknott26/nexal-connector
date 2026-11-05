@@ -156,3 +156,32 @@ func TestRegenerationPreservesUnobservedAndUndeliveredEvidence(t *testing.T) {
 		t.Fatal("lost delivered incident on rotation/restart")
 	}
 }
+
+func TestFinishRotationRejectsInvalidJournalAndFailedVerification(t *testing.T) {
+	const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	good := digest([]byte("expected"))
+	cases := map[string]*watermarkRotation{
+		"bad id":       {"not-a-uuid", "replacement-not-a-uuid", good},
+		"foreign file": {id, "../escape", good},
+		"bad baseline": {id, "replacement-" + id, "short"},
+		"mismatch":     {id, "replacement-" + id, good},
+	}
+	for name, rotation := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := Canary{Directory: t.TempDir()}
+			if err := c.Configure(true); err != nil {
+				t.Fatal(err)
+			}
+			err := c.locked(func(root *os.Root, s *CanaryState) error {
+				s.Rotation = rotation
+				return finishRotation(root, s)
+			})
+			if err == nil {
+				t.Fatal("finishRotation accepted a bad journal or unverified replacement")
+			}
+		})
+	}
+	if err := finishRotation(nil, &CanaryState{}); err != nil {
+		t.Fatalf("nil rotation must be a no-op: %v", err)
+	}
+}

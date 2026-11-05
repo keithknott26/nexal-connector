@@ -36,3 +36,42 @@ func TestRequestBandwidthOpenRefusesAnAddressOutsideTheMesh(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestBandwidthOpenIDReturnsOnlyAValidRequestID(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{"valid", `{"requestId":"bw_1","delivered":true}`, "bw_1"},
+		{"missing", `{"delivered":true}`, ""},
+		{"invalid", `{"requestId":"bad id/../x","delivered":true}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(202)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c, _ := New(srv.URL, "t", true)
+			got, err := c.RequestBandwidthOpenID(context.Background(), "100.86.56.136")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("id = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRequestBandwidthOpenIDPropagatesServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	c, _ := New(srv.URL, "t", true)
+	id, err := c.RequestBandwidthOpenID(context.Background(), "100.86.56.136")
+	if err == nil || id != "" {
+		t.Fatalf("id = %q, err = %v; want an error and no id", id, err)
+	}
+}

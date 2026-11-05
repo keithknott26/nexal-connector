@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,5 +86,14 @@ func TestBundleReceiveRejectsSelfAsDonor(t *testing.T) {
 	err := bundleCommand(context.Background(), "bundle-receive", []string{"--from-host", bundleTestID, "--config", path})
 	if err == nil || !strings.Contains(err.Error(), "must be different enrolled hosts") {
 		t.Fatalf("self-transfer not refused: %v", err)
+	}
+}
+
+func TestPeerNamesCommandRefusesUnenrolledHostBeforeCredentialAccess(t *testing.T) {
+	path := bundleTestConfig(t, "")
+	err := peerNamesCommand(context.Background(), []string{"--config", path, "--action", "list"})
+	var ce *codedError
+	if !errors.As(err, &ce) || ce.code != "not_enrolled" {
+		t.Fatalf("expected not_enrolled before credential access, got %v", err)
 	}
 }

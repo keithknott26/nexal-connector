@@ -5,6 +5,8 @@ import (
 	"flag"
 	"strings"
 	"testing"
+
+	"nexal/connector/internal/lanshare"
 )
 
 func TestLanShareCommandRejectsMissingAndUnknownSubcommand(t *testing.T) {
@@ -65,6 +67,18 @@ func TestLanShareStatusAndSetupRejectStrayArgumentsBeforeTouchingTheHost(t *test
 		err := lanShareCommand(context.Background(), []string{tc.sub, "--path", "/tmp/x", "--name", "X", "stray"})
 		if err == nil || !strings.Contains(err.Error(), tc.usage) {
 			t.Fatalf("%s accepted a stray positional argument: %v", tc.sub, err)
+		}
+	}
+}
+
+func TestLanShareStatusAndSetupReportMissingMacOSTools(t *testing.T) {
+	if err := lanshare.Available(); err == nil {
+		t.Skip("macOS sharing tools present; this test covers hosts without them")
+	}
+	for _, sub := range []string{"status", "setup"} {
+		err := lanShareCommand(context.Background(), []string{sub, "--path", "/tmp/x", "--name", "X"})
+		if err == nil || !strings.Contains(err.Error(), "requires macOS") {
+			t.Fatalf("%s: want a requires-macOS error, got %v", sub, err)
 		}
 	}
 }

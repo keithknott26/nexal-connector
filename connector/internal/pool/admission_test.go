@@ -133,3 +133,36 @@ func TestAdmissionOverflowAndCapacityReduction(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAdmissionRenewExtendsLeaseAndRejectsInvalidTTL(t *testing.T) {
+	now := time.Date(2026, 9, 19, 1, 0, 0, 0, time.UTC)
+	a, err := NewAdmission(AdmissionOptions{Capacity: Resources{1000, 1000, 1000}, Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := a.Reserve("private", PrivateWork, Resources{100, 100, 100}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ttl := range []time.Duration{0, -time.Second, 25 * time.Hour} {
+		if _, err := a.Renew(r.ID, r.Epoch, ttl); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Renew ttl=%v = %v, want ErrInvalid", ttl, err)
+		}
+	}
+	if _, err := a.Renew(r.ID, r.Epoch+1, time.Minute); !errors.Is(err, ErrExpired) {
+		t.Fatalf("Renew with wrong epoch = %v, want ErrExpired", err)
+	}
+	now = now.Add(30 * time.Second)
+	renewed, err := a.Renew(r.ID, r.Epoch, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := now.Add(time.Hour); !renewed.ExpiresAt.Equal(want) {
+		t.Fatalf("renewed expiry = %v, want %v", renewed.ExpiresAt, want)
+	}
+	// Past the original one-minute deadline the renewed lease must still be valid.
+	now = now.Add(10 * time.Minute)
+	if err := a.Validate(r.ID, r.Epoch); err != nil {
+		t.Fatalf("renewed lease expired early: %v", err)
+	}
+}

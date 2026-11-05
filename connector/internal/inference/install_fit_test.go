@@ -47,19 +47,6 @@ func TestCheckLocalFit(t *testing.T) {
 	}
 }
 
-func TestSortedNames(t *testing.T) {
-	if got := sortedNames(nil); len(got) != 0 {
-		t.Fatalf("nil files: %v", got)
-	}
-	got := sortedNames([]PinFile{{Name: "weights.safetensors"}, {Name: "config.json"}, {Name: "tokenizer.json"}})
-	want := []string{"config.json", "tokenizer.json", "weights.safetensors"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v, want %v", got, want)
-		}
-	}
-}
-
 func TestSha256Hex(t *testing.T) {
 	// FIPS 180-2 test vectors.
 	for in, want := range map[string]string{

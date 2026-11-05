@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
 )
 
 // StateInstalledUnmeasured is the only state an install can produce: the files
@@ -91,13 +90,4 @@ func (m Manifest) Bytes() ([]byte, error) {
 func sha256Hex(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
-}
-
-func sortedNames(files []PinFile) []string {
-	n := make([]string, 0, len(files))
-	for _, f := range files {
-		n = append(n, f.Name)
-	}
-	sort.Strings(n)
-	return n
 }

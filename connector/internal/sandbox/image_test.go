@@ -55,6 +55,20 @@ func TestNormalizeArch(t *testing.T) {
 	}
 }
 
+func TestNormalizeArchTrimsAndPassesThroughUnknown(t *testing.T) {
+	for in, want := range map[string]string{
+		"x64":         "amd64",
+		"  AArch64\n": "arm64",
+		" X86_64 ":    "amd64",
+		" RISCV64 ":   "riscv64",
+		"":            "",
+	} {
+		if got := NormalizeArch(in); got != want {
+			t.Errorf("NormalizeArch(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestIsQCOW2(t *testing.T) {
 	dir := t.TempDir()
 	q := filepath.Join(dir, "q")

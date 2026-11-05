@@ -166,3 +166,49 @@ func TestAdmissionRenewExtendsLeaseAndRejectsInvalidTTL(t *testing.T) {
 		t.Fatalf("renewed lease expired early: %v", err)
 	}
 }
+
+func TestSetStorageUsageAndReleaseStorage(t *testing.T) {
+	a, err := NewAdmission(AdmissionOptions{Capacity: Resources{MemoryBytes: 1000, StorageBytes: 100}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		owner string
+		bytes int64
+	}{{"", 1}, {"s", -1}} {
+		if err := a.SetStorageUsage(c.owner, c.bytes); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("SetStorageUsage(%q,%d) = %v, want ErrInvalid", c.owner, c.bytes, err)
+		}
+	}
+	if err := a.SetStorageUsage("s1", 60); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetStorageUsage("s2", 50); !errors.Is(err, ErrQuota) {
+		t.Fatalf("over-quota growth = %v, want ErrQuota", err)
+	}
+	// Reconciling the same owner charges only the delta, and may shrink.
+	if err := a.SetStorageUsage("s1", 100); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SetStorageUsage("s1", 40); err != nil {
+		t.Fatal(err)
+	}
+	if _, used, _, _ := a.Snapshot(); used.StorageBytes != 40 {
+		t.Fatalf("used storage %d, want 40", used.StorageBytes)
+	}
+	// Growth is refused while paused, but shrinking still works.
+	a.Reclaim()
+	if err := a.SetStorageUsage("s1", 50); !errors.Is(err, ErrPaused) {
+		t.Fatalf("paused growth = %v, want ErrPaused", err)
+	}
+	if err := a.SetStorageUsage("s1", 30); err != nil {
+		t.Fatalf("paused shrink: %v", err)
+	}
+	// Release is idempotent and unknown owners are ignored.
+	a.ReleaseStorage("s1")
+	a.ReleaseStorage("s1")
+	a.ReleaseStorage("never-registered")
+	if _, used, _, _ := a.Snapshot(); used.StorageBytes != 0 {
+		t.Fatalf("used storage after release %d, want 0", used.StorageBytes)
+	}
+}

@@ -306,3 +306,20 @@ func TestProvisionPassesAHuggingFaceTokenToTheWorker(t *testing.T) {
 		t.Fatal("no token was given, so none must be sent")
 	}
 }
+
+func TestClientBaseAndHTTPDefaults(t *testing.T) {
+	c := &Client{}
+	if got := c.base(); got != DefaultAPI {
+		t.Fatalf("empty Base = %q, want DefaultAPI", got)
+	}
+	if hc := c.client(); hc == nil || hc.Timeout <= 0 {
+		t.Fatalf("default http client must have a timeout, got %+v", hc)
+	}
+	c = &Client{Base: "http://example.test/v1//", HTTP: http.DefaultClient}
+	if got := c.base(); got != "http://example.test/v1" {
+		t.Fatalf("base = %q, want trailing slashes trimmed", got)
+	}
+	if c.client() != http.DefaultClient {
+		t.Fatal("custom HTTP client must be returned as-is")
+	}
+}

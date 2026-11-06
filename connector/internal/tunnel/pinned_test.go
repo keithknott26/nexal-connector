@@ -100,3 +100,34 @@ func TestPinnedMatchesHostAgreesWithPinnedArchitecture(t *testing.T) {
 		t.Errorf("PinnedMatchesHost() = %v, want %v (pinned %q, host %q)", got, want, p.Architecture, runtime.GOARCH)
 	}
 }
+
+// A pin file that has drifted from the struct (extra field) or is not JSON at all
+// must fail loudly rather than be silently half-read.
+func TestParsePinnedRejectsUnknownFieldsAndMalformedJSON(t *testing.T) {
+	for name, raw := range map[string]string{
+		"unknown field":  `{"version":"1","architecture":"arm64","bogus":true}`,
+		"malformed json": `{"version":`,
+		"empty":          ``,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parsePinned(raw); err == nil {
+				t.Error("parsePinned accepted a bad pin file")
+			} else if !strings.Contains(err.Error(), "pinned.json") {
+				t.Errorf("error %q should name pinned.json", err)
+			}
+		})
+	}
+}
+
+// The accepting path of the reconciliation: a self-consistent pin passes, so the
+// rejection tests above cannot be passing merely because everything is rejected.
+func TestCheckArtifactAcceptsConsistentPin(t *testing.T) {
+	raw := `{"version":"1.2.3","architecture":"arm64","asset":"cloudflared-darwin-arm64.tgz",` +
+		`"sourceUrl":"https://github.com/cloudflare/cloudflared/releases/download/1.2.3/cloudflared-darwin-arm64.tgz"}`
+	if err := checkArtifact(raw); err != nil {
+		t.Errorf("consistent pin rejected: %v", err)
+	}
+	if err := checkArtifact(strings.Replace(raw, `"arm64","asset"`, `"amd64","asset"`, 1)); err == nil {
+		t.Error("non-arm64 pin accepted")
+	}
+}

@@ -100,6 +100,15 @@ func TestOrphanServeServers(t *testing.T) {
 	}
 }
 
+func TestOrphanServeServersEmptyAndMalformedInput(t *testing.T) {
+	d := "/Users/k/Library/Application Support/Nexal/inference"
+	for name, ps := range map[string]string{"empty": "", "garbage only": "garbage\nmore garbage", "short lines": "1 1\n2"} {
+		if got := orphanServeServers(ps, d, 1); len(got) != 0 {
+			t.Errorf("%s: picked %v, want none", name, got)
+		}
+	}
+}
+
 func TestPoolUsesPipeline(t *testing.T) {
 	d := poolDir(t)
 	cfg := func(modelType string) {

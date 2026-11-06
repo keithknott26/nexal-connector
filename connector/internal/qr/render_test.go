@@ -117,3 +117,19 @@ func TestRowsMatchTheModuleMatrix(t *testing.T) {
 		}
 	}
 }
+
+// A caller-supplied Quiet overrides the default margin; zero or negative falls
+// back to the standard QuietZone rather than producing a flush, unscannable code.
+func TestCustomQuietMarginIsHonouredAndNonPositiveFallsBack(t *testing.T) {
+	code := testCode(t)
+	lines := strings.Split(strings.TrimRight(code.Terminal(Style{ASCII: true, Quiet: 2}), "\n"), "\n")
+	if want := code.Size + 2*2; len(lines) != want {
+		t.Fatalf("Quiet=2 gave %d lines, want %d", len(lines), want)
+	}
+	for _, q := range []int{0, -3} {
+		got := code.Terminal(Style{ASCII: true, Quiet: q})
+		if want := code.Terminal(Style{ASCII: true}); got != want {
+			t.Fatalf("Quiet=%d did not fall back to the default quiet zone", q)
+		}
+	}
+}

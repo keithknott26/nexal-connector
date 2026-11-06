@@ -259,6 +259,17 @@ func TestDescribeOpenFailureExplainsConflict(t *testing.T) {
 	}
 }
 
+func TestDescribeOpenFailureExplainsUnknownHostAndPassesOthersThrough(t *testing.T) {
+	got := describeOpenFailure(errors.New("coordinator rejected request (HTTP 404)"))
+	if !strings.Contains(got, "does not know a host") || !strings.HasPrefix(got, "coordinator rejected request (HTTP 404)") {
+		t.Fatal(got)
+	}
+	const plain = "connection reset by peer"
+	if got := describeOpenFailure(errors.New(plain)); got != plain {
+		t.Fatalf("unrelated errors must pass through unchanged, got %q", got)
+	}
+}
+
 // Hosts are spread across the startup window, the same address always lands in the same place, and
 // the periodic delay drifts within +/-10%.
 func TestSchedulesAreStaggered(t *testing.T) {

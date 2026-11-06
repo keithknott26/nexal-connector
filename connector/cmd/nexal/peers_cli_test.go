@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,5 +60,20 @@ func TestPeersRevokeUnknownFingerprintIsRefused(t *testing.T) {
 	err := peersCommand(context.Background(), []string{"revoke", "--config", cfg, "--fingerprint", strings.Repeat("b", 64)})
 	if err == nil {
 		t.Fatal("revoking a peer that was never enrolled must fail, not report success")
+	}
+}
+
+func TestSelfIdentityMissingConfigErrorsWithoutMintingAnything(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	if _, err := selfIdentity(context.Background(), cfg); err == nil {
+		t.Fatal("expected an error when no configuration exists")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("selfIdentity must not create files, found %d entries", len(entries))
 	}
 }

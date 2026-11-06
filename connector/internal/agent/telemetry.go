@@ -98,6 +98,11 @@ func ParseFreeMemory(b []byte) (uint64, error) {
 	// Deliberately do not count compressed, active, purgeable or swap memory.
 	return (free + spec) * page, nil
 }
+
+// MacProbe samples owner idle time and memory on macOS. It fails safe: off
+// macOS, or when any command or parse fails, it reports an unknown reading with
+// OwnerActive true so callers never treat the owner as away on bad data.
+// idleThreshold is the HID idle time, in seconds, at which the owner counts as away.
 func MacProbe(idleThreshold uint64) Probe {
 	return func(ctx context.Context) Telemetry {
 		t := Telemetry{OwnerActive: true}

@@ -680,3 +680,41 @@ func TestProbeMeshStopsOnCloseWithoutAskingForKey(t *testing.T) {
 		t.Fatal("cancelled probe must not mark the sandbox as awaiting a key")
 	}
 }
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not reached in time")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A VM whose mesh never reconnects after a wake is flagged as needing a fresh key.
+func TestProbeMeshFlagsAwaitKeyWhenMeshNeverReturns(t *testing.T) {
+	old := meshProbeInterval
+	meshProbeInterval = time.Millisecond
+	t.Cleanup(func() { meshProbeInterval = old })
+	m := newTestManager(t, &fakeHyp{}, nil, &fakeGuest{rep: GuestReply{Connected: false}})
+	put(m, &record{ID: "sb1", State: StateRunning, Kind: SandboxVM, Handle: Handle{Label: "l1"}})
+	m.probeMesh("sb1")
+	waitFor(t, func() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.boxes["sb1"].AwaitKey })
+}
+
+// A reconnected mesh ends the probe without asking for a key.
+func TestProbeMeshHealthyMeshDoesNotAskForKey(t *testing.T) {
+	old := meshProbeInterval
+	meshProbeInterval = time.Millisecond
+	t.Cleanup(func() { meshProbeInterval = old })
+	g := &fakeGuest{rep: GuestReply{Connected: true}}
+	m := newTestManager(t, &fakeHyp{}, nil, g)
+	put(m, &record{ID: "sb1", State: StateRunning, Kind: SandboxVM, Handle: Handle{Label: "l1"}})
+	m.probeMesh("sb1")
+	waitFor(t, func() bool { g.mu.Lock(); defer g.mu.Unlock(); return len(g.cmds) > 0 })
+	m.Close() // waits for the probe goroutine
+	if snap(m, "sb1").AwaitKey {
+		t.Fatal("healthy mesh must not mark the sandbox as awaiting a key")
+	}
+}

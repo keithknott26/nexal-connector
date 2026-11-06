@@ -602,6 +602,10 @@ func (m *Manager) onGone(ctx context.Context, id string) {
 	}()
 }
 
+// meshProbeInterval is the delay between probeMesh checks (a variable so tests
+// can shorten it).
+var meshProbeInterval = 15 * time.Second
+
 // probeMesh checks, for about 90 s after a wake, that a VM's mesh connection is
 // back; if it never is, the peer was dropped and a fresh key is requested.
 func (m *Manager) probeMesh(id string) {
@@ -612,7 +616,7 @@ func (m *Manager) probeMesh(id string) {
 			select {
 			case <-m.ctx.Done():
 				return
-			case <-time.After(15 * time.Second):
+			case <-time.After(meshProbeInterval):
 			}
 			m.mu.Lock()
 			r := m.boxes[id]

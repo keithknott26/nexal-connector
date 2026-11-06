@@ -41,3 +41,23 @@ func TestPeersListRejectsPositionalArgsAndRelativeConfig(t *testing.T) {
 		t.Fatal("expected relative config path to be rejected")
 	}
 }
+
+func TestPeersListEmptyRegistryReportsZeroMembers(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	var err error
+	out := captureStdout(t, func() { err = peersCommand(context.Background(), []string{"list", "--config", cfg}) })
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(out, `"count":0`) || !strings.Contains(out, `"members":[]`) {
+		t.Fatalf("expected an empty member list, got %q", out)
+	}
+}
+
+func TestPeersRevokeUnknownFingerprintIsRefused(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	err := peersCommand(context.Background(), []string{"revoke", "--config", cfg, "--fingerprint", strings.Repeat("b", 64)})
+	if err == nil {
+		t.Fatal("revoking a peer that was never enrolled must fail, not report success")
+	}
+}

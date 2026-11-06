@@ -97,3 +97,14 @@ func TestPeerNamesCommandRefusesUnenrolledHostBeforeCredentialAccess(t *testing.
 		t.Fatalf("expected not_enrolled before credential access, got %v", err)
 	}
 }
+
+func TestBundleSendRequiresEnrolledHost(t *testing.T) {
+	path := bundleTestConfig(t, "")
+	err := bundleCommand(context.Background(), "bundle-send", []string{
+		"--transfer", bundleTestID, "--bundle", "/tmp/b",
+		"--receiver-key-sha256", strings.Repeat("a", 64), "--config", path,
+	})
+	if err == nil || !strings.Contains(err.Error(), "enroll this Mac") {
+		t.Fatalf("unenrolled sender not refused before credential access: %v", err)
+	}
+}

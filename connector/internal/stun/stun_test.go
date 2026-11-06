@@ -686,3 +686,41 @@ func TestUDPExchangerBoundsReplySize(t *testing.T) {
 		t.Fatalf("err = %v, want ErrResponseSize", err)
 	}
 }
+
+func TestObservePropagatesExchangerConstructionFailure(t *testing.T) {
+	boom := errors.New("bind failed")
+	c := &Client{Servers: []string{"a.example:3478"},
+		NewExchanger: func() (Exchanger, error) { return nil, boom }}
+	if _, err := c.Observe(context.Background()); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the constructor error", err)
+	}
+}
+
+// A flood of datagrams that never carry our transaction id must end the query
+// after maxDatagramsPerExchange attempts rather than hold the goroutine, and the
+// observation must record ErrNoMatch plus the unmatched count.
+func TestObserveGivesUpAfterBoundedUnmatchedDatagrams(t *testing.T) {
+	_, other, err := NewBindingRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeExchanger{respond: func(string, []byte) ([]byte, error) {
+		return EncodeBindingSuccess(other, netip.MustParseAddrPort("192.0.2.1:1"), true), nil
+	}}
+	c := &Client{Servers: []string{"a.example:3478"},
+		NewExchanger: func() (Exchanger, error) { return fake, nil }}
+	result, err := c.Observe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reachable {
+		t.Fatal("spoofed-only replies must not count as reachable")
+	}
+	obs := result.Observations[0]
+	if obs.Unmatched != maxDatagramsPerExchange || obs.Error != ErrNoMatch.Error() {
+		t.Fatalf("observation = %+v, want %d unmatched and ErrNoMatch", obs, maxDatagramsPerExchange)
+	}
+	if len(fake.calls) != maxDatagramsPerExchange {
+		t.Fatalf("exchanges = %d, want %d", len(fake.calls), maxDatagramsPerExchange)
+	}
+}

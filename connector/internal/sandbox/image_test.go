@@ -91,6 +91,20 @@ func TestIsQCOW2(t *testing.T) {
 	}
 }
 
+func TestIsQCOW2ShortAndMissingFiles(t *testing.T) {
+	dir := t.TempDir()
+	short := filepath.Join(dir, "short")
+	if err := os.WriteFile(short, []byte{'Q', 'F'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := IsQCOW2(short); err != nil || got {
+		t.Fatalf("truncated magic = %v, %v; want false, nil", got, err)
+	}
+	if got, err := IsQCOW2(filepath.Join(dir, "missing")); err == nil || got {
+		t.Fatalf("missing file = %v, %v; want false and an error", got, err)
+	}
+}
+
 func TestParseImageDigest(t *testing.T) {
 	a, b := strings.Repeat("a", 64), strings.Repeat("b", 128)
 	d, err := ParseImageDigest(" SHA256:" + strings.ToUpper(a))

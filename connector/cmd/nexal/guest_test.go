@@ -71,3 +71,25 @@ func TestGuestRedeemPersistsLeaseBeforeAnyActivation(t *testing.T) {
 		t.Fatal("guest joined without expiry guard")
 	}
 }
+
+func TestExpireGuestRevokesLocallyEvenWhenTunnelDisconnectFails(t *testing.T) {
+	// With no nexal-network on PATH the disconnect fails; expiry must still
+	// be persisted and the pending disconnect reported to the caller.
+	t.Setenv("PATH", t.TempDir())
+	now := time.Now().UTC()
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	cfg := config.Config{Version: 1, Coordinator: "https://example.invalid", Name: "Guest Mac", Listen: "127.0.0.1:8788", Development: true, DevSecrets: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+	cfg.GuestAccess = &config.GuestAccess{GrantID: "grant-1", MeshHostname: "nexal-guest-grant-1", ReceivedAt: now.Format(time.RFC3339Nano), AccessExpiresAt: now.Add(time.Hour).Format(time.RFC3339Nano), InviterEmail: "owner@example.com"}
+	cfg.Enrollment = &config.EnrollmentState{SchemaVersion: 2, Status: "provisioning"}
+	err := expireGuest(context.Background(), path, &cfg)
+	if err == nil || !strings.Contains(err.Error(), "disconnect is still pending") {
+		t.Fatalf("expected pending-disconnect error, got %v", err)
+	}
+	saved, loadErr := config.Load(path)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if saved.GuestAccess == nil || !saved.GuestAccess.Expired || !saved.Paused || saved.Enrollment == nil || saved.Enrollment.Status != "revoked" {
+		t.Fatalf("expiry not persisted: %+v", saved)
+	}
+}

@@ -718,3 +718,29 @@ func TestProbeMeshHealthyMeshDoesNotAskForKey(t *testing.T) {
 		t.Fatal("healthy mesh must not mark the sandbox as awaiting a key")
 	}
 }
+
+func TestReconcileFailsInterruptedProvisioningAndStopping(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	put(m, &record{ID: "p", State: StateProvisioning, Kind: SandboxVM, Lifecycle: LifecycleEphemeral})
+	put(m, &record{ID: "s", State: StateStopping, Kind: SandboxVM, Lifecycle: LifecyclePersistent})
+	m.reconcile(context.Background(), "p", 0)
+	m.reconcile(context.Background(), "s", 0)
+	for _, id := range []string{"p", "s"} {
+		if r := snap(m, id); r.State != StateFailed {
+			t.Fatalf("%s: interrupted work must fail after a restart: %+v", id, r)
+		}
+	}
+}
+
+func TestReconcileLeavesBusyAwaitingAndTerminalSandboxesAlone(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, nil, nil)
+	put(m, &record{ID: "busy", State: StateProvisioning, busy: true})
+	put(m, &record{ID: "await", State: StateProvisioning, AwaitKey: true})
+	put(m, &record{ID: "failed", State: StateFailed})
+	for _, id := range []string{"busy", "await", "failed", "missing"} {
+		m.reconcile(context.Background(), id, 0)
+	}
+	if snap(m, "busy").State != StateProvisioning || snap(m, "await").State != StateProvisioning || snap(m, "failed").State != StateFailed {
+		t.Fatal("busy, key-awaiting and terminal sandboxes must not be touched")
+	}
+}

@@ -2,6 +2,7 @@ package bandwidth
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"testing"
 	"time"
@@ -266,5 +267,25 @@ func TestTestAllPeersRecordsSuccessfulMeasurement(t *testing.T) {
 	}
 	if r.ObservedMax() < res.DownloadMbps {
 		t.Errorf("ObservedMax %v below measured %v", r.ObservedMax(), res.DownloadMbps)
+	}
+}
+
+func TestRunReturnsWhenCancelledBeforeFirstTest(t *testing.T) {
+	r := NewRunner(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		r.Run(ctx, staticProvider{})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after context cancellation during startup delay")
+	}
+	if len(r.Results()) != 0 {
+		t.Errorf("no test should have run, got %v", r.Results())
 	}
 }

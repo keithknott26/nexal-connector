@@ -117,3 +117,19 @@ func TestGuestGuardReadyFalseWhenGuardNotInstalled(t *testing.T) {
 		t.Fatal("guard reported ready although its root-owned executable is missing")
 	}
 }
+
+func TestRootOwnedImmutablePathRejectsMissingAndWritableComponents(t *testing.T) {
+	// A missing leaf under a root-owned directory must not be trusted.
+	if rootOwnedImmutablePath("/usr/nexal-test-missing-helper-path") {
+		t.Fatal("missing path accepted as an immutable root-owned helper")
+	}
+	// A world-writable ancestor (even a sticky /tmp) lets another user swap the
+	// helper, so the whole chain must be refused.
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if rootOwnedImmutablePath(dir) {
+		t.Fatal("group/world-writable directory accepted as a root-owned path")
+	}
+}

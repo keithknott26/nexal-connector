@@ -88,3 +88,35 @@ func TestSocketGuestChannelRefusalAndBadIP(t *testing.T) {
 		t.Fatal("no channel must error")
 	}
 }
+
+// exchangeGuest treats the guest as untrusted: it must reject a channel that closes
+// silently or sends garbage, truncate an oversized error, and name a refusal that
+// carries no reason.
+func TestExchangeGuestHandlesUntrustedReplies(t *testing.T) {
+	run := func(reply string) (GuestReply, error) {
+		host, guest := net.Pipe()
+		defer host.Close()
+		go func() {
+			defer guest.Close()
+			_, _ = bufio.NewReader(guest).ReadBytes('\n')
+			if reply != "" {
+				_, _ = guest.Write([]byte(reply))
+			}
+		}()
+		return exchangeGuest(host, GuestCommand{Op: GuestOpMeshStatus})
+	}
+
+	if _, err := run(""); err == nil || !strings.Contains(err.Error(), "closed without a reply") {
+		t.Fatalf("silent close = %v, want closed-without-reply error", err)
+	}
+	if _, err := run("not json\n"); err == nil || !strings.Contains(err.Error(), "invalid reply") {
+		t.Fatalf("garbage reply = %v, want invalid-reply error", err)
+	}
+	if _, err := run(`{"ok":false}` + "\n"); err == nil || !strings.Contains(err.Error(), "guest refused the command") {
+		t.Fatalf("reasonless refusal = %v, want default refusal text", err)
+	}
+	rep, err := run(`{"ok":false,"error":"` + strings.Repeat("x", 500) + `"}` + "\n")
+	if err == nil || len(rep.Error) != 200 {
+		t.Fatalf("long error: len=%d err=%v, want truncated to 200", len(rep.Error), err)
+	}
+}

@@ -431,3 +431,20 @@ func TestReadStaticAndThermalOffDarwinRunNothing(t *testing.T) {
 		t.Fatalf("thermal off darwin = %q, want empty", got)
 	}
 }
+
+func TestReadStaticAndThermalOffDarwinSkipCommands(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin shells out to system tools")
+	}
+	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("no command may run off darwin")
+		return nil, nil
+	}}
+	info := c.readStatic(context.Background())
+	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
+		t.Fatalf("unexpected static info: %+v", info)
+	}
+	if got := c.thermal(context.Background()); got != "" {
+		t.Fatalf("thermal = %q, want empty off darwin", got)
+	}
+}

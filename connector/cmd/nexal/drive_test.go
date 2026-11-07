@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"nexal/connector/internal/config"
+	"nexal/connector/internal/drive"
 )
 
 func TestDriveCommandDispatchErrors(t *testing.T) {
@@ -147,5 +148,41 @@ func TestDriveCommandsRefuseWhenNotEnrolled(t *testing.T) {
 				t.Fatalf("error = %v, want not-enrolled refusal", err)
 			}
 		})
+	}
+}
+
+// An invalid key and an oversize file are both refused from the arguments and a
+// stat alone: neither reads the file nor touches the configuration, which does
+// not exist here.
+func TestDrivePutRefusesInvalidKeyAndOversizeFileBeforeConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	small := filepath.Join(dir, "small.txt")
+	if err := os.WriteFile(small, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	big := filepath.Join(dir, "big.bin")
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sparse: Truncate allocates no data blocks.
+	if err := f.Truncate(drive.MaxPlaintextBytes + 1); err != nil {
+		f.Close()
+		t.Skipf("cannot create sparse file: %v", err)
+	}
+	f.Close()
+
+	err = drivePut(context.Background(), []string{"--config", cfg, "--key", "../escape", "--file", small})
+	if err == nil || strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("invalid key should fail ValidateKey, got %v", err)
+	}
+	if err := drive.ValidateKey("../escape"); err == nil {
+		t.Fatal("test premise broken: ../escape must be an invalid drive key")
+	}
+
+	err = drivePut(context.Background(), []string{"--config", cfg, "--key", "a/b", "--file", big})
+	if err == nil || !strings.Contains(err.Error(), "Chunked upload is not implemented") {
+		t.Fatalf("oversize file not refused on stat: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -42,5 +43,57 @@ func TestPeerNamesRefusesBadArguments(t *testing.T) {
 		if err := runPeerNames(context.Background(), api, "host_1", c.action, c.address, strings.NewReader(c.input), &bytes.Buffer{}); err == nil {
 			t.Fatalf("%+v: expected an error", c)
 		}
+	}
+}
+
+type scriptedPeerNames struct {
+	body json.RawMessage
+	err  error
+}
+
+func (s scriptedPeerNames) PeerNames(context.Context, string) (json.RawMessage, error) {
+	return s.body, s.err
+}
+func (s scriptedPeerNames) SetPeerName(context.Context, string, string, string) (json.RawMessage, error) {
+	return s.body, s.err
+}
+
+func TestPeerNamesListWritesBodyAndDefaultsEmptyToObject(t *testing.T) {
+	var out bytes.Buffer
+	api := scriptedPeerNames{body: json.RawMessage(`{"names":[{"address":"100.86.1.1","name":"Lab"}]}`)}
+	if err := runPeerNames(context.Background(), api, "host_1", "list", "", strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != `{"names":[{"address":"100.86.1.1","name":"Lab"}]}`+"\n" {
+		t.Fatalf("unexpected list output %q", got)
+	}
+	out.Reset()
+	if err := runPeerNames(context.Background(), scriptedPeerNames{}, "host_1", "list", "", strings.NewReader(""), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "{}\n" {
+		t.Fatalf("empty body must print {}, got %q", got)
+	}
+}
+
+func TestPeerNamesPropagatesAPIErrorWithoutWriting(t *testing.T) {
+	boom := errors.New("coordinator unreachable")
+	for _, action := range []string{"list", "set"} {
+		var out bytes.Buffer
+		address := ""
+		if action == "set" {
+			address = "100.86.1.1"
+		}
+		err := runPeerNames(context.Background(), scriptedPeerNames{err: boom}, "host_1", action, address, strings.NewReader("Lab\n"), &out)
+		if !errors.Is(err, boom) || out.Len() != 0 {
+			t.Fatalf("%s: err=%v output=%q", action, err, out.String())
+		}
+	}
+}
+
+func TestPeerNamesInvalidNameHasStableCode(t *testing.T) {
+	err := runPeerNames(context.Background(), scriptedPeerNames{}, "host_1", "set", "100.86.1.1", strings.NewReader("bad\x07"), &bytes.Buffer{})
+	if errorCode(err) != "invalid_name" {
+		t.Fatalf("expected invalid_name, got %v", err)
 	}
 }

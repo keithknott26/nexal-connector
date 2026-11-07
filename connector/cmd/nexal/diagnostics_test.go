@@ -105,3 +105,19 @@ func TestDiagnosticsBundleRedactsSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveBundleSourcesWiresEverySourceAndLogDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	src := liveBundleSources(filepath.Join(home, "config.json"))
+	if src.Now == nil || src.Status == nil || src.Runtime == nil || src.Wake == nil || src.Host == nil {
+		t.Fatalf("live bundle sources left a source unset: %+v", src)
+	}
+	want, err := diaglog.LogDir()
+	if err != nil || src.LogDir != want || !strings.HasPrefix(src.LogDir, home) {
+		t.Fatalf("LogDir = %q, want %q under %q (err %v)", src.LogDir, want, home, err)
+	}
+	if d := time.Since(src.Now()); d < 0 || d > time.Minute {
+		t.Fatalf("Now is not the wall clock: %v", d)
+	}
+}

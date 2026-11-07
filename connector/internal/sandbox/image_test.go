@@ -338,3 +338,29 @@ func TestEnsureQCOW2Conversion(t *testing.T) {
 		t.Fatalf("raw not reused: calls=%d err=%v", ok.calls, err)
 	}
 }
+
+func TestHashFileMatchesStdlibDigestsAndReportsSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "blob")
+	data := []byte("nexal image bytes")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s256 := sha256.Sum256(data)
+	s512 := sha512.Sum512(data)
+	for algo, want := range map[string]string{"sha256": hex.EncodeToString(s256[:]), "sha512": hex.EncodeToString(s512[:])} {
+		got, n, err := hashFile(path, ImageDigest{Algo: algo})
+		if err != nil || got != want || n != int64(len(data)) {
+			t.Fatalf("%s: got=%q n=%d err=%v", algo, got, n, err)
+		}
+	}
+}
+
+func TestHashFileErrorsOnMissingFileAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := hashFile(filepath.Join(dir, "missing"), ImageDigest{Algo: "sha256"}); err == nil {
+		t.Fatal("hashFile of a missing file must fail")
+	}
+	if _, _, err := hashFile(dir, ImageDigest{Algo: "sha256"}); err == nil {
+		t.Fatal("hashFile of a directory must fail")
+	}
+}

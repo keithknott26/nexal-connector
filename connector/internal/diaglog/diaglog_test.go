@@ -278,3 +278,29 @@ func TestRotatingFileCloseReopensAppendsAndReportsOpenErrors(t *testing.T) {
 		t.Fatalf("expected open error, got n=%d err=%v", n, err)
 	}
 }
+
+func TestSetEnabledReportsFilesystemErrorsWithoutLeakingPaths(t *testing.T) {
+	root := t.TempDir()
+
+	// The configuration directory cannot be created because a file is in the way.
+	blocker := filepath.Join(root, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := SetEnabled(filepath.Join(blocker, "config.json"), true)
+	if err == nil || err.Error() != "cannot create the configuration directory" {
+		t.Fatalf("enable under a file: err = %v", err)
+	}
+
+	// The flag path is a non-empty directory, so it can be neither written nor removed.
+	cfg := filepath.Join(root, "config.json")
+	if err := os.MkdirAll(filepath.Join(FlagPath(cfg), "child"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetEnabled(cfg, true); err == nil || err.Error() != "cannot write the diagnostics flag" {
+		t.Fatalf("enable over a directory: err = %v", err)
+	}
+	if err := SetEnabled(cfg, false); err == nil || err.Error() != "cannot remove the diagnostics flag" {
+		t.Fatalf("disable over a directory: err = %v", err)
+	}
+}

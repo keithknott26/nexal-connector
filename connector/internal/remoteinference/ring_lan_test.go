@@ -3,6 +3,7 @@ package remoteinference
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -199,4 +200,33 @@ func TestRingPlanCloseClosesEveryRelay(t *testing.T) {
 	}
 	l.Close()
 	(&ringPlan{}).close() // no relays: nothing to do
+}
+
+// A LAN address this Mac cannot bind must not fail the plan: the mesh relay still serves the pool, the LAN peer is
+// still listed, and the failure is logged so the owner can see why the other Macs fall back to the neXal address.
+func TestPlanRingKeepsMeshRelayWhenTheLANCannotBeListenedOn(t *testing.T) {
+	var logs strings.Builder
+	r := &Runner{
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		LAN:    func() []string { return []string{"192.168.1.5"} },
+	}
+	_, portStr, _ := net.SplitHostPort(freeAddr(t))
+	port, _ := strconv.Atoi(portStr)
+	ring := []string{"100.86.0.1:" + portStr, "100.86.0.2:8011"}
+	// 192.0.2.1 (TEST-NET-1) is never assigned locally, so the LAN relay cannot bind; 0.0.0.0 lets the mesh relay bind.
+	lan := []string{"192.0.2.1:" + portStr, "192.168.1.20:8011"}
+	plan, err := r.planRing(context.Background(), ring, lan, 0, port, "0.0.0.0")
+	if err != nil {
+		t.Fatalf("planRing failed on an unbindable LAN address: %v", err)
+	}
+	defer plan.close()
+	if len(plan.relays) != 1 {
+		t.Fatalf("relays %d, want only the mesh relay", len(plan.relays))
+	}
+	if want := "192.168.1.20:8011"; plan.hosts[1] != want {
+		t.Fatalf("hosts %v, want peer on its LAN address %s", plan.hosts, want)
+	}
+	if !strings.Contains(logs.String(), "cannot listen on the LAN") {
+		t.Fatalf("no warning logged: %q", logs.String())
+	}
 }

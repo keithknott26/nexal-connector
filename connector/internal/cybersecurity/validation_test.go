@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +151,31 @@ func TestValidationHandlerRejectsMalformedRequestsAndSurfacesReportFailure(t *te
 	}
 	if code := do("POST", "/validation/"+r.ID, ""); code != 404 || reports != 1 {
 		t.Fatalf("nonce reusable after failed report: code=%d reports=%d", code, reports)
+	}
+}
+
+func TestValidateLocalRejectsNetworkModuleAndPropagatesReportFailure(t *testing.T) {
+	net := validationGrant()
+	net.Module = "network_canary"
+	net.TargetIP = "100.86.1.2"
+	executed, reason, err := (Canary{Directory: t.TempDir()}).ValidateLocal(context.Background(), net, func(context.Context, Event) error { t.Fatal("reported for a network exercise"); return nil })
+	if err == nil || executed || reason != "execution_failed" {
+		t.Fatalf("network module: executed=%v reason=%q err=%v", executed, reason, err)
+	}
+
+	dir := t.TempDir()
+	reportErr := errors.New("evidence store down")
+	executed, reason, err = (Canary{Directory: dir}).ValidateLocal(context.Background(), validationGrant(), func(context.Context, Event) error { return reportErr })
+	if !errors.Is(err, reportErr) || !executed || reason != "completed" {
+		t.Fatalf("report failure: executed=%v reason=%q err=%v", executed, reason, err)
+	}
+	if files, _ := os.ReadDir(dir); len(files) != 0 {
+		t.Fatal("artifact left behind after report failure")
+	}
+
+	missing := filepath.Join(t.TempDir(), "absent")
+	executed, reason, err = (Canary{Directory: missing}).ValidateLocal(context.Background(), validationGrant(), func(context.Context, Event) error { return nil })
+	if err == nil || executed || reason != "execution_failed" {
+		t.Fatalf("missing directory: executed=%v reason=%q err=%v", executed, reason, err)
 	}
 }

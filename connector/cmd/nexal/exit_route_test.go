@@ -93,3 +93,14 @@ func TestExitRouteAcceptsValidDisableFormsThenRequiresEnrollment(t *testing.T) {
 		}
 	}
 }
+
+func TestExitRouteReportsFlagParseAndMissingConfigErrors(t *testing.T) {
+	if err := exitRouteCommand(context.Background(), []string{"--no-such-flag"}); err == nil {
+		t.Fatal("unknown flag was accepted")
+	}
+	missing := filepath.Join(t.TempDir(), "private", "config.json")
+	err := exitRouteCommand(context.Background(), []string{"--tunnel", "100.64.0.2", "--config", missing})
+	if err == nil || strings.Contains(err.Error(), "enroll this host") {
+		t.Fatalf("missing config was not reported as a load error: %v", err)
+	}
+}

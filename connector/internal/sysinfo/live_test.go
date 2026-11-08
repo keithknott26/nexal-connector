@@ -227,3 +227,25 @@ func TestParseBackupSuffixFutureAndUTC(t *testing.T) {
 		t.Errorf("empty input accepted: %q", got)
 	}
 }
+
+func TestIdlePatternMatchesOnlyBareHIDIdleTimeLine(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"indented line", "  \"HIDIdleTime\" = 42\n", "42"},
+		{"other key ignored", "  \"HIDIdleTimeX\" = 42\n", ""},
+		{"non-numeric ignored", "  \"HIDIdleTime\" = abc\n", ""},
+		{"trailing junk ignored", "  \"HIDIdleTime\" = 42 extra\n", ""},
+		{"more than 20 digits ignored", "  \"HIDIdleTime\" = 123456789012345678901\n", ""},
+	}
+	for _, tc := range cases {
+		m := idlePattern.FindSubmatch([]byte(tc.in))
+		got := ""
+		if len(m) == 2 {
+			got = string(m[1])
+		}
+		if got != tc.want {
+			t.Errorf("%s: got %q want %q", tc.name, got, tc.want)
+		}
+	}
+}

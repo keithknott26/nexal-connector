@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,5 +187,94 @@ func TestDrivePutRefusesInvalidKeyAndOversizeFileBeforeConfig(t *testing.T) {
 	err = drivePut(context.Background(), []string{"--config", cfg, "--key", "a/b", "--file", big})
 	if err == nil || !strings.Contains(err.Error(), "Chunked upload is not implemented") {
 		t.Fatalf("oversize file not refused on stat: %v", err)
+	}
+}
+
+// An end-to-end pass through put, get, list and usage against a fake
+// coordinator: the plaintext must never reach the wire, the restored file must
+// match and be 0600, and the bearer must be the stored host credential.
+func TestDriveEndToEndAgainstFakeCoordinator(t *testing.T) {
+	var stored []byte
+	var sawAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/drive/objects/"):
+			stored, _ = io.ReadAll(r.Body)
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]any{
+				"id": "1", "key": "docs/a.txt", "sizeBytes": len(stored), "createdAt": "2026-01-01T00:00:00Z"}})
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/drive/objects/"):
+			_, _ = w.Write(stored)
+		case r.URL.Path == "/api/drive/objects":
+			_ = json.NewEncoder(w).Encode(map[string]any{"objects": []map[string]any{
+				{"id": "1", "key": "docs/a.txt", "sizeBytes": len(stored), "createdAt": "2026-01-01T00:00:00Z"}}, "nextCursor": "c2"})
+		case r.URL.Path == "/api/drive/usage":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tier": "free", "ceilingBytes": 100, "usedBytes": 150, "objectCount": 1})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "config.json")
+	seed := config.Config{Version: 1, Coordinator: srv.URL, Name: "Mac", Listen: "127.0.0.1:8788", HostID: "host-1",
+		Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+	if err := config.Save(cfg, seed); err != nil {
+		t.Fatal(err)
+	}
+	if err := (config.FileSecrets{Dir: filepath.Join(dir, "dev-secrets")}).Put(context.Background(), "host", "tok1234567890abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	const plain = "very secret plaintext"
+	src := filepath.Join(dir, "src.txt")
+	if err := os.WriteFile(src, []byte(plain), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var err error
+	out := captureStdout(t, func() {
+		err = drivePut(context.Background(), []string{"--config", cfg, "--key", "docs/a.txt", "--file", src})
+	})
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if sawAuth != "Bearer tok1234567890abcdef" {
+		t.Fatalf("bearer = %q", sawAuth)
+	}
+	if strings.Contains(string(stored), plain) || strings.Contains(out, plain) {
+		t.Fatal("plaintext leaked to the coordinator or stdout")
+	}
+
+	dst := filepath.Join(dir, "restored.txt")
+	captureStdout(t, func() {
+		err = driveGet(context.Background(), []string{"--config", cfg, "--key", "docs/a.txt", "--out", dst})
+	})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if b, _ := os.ReadFile(dst); string(b) != plain {
+		t.Fatalf("restored = %q", b)
+	}
+	if st, _ := os.Stat(dst); st.Mode().Perm() != 0o600 {
+		t.Fatalf("restored mode = %v", st.Mode().Perm())
+	}
+
+	out = captureStdout(t, func() { err = driveList(context.Background(), []string{"--config", cfg}) })
+	if err != nil || !strings.Contains(out, `"docs/a.txt"`) || !strings.Contains(out, `"nextCursor": "c2"`) && !strings.Contains(out, `"nextCursor":"c2"`) {
+		t.Fatalf("list = %q, %v", out, err)
+	}
+
+	out = captureStdout(t, func() { err = driveUsage(context.Background(), []string{"--config", cfg}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage map[string]any
+	if json.Unmarshal([]byte(out), &usage) != nil || usage["remainingBytes"] != float64(0) {
+		t.Fatalf("usage over ceiling must clamp remaining to 0: %q", out)
 	}
 }

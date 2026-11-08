@@ -323,3 +323,51 @@ func TestClientBaseAndHTTPDefaults(t *testing.T) {
 		t.Fatal("custom HTTP client must be returned as-is")
 	}
 }
+
+func TestRemoveReportsRealFailuresAndRefusesBadTemplateID(t *testing.T) {
+	f, c := newFake(t)
+	if err := c.Remove(context.Background(), "", "tpl/../x"); err == nil || !strings.Contains(err.Error(), "invalid template id") {
+		t.Fatalf("a bad template id must be refused, got %v", err)
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("nothing should be sent: %+v", f.calls)
+	}
+	// A non-404 failure is surfaced, wrapped with which resource it concerned, and stops before the template.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	bad := &Client{Base: srv.URL, Key: testKey}
+	err := bad.Remove(context.Background(), "ep456", "tpl123")
+	var re *Error
+	if err == nil || !strings.Contains(err.Error(), "removing the endpoint") || !errors.As(err, &re) || re.Status != 500 {
+		t.Fatalf("want a wrapped 500 for the endpoint, got %v", err)
+	}
+	err = bad.Remove(context.Background(), "", "tpl123")
+	if err == nil || !strings.Contains(err.Error(), "removing the worker template") {
+		t.Fatalf("want a wrapped template failure, got %v", err)
+	}
+}
+
+func TestDoRefusesMissingKeyAndUnreadableReplies(t *testing.T) {
+	if _, err := (&Client{Base: "http://127.0.0.1:1"}).Exists(context.Background(), "ep1"); err == nil ||
+		!strings.Contains(err.Error(), "API key") {
+		t.Fatalf("a missing key must be reported before any request, got %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`<html>not json</html>`))
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{Base: srv.URL, Key: testKey}
+	var out idReply
+	if err := c.do(context.Background(), http.MethodGet, "/x", nil, &out); err == nil ||
+		!strings.Contains(err.Error(), "could not be read") {
+		t.Fatalf("an unparseable 2xx reply must be an error, got %v", err)
+	}
+	// Transport failures name the cause but never leak the key.
+	srv.Close()
+	err := c.do(context.Background(), http.MethodGet, "/x", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "could not reach RunPod") || strings.Contains(err.Error(), testKey) {
+		t.Fatalf("want a key-free transport error, got %v", err)
+	}
+}

@@ -308,3 +308,45 @@ func TestOperationClassifiesEveryAllowlistedFamily(t *testing.T) {
 		}
 	}
 }
+
+func TestTransportMarksFailuresAndNormalizesMethod(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	old := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer otel.SetTracerProvider(old)
+
+	boom := io.ErrUnexpectedEOF
+	failing := Transport{Base: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, boom })}
+	req, _ := http.NewRequest("BREW", "https://coordinator.test/api/hosts/secret-id", strings.NewReader("body"))
+	if _, err := failing.RoundTrip(req); err != boom {
+		t.Fatalf("transport error not passed through: %v", err)
+	}
+	server := Transport{Base: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("x"))}, nil
+	})}
+	req2, _ := http.NewRequest("GET", "https://coordinator.test/api/v2/thing", nil)
+	resp, err := server.RoundTrip(req2)
+	if err != nil || resp.StatusCode != 503 {
+		t.Fatalf("resp=%v err=%v", resp, err)
+	}
+	_ = resp.Body.Close()
+
+	spans := recorder.Ended()
+	if len(spans) != 2 {
+		t.Fatalf("spans=%d", len(spans))
+	}
+	for i, span := range spans {
+		if span.Status().Code.String() != "Error" {
+			t.Fatalf("span %d status=%v, want Error", i, span.Status().Code)
+		}
+	}
+	for _, attr := range spans[0].Attributes() {
+		if attr.Key == "http.request.method" && attr.Value.AsString() != "OTHER" {
+			t.Fatalf("method not normalized: %s", attr.Value.AsString())
+		}
+		if strings.Contains(attr.Value.Emit(), "secret") {
+			t.Fatal("path parameter leaked")
+		}
+	}
+}

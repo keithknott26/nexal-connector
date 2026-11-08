@@ -249,3 +249,48 @@ func TestForwarderDropsUnusableLANAddress(t *testing.T) {
 		c.Close()
 	}
 }
+
+func TestForwarderWiresRunnerOverflowAndMeter(t *testing.T) {
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	p := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	m := NewMeter()
+	o := &Overflow{MaxPrompt: 1234}
+	r := &Runner{NoLAN: true, Overflow: o, Meter: m}
+	r.init()
+	f, err := r.forwarder(context.Background(), "127.0.0.1", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.mu.Lock()
+	gotOverflow, gotMeter := f.overflow, f.meter
+	f.mu.Unlock()
+	if gotOverflow != o || gotMeter != m {
+		t.Fatalf("forwarder overflow=%p meter=%p, want %p and %p", gotOverflow, gotMeter, o, m)
+	}
+	o.mu.Lock()
+	oMeter := o.Meter
+	o.mu.Unlock()
+	if oMeter != m {
+		t.Fatal("the overflow tier was not given the runner's meter")
+	}
+}
+
+func TestForwarderLeavesOverflowAndMeterNilWhenUnset(t *testing.T) {
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	p := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	r := &Runner{NoLAN: true}
+	r.init()
+	f, err := r.forwarder(context.Background(), "127.0.0.1", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.overflow != nil || f.meter != nil {
+		t.Fatal("an unconfigured runner must not attach an overflow tier or meter")
+	}
+}

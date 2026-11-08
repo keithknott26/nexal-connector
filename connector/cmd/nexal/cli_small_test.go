@@ -274,3 +274,19 @@ func TestIdentityCommandRejectsBadArgsWithoutCreatingConfig(t *testing.T) {
 		t.Fatalf("rejected invocation must not create the config: %v", err)
 	}
 }
+
+func TestTunnelCommandRefusesWithoutPinnedCloudflared(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	c := config.Config{Version: 1, Coordinator: "http://127.0.0.1:1", Name: "Mac", Listen: "127.0.0.1:8788",
+		Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	err := tunnelCommand(context.Background(), []string{"--config", path})
+	if err == nil || !strings.Contains(err.Error(), "no pinned cloudflared configuration") {
+		t.Fatalf("expected unconfigured-tunnel refusal, got %v", err)
+	}
+	if err := tunnelCommand(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "missing.json")}); err == nil {
+		t.Fatal("expected error for a missing config file")
+	}
+}

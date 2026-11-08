@@ -98,6 +98,25 @@ func TestStaticPeerAddrPort(t *testing.T) {
 	}
 }
 
+func TestStaticPeerAddrPortRejectsUndialableEndpoints(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://10.20.0.5",          // no port
+		"https://printer.local:8443", // hostname: no DNS lookup is performed
+		"https://10.20.0.5:0",        // port out of range
+		"https://10.20.0.5:70000",    // port out of range
+	} {
+		if addr, ok := (StaticPeer{Endpoint: endpoint}).AddrPort(); ok {
+			t.Errorf("%q produced %v", endpoint, addr)
+		}
+	}
+	// An IPv4-mapped IPv6 literal is normalised so it compares equal to the
+	// plain IPv4 form used elsewhere in the merged discovery view.
+	addr, ok := (StaticPeer{Endpoint: "https://[::ffff:10.20.0.5]:8443"}).AddrPort()
+	if !ok || addr.String() != "10.20.0.5:8443" {
+		t.Fatalf("mapped addr = %v ok=%v", addr, ok)
+	}
+}
+
 func TestDecodeStaticPeerStrict(t *testing.T) {
 	good := `{"endpoint":"https://10.20.0.5:8443","fingerprint":"` + fpA + `"}`
 	p, err := DecodeStaticPeer([]byte(good))

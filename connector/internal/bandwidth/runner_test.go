@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"nexal/connector/internal/mesh"
@@ -288,4 +289,49 @@ func TestRunReturnsWhenCancelledBeforeFirstTest(t *testing.T) {
 	if len(r.Results()) != 0 {
 		t.Errorf("no test should have run, got %v", r.Results())
 	}
+}
+
+// Run records its context and provider once the startup delay has passed, idles for a
+// jittered TestInterval when every peer is measured, and returns promptly on cancellation.
+func TestRunRegistersProviderAfterStartupAndStopsOnCancel(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := NewRunner(slog.Default())
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			r.Run(ctx, staticProvider{})
+			close(done)
+		}()
+
+		time.Sleep(StartupDelay - time.Second)
+		synctest.Wait()
+		r.mu.RLock()
+		early := r.provider
+		r.mu.RUnlock()
+		if early != nil {
+			t.Fatal("provider registered before the startup delay elapsed")
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		r.mu.RLock()
+		got, runCtx := r.provider, r.ctx
+		r.mu.RUnlock()
+		if got == nil || runCtx != ctx {
+			t.Fatalf("after startup: provider=%v ctx matches=%v", got, runCtx == ctx)
+		}
+		select {
+		case <-done:
+			t.Fatal("Run returned before cancellation")
+		default:
+		}
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("Run did not return after cancellation")
+		}
+	})
 }

@@ -448,3 +448,22 @@ func TestReadStaticAndThermalOffDarwinSkipCommands(t *testing.T) {
 		t.Fatalf("thermal = %q, want empty off darwin", got)
 	}
 }
+
+// On non-darwin hosts the collector must not shell out to macOS tools: static
+// info falls back to the Go runtime and thermal state is left empty.
+func TestNonDarwinCollectorDoesNotRunMacTools(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin shells out to sysctl/pmset by design")
+	}
+	c := &Collector{Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
+		t.Errorf("unexpected command %s on %s", name, runtime.GOOS)
+		return nil, errors.New("unexpected")
+	}}
+	info := c.readStatic(context.Background())
+	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
+		t.Fatalf("static info = %+v", info)
+	}
+	if got := c.thermal(context.Background()); got != "" {
+		t.Fatalf("thermal = %q, want empty", got)
+	}
+}

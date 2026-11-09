@@ -55,3 +55,31 @@ func TestLocalAPIHandlerRequiresStrongToken(t *testing.T) {
 		}
 	}
 }
+
+// A wrong method on /v1/policy must say which methods are allowed, and a
+// request from a non-loopback peer is refused before the token is even looked at.
+func TestLocalAPIPolicyAllowHeaderAndNonLoopbackPeer(t *testing.T) {
+	a, _ := testAgent(t)
+	token := strings.Repeat("x", 64)
+	h, err := a.Handler(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("DELETE", "http://127.0.0.1:8788/v1/policy", nil)
+	r.RemoteAddr = "127.0.0.1:12345"
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 405 || w.Header().Get("Allow") != "GET, PUT" {
+		t.Fatalf("got %d Allow=%q, want 405 and %q", w.Code, w.Header().Get("Allow"), "GET, PUT")
+	}
+
+	r = httptest.NewRequest("GET", "http://127.0.0.1:8788/v1/status", nil)
+	r.RemoteAddr = "192.0.2.7:12345"
+	r.Header.Set("Authorization", "Bearer "+token)
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 403 || !strings.Contains(w.Body.String(), `"code":"loopback_required"`) {
+		t.Fatalf("got %d %s, want 403 loopback_required", w.Code, w.Body.String())
+	}
+}

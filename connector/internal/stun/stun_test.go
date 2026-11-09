@@ -724,3 +724,58 @@ func TestObserveGivesUpAfterBoundedUnmatchedDatagrams(t *testing.T) {
 		t.Fatalf("exchanges = %d, want %d", len(fake.calls), maxDatagramsPerExchange)
 	}
 }
+
+// A cancelled context makes name resolution fail locally (no network is
+// touched), and that failure is reported as a resolve error, not ErrInvalid.
+func TestUDPExchangerReportsResolveFailure(t *testing.T) {
+	e, err := NewUDPExchanger()
+	if err != nil {
+		t.Skipf("UDP socket unavailable in this sandbox: %v", err)
+	}
+	defer e.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = e.Exchange(ctx, "stun.invalid:3478", []byte{0})
+	if err == nil || !strings.Contains(err.Error(), "cannot resolve server") {
+		t.Errorf("Exchange err = %v, want a 'cannot resolve server' error", err)
+	}
+}
+
+// Datagrams whose source IP differs from the queried server are skipped, and
+// after the bounded number of strangers the exchange gives up with ErrNoMatch.
+func TestUDPExchangerIgnoresDatagramsFromOtherSources(t *testing.T) {
+	target, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Skipf("UDP loopback unavailable: %v", err)
+	}
+	defer target.Close()
+	stranger, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 2)})
+	if err != nil {
+		t.Skipf("cannot bind 127.0.0.2 in this sandbox: %v", err)
+	}
+	defer stranger.Close()
+
+	e, err := NewUDPExchanger()
+	if err != nil {
+		t.Skipf("UDP socket unavailable in this sandbox: %v", err)
+	}
+	defer e.Close()
+
+	go func() {
+		buf := make([]byte, maxMessageBytes)
+		_, from, err := target.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		for i := 0; i < maxDatagramsPerExchange; i++ {
+			_, _ = stranger.WriteToUDP([]byte("not-stun"), &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: from.Port})
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	server := target.LocalAddr().String()
+	if _, err := e.Exchange(ctx, server, []byte{0}); !errors.Is(err, ErrNoMatch) {
+		t.Errorf("Exchange err = %v, want ErrNoMatch", err)
+	}
+}

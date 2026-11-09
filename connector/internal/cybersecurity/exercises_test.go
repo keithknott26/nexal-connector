@@ -137,3 +137,36 @@ func TestExerciseChecksRejectsCancelledContextAndUnusableDirectory(t *testing.T)
 		t.Fatalf("unusable directory accepted: %v %+v", err, checks)
 	}
 }
+
+func TestExerciseChecksReturnsContextErrorWhenAlreadyCancelled(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	checks, err := (Canary{Directory: dir}).ExerciseChecks(ctx)
+	if !errors.Is(err, context.Canceled) || checks != nil {
+		t.Fatalf("checks=%v err=%v", checks, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("cancelled exercise left artifacts: %v", entries)
+	}
+}
+
+func TestRunExercisesRejectsCancelledContextAndNonDirectoryExerciseRoot(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	report := func(context.Context, Event) error { called = true; return nil }
+	if err := (Canary{Directory: t.TempDir()}).RunExercises(ctx, report); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "security-exercises"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Canary{Directory: dir}).RunExercises(context.Background(), report); err == nil {
+		t.Fatal("expected error when exercise root is a regular file")
+	}
+	if called {
+		t.Fatal("report must not be called on rejected runs")
+	}
+}

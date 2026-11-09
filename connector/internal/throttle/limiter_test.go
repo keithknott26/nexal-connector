@@ -234,3 +234,49 @@ func TestSetRateSettlesElapsedTimeAtOldRate(t *testing.T) {
 		t.Fatalf("delay after SetRate = %v, want 500ms", delay)
 	}
 }
+
+// Wait's cheap exits must not touch the bucket: a context that is already done
+// fails before any tokens are reserved, and a non-positive size is free.
+func TestWaitShortCircuitsWithoutSpendingTokens(t *testing.T) {
+	clock := newFakeClock()
+	limiter, _ := NewLimiter(1000, 100, clock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := limiter.Wait(ctx, 100); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wait on a cancelled context = %v, want context.Canceled", err)
+	}
+	for _, n := range []int64{0, -5} {
+		if err := limiter.Wait(context.Background(), n); err != nil {
+			t.Fatalf("Wait(%d) = %v, want nil", n, err)
+		}
+	}
+	// The full burst must still be available: nothing above was charged.
+	if err := limiter.Wait(context.Background(), 100); err != nil {
+		t.Fatal(err)
+	}
+	if clock.waiterCount() != 0 {
+		t.Fatal("a wait inside an untouched burst blocked, so an earlier call spent tokens")
+	}
+}
+
+// A zero-length read is a no-op that must not be charged or delayed, and a
+// cancelled context makes the shaped read fail without reading the source.
+func TestShapedReaderZeroLengthAndCancelledReads(t *testing.T) {
+	clock := newFakeClock()
+	limiter, _ := NewLimiter(1000, 100, clock)
+	src := strings.NewReader("data")
+	ctx, cancel := context.WithCancel(context.Background())
+	r, _ := NewReader(ctx, src, limiter)
+
+	if n, err := r.Read(nil); n != 0 || err != nil {
+		t.Fatalf("zero-length Read = (%d, %v), want (0, nil)", n, err)
+	}
+	cancel()
+	if n, err := r.Read(make([]byte, 4)); n != 0 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("Read on a cancelled context = (%d, %v), want (0, context.Canceled)", n, err)
+	}
+	if src.Len() != 4 {
+		t.Fatalf("the source was read despite cancellation; %d bytes left, want 4", src.Len())
+	}
+}

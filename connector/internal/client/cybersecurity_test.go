@@ -136,3 +136,75 @@ func TestCanaryIncidentSurvivesBadAcknowledgementAndReachesHandoff(t *testing.T)
 		t.Fatal("missing local handoff evidence")
 	}
 }
+
+func TestSecurityReportingRejectsBadInputWithoutContactingCoordinator(t *testing.T) {
+	hits := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	defer server.Close()
+	c, err := New(server.URL, "host-credential", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := cybersecurity.Event{SchemaVersion: 1, EventID: "event_1", ObservedAt: time.Now().UTC().Format(cybersecurity.TimeLayout), Kind: "network_alert", Severity: "high", Detector: "public", DetectorVersion: "v1", OriginAssessment: "unknown", EvidenceRef: "ev_1"}
+	if c.ReportSecurityEvent(context.Background(), "../bad", valid) == nil {
+		t.Fatal("accepted invalid host id")
+	}
+	if c.ReportSecurityEvent(context.Background(), "host_1", cybersecurity.Event{}) == nil {
+		t.Fatal("accepted invalid event")
+	}
+	if _, err := c.ExchangeWatermarkState(context.Background(), "../bad", cybersecurity.CanaryState{}); err == nil {
+		t.Fatal("accepted invalid host id for watermark state")
+	}
+	if hits != 0 {
+		t.Fatalf("coordinator contacted %d times for invalid input", hits)
+	}
+}
+
+func TestSecurityReportingSurfacesCoordinatorFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	c, err := New(server.URL, "host-credential", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := cybersecurity.Event{SchemaVersion: 1, EventID: "event_1", ObservedAt: time.Now().UTC().Format(cybersecurity.TimeLayout), Kind: "network_alert", Severity: "high", Detector: "public", DetectorVersion: "v1", OriginAssessment: "unknown", EvidenceRef: "ev_1"}
+	if c.ReportSecurityEvent(context.Background(), "host_1", e) == nil {
+		t.Fatal("coordinator failure swallowed for security event")
+	}
+	if c.ReportWatermarkState(context.Background(), "host_1", cybersecurity.CanaryState{Enabled: true, Status: "watching"}) == nil {
+		t.Fatal("coordinator failure swallowed for watermark state")
+	}
+}
+
+func TestWatermarkStateOmitsAlreadyReportedOperationResult(t *testing.T) {
+	var sawResult []bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Error("invalid request")
+		}
+		_, has := body["operationResult"]
+		sawResult = append(sawResult, has)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"schemaVersion": 1, "accepted": true, "reportedAt": body["reportedAt"], "operation": map[string]any{"id": "op_1", "kind": "regenerate", "expiresAt": "later"}})
+	}))
+	defer server.Close()
+	c, err := New(server.URL, "host-credential", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := cybersecurity.CanaryState{Enabled: true, Status: "watching", OperationResult: &cybersecurity.WatermarkResult{ID: "op_1", Kind: "regenerate"}}
+	op, err := c.ExchangeWatermarkState(context.Background(), "host_1", state)
+	if err != nil || op == nil || op.ID != "op_1" {
+		t.Fatalf("operation not returned: %v %+v", err, op)
+	}
+	state.OperationReported = true
+	if _, err = c.ExchangeWatermarkState(context.Background(), "host_1", state); err != nil {
+		t.Fatal(err)
+	}
+	if len(sawResult) != 2 || !sawResult[0] || sawResult[1] {
+		t.Fatalf("operationResult presence = %v, want [true false]", sawResult)
+	}
+}

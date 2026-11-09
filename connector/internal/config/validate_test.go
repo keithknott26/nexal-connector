@@ -45,3 +45,32 @@ func TestConfigValidateRejectsUnsafeCombinations(t *testing.T) {
 		t.Errorf("complete paired enrollment rejected: %v", err)
 	}
 }
+
+func TestConfigValidateEnrollmentRequiredFields(t *testing.T) {
+	fp := strings.Repeat("a", 64)
+	complete := func() EnrollmentState {
+		return EnrollmentState{SchemaVersion: 2, Status: "paired", AccountID: "a", NetworkID: "n", DeviceID: fp, PairedAt: "t", ManagementURL: "https://m.example"}
+	}
+	c := validBaseConfig()
+	c.Enrollment = &EnrollmentState{SchemaVersion: 2, Status: "provisioning"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("a provisioning enrollment needs no pairing fields: %v", err)
+	}
+	cases := map[string]func(*EnrollmentState){
+		"missing network":        func(e *EnrollmentState) { e.NetworkID = "" },
+		"missing pairedAt":       func(e *EnrollmentState) { e.PairedAt = "" },
+		"missing management URL": func(e *EnrollmentState) { e.ManagementURL = "" },
+		"plain-http management":  func(e *EnrollmentState) { e.ManagementURL = "http://m.example" },
+		"uppercase fingerprint":  func(e *EnrollmentState) { e.DeviceID = strings.Repeat("A", 64) },
+		"short fingerprint":      func(e *EnrollmentState) { e.DeviceID = fp[:63] },
+	}
+	for name, mutate := range cases {
+		e := complete()
+		mutate(&e)
+		c := validBaseConfig()
+		c.Enrollment = &e
+		if c.Validate() == nil {
+			t.Errorf("%s: Validate accepted it", name)
+		}
+	}
+}

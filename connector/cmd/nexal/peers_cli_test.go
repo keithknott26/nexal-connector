@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"nexal/connector/internal/config"
+	"nexal/connector/internal/peeridentity"
 )
 
 func TestPeersCommandDispatchErrors(t *testing.T) {
@@ -75,5 +79,33 @@ func TestSelfIdentityMissingConfigErrorsWithoutMintingAnything(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("selfIdentity must not create files, found %d entries", len(entries))
+	}
+}
+
+func TestSelfIdentityWithoutMintedIdentityPointsAtIdentityCommand(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "private", "config.json")
+	seed := config.Config{Version: 1, Coordinator: "http://127.0.0.1:1", Name: "Mac", Listen: "127.0.0.1:8788",
+		Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20, ReserveMemoryBytes: 128 << 20, IdleSeconds: 300}
+	if err := config.Save(cfg, seed); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Dir(cfg)
+	before, err := os.ReadDir(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = selfIdentity(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "run `nexal identity` on this Mac first") {
+		t.Fatalf("expected the identity hint, got %v", err)
+	}
+	if !errors.Is(err, peeridentity.ErrNoIdentity) {
+		t.Fatalf("error must wrap ErrNoIdentity, got %v", err)
+	}
+	after, err := os.ReadDir(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("selfIdentity must not mint anything: %d -> %d entries", len(before), len(after))
 	}
 }

@@ -179,3 +179,33 @@ func TestValidateLocalRejectsNetworkModuleAndPropagatesReportFailure(t *testing.
 		t.Fatalf("missing directory: executed=%v reason=%q err=%v", executed, reason, err)
 	}
 }
+
+func TestValidationHandlerRejectsWrongNonceAndCancelledContextWithoutConsumingNonce(t *testing.T) {
+	r := validationGrant()
+	r.Module = "network_canary"
+	r.TargetIP = "100.86.1.2"
+	ctx, cancel := context.WithCancel(context.Background())
+	reports := 0
+	h, _ := validationHandler(ctx, r, func(context.Context) bool { return true }, func(context.Context, Event) error { reports++; return nil })
+	do := func(auth string) int {
+		req := httptest.NewRequest("POST", "http://mesh/validation/"+r.ID, nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w.Code
+	}
+	for name, auth := range map[string]string{"missing header": "", "wrong nonce": "Bearer " + uuid.NewString(), "no bearer prefix": r.Nonce} {
+		if code := do(auth); code != 404 {
+			t.Fatalf("%s: code = %d, want 404", name, code)
+		}
+	}
+	cancel()
+	if code := do("Bearer " + r.Nonce); code != 410 {
+		t.Fatalf("cancelled context code = %d, want 410", code)
+	}
+	if reports != 0 {
+		t.Fatalf("rejected requests reached report: %d", reports)
+	}
+}

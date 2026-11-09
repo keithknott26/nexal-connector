@@ -154,6 +154,14 @@ func TestSpecIsValidatedBeforeAnythingIsCreated(t *testing.T) {
 		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, MaxWorkers: 11},
 		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, Image: "evil image"},
 		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, MinCUDA: "abc"},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, Quantization: "Bad Quant"},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, MaxModelLen: -1},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, MaxModelLen: 1<<20 + 1},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, DiskGB: 501},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, DiskGB: -1},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, IdleSeconds: 3601},
+		{Model: "a/b", GPUTypes: []string{"NVIDIA A40"}, IdleSeconds: -1},
+		{Model: "a/b", GPUTypes: make([]string, 13)},
 	}
 	for i, s := range bad {
 		if _, err := c.Provision(context.Background(), s); err == nil {

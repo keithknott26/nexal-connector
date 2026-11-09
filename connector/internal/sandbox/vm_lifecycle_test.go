@@ -93,3 +93,24 @@ func TestVZHypervisorKillCleansUpFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestVZHypervisorKillReportsFailureWhileStillRunning(t *testing.T) {
+	plist := filepath.Join(t.TempDir(), "p")
+	if err := os.WriteFile(plist, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := newFakeVZ(t, nil, nil)
+	h.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if args[0] == "bootout" {
+			return []byte("denied"), errors.New("exit 1")
+		}
+		return []byte("state = running\n"), nil // print: job is still alive
+	}
+	err := h.Kill(context.Background(), Handle{Label: "l1", Plist: plist})
+	if err == nil || !strings.Contains(err.Error(), "launchctl bootout failed") {
+		t.Fatalf("Kill = %v, want bootout failure", err)
+	}
+	if _, serr := os.Stat(plist); serr != nil {
+		t.Fatal("files of a still-running job must not be removed")
+	}
+}

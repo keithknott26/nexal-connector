@@ -50,3 +50,26 @@ func TestHdiutilISOWrapsBuilderFailureAndClearsStaleImage(t *testing.T) {
 		t.Fatalf("stale seed image must be removed before building, stat err=%v", serr)
 	}
 }
+
+func TestRemoveSeedEmptyArgsAreNoOpAndISOFailureIsReportedAfterDirRemoval(t *testing.T) {
+	if err := RemoveSeed("", ""); err != nil {
+		t.Fatalf("empty args must be a no-op: %v", err)
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "seed")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A non-empty directory in the image slot makes os.Remove fail with an error
+	// that is not "not exist", which RemoveSeed must surface.
+	iso := filepath.Join(root, "seed.iso")
+	if err := os.MkdirAll(filepath.Join(iso, "child"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveSeed(dir, iso); err == nil {
+		t.Fatal("expected an error when the seed image cannot be removed")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Error("seed dir must still be removed when the image removal fails")
+	}
+}

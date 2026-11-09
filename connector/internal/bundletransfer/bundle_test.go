@@ -315,3 +315,34 @@ func TestSealRejectsBadBindingKeyAndOversizeBundle(t *testing.T) {
 		t.Fatal("oversize bundle accepted")
 	}
 }
+func TestOpenRejectsMissingMalformedAndFarFutureTransfers(t *testing.T) {
+	b, tx, key := fixture(t)
+	sealed, err := Seal(tx, Fingerprint(key.EncapsulationKey().Bytes()), b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	missing := tx
+	missing.Ciphertext = nil
+	if _, err := Open(missing, key); err == nil || !strings.Contains(err.Error(), "not bound") {
+		t.Fatalf("missing ciphertext = %v", err)
+	}
+
+	for name, ct := range map[string]string{
+		"bad base64": "!!!not-base64!!!",
+		"too short":  base64.StdEncoding.EncodeToString([]byte("short")),
+	} {
+		bad := tx
+		bad.Ciphertext = &ct
+		if _, err := Open(bad, key); err == nil || !strings.Contains(err.Error(), "invalid encrypted bundle") {
+			t.Fatalf("%s = %v", name, err)
+		}
+	}
+
+	far := tx
+	far.Ciphertext = &sealed
+	far.ExpiresAt = time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+	if _, err := Open(far, key); err == nil || !strings.Contains(err.Error(), "invalid transfer expiry") {
+		t.Fatalf("far-future expiry = %v", err)
+	}
+}

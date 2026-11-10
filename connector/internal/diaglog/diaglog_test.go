@@ -304,3 +304,36 @@ func TestSetEnabledReportsFilesystemErrorsWithoutLeakingPaths(t *testing.T) {
 		t.Fatalf("disable over a directory: err = %v", err)
 	}
 }
+
+func TestRotatingFileOversizeWriteAndExistingSize(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "d.log")
+	big := []byte(strings.Repeat("y", 100) + "\n")
+
+	// A single write larger than the cap lands in an empty file without
+	// rotating: there is nothing to rotate away.
+	r := NewRotatingFile(p, 64)
+	if _, err := r.Write(big); err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	if _, err := os.Stat(p + ".1"); !os.IsNotExist(err) {
+		t.Fatalf("empty file must not rotate, stat err=%v", err)
+	}
+
+	// A fresh writer counts the existing file size, so the next write rotates
+	// the oversize content to .1 and starts a new file.
+	r2 := NewRotatingFile(p, 64)
+	small := []byte("small\n")
+	if _, err := r2.Write(small); err != nil {
+		t.Fatal(err)
+	}
+	_ = r2.Close()
+	old, err := os.ReadFile(p + ".1")
+	if err != nil || !bytes.Equal(old, big) {
+		t.Fatalf("rotation should hold the old content: %q %v", old, err)
+	}
+	cur, err := os.ReadFile(p)
+	if err != nil || !bytes.Equal(cur, small) {
+		t.Fatalf("current file should hold only the new write: %q %v", cur, err)
+	}
+}

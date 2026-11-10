@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -163,5 +165,28 @@ func TestSandboxCLIStopStart(t *testing.T) {
 		if err := checkSandboxArgs(action, "sb1", "vnc", false); err == nil {
 			t.Fatalf("%s accepted --kind", action)
 		}
+	}
+}
+
+func TestSandboxCommandRejectsBadInputBeforeLoadingConfig(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	for name, args := range map[string][]string{
+		"unknown action":      {"--config", cfg, "--action", "explode"},
+		"missing action":      {"--config", cfg},
+		"relative config":     {"--config", "relative.json", "--action", "list"},
+		"positional argument": {"--config", cfg, "--action", "list", "extra"},
+		"unknown flag":        {"--config", cfg, "--bogus"},
+		"list with id":        {"--config", cfg, "--action", "list", "--id", "abc"},
+	} {
+		if err := sandboxCommand(context.Background(), args); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	// Valid arguments but no configuration file: must fail, not panic.
+	if err := sandboxCommand(context.Background(), []string{"--config", cfg, "--action", "list"}); err == nil {
+		t.Error("expected missing configuration to fail")
+	}
+	if _, err := os.Stat(cfg); err == nil {
+		t.Error("sandboxCommand must not create the configuration file")
 	}
 }

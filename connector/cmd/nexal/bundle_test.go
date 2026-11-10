@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -106,5 +109,46 @@ func TestBundleSendRequiresEnrolledHost(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "enroll this Mac") {
 		t.Fatalf("unenrolled sender not refused before credential access: %v", err)
+	}
+}
+
+func TestBundleSendRefusesTransferThatIsNotPendingForThisDonor(t *testing.T) {
+	donor := "22222222-2222-4222-8222-222222222222"
+	for name, state := range map[string]string{"already ready": "ready", "expired": "expired"} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("unexpected %s %s: nothing may be uploaded", r.Method, r.URL.Path)
+				}
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"id": bundleTestID, "donorHostId": donor, "receiverHostId": bundleTestID,
+					"publicKey": "AAAA", "expiresAt": "2099-01-01T00:00:00Z", "state": state,
+				})
+			}))
+			defer srv.Close()
+			path := filepath.Join(t.TempDir(), "private", "config.json")
+			c := config.Config{
+				Version: 1, Coordinator: srv.URL, Name: "M2 mini", Listen: "127.0.0.1:8788",
+				Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20,
+				ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300, HostID: donor,
+			}
+			if err := config.Save(path, c); err != nil {
+				t.Fatal(err)
+			}
+			s, err := config.NewSecrets(path, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Put(context.Background(), "host", strings.Repeat("h", 40)); err != nil {
+				t.Fatal(err)
+			}
+			err = bundleCommand(context.Background(), "bundle-send", []string{
+				"--transfer", bundleTestID, "--bundle", t.TempDir(),
+				"--receiver-key-sha256", strings.Repeat("a", 64), "--config", path,
+			})
+			if err == nil || !strings.Contains(err.Error(), "not pending for this donor") {
+				t.Fatalf("non-pending transfer not refused: %v", err)
+			}
+		})
 	}
 }

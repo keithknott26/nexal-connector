@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,5 +71,22 @@ func TestMeshReconnectedGivesUpOnCancelAndExpiredWait(t *testing.T) {
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("meshReconnected did not return promptly: %v", time.Since(start))
+	}
+}
+
+func TestPairV2CommandRequiresExactlyOneMode(t *testing.T) {
+	missing := []string{"--config", "/private/tmp/nonexistent-nexal-test-config.json"}
+	cases := [][]string{
+		nil,
+		{"--create", "--leave"},
+		{"--rejoin", "--rekey"},
+		{"--status", "abc", "--cancel", "def"},
+		{"--reset-local", "--create", "--rekey"},
+	}
+	for _, c := range cases {
+		err := pairV2Command(context.Background(), append(append([]string{}, c...), missing...))
+		if err == nil || !strings.Contains(err.Error(), "pair-v2 requires exactly one of") {
+			t.Fatalf("args %v: want mode-count error, got %v", c, err)
+		}
 	}
 }

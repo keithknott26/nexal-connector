@@ -187,3 +187,62 @@ func TestBundleReceiveRejectsMismatchedTransferResponse(t *testing.T) {
 		t.Fatalf("mismatched transfer response not refused: %v", err)
 	}
 }
+
+func TestBundleReceivePollRejectsUnavailableOrChangedTransfer(t *testing.T) {
+	receiver := "22222222-2222-4222-8222-222222222222"
+	cases := []struct {
+		name  string
+		poll  func(created map[string]string) map[string]string
+		wants string
+	}{
+		{"expired", func(c map[string]string) map[string]string { c["state"] = "expired"; return c }, "no longer available"},
+		{"identity changed", func(c map[string]string) map[string]string {
+			c["state"] = "ready"
+			c["donorHostId"] = "33333333-3333-4333-8333-333333333333"
+			return c
+		}, "transfer identity changed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var created map[string]string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					var req map[string]string
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					created = map[string]string{
+						"id": bundleTestID, "donorHostId": req["donorHostId"], "receiverHostId": receiver,
+						"publicKey": req["publicKey"], "expiresAt": "2099-01-01T00:00:00Z", "state": "pending",
+					}
+					_ = json.NewEncoder(w).Encode(created)
+					return
+				}
+				next := map[string]string{}
+				for k, v := range created {
+					next[k] = v
+				}
+				_ = json.NewEncoder(w).Encode(tc.poll(next))
+			}))
+			defer srv.Close()
+			path := filepath.Join(t.TempDir(), "private", "config.json")
+			c := config.Config{
+				Version: 1, Coordinator: srv.URL, Name: "M2 mini", Listen: "127.0.0.1:8788",
+				Development: true, DevSecrets: true, Paused: true, MemoryLimitBytes: 256 << 20,
+				ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300, HostID: receiver,
+			}
+			if err := config.Save(path, c); err != nil {
+				t.Fatal(err)
+			}
+			s, err := config.NewSecrets(path, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Put(context.Background(), "host", strings.Repeat("h", 40)); err != nil {
+				t.Fatal(err)
+			}
+			err = bundleCommand(context.Background(), "bundle-receive", []string{"--from-host", bundleTestID, "--config", path})
+			if err == nil || !strings.Contains(err.Error(), tc.wants) {
+				t.Fatalf("want %q, got %v", tc.wants, err)
+			}
+		})
+	}
+}

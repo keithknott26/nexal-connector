@@ -1,0 +1,238 @@
+--- a/client/cmd/up.go
++++ b/client/cmd/up.go
+@@ -397,7 +397,7 @@
+ 	var loginErr error
+ 	var loginResp *proto.LoginResponse
+ 
+-	err = WithBackOff(func() error {
++	login := func() error {
+ 		var backOffErr error
+ 		loginResp, backOffErr = client.Login(ctx, loginRequest)
+ 		if s, ok := gstatus.FromError(backOffErr); ok && (s.Code() == codes.InvalidArgument ||
+@@ -408,7 +408,16 @@
+ 			return nil
+ 		}
+ 		return backOffErr
+-	})
++	}
++
++	err = WithBackOff(login)
++	// A login that never reached a decision leaves the daemon dialling a
++	// management client that will not recover, so every later `up` fails the
++	// same way until the service is bounced. Repair it here rather than
++	// leaving the user to do it by hand (see nexal_stuck_login.go).
++	if err != nil && isStuckLogin(err) {
++		err = retryLoginAfterHealing(ctx, cmd, client, login, err)
++	}
+ 	if err != nil {
+ 		return fmt.Errorf("login backoff cycle failed: %v", err)
+ 	}
+--- /dev/null
++++ b/client/cmd/nexal_stuck_login.go
+@@ -0,0 +1,206 @@
++package cmd
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"os/exec"
++	"runtime"
++	"strings"
++	"time"
++
++	log "github.com/sirupsen/logrus"
++	"github.com/spf13/cobra"
++	"google.golang.org/grpc"
++	"google.golang.org/grpc/codes"
++	gstatus "google.golang.org/grpc/status"
++
++	"github.com/netbirdio/netbird/client/proto"
++)
++
++// A login that never got a decision out of Management can leave the daemon
++// holding a management client that does not recover by itself: every later
++// `up` dials through it, times out, and the CLI's own backoff gives up with
++// "login backoff cycle failed: ... DeadlineExceeded ... create connection:
++// dial context: context deadline exceeded". Nothing in that state is the
++// user's to fix, and the only way out used to be stopping and starting the
++// service by hand, so `up` repairs it here instead.
++//
++// The repair is a two-rung ladder, each rung followed by a real login attempt
++// so nothing is assumed to have worked:
++//
++//  1. Down, which makes the daemon drop its engine and the management client
++//     with it. This needs no privileges and keeps the service running.
++//  2. Stopping and starting the service, which is what a user does by hand.
++//     That needs root, so when `up` is not privileged this rung reports the
++//     exact command instead of attempting it.
++//
++// Only a login that never reached a decision is repaired this way. Management
++// refusing the peer's credentials is an answer, not a stuck daemon, and
++// bouncing the service would hide it.
++
++// Timings and the two seams the repair goes through. They are variables so a
++// test can drive the ladder without waiting out a real backoff or a real
++// service restart; production never reassigns them.
++var (
++	// How long to let the daemon settle after Down before dialing again. It
++	// tears the engine down synchronously; this covers the management client's
++	// own shutdown.
++	daemonSettleAfterDown = 2 * time.Second
++	// How long to wait for the daemon to answer again after a service restart.
++	daemonWaitAfterRestart = 30 * time.Second
++	daemonWaitPoll         = time.Second
++	// loginWithBackOff drives one login attempt through the CLI's retry policy.
++	loginWithBackOff = WithBackOff
++	// serviceRestarter performs rung 2 of the ladder.
++	serviceRestarter = restartService
++)
++
++// stuckLoginSignatures are the ways a login that never reached a decision
++// describes itself by the time it arrives here: the daemon's dial to
++// Management timing out, and the connector's own wrapper around the same
++// failure when it drives `up` with a startup deadline.
++var stuckLoginSignatures = []string{
++	"create connection",
++	"context deadline exceeded",
++	"did not finish authentication",
++}
++
++// isStuckLogin reports whether err is a login that never reached a decision,
++// as opposed to Management answering and refusing the peer. The gRPC status
++// codes are checked first because they are the daemon's own classification;
++// the message signatures catch the same failure once it has been wrapped in
++// text by an outer layer.
++func isStuckLogin(err error) bool {
++	if err == nil {
++		return false
++	}
++	switch gstatus.Code(err) {
++	case codes.DeadlineExceeded, codes.Unavailable:
++		return true
++	}
++	if errors.Is(err, context.DeadlineExceeded) {
++		return true
++	}
++	text := strings.ToLower(err.Error())
++	for _, signature := range stuckLoginSignatures {
++		if strings.Contains(text, signature) {
++			return true
++		}
++	}
++	return false
++}
++
++// daemonHealer is the slice of the daemon API the repair uses. Keeping it to
++// these two calls lets the ladder be tested without standing up a daemon.
++type daemonHealer interface {
++	Down(context.Context, *proto.DownRequest, ...grpc.CallOption) (*proto.DownResponse, error)
++	Status(context.Context, *proto.StatusRequest, ...grpc.CallOption) (*proto.StatusResponse, error)
++}
++
++// retryLoginAfterHealing repairs a daemon whose login never finished and
++// returns the result of the login attempt that follows. cause is the failure
++// that triggered the repair; it is reported alongside anything the repair
++// itself hits, because the original failure is the one worth reading.
++func retryLoginAfterHealing(ctx context.Context, cmd *cobra.Command, client daemonHealer, login func() error, cause error) error {
++	cmd.Println("The secure networking service did not finish signing in. Repairing it.")
++	log.Warnf("login never reached a decision (%v); dropping the daemon's connection and signing in again", cause)
++
++	dropDaemonConnection(ctx, client)
++	err := loginWithBackOff(login)
++	if err == nil {
++		cmd.Println("Repaired: signed in after reconnecting.")
++		return nil
++	}
++	// Management answering this time, with a refusal, is an answer: report it
++	// rather than restarting the service over it.
++	if !isStuckLogin(err) {
++		return err
++	}
++
++	log.Warnf("still stuck after reconnecting (%v); restarting the secure networking service", err)
++	if restartErr := serviceRestarter(ctx, cmd); restartErr != nil {
++		return fmt.Errorf("%w (could not restart the service automatically: %v)", cause, restartErr)
++	}
++	if err := waitForDaemon(ctx, client); err != nil {
++		return fmt.Errorf("%w (the service did not come back: %v)", cause, err)
++	}
++	if err := loginWithBackOff(login); err != nil {
++		return err
++	}
++	cmd.Println("Repaired: signed in after restarting the service.")
++	return nil
++}
++
++// dropDaemonConnection asks the daemon to tear down its engine, which releases
++// the stuck management client. A daemon that is already down answers with an
++// error, which is the state this wants anyway, so nothing here fails the repair.
++func dropDaemonConnection(ctx context.Context, client daemonHealer) {
++	if _, err := client.Down(ctx, &proto.DownRequest{}); err != nil {
++		log.Debugf("daemon down during repair: %v", err)
++	}
++	select {
++	case <-ctx.Done():
++	case <-time.After(daemonSettleAfterDown):
++	}
++}
++
++// waitForDaemon blocks until the daemon answers again, or the wait runs out.
++func waitForDaemon(ctx context.Context, client daemonHealer) error {
++	deadline := time.Now().Add(daemonWaitAfterRestart)
++	var last error
++	for {
++		if _, err := client.Status(ctx, &proto.StatusRequest{}); err == nil {
++			return nil
++		} else {
++			last = err
++		}
++		if time.Now().After(deadline) {
++			return last
++		}
++		select {
++		case <-ctx.Done():
++			return ctx.Err()
++		case <-time.After(daemonWaitPoll):
++		}
++	}
++}
++
++// restartService stops and starts this binary's own service. Only this
++// executable is ever run: nothing from PATH, and nothing named by the daemon.
++func restartService(ctx context.Context, cmd *cobra.Command) error {
++	self, err := os.Executable()
++	if err != nil {
++		return fmt.Errorf("locate this program: %w", err)
++	}
++	if !privilegedEnough() {
++		return errors.New(manualRestartInstructions(self))
++	}
++	cmd.Println("Restarting the secure networking service.")
++	for _, action := range []string{"stop", "start"} {
++		out, err := exec.CommandContext(ctx, self, "service", action).CombinedOutput()
++		if err != nil {
++			detail := strings.Join(strings.Fields(string(out)), " ")
++			return fmt.Errorf("service %s: %v: %s", action, err, detail)
++		}
++	}
++	return nil
++}
++
++// privilegedEnough reports whether this process can control the service.
++// Windows elevation is not an euid, so there it is left to the service call
++// itself to refuse.
++func privilegedEnough() bool {
++	if runtime.GOOS == "windows" {
++		return true
++	}
++	return os.Geteuid() == 0
++}
++
++func manualRestartInstructions(self string) string {
++	if runtime.GOOS == "windows" {
++		return fmt.Sprintf("restarting the service needs an elevated prompt:\n\n    %q service stop\n    %q service start\n", self, self)
++	}
++	return fmt.Sprintf("restarting the service needs administrator rights:\n\n    sudo %q service stop && sudo %q service start\n", self, self)
++}

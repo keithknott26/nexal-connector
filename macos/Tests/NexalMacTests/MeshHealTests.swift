@@ -25,6 +25,16 @@ final class MeshHealTests: XCTestCase {
         XCTAssertFalse(AppModel.serviceNeedsReinstall("connection refused"))
     }
 
+    /// The real messages seen from a service that is up but never authenticated.
+    func testUnauthenticatedServiceIsRecognised() {
+        XCTAssertTrue(AppModel.serviceNeedsRestart(
+            "secure networking service did not finish authentication; restart the neXal networking service and retry"))
+        XCTAssertTrue(AppModel.serviceNeedsRestart(
+            "daemon up failed: login backoff cycle failed: rpc error: code = DeadlineExceeded desc = create connection: dial context: context deadline exceeded"))
+        XCTAssertFalse(AppModel.serviceNeedsRestart("update settings are disabled"))
+        XCTAssertFalse(AppModel.serviceNeedsRestart("connection refused"))
+    }
+
     private func peer(_ id: String, pq: String, reason: String?, lifecycle: String = "degraded") -> ConnectorStatus.MeshPeer {
         var fields: [String: Any] = ["id": id, "name": id, "lifecycle": lifecycle, "path": "p2p", "pathLabel": "Direct",
                                      "pq": pq, "traffic": ["receivedBytes": 0, "sentBytes": 0]]

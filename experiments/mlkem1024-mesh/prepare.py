@@ -50,6 +50,10 @@ subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird
 # Make-before-break renewal (2026-10-29): the handler no longer revokes the key it is
 # replacing right before installing the new one, which ended the gated.14 overlap at once.
 subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-renewal-overlap.patch')], cwd=opts.output / 'netbird', check=True)
+# Self-healing `up` (2026-11-10): a login that never reached a decision left the daemon
+# dialling a management client that never recovered, so every later `up` failed with
+# "login backoff cycle failed" until someone stopped and started the service by hand.
+subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(root / 'netbird-stuck-login.patch')], cwd=opts.output / 'netbird', check=True)
 for f in root.glob('nexal_*test.go'):
     shutil.copyfile(f, opts.output / 'rosenpass' / f.name)
 module = opts.output / 'netbird' / 'go.mod'
@@ -110,3 +114,4 @@ print('Prepared isolated experimental sources. No installed runtime or productio
 shutil.copyfile(root / "netbird_reconnect_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_reconnect_test.go")
 shutil.copyfile(root / "netbird_resilience_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_resilience_test.go")
 shutil.copyfile(root / "netbird_overlap_test.go", opts.output / "netbird/client/internal/rosenpass/nexal_overlap_test.go")
+shutil.copyfile(root / "netbird_stuck_login_test.go", opts.output / "netbird/client/cmd/nexal_stuck_login_test.go")

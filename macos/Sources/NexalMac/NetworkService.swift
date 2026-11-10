@@ -386,6 +386,30 @@ enum NetworkService {
         }
     }
 
+    /// Blocking: one administrator prompt that stops and starts the service,
+    /// then waits for its socket. Call off the main actor.
+    ///
+    /// This is the repair for a service that is RUNNING but never finished
+    /// signing in: its login attempt is in backoff, so every `up` sits there
+    /// until the 30-second deadline and returns "did not finish
+    /// authentication". Reinstalling would also clear it, but that re-registers
+    /// the daemon and rewrites the firewall rules for a service whose
+    /// installation is fine — a stop/start is the smallest thing that works.
+    static func restart() throws {
+        let helper = try validatedHelper()
+        let script = [
+            "on run argv",
+            "set p to quoted form of (item 1 of argv)",
+            "do shell script p & \" service stop >/dev/null 2>&1; \" & p & \" service start\" "
+                + "with prompt \"neXal needs to restart its secure networking service to finish signing this Mac in to your network.\" "
+                + "with administrator privileges",
+            "end run",
+        ]
+        try runAdminScript(script, argument: helper.path)
+        for _ in 0..<30 where !isRunning { Thread.sleep(forTimeInterval: 0.5) }
+        guard isRunning else { throw Failure.didNotStart }
+    }
+
     /// Install a root launchd deadline guard before a guest tunnel can start.
     /// It survives quitting this app and needs no coordinator polling.
     static func installGuestExpiryGuard(config: URL) throws {

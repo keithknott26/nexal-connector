@@ -303,6 +303,19 @@ final class AppModel: ObservableObject {
               hasPersistedHostIdentity || hasUnfinishedEnrollment else { return }
         do { _ = try await invoke(.rejoinNetwork) }
         catch {
+            // A service that is running but never finished signing in holds every `up` until its
+            // deadline. Nothing in the connector can clear that — the login state lives in the root
+            // service — so stop and start it (one administrator prompt, once per launch) and join again.
+            if Self.serviceNeedsRestart(error.localizedDescription), !serviceRestartAttempted {
+                serviceRestartAttempted = true
+                AgentLog.note("secure networking service did not finish signing in; restarting it")
+                do {
+                    try await Task.detached(priority: .userInitiated) { try NetworkService.restart() }.value
+                    _ = try await invoke(.rejoinNetwork)
+                    pairingProblem = nil
+                } catch { pairingProblem = error.localizedDescription }
+                return
+            }
             // A service left in its login-backoff state refuses `up` with "update settings are
             // disabled" until it is installed again. Reinstalling needs the administrator prompt,
             // so ask once per launch, then join again.
@@ -321,10 +334,25 @@ final class AppModel: ObservableObject {
     }
 
     private var serviceReinstallAttempted = false
+    private var serviceRestartAttempted = false
 
     /// The runtime's refusal of `up` while its service is stuck.
     static func serviceNeedsReinstall(_ message: String) -> Bool {
         message.localizedCaseInsensitiveContains("update settings are disabled")
+    }
+
+    /// The signatures of a service that is up but has not authenticated: the connector's own
+    /// 30-second startup deadline, and the runtime's two ways of saying the same thing when it
+    /// reaches `up` directly ("login backoff cycle failed", a DeadlineExceeded dial).
+    static let serviceRestartSignatures = [
+        "did not finish authentication",
+        "login backoff",
+        "deadlineexceeded",
+        "context deadline exceeded",
+    ]
+
+    static func serviceNeedsRestart(_ message: String) -> Bool {
+        serviceRestartSignatures.contains { message.localizedCaseInsensitiveContains($0) }
     }
 
     // MARK: Secure-network self-healing

@@ -340,3 +340,45 @@ func TestRunLoopRemovesAbandonedSessionDirectories(t *testing.T) {
 		t.Fatal("offline execution")
 	}
 }
+
+func TestUnsafeSessionIDsAreClosedWithoutDownloadOrExecution(t *testing.T) {
+	for _, bad := range []struct{ session, network string }{{"../escape", "network_1"}, {"session_1", "net work"}, {"", "network_1"}} {
+		f, m := fixture(t)
+		f.session.SessionID, f.session.NetworkID = bad.session, bad.network
+		ran := false
+		m.Run = func(context.Context, string, string) error { ran = true; return nil }
+		if err := m.once(context.Background()); err != ErrClosed {
+			t.Fatalf("%+v: err = %v, want ErrClosed", bad, err)
+		}
+		if f.downloads != 0 || ran {
+			t.Fatalf("%+v: unsafe session downloaded or executed", bad)
+		}
+		if f.closed != 1 {
+			t.Fatalf("%+v: session closed %d times, want 1", bad, f.closed)
+		}
+	}
+}
+
+type openFails struct{ fake }
+
+func (o *openFails) OpenRuntime(context.Context, string) (Session, error) {
+	o.opens++
+	return Session{}, io.ErrUnexpectedEOF
+}
+
+func TestOpenRuntimeFailureIsReturnedAndNothingRuns(t *testing.T) {
+	_, m := fixture(t)
+	api := &openFails{}
+	m.API = api
+	ran := false
+	m.Run = func(context.Context, string, string) error { ran = true; return nil }
+	if err := m.once(context.Background()); err != io.ErrUnexpectedEOF {
+		t.Fatalf("err = %v", err)
+	}
+	if api.opens != 1 || api.downloads != 0 || api.closed != 0 || ran {
+		t.Fatalf("opens=%d downloads=%d closed=%d ran=%v", api.opens, api.downloads, api.closed, ran)
+	}
+	if entries, _ := os.ReadDir(m.Root); len(entries) != 0 {
+		t.Fatal("files left behind")
+	}
+}

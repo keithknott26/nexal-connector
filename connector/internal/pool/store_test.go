@@ -556,3 +556,54 @@ func TestRecognizedFileAllowList(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenDirectoryRejectionAndCreationBranches(t *testing.T) {
+	base := testDirectory(t)
+	file := filepath.Join(base, "file")
+	if err := os.WriteFile(file, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	loose := filepath.Join(base, "loose")
+	if err := os.Mkdir(loose, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(loose, 0755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(base, link); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{
+		"empty":            "",
+		"dot-dot":          base + "/a/../b",
+		"root":             "/",
+		"file component":   filepath.Join(file, "child"),
+		"group/world perm": loose,
+		"symlink parent":   filepath.Join(link, "child"),
+	} {
+		if _, root, err := openDirectory(path); !errors.Is(err, ErrUnsafePath) {
+			if root != nil {
+				root.Close()
+			}
+			t.Fatalf("%s: err=%v", name, err)
+		}
+	}
+	// A missing intermediate directory is never created implicitly.
+	if _, _, err := openDirectory(filepath.Join(base, "missing", "child")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing parent: %v", err)
+	}
+	// A missing final component is created owner-only and returned usable.
+	fresh := filepath.Join(base, "fresh")
+	abs, root, err := openDirectory(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Close()
+	if abs != fresh {
+		t.Fatalf("abs=%q", abs)
+	}
+	if info, err := os.Stat(fresh); err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("created dir: %v %v", info, err)
+	}
+}

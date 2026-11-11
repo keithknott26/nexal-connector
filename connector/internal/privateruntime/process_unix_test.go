@@ -45,3 +45,19 @@ func TestProcessHasNoInheritedCredentialAndCancels(t *testing.T) {
 		t.Fatal("runtime ignored cancellation")
 	}
 }
+
+func TestRunProcessReportsStartFailureAndExitStatus(t *testing.T) {
+	root := t.TempDir()
+	lease := filepath.Join(root, "session.json")
+	// No runtime binary present: Start must fail rather than hang.
+	if err := runProcess(context.Background(), root, lease); err == nil {
+		t.Fatal("expected error when runtime binary is missing")
+	}
+	// A runtime that exits non-zero must surface its failure.
+	if err := os.WriteFile(filepath.Join(root, "runtime"), []byte("#!/bin/sh\nexit 3\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := runProcess(context.Background(), root, lease); err == nil {
+		t.Fatal("expected error from non-zero runtime exit")
+	}
+}

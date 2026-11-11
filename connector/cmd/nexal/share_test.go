@@ -318,3 +318,31 @@ func TestShareStartReachesTheScratchCheckWithEverythingElseSatisfied(t *testing.
 		}
 	}
 }
+
+func TestLeavingNetworkWhenNeverPairedReportsLeftWithoutContactingCoordinator(t *testing.T) {
+	path := shareConfig(t, true)
+	out := captureStdout(t, func() {
+		if err := leavePairV2(context.Background(), path); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, `"left":true`) {
+		t.Fatalf("leave output = %q", out)
+	}
+	if _, err := os.Lstat(stopPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("a stop sentinel was written with no recovery session: %v", err)
+	}
+}
+
+func TestLeavingNetworkRefusesWhenRecoveryStateCannotBeInspected(t *testing.T) {
+	path := shareConfig(t, true)
+	// A directory where the session record belongs makes ReadPrivate fail with
+	// something other than not-exist; leave must refuse rather than race it.
+	if err := os.Mkdir(sessionPath(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	err := leavePairV2(context.Background(), path)
+	if err == nil || !strings.Contains(err.Error(), "cannot inspect recovery state") {
+		t.Fatalf("unreadable recovery state not refused: %v", err)
+	}
+}

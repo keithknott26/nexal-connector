@@ -335,25 +335,6 @@ func TestLocalRankUnmapsIPv4AndRejectsPublic(t *testing.T) {
 	}
 }
 
-func TestNonDarwinStaticAndThermalSkipExternalCommands(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS shells out to sysctl/pmset by design")
-	}
-	c := &Collector{
-		Run: func(context.Context, string, ...string) ([]byte, error) {
-			t.Fatal("non-darwin hosts must not run macOS tools")
-			return nil, nil
-		},
-	}
-	info := c.readStatic(context.Background())
-	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() || info.Chip != "" || info.Serial != "" {
-		t.Fatalf("unexpected static info: %+v", info)
-	}
-	if got := c.thermal(context.Background()); got != "" {
-		t.Fatalf("thermal = %q, want empty off macOS", got)
-	}
-}
-
 func TestThermalReportsUnknownWhenPmsetFailsAndParsesOtherwise(t *testing.T) {
 	failing := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("absent") }}
 	ok := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
@@ -389,27 +370,6 @@ func TestThermalSkipsPmsetOffDarwinAndReportsUnknownOnRunnerError(t *testing.T) 
 	}
 }
 
-func TestThermalAndStaticAreToolFreeOffDarwin(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin reads these through pmset and sysctl")
-	}
-	calls := 0
-	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
-		calls++
-		return nil, errors.New("must not run")
-	}}
-	if got := c.thermal(context.Background()); got != "" {
-		t.Fatalf("thermal off darwin = %q, want empty", got)
-	}
-	info := c.readStatic(context.Background())
-	if calls != 0 {
-		t.Fatal("darwin-only tools ran off darwin", calls)
-	}
-	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
-		t.Fatalf("static info off darwin = %+v", info)
-	}
-}
-
 // Off macOS the collector must not shell out to macOS-only tools: static info
 // is just GOOS and the CPU count, and thermal reports "" (not "unknown").
 func TestReadStaticAndThermalOffDarwinRunNothing(t *testing.T) {
@@ -429,76 +389,5 @@ func TestReadStaticAndThermalOffDarwinRunNothing(t *testing.T) {
 	}
 	if got := c.thermal(context.Background()); got != "" {
 		t.Fatalf("thermal off darwin = %q, want empty", got)
-	}
-}
-
-func TestReadStaticAndThermalOffDarwinSkipCommands(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin shells out to system tools")
-	}
-	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
-		t.Fatal("no command may run off darwin")
-		return nil, nil
-	}}
-	info := c.readStatic(context.Background())
-	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
-		t.Fatalf("unexpected static info: %+v", info)
-	}
-	if got := c.thermal(context.Background()); got != "" {
-		t.Fatalf("thermal = %q, want empty off darwin", got)
-	}
-}
-
-// On non-darwin hosts the collector must not shell out to macOS tools: static
-// info falls back to the Go runtime and thermal state is left empty.
-func TestNonDarwinCollectorDoesNotRunMacTools(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin shells out to sysctl/pmset by design")
-	}
-	c := &Collector{Run: func(_ context.Context, name string, _ ...string) ([]byte, error) {
-		t.Errorf("unexpected command %s on %s", name, runtime.GOOS)
-		return nil, errors.New("unexpected")
-	}}
-	info := c.readStatic(context.Background())
-	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
-		t.Fatalf("static info = %+v", info)
-	}
-	if got := c.thermal(context.Background()); got != "" {
-		t.Fatalf("thermal = %q, want empty", got)
-	}
-}
-
-// On non-macOS hosts readStatic must not shell out and thermal must be empty.
-func TestNonDarwinStaticAndThermal(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin shells out to system tools")
-	}
-	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
-		t.Fatal("runner must not be called on non-darwin hosts")
-		return nil, nil
-	}}
-	info := c.readStatic(context.Background())
-	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
-		t.Fatalf("static info = %+v", info)
-	}
-	if got := c.thermal(context.Background()); got != "" {
-		t.Fatalf("thermal = %q, want empty", got)
-	}
-}
-
-func TestReadStaticAndThermalOffDarwinRunNoTools(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin reads static facts through its tools")
-	}
-	c := &Collector{Run: func(context.Context, string, ...string) ([]byte, error) {
-		t.Fatal("darwin-only tool ran off darwin")
-		return nil, nil
-	}}
-	info := c.readStatic(context.Background())
-	if info.OS != runtime.GOOS || info.Cores != runtime.NumCPU() {
-		t.Fatalf("unexpected static info: %+v", info)
-	}
-	if got := c.thermal(context.Background()); got != "" {
-		t.Fatalf("thermal = %q off darwin, want empty", got)
 	}
 }

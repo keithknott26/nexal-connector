@@ -744,3 +744,36 @@ func TestReconcileLeavesBusyAwaitingAndTerminalSandboxesAlone(t *testing.T) {
 		t.Fatal("busy, key-awaiting and terminal sandboxes must not be touched")
 	}
 }
+
+func TestOnGoneIgnoresBusyAndUnknownBoxes(t *testing.T) {
+	hv := &fakeHyp{}
+	m := newTestManager(t, hv, nil, nil)
+	m.onGone(context.Background(), "nope") // unknown id: must not panic
+	put(m, &record{ID: "busy", State: StateRunning, Kind: SandboxVM, Lifecycle: LifecycleEphemeral,
+		Handle: Handle{Label: "l-busy"}, busy: true})
+	m.onGone(context.Background(), "busy")
+	r := snap(m, "busy")
+	if r.State != StateRunning || r.Handle.Label != "l-busy" || r.AwaitKey {
+		t.Fatalf("busy box must be left alone: %+v", r)
+	}
+	if len(hv.killed) != 0 {
+		t.Fatalf("busy box VM killed: %v", hv.killed)
+	}
+}
+
+func TestOnGoneDevcontainerNeverKillsVMAndAsksForKey(t *testing.T) {
+	for _, lc := range []Lifecycle{LifecycleEphemeral, LifecyclePersistent} {
+		hv := &fakeHyp{}
+		m := newTestManager(t, hv, nil, nil)
+		put(m, &record{ID: "dev", State: StateRunning, Kind: SandboxDevcontainer, Lifecycle: lc,
+			Handle: Handle{Label: "dc"}, Boot: &BootInfo{Hostname: "h"}})
+		m.onGone(context.Background(), "dev")
+		r := snap(m, "dev")
+		if r.State != StateProvisioning || !r.AwaitKey {
+			t.Fatalf("%s: %+v", lc, r)
+		}
+		if len(hv.killed) != 0 {
+			t.Fatalf("%s: dev container must not go through the VM hypervisor: %v", lc, hv.killed)
+		}
+	}
+}

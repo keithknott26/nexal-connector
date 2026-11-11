@@ -131,3 +131,29 @@ func TestCheckArtifactAcceptsConsistentPin(t *testing.T) {
 		t.Error("non-arm64 pin accepted")
 	}
 }
+
+// Drift between the pin file and the struct that reads it, a malformed file and an
+// unsupported architecture must all be rejected rather than silently accepted.
+func TestCheckArtifactRejectsDriftMalformedAndWrongArchitecture(t *testing.T) {
+	raw, err := pinnedFS.ReadFile("pinned.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := string(raw)
+	if err := checkArtifact(good); err != nil {
+		t.Fatalf("embedded pin rejected: %v", err)
+	}
+	for name, in := range map[string]string{
+		"unknown field":      strings.Replace(good, `"version"`, `"surprise": "x", "version"`, 1),
+		"malformed json":     "{not json",
+		"empty input":        "",
+		"non-arm64 pin file": strings.Replace(good, `"architecture": "arm64"`, `"architecture": "amd64"`, 1),
+	} {
+		if in == good {
+			t.Fatalf("%s: mutation did not apply", name)
+		}
+		if err := checkArtifact(in); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

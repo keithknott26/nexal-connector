@@ -178,3 +178,83 @@ func TestValidIDCharsetAndLength(t *testing.T) {
 		}
 	}
 }
+
+type errSource struct{}
+
+func (errSource) Fetch(context.Context, string) (EncryptedBundle, error) {
+	return EncryptedBundle{}, errors.New("network down")
+}
+
+type errKeys struct{}
+
+func (errKeys) BundleKey(context.Context, string, string) ([]byte, error) {
+	return nil, errors.New("no key")
+}
+
+type errFloor struct {
+	loadErr, advanceErr error
+}
+
+func (f errFloor) Load(context.Context, string) (uint64, error)  { return 0, f.loadErr }
+func (f errFloor) Advance(context.Context, string, uint64) error { return f.advanceErr }
+
+func TestRetrieveAndActivateErrorBranches(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+	bundle, key := sealedFixture(t, "device-1", now)
+	src := bundleSource{bundle}
+	keys := func() *keyFixture { return &keyFixture{key: append([]byte(nil), key...)} }
+
+	// Unconfigured collaborators.
+	if _, err := RetrieveAndActivate(ctx, src, digestVerifier{}, keys(), nil, &activator{}, "device-1", now); err == nil {
+		t.Fatal("nil floor accepted")
+	}
+	if _, err := RetrieveAndActivate(ctx, src, digestVerifier{}, keys(), &persistentFloor{values: map[string]uint64{}}, nil, "device-1", now); err == nil {
+		t.Fatal("nil activator accepted")
+	}
+	if _, _, err := Retrieve(ctx, nil, digestVerifier{}, keys(), "device-1", now); err == nil {
+		t.Fatal("nil source accepted")
+	}
+	if _, _, err := Retrieve(ctx, src, digestVerifier{}, keys(), "bad id!", now); err == nil {
+		t.Fatal("invalid device id accepted")
+	}
+
+	// Retrieve failures propagate through RetrieveAndActivate and never activate.
+	act := &activator{}
+	if _, err := RetrieveAndActivate(ctx, errSource{}, digestVerifier{}, keys(), &persistentFloor{values: map[string]uint64{}}, act, "device-1", now); err == nil || act.calls != 0 {
+		t.Fatalf("fetch error: err=%v calls=%d", err, act.calls)
+	}
+	if _, _, err := Retrieve(ctx, src, digestVerifier{}, errKeys{}, "device-1", now); err == nil {
+		t.Fatal("key provider error accepted")
+	}
+
+	// Envelope validation.
+	empty := bundle
+	empty.Ciphertext = nil
+	if _, _, err := Retrieve(ctx, bundleSource{empty}, digestVerifier{}, keys(), "device-1", now); err == nil {
+		t.Fatal("empty ciphertext accepted")
+	}
+	badNonce := bundle
+	badNonce.Nonce = []byte{1, 2, 3}
+	if _, _, err := Retrieve(ctx, bundleSource{badNonce}, digestVerifier{}, keys(), "device-1", now); err == nil {
+		t.Fatal("short nonce accepted")
+	}
+	if _, _, err := Retrieve(ctx, src, digestVerifier{}, &keyFixture{key: []byte("short")}, "device-1", now); err == nil {
+		t.Fatal("invalid AES key length accepted")
+	}
+
+	// Floor failures.
+	act = &activator{}
+	if _, err := RetrieveAndActivate(ctx, src, digestVerifier{}, keys(), errFloor{loadErr: errors.New("keychain locked")}, act, "device-1", now); err == nil || act.calls != 0 {
+		t.Fatalf("floor load error: err=%v calls=%d", err, act.calls)
+	}
+	if _, err := RetrieveAndActivate(ctx, src, digestVerifier{}, keys(), errFloor{advanceErr: errors.New("write failed")}, &activator{}, "device-1", now); err == nil {
+		t.Fatal("floor persistence failure reported success")
+	}
+
+	// Equal revision: activates but does not rewrite the floor.
+	floor := &persistentFloor{values: map[string]uint64{"device-1": 7}}
+	if _, err := RetrieveAndActivate(ctx, src, digestVerifier{}, keys(), floor, &activator{}, "device-1", now); err != nil {
+		t.Fatalf("same-revision reactivation: %v", err)
+	}
+}

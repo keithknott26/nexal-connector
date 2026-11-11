@@ -54,3 +54,25 @@ func writeCanaryState(t *testing.T, dir string, b []byte) {
 		t.Fatal(err)
 	}
 }
+
+func TestSaveCanaryRenameFailureReturnsErrorAndRemovesTempFile(t *testing.T) {
+	dir := t.TempDir()
+	// A non-empty directory named state.json makes the final rename fail.
+	if err := os.MkdirAll(filepath.Join(dir, "state.json", "child"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := saveCanary(root, &CanaryState{}); err == nil {
+		t.Fatal("expected rename failure to be reported")
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("temporary state file left behind: %s", e.Name())
+		}
+	}
+}

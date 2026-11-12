@@ -1345,20 +1345,27 @@ func (a *Agent) runSandbox(ctx context.Context, hostID string) {
 		}
 		if err := a.sandbox.Poll(ctx, hostID); err != nil && !client.IsNotSupported(err) {
 			a.logger.Debug("sandbox poll failed", "error", errorText(err))
-			if sandboxBackoff == 0 {
-				sandboxBackoff = sandboxBackoffMin
-			} else {
-				sandboxBackoff *= 2
-			}
-			if sandboxBackoff > sandboxBackoffMax {
-				sandboxBackoff = sandboxBackoffMax
-			}
+			sandboxBackoff = nextSandboxBackoff(sandboxBackoff, sandboxBackoffMin, sandboxBackoffMax)
 			t.Reset(sandboxBackoff)
 		} else {
 			sandboxBackoff = 0
 			t.Reset(sandboxPollInterval)
 		}
 	}
+}
+
+// nextSandboxBackoff returns the poll delay after a failed sandbox poll: min on
+// the first failure, then doubling, never above max.
+func nextSandboxBackoff(cur, min, max time.Duration) time.Duration {
+	if cur <= 0 {
+		cur = min
+	} else {
+		cur *= 2
+	}
+	if cur > max {
+		cur = max
+	}
+	return cur
 }
 
 // tunnelSignature condenses the parts of the mesh status the coordinator and the

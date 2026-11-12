@@ -190,3 +190,12 @@ func TestSandboxCommandRejectsBadInputBeforeLoadingConfig(t *testing.T) {
 		t.Error("sandboxCommand must not create the configuration file")
 	}
 }
+
+func TestSandboxCommandRefusesUnenrolledHostBeforeCredentialAccess(t *testing.T) {
+	path := bundleTestConfig(t, "")
+	err := sandboxCommand(context.Background(), []string{"--config", path, "--action", "list"})
+	var ce *codedError
+	if !errors.As(err, &ce) || ce.code != "not_enrolled" {
+		t.Fatalf("expected not_enrolled before credential access, got %v", err)
+	}
+}

@@ -61,6 +61,9 @@ func sandboxCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !client.ValidID(c.HostID) {
+		return &codedError{code: "not_enrolled", err: errors.New("this computer is not enrolled; run enrollment first")}
+	}
 	secrets, err := config.NewSecrets(*path, c)
 	if err != nil {
 		return err
@@ -74,9 +77,6 @@ func sandboxCommand(ctx context.Context, args []string) error {
 	api, err := client.New(c.Coordinator, token, c.Development)
 	if err != nil {
 		return err
-	}
-	if !client.ValidID(c.HostID) {
-		return &codedError{code: "not_enrolled", err: errors.New("this computer is not enrolled; run enrollment first")}
 	}
 	return runSandbox(ctx, api, c.HostID, *action, *id, *kind, *stdin, os.Stdin, os.Stdout)
 }

@@ -461,3 +461,36 @@ func TestInitPausedFlagStillWithholds(t *testing.T) {
 		t.Error("--paused did not withhold contribution")
 	}
 }
+
+func TestUsageListsEveryDispatchedCommand(t *testing.T) {
+	err := run(context.Background(), nil)
+	if err == nil {
+		t.Fatal("empty args accepted")
+	}
+	src, rerr := os.ReadFile("main.go")
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	start := strings.Index(string(src), "func run(")
+	body := string(src)[start:]
+	end := strings.Index(body, "\nfunc doctorCommand")
+	body = body[:end]
+	usage := strings.TrimPrefix(err.Error(), "usage: nexal ")
+	usage, _, _ = strings.Cut(usage, " [")
+	listed := map[string]bool{}
+	for _, c := range strings.Split(usage, "|") {
+		listed[c] = true
+	}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "case \"") {
+			continue
+		}
+		for _, c := range strings.Split(strings.TrimSuffix(line, ":"), ",") {
+			c = strings.Trim(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(c), "case")), `"`)
+			if !listed[c] {
+				t.Errorf("command %q is dispatched but missing from usage", c)
+			}
+		}
+	}
+}

@@ -98,7 +98,7 @@ func parse(f *flag.FlagSet, args []string, path *string) error {
 }
 func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|inference|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|share-while-active|security-import|diagnostics|bundle-send|bundle-receive [--config absolute-path]")
+		return errors.New("usage: nexal init|enroll|identity|coordinator-check|run|status|peers-view|time-machine|policy|set-policy|pause|resume|accept-jobs|cancel|pair|pair-v2|doctor|tunnel-check|static-peers|peers|collective|inference|drive|share|lan-share|wake|canary|honeypot|sandbox|peer-names|share-while-active|security-import|diagnostics|bundle-send|bundle-receive|exit-route|guest|overflow|self-test|version [--config absolute-path]")
 	}
 	switch args[0] {
 	case "exit-route":

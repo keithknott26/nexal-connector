@@ -285,3 +285,27 @@ func TestDoctorReportsStaticPeerCountWithoutAddresses(t *testing.T) {
 		t.Fatal("the report must state that configuration is not authorization")
 	}
 }
+
+// Inspect is the production entry point wiring the real loader; a missing config
+// must be reported as blocked without leaking the path and without touching the
+// network or the telemetry probe.
+func TestInspectMissingConfigIsBlockedAndOffline(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "private-missing-config.json")
+	report := Inspect(context.Background(), missing, false, false)
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration = %s, want blocked", got)
+	}
+	if got := status(t, report, "telemetry"); got != "not_checked" {
+		t.Fatalf("telemetry = %s, want not_checked", got)
+	}
+	if report.NetworkContacted {
+		t.Fatal("report claims network contact for an offline run")
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-missing-config") {
+		t.Fatalf("report leaks config path: %s", raw)
+	}
+}

@@ -607,3 +607,51 @@ func TestOpenDirectoryRejectionAndCreationBranches(t *testing.T) {
 		t.Fatalf("created dir: %v %v", info, err)
 	}
 }
+
+func TestScanOnOpenCleansTempRejectsStrangersAndEnforcesQuota(t *testing.T) {
+	open := func(dir string, quota int64) (*Store, error) {
+		return NewStore(StoreOptions{Directory: dir, QuotaBytes: quota, MaxObjectBytes: 1 << 20,
+			FreeBytes: func() (uint64, error) { return 1 << 30, nil }})
+	}
+	// Seed a directory with one real object, then close it.
+	dir := testDirectory(t)
+	s, err := open(dir, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutBytes(Cache, make([]byte, 600)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A crashed writer's temp file is removed on reopen and is not charged.
+	tmp := filepath.Join(dir, ".tmp."+digestOf([]byte("crashed")))
+	if err := os.WriteFile(tmp, make([]byte, 300), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err = open(dir, 1000)
+	if err != nil {
+		t.Fatalf("reopen with stale temp: %v", err)
+	}
+	if _, err := os.Lstat(tmp); !os.IsNotExist(err) {
+		t.Fatalf("stale temp file not removed: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A quota smaller than what is already on disk fails the reopen.
+	if _, err := open(dir, 500); !errors.Is(err, ErrQuota) {
+		t.Fatalf("over-quota reopen: %v", err)
+	}
+
+	// An unrecognized file makes the directory unsafe.
+	if err := os.WriteFile(filepath.Join(dir, "stranger.txt"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open(dir, 1000); !errors.Is(err, ErrUnsafePath) {
+		t.Fatalf("stranger file: %v", err)
+	}
+}

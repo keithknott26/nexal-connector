@@ -16,10 +16,10 @@ func TestStartBootRefusalsReportFailedWithoutRecord(t *testing.T) {
 			SetupKey: "abcdefgh12345678", Devcontainer: &Devcontainer{Template: "go"}, ExpiresAt: &past}
 	}
 	cases := []struct {
-		name           string
-		task           func() Task
-		dev            DevOps
-		want           string
+		name string
+		task func() Task
+		dev  DevOps
+		want string
 	}{
 		{"invalid task", func() Task { tk := valid(); tk.Hostname = "bad host!"; return tk }, &fakeDev{}, "invalid task"},
 		{"dev unavailable", valid, nil, "not available"},

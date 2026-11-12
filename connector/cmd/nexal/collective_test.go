@@ -327,34 +327,45 @@ func TestWaitForPeersIsBoundedAndSkipsSelf(t *testing.T) {
 // The command must refuse an unusable invocation before it loads an identity,
 // binds a socket or dials anything, and must never echo an argument back.
 func TestCollectiveCommandRejectsUnsafeFlags(t *testing.T) {
-	for _, args := range [][]string{
-		{"collective"},
-		{"collective", "--config", "relative-path"},
-		{"collective", "--config", "/tmp/nexal-absent/config.json"},
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--tenant", "t"},
-		// Wildcard bind.
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--tenant", "t",
-			"--listen", "0.0.0.0:48441", "--session", strings.Repeat("a", 64), "--values", "1,2"},
-		// Public bind.
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--tenant", "t",
-			"--listen", "8.8.8.8:48441", "--session", strings.Repeat("a", 64), "--values", "1,2"},
-		// Unknown reduction.
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--tenant", "t",
-			"--listen", "127.0.0.1:48441", "--session", strings.Repeat("a", 64), "--values", "1,2", "--op", "mean"},
-		// Timeouts outside the bound.
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--tenant", "t",
-			"--listen", "127.0.0.1:48441", "--session", strings.Repeat("a", 64), "--values", "1,2", "--timeout", "1h"},
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--tenant", "t",
-			"--listen", "127.0.0.1:48441", "--session", strings.Repeat("a", 64), "--values", "1,2", "--step-timeout", "0s"},
-		// Unknown flag, carrying a value that must not be echoed.
-		{"collective", "--config", "/tmp/nexal-absent/config.json", "--secret", "must-not-echo"},
+	const cfg = "/tmp/nexal-absent/config.json"
+	session := strings.Repeat("a", 64)
+	base := func(extra ...string) []string {
+		return append([]string{"collective", "--config", cfg, "--tenant", "t",
+			"--listen", "127.0.0.1:48441", "--session", session, "--values", "1,2"}, extra...)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string // substring the refusal must carry, so each case fails for its own reason
+	}{
+		{"no flags", []string{"collective"}, "usage: nexal collective"},
+		{"relative config", []string{"collective", "--config", "relative-path"}, "absolute"},
+		{"missing required", []string{"collective", "--config", cfg}, "usage: nexal collective"},
+		{"tenant only", []string{"collective", "--config", cfg, "--tenant", "t"}, "usage: nexal collective"},
+		{"timeout too long", base("--timeout", "1h"), "at most"},
+		{"zero step timeout", base("--step-timeout", "0s"), "positive"},
+		{"unknown flag", []string{"collective", "--config", cfg, "--secret", "must-not-echo"}, "invalid command flags"},
 	} {
-		err := run(context.Background(), args)
+		err := run(context.Background(), tc.args)
 		if err == nil {
-			t.Fatalf("accepted unusable invocation: %v", args)
+			t.Fatalf("%s: accepted unusable invocation: %v", tc.name, tc.args)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: error %q does not mention %q", tc.name, err, tc.want)
 		}
 		if strings.Contains(err.Error(), "must-not-echo") {
-			t.Fatal("flag value echoed in the error")
+			t.Fatalf("%s: flag value echoed in the error", tc.name)
+		}
+	}
+	// Wildcard, public and unknown-reduction cases are refused by their own
+	// validators; they must still fail before any identity or socket is touched.
+	for _, args := range [][]string{
+		{"collective", "--config", cfg, "--tenant", "t", "--listen", "0.0.0.0:48441", "--session", session, "--values", "1,2"},
+		{"collective", "--config", cfg, "--tenant", "t", "--listen", "8.8.8.8:48441", "--session", session, "--values", "1,2"},
+		base("--op", "mean"),
+	} {
+		if err := run(context.Background(), args); err == nil {
+			t.Fatalf("accepted unusable invocation: %v", args)
 		}
 	}
 }

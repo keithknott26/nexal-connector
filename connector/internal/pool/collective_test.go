@@ -801,3 +801,51 @@ func TestRingAccessorsReportConstruction(t *testing.T) {
 		t.Fatal("mutating the Members() result changed the ring")
 	}
 }
+
+// join refuses a second local collective on the same session and surfaces a
+// disagreement with an already-arrived frame, and expired never-joined sessions
+// are reaped so they cannot hold session slots forever.
+func TestRingInboxJoinConflictsAndExpiredSessionReaping(t *testing.T) {
+	inbox := newRingInbox(time.Now)
+	frame := testChunkFrame()
+	if err := inbox.deliver(frame); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if _, err := inbox.join(frame.session, frame.total+1, frame.op); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("join with a different vector length returned %v, want ErrInvalid", err)
+	}
+	if _, err := inbox.join(frame.session, frame.total, ReduceMax); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("join with a different reduction returned %v, want ErrInvalid", err)
+	}
+	if _, err := inbox.join(frame.session, frame.total, frame.op); err != nil {
+		t.Fatalf("matching join: %v", err)
+	}
+	if _, err := inbox.join(frame.session, frame.total, frame.op); !errors.Is(err, ErrConflict) {
+		t.Fatalf("second join returned %v, want ErrConflict", err)
+	}
+
+	// An unjoined session older than the TTL is reaped when a new one is created;
+	// a joined one is kept however old it is.
+	clock := time.Now()
+	aged := newRingInbox(func() time.Time { return clock })
+	stale, joined := testChunkFrame(), testChunkFrame()
+	stale.session, joined.session = fmt.Sprintf("%064x", 1), fmt.Sprintf("%064x", 2)
+	if err := aged.deliver(stale); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aged.join(joined.session, joined.total, joined.op); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(collectiveSessionTTL + time.Second)
+	fresh := testChunkFrame()
+	fresh.session = fmt.Sprintf("%064x", 3)
+	if err := aged.deliver(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aged.session(stale.session, false); err == nil {
+		t.Fatal("expired unjoined session was not reaped")
+	}
+	if _, err := aged.session(joined.session, false); err != nil {
+		t.Fatalf("joined session was reaped: %v", err)
+	}
+}

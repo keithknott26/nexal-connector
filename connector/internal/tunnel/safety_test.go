@@ -69,3 +69,44 @@ func TestStrictSupervisorQuarantinesLocalFixtures(t *testing.T) {
 		})
 	}
 }
+
+// runFixture executes an inert shell script as the "cloudflared" binary and
+// returns Run's result. The script answers --version so Check passes.
+func runFixture(t *testing.T, body string, ctx context.Context) (error, Evidence) {
+	t.Helper()
+	pin := fixture(t)
+	script := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'cloudflared version 2026.1.0 (test)'; exit 0; fi\n" + body
+	if err := os.WriteFile(pin.Binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(script))
+	pin.SHA256 = hex.EncodeToString(sum[:])
+	var last Evidence
+	err := Run(ctx, pin, "127.0.0.1:8788", filepath.Join(t.TempDir(), "private"), func(e Evidence) { last = e })
+	return err, last
+}
+
+func TestRunReportsDistinctNonQuarantineExits(t *testing.T) {
+	bg, cancelBg := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelBg()
+	t.Run("clean_exit_is_not_success", func(t *testing.T) {
+		err, last := runFixture(t, "exit 0\n", bg)
+		if err == nil || !strings.Contains(err.Error(), "no automatic fallback") || last.Connected || last.Quarantined {
+			t.Fatalf("clean exit must fail closed without quarantine: err=%v last=%+v", err, last)
+		}
+	})
+	t.Run("nonzero_exit_is_unavailable", func(t *testing.T) {
+		err, last := runFixture(t, "exit 3\n", bg)
+		if err == nil || !strings.Contains(err.Error(), "strict tunnel unavailable") || last.Connected || last.Quarantined {
+			t.Fatalf("non-zero exit must report unavailable: err=%v last=%+v", err, last)
+		}
+	})
+	t.Run("context_cancel_is_graceful", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+		defer cancel()
+		err, last := runFixture(t, "exec /bin/sleep 30\n", ctx)
+		if err != nil || last.Connected || last.Quarantined {
+			t.Fatalf("operator cancellation must return nil: err=%v last=%+v", err, last)
+		}
+	})
+}

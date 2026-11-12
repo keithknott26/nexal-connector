@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync"
 	"testing"
@@ -469,5 +470,27 @@ func TestStaticPeersFromDropsUnusableEntries(t *testing.T) {
 	})
 	if len(out) != 1 || out[0].Address.String() != "10.20.0.5:8443" {
 		t.Fatalf("out = %+v", out)
+	}
+}
+
+// A full candidate set refuses new claims but must still refresh a peer it
+// already holds, otherwise a flood would also freeze known peers' addresses
+// and let them age out.
+func TestCandidateSetFullStillRefreshesKnownPeers(t *testing.T) {
+	now := time.Now()
+	set := newCandidateSet(func() time.Time { return now })
+	fingerprint := func(i int) string { return fmt.Sprintf("%064x", i+1) }
+	for i := range maxLANCandidates {
+		set.add([]discovery.Candidate{{HostID: "h", Fingerprint: fingerprint(i), Port: 7443, SeenAt: now}})
+	}
+	set.add([]discovery.Candidate{{HostID: "new", Fingerprint: fingerprint(maxLANCandidates), Port: 7443, SeenAt: now}})
+	if got := len(set.list(now)); got != maxLANCandidates {
+		t.Fatalf("full set has %d entries, want %d (new claim must be dropped)", got, maxLANCandidates)
+	}
+	later := now.Add(candidateTTL - time.Second)
+	set.add([]discovery.Candidate{{HostID: "h", Fingerprint: fingerprint(0), Port: 9999, SeenAt: later}})
+	got := set.list(later.Add(2 * time.Second))
+	if len(got) != 1 || got[0].Fingerprint != fingerprint(0) || got[0].Port != 9999 {
+		t.Fatalf("known peer was not refreshed while full: %+v", got)
 	}
 }

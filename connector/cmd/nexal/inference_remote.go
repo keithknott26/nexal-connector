@@ -26,6 +26,23 @@ import (
 //
 // The coordinator only queues the request. The other Mac's connector installs and serves the model with its
 // own `nexal inference` commands, under its own owner policy, on its neXal address only.
+// validateOffloadFlags checks remote-offload's flags before any file or network access.
+func validateOffloadFlags(mode string, maxPrompt, maxWait int) error {
+	switch mode {
+	case "off", "always":
+	case "large":
+		if maxPrompt <= 0 && maxWait <= 0 {
+			return &codedError{code: "invalid_arguments", err: errors.New("--mode large needs --max-prompt or --max-wait")}
+		}
+	default:
+		return &codedError{code: "invalid_arguments", err: errors.New("--mode must be off, large or always")}
+	}
+	if maxPrompt < 0 || maxPrompt > 10_000_000 || maxWait < 0 || maxWait > 3600 {
+		return &codedError{code: "invalid_arguments", err: errors.New("--max-prompt must be 0-10000000 and --max-wait 0-3600")}
+	}
+	return nil
+}
+
 func inferenceRemote(ctx context.Context, args []string) error {
 	var to, pool, mode *string
 	var wait, asJSON, shareGPU *bool
@@ -43,6 +60,11 @@ func inferenceRemote(ctx context.Context, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if args[0] == "remote-offload" {
+		if err := validateOffloadFlags(*mode, *maxPrompt, *maxWait); err != nil {
+			return err
+		}
 	}
 	c, err := config.Load(*path)
 	if err != nil {
@@ -81,18 +103,6 @@ func inferenceRemote(ctx context.Context, args []string) error {
 			show(t)
 		}
 	case "remote-offload":
-		switch *mode {
-		case "off", "always":
-		case "large":
-			if *maxPrompt <= 0 && *maxWait <= 0 {
-				return &codedError{code: "invalid_arguments", err: errors.New("--mode large needs --max-prompt or --max-wait")}
-			}
-		default:
-			return &codedError{code: "invalid_arguments", err: errors.New("--mode must be off, large or always")}
-		}
-		if *maxPrompt < 0 || *maxPrompt > 10_000_000 || *maxWait < 0 || *maxWait > 3600 {
-			return &codedError{code: "invalid_arguments", err: errors.New("--max-prompt must be 0-10000000 and --max-wait 0-3600")}
-		}
 		p := remoteinference.OffloadPolicy{Mode: *mode, MaxPromptTokens: *maxPrompt, MaxWaitSeconds: *maxWait}
 		shared := ""
 		if *shareGPU && p.Mode != "off" {

@@ -346,3 +346,40 @@ func TestOpenRejectsMissingMalformedAndFarFutureTransfers(t *testing.T) {
 		t.Fatalf("far-future expiry = %v", err)
 	}
 }
+
+// sealRaw encrypts arbitrary plaintext with the same KEM/AEAD binding Seal
+// uses, so Open's post-authentication JSON checks can be exercised.
+func sealRaw(t *testing.T, tx client.Transfer, key *mlkem.DecapsulationKey768, plain []byte) string {
+	t.Helper()
+	binding, err := aad(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, kem := key.EncapsulationKey().Encapsulate()
+	gcm, err := aead(secret, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	wire := append(append(kem, nonce...), gcm.Seal(nil, nonce, plain, binding)...)
+	return base64.StdEncoding.EncodeToString(wire)
+}
+
+func TestOpenRejectsAuthenticatedButMalformedBundleJSON(t *testing.T) {
+	_, tx, key := fixture(t)
+	for name, tc := range map[string]struct{ plain, want string }{
+		"duplicate keys": {`{"a":"eA==","a":"eQ=="}`, "ambiguous bundle JSON"},
+		"not an object":  {`[1,2]`, "ambiguous bundle JSON"},
+		"wrong value":    {`{"a":1}`, "invalid bundle JSON"},
+	} {
+		ct := sealRaw(t, tx, key, []byte(tc.plain))
+		bad := tx
+		bad.Ciphertext = &ct
+		if _, err := Open(bad, key); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s = %v, want %q", name, err, tc.want)
+		}
+	}
+}

@@ -175,3 +175,24 @@ func TestHoneypotReportsBusyWhenStateLockIsHeld(t *testing.T) {
 		t.Fatalf("err = %v, want busy", err)
 	}
 }
+
+// The decoys must never bind a public, loopback or IPv6 address unless loopback
+// is explicitly allowed for tests; whatever the host interfaces look like, only
+// IPv4 mesh/LAN addresses (plus the opt-in loopback) may come back.
+func TestHoneypotAddressesOnlyReturnsMeshLANAndOptInLoopback(t *testing.T) {
+	loopback := netip.MustParseAddr("127.0.0.1")
+	for _, addr := range (Honeypot{}).honeypotAddresses() {
+		if !addr.Is4() || (SourceClass(addr) != "mesh" && SourceClass(addr) != "lan") || addr == loopback {
+			t.Fatalf("unexpected decoy address %s (class %q)", addr, SourceClass(addr))
+		}
+	}
+	got := (Honeypot{allowLoopback: true}).honeypotAddresses()
+	if len(got) == 0 || got[0] != loopback {
+		t.Fatalf("allowLoopback should list 127.0.0.1 first, got %v", got)
+	}
+	for _, addr := range got[1:] {
+		if addr == loopback || !addr.Is4() {
+			t.Fatalf("unexpected address %s after loopback", addr)
+		}
+	}
+}

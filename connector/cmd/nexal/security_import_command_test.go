@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"nexal/connector/internal/config"
 )
 
 // securityImportCommand must refuse unusable input before reading config,
@@ -39,5 +42,33 @@ func TestSecurityImportCommandRejectsBadInputBeforeNetwork(t *testing.T) {
 	}
 	if _, err := os.Stat(cfg); err == nil {
 		t.Fatal("config file must not be created by a rejected import")
+	}
+}
+
+// A valid capture on a host that is not enrolled must stop before any
+// keychain or network access and leave the capture untouched.
+func TestSecurityImportCommandRequiresEnrolledHost(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "private", "config.json")
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(cfg, c); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(dir, "capture.jsonl")
+	row := `{"event_type":"alert","timestamp":"` + time.Now().UTC().Format(time.RFC3339Nano) +
+		`","alert":{"signature_id":7,"severity":1},"src_ip":"192.168.1.2"}` + "\n"
+	if err := os.WriteFile(capture, []byte(row), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := securityImportCommand(context.Background(), []string{"--config", cfg, "--input", capture, "--source-id", "opaque_capture_7", "--rules-version", "rules_1"})
+	if err == nil || !strings.Contains(err.Error(), "enroll this host") {
+		t.Fatalf("unenrolled host: want enroll error, got %v", err)
+	}
+	if _, statErr := os.Stat(capture); statErr != nil {
+		t.Fatalf("capture must be retained: %v", statErr)
 	}
 }

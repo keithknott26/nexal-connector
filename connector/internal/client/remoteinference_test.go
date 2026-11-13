@@ -159,3 +159,39 @@ func TestInferenceGatewayLease(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestRemoteInferenceListAndCreateRejectBadHostIDAndSurfaceServerErrors(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const bad = "bad id/../x"
+	if _, err := c.AllRemoteInference(ctx, bad); err == nil {
+		t.Fatal("AllRemoteInference accepted an invalid host id")
+	}
+	if _, err := c.CreateRemoteInference(ctx, bad, "h2", "m"); err == nil {
+		t.Fatal("CreateRemoteInference accepted an invalid host id")
+	}
+	if _, err := c.CreateRemoteInferencePool(ctx, bad, []string{"h2"}, "m"); err == nil {
+		t.Fatal("CreateRemoteInferencePool accepted an invalid host id")
+	}
+	if hits != 0 {
+		t.Fatalf("invalid host ids reached the network: %d requests", hits)
+	}
+	if _, err := c.AllRemoteInference(ctx, "h1"); err == nil {
+		t.Fatal("AllRemoteInference swallowed a 500")
+	}
+	if task, err := c.CreateRemoteInference(ctx, "h1", "h2", "m"); err == nil || task != nil {
+		t.Fatalf("CreateRemoteInference swallowed a 500: task=%v err=%v", task, err)
+	}
+	if hits == 0 {
+		t.Fatal("valid host id never reached the server")
+	}
+}

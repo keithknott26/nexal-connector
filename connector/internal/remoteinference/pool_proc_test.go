@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type countingCloser struct{ n int }
@@ -40,5 +43,60 @@ func TestProcStopCancelsWaitsAndClosesRingOnce(t *testing.T) {
 	}
 	if relay.n != 1 {
 		t.Fatalf("ring relays closed %d times, want 1", relay.n)
+	}
+}
+
+func TestStartProcReportsStartFailure(t *testing.T) {
+	r := &Runner{Exe: filepath.Join(t.TempDir(), "missing-nexal"), LogDir: filepath.Join(t.TempDir(), "logs")}
+	p, err := r.startProc(context.Background(), "pool-serve", "big")
+	if err == nil || p != nil {
+		t.Fatalf("startProc = %v, %v; want nil proc and an error", p, err)
+	}
+}
+
+func TestStartProcCapturesOutputLogsAndReportsExit(t *testing.T) {
+	exe := script(t, `echo "helper says hi"; echo "boom" >&2; exit 3`)
+	logDir := filepath.Join(t.TempDir(), "logs")
+	r := &Runner{Exe: exe, LogDir: logDir}
+	p, err := r.startProc(context.Background(), "pool-serve", "big")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("helper did not exit")
+	}
+	if p.alive() {
+		t.Fatal("alive() true after the helper exited")
+	}
+	got := p.exit()
+	if !strings.Contains(got, "helper says hi") || !strings.Contains(got, "boom") || !strings.Contains(got, "exit status 3") {
+		t.Fatalf("exit() = %q", got)
+	}
+	data, err := os.ReadFile(filepath.Join(logDir, "inference-pool-big.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"=== ", "pool-serve big", "helper says hi", "exited:"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("log missing %q:\n%s", want, data)
+		}
+	}
+}
+
+func TestStartProcStopEndsALongRunningHelper(t *testing.T) {
+	exe := script(t, `exec sleep 60`)
+	r := &Runner{Exe: exe} // no LogDir: output goes only to the tail
+	p, err := r.startProc(context.Background(), "pool-serve", "big")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.alive() {
+		t.Fatal("helper should be running")
+	}
+	p.stop()
+	if p.alive() {
+		t.Fatal("helper still running after stop")
 	}
 }

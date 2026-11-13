@@ -309,3 +309,19 @@ func TestInspectMissingConfigIsBlockedAndOffline(t *testing.T) {
 		t.Fatalf("report leaks config path: %s", raw)
 	}
 }
+
+func TestInspectWithMissingConfigIsOfflineAndBlocked(t *testing.T) {
+	report := Inspect(context.Background(), filepath.Join(t.TempDir(), "missing.json"), false, false)
+	if report.NetworkContacted {
+		t.Fatal("an Inspect run without nat must not claim network contact")
+	}
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration status = %q, want blocked", got)
+	}
+	if got := status(t, report, "telemetry"); got != "not_checked" {
+		t.Fatalf("telemetry status = %q, want not_checked", got)
+	}
+	if report.Mode != "unknown" {
+		t.Fatalf("mode = %q, want unknown", report.Mode)
+	}
+}

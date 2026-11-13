@@ -334,3 +334,16 @@ func TestHandleDeliversResponsesToTheSinkAndIgnoresEverythingElse(t *testing.T) 
 	m.handle(responsePacket(t, peerAdvertisement()), from, conn, nil)
 	m.handle(queryPacket(t), from, conn, nil)
 }
+
+func TestResponderInstanceName(t *testing.T) {
+	r, err := NewResponder(sampleAdvertisement(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.instanceName(); got == "" {
+		t.Fatal("instanceName empty for a responder with answers")
+	}
+	if got := (&Responder{}).instanceName(); got != "" {
+		t.Fatalf("instanceName = %q for a responder without answers, want empty", got)
+	}
+}

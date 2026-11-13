@@ -133,3 +133,49 @@ func TestRootOwnedImmutablePathRejectsMissingAndWritableComponents(t *testing.T)
 		t.Fatal("group/world-writable directory accepted as a root-owned path")
 	}
 }
+
+type failingDownRunner struct {
+	calls  chan []string
+	cancel context.CancelFunc
+}
+
+func (r failingDownRunner) Run(_ context.Context, name string, args ...string) error {
+	call := append([]string{name}, args...)
+	r.calls <- call
+	if len(args) == 1 && args[0] == "down" {
+		return os.ErrDeadlineExceeded
+	}
+	r.cancel()
+	return nil
+}
+
+func TestGuestGuardRejectsInvalidLeaseWithoutRunningCommands(t *testing.T) {
+	calls := make(chan []string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := runGuestGuard(ctx, filepath.Join(t.TempDir(), "config.json"), config.GuestAccess{}, guestGuardRunner{calls, cancel})
+	if err == nil || !strings.Contains(err.Error(), "invalid expiry guard lease") {
+		t.Fatalf("invalid lease was accepted: %v", err)
+	}
+	select {
+	case args := <-calls:
+		t.Fatal("invalid lease ran a privileged command", args)
+	default:
+	}
+}
+
+func TestGuestGuardStopsServiceWhenDownFails(t *testing.T) {
+	now := time.Now()
+	grant := config.GuestAccess{GrantID: "grant_1", ReceivedAt: now.Add(-time.Minute).UTC().Format(time.RFC3339Nano), AccessExpiresAt: now.Add(-time.Second).UTC().Format(time.RFC3339Nano), InviterEmail: "owner@example.com"}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	calls := make(chan []string, 4)
+	_ = runGuestGuard(ctx, filepath.Join(t.TempDir(), "config.json"), grant, failingDownRunner{calls, cancel})
+	if len(calls) != 2 {
+		t.Fatalf("expected down then service stop, got %d calls", len(calls))
+	}
+	first, second := <-calls, <-calls
+	if strings.Join(first, " ") != "nexal-network down" || strings.Join(second, " ") != "nexal-network service stop" {
+		t.Fatal("unexpected fallback sequence", first, second)
+	}
+}

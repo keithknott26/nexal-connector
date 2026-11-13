@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"nexal/connector/internal/config"
 )
 
 type fakePeerNames struct{ address, name string }
@@ -95,5 +98,35 @@ func TestPeerNamesInvalidNameHasStableCode(t *testing.T) {
 	err := runPeerNames(context.Background(), scriptedPeerNames{}, "host_1", "set", "100.86.1.1", strings.NewReader("bad\x07"), &bytes.Buffer{})
 	if errorCode(err) != "invalid_name" {
 		t.Fatalf("expected invalid_name, got %v", err)
+	}
+}
+
+func TestPeerNamesCommandRejectsBadArgsBeforeReadingConfig(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent", "config.json")
+	for name, args := range map[string][]string{
+		"no action":         {"--config", missing},
+		"list with address": {"--action", "list", "--address", "100.64.0.2", "--config", missing},
+		"set bad address":   {"--action", "set", "--address", "8.8.8.8", "--config", missing},
+	} {
+		err := peerNamesCommand(context.Background(), args)
+		if err == nil || errorCode(err) != "invalid_arguments" {
+			t.Errorf("%s: want invalid_arguments, got %v", name, err)
+		}
+	}
+}
+
+func TestPeerNamesCommandRequiresEnrolledHost(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private", "config.json")
+	c := config.Config{
+		Version: 1, Coordinator: "http://127.0.0.1:1", Name: "M2 mini", Listen: "127.0.0.1:8788",
+		Development: true, Paused: true, MemoryLimitBytes: 256 << 20,
+		ReserveMemoryBytes: 4096 << 20, IdleSeconds: 300,
+	}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	err := peerNamesCommand(context.Background(), []string{"--action", "list", "--config", path})
+	if err == nil || errorCode(err) != "not_enrolled" {
+		t.Fatalf("unenrolled host: want not_enrolled, got %v", err)
 	}
 }

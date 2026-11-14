@@ -344,6 +344,13 @@ func TestCollectiveCommandRejectsUnsafeFlags(t *testing.T) {
 		{"tenant only", []string{"collective", "--config", cfg, "--tenant", "t"}, "usage: nexal collective"},
 		{"timeout too long", base("--timeout", "1h"), "at most"},
 		{"zero step timeout", base("--step-timeout", "0s"), "positive"},
+		{"peer wait too long", base("--peer-wait", "1h"), "at most"},
+		{"step timeout too long", base("--step-timeout", "1h"), "at most"},
+		{"negative overall timeout", base("--timeout", "-1s"), "positive"},
+		{"positional argument", append(base(), "extra"), "unexpected positional arguments"},
+		{"unknown reduction", base("--op", "mean"), "--op must be sum, max or min"},
+		{"non-numeric values", base("--values", "1,abc"), "finite decimal numbers"},
+		{"non-finite values", base("--values", "1,NaN"), "finite"},
 		{"unknown flag", []string{"collective", "--config", cfg, "--secret", "must-not-echo"}, "invalid command flags"},
 	} {
 		err := run(context.Background(), tc.args)

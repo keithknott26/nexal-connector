@@ -261,3 +261,21 @@ func TestNewValidation(t *testing.T) {
 		t.Fatal("nil dialer accepted")
 	}
 }
+
+func TestSetDisconnectedKeepsRemovalReason(t *testing.T) {
+	h := newHarness(t)
+	h.c.mu.Lock()
+	h.c.connected = true
+	h.c.mu.Unlock()
+	h.c.setDisconnected("cannot reach the coordinator")
+	if s := h.c.Snapshot(); s.Connected || s.LastError != "cannot reach the coordinator" {
+		t.Fatalf("plain disconnect not recorded: %+v", s)
+	}
+	h.c.mu.Lock()
+	h.c.removed = true
+	h.c.mu.Unlock()
+	h.c.setDisconnected("cannot reach the coordinator")
+	if s := h.c.Snapshot(); s.Connected || s.LastError != "this Mac was removed from the network" {
+		t.Fatalf("removal reason overwritten: %+v", s)
+	}
+}

@@ -246,6 +246,16 @@ func TestLogDirIsUnderHomeAndPlatformSpecific(t *testing.T) {
 	}
 }
 
+func TestLogDirReportsMissingHome(t *testing.T) {
+	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
+		t.Skip("home lookup does not use $HOME on this platform")
+	}
+	t.Setenv("HOME", "")
+	if got, err := LogDir(); err == nil {
+		t.Fatalf("LogDir() = %q, want an error when the home directory is unknown", got)
+	}
+}
+
 func TestRotatingFileCloseReopensAppendsAndReportsOpenErrors(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "sub", "d.log")

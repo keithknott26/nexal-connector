@@ -644,3 +644,24 @@ func readSibling(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// A coordinator answer about another pairing, or with an expiry that is not a
+// wire date, must be rejected rather than shown to the user as this pairing's state.
+func TestPairingStateRejectsMismatchedIDAndBadExpiry(t *testing.T) {
+	otherID := "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+	for name, body := range map[string]string{
+		"different pairing": fmt.Sprintf(statusBody, otherID, PairingWaiting, futureExpiry(time.Minute)),
+		"bad expiry":        fmt.Sprintf(statusBody, testPairingID, PairingWaiting, "tomorrow-ish"),
+		"empty expiry":      fmt.Sprintf(statusBody, testPairingID, PairingWaiting, ""),
+	} {
+		c, _ := pairingServer(t, func(w http.ResponseWriter, _ *http.Request, _ *recorded) {
+			_, _ = w.Write([]byte(body))
+		})
+		got, err := c.PairingState(context.Background(), testHostID, testPairingID)
+		if err == nil {
+			t.Errorf("%s: accepted %+v", name, got)
+		} else if got != (PairingStatus{}) {
+			t.Errorf("%s: rejected state must be zero, got %+v", name, got)
+		}
+	}
+}

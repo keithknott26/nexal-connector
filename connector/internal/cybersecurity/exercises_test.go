@@ -170,3 +170,18 @@ func TestRunExercisesRejectsCancelledContextAndNonDirectoryExerciseRoot(t *testi
 		t.Fatal("report must not be called on rejected runs")
 	}
 }
+
+func TestTestIntegrityFailsOnUnusableDirectoryAndLeavesNoArtifacts(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	if err := (Canary{Directory: missing}).testIntegrity(context.Background()); err == nil {
+		t.Fatal("unusable directory accepted")
+	}
+
+	dir := t.TempDir()
+	if err := (Canary{Directory: dir}).testIntegrity(context.Background()); err != nil {
+		t.Fatalf("integrity self-test failed on a healthy directory: %v", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("self-test left artifacts behind: %v", entries)
+	}
+}

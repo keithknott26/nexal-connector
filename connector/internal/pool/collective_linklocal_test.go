@@ -171,3 +171,25 @@ func linkLocalIPv4(t *testing.T) string {
 	}
 	return ""
 }
+
+// A ring client must refuse a non-private or malformed peer endpoint before it
+// builds any TLS policy, so a hostile roster entry cannot steer a dial.
+func TestNewRingClientRejectsUnsafeEndpointBeforeBuildingPolicy(t *testing.T) {
+	for _, endpoint := range []string{"http://10.0.0.2:9000", "https://example.com:9000", "https://8.8.8.8:9000", "https://10.0.0.2", "https://10.0.0.2:0"} {
+		client, err := newRingClient(RingOptions{}, RingMember{Endpoint: endpoint})
+		if err == nil || client != nil {
+			t.Errorf("newRingClient(%q) = %v, %v; want rejection", endpoint, client, err)
+		}
+	}
+}
+
+// A nil clock falls back to the real one instead of panicking on first use.
+func TestNewRingInboxDefaultsNilClock(t *testing.T) {
+	inbox := newRingInbox(nil)
+	if inbox.now == nil {
+		t.Fatal("nil clock was not defaulted")
+	}
+	if _, err := inbox.session(strings.Repeat("0", 63)+"1", true); err != nil {
+		t.Fatalf("session creation with default clock: %v", err)
+	}
+}

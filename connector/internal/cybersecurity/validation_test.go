@@ -209,3 +209,25 @@ func TestValidationHandlerRejectsWrongNonceAndCancelledContextWithoutConsumingNo
 		t.Fatalf("rejected requests reached report: %d", reports)
 	}
 }
+
+func TestValidateLocalPropagatesReportFailureAndCleansUp(t *testing.T) {
+	dir := t.TempDir()
+	reportErr := errors.New("evidence store down")
+	executed, reason, err := (Canary{Directory: dir}).ValidateLocal(context.Background(), validationGrant(),
+		func(context.Context, Event) error { return reportErr })
+	if !errors.Is(err, reportErr) || !executed || reason != "completed" {
+		t.Fatalf("executed=%v reason=%q err=%v", executed, reason, err)
+	}
+	if files, _ := os.ReadDir(dir); len(files) != 0 {
+		t.Fatalf("artifact left behind after report failure: %v", files)
+	}
+}
+
+func TestValidateLocalFailsWhenWorkDirectoryIsMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	executed, reason, err := (Canary{Directory: missing}).ValidateLocal(context.Background(), validationGrant(),
+		func(context.Context, Event) error { t.Fatal("evidence reported without a probe"); return nil })
+	if err == nil || executed || reason != "execution_failed" {
+		t.Fatalf("executed=%v reason=%q err=%v", executed, reason, err)
+	}
+}

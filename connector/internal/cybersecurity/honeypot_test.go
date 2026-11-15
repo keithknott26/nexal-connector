@@ -196,3 +196,55 @@ func TestHoneypotAddressesOnlyReturnsMeshLANAndOptInLoopback(t *testing.T) {
 		}
 	}
 }
+
+func TestHoneypotDeliverRetainsOnFailureAndDropsExpiredWithoutReporting(t *testing.T) {
+	h := Honeypot{Directory: t.TempDir()}
+	now := time.Now().UTC()
+	mk := func(id string, at time.Time) Event {
+		return Event{SchemaVersion: 1, EventID: id, ObservedAt: at.Format(TimeLayout), Kind: "network_alert", Severity: "low",
+			Detector: "nexal_honeypot_ssh", DetectorVersion: "1", OriginAssessment: "unknown", EvidenceRef: "honeypot_ssh_lan_" + id}
+	}
+	stale := mk("stale", now.Add(-8*24*time.Hour))
+	if stale.Validate(now) == nil {
+		t.Fatal("test event should be expired")
+	}
+	first, second := mk("first", now), mk("second", now)
+	if err := h.locked(func(root *os.Root, s *HoneypotState) error {
+		s.Pending = []Event{stale, first, second}
+		return saveHoneypot(root, s)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var reported []string
+	fail := true
+	report := func(_ context.Context, e Event) error {
+		reported = append(reported, e.EventID)
+		if fail {
+			return io.ErrUnexpectedEOF
+		}
+		return nil
+	}
+	// The expired event is dropped (and counted) without a report; the first
+	// live event fails, so it and everything after it stay queued.
+	h.deliver(context.Background(), report)
+	st, err := h.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Pending) != 2 || st.Pending[0].EventID != "first" || st.Pending[1].EventID != "second" || st.Suppressed != 1 {
+		t.Fatalf("after failed delivery: pending=%v suppressed=%d", st.Pending, st.Suppressed)
+	}
+	if len(reported) != 1 || reported[0] != "first" {
+		t.Fatalf("reported = %v, want [first]", reported)
+	}
+	fail = false
+	reported = nil
+	h.deliver(context.Background(), report)
+	st, err = h.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Pending) != 0 || len(reported) != 2 || reported[0] != "first" || reported[1] != "second" {
+		t.Fatalf("after retry: pending=%v reported=%v", st.Pending, reported)
+	}
+}

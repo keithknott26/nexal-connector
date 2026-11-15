@@ -219,8 +219,12 @@ func (u *udpExchanger) Exchange(ctx context.Context, server string, request []by
 		return nil, ErrInvalid
 	}
 	addrs, err := u.resolver.LookupNetIP(ctx, "ip", host)
-	if err != nil || len(addrs) == 0 {
+	if err != nil {
 		return nil, fmt.Errorf("stun: cannot resolve server: %w", err)
+	}
+	if len(addrs) == 0 {
+		// A nil err must not be wrapped: %w of nil renders as "%!w(<nil>)".
+		return nil, errors.New("stun: cannot resolve server: no addresses")
 	}
 	p, err := net.LookupPort("udp", port)
 	if err != nil || p < 1 || p > 65535 {

@@ -383,3 +383,45 @@ func TestOpenRejectsAuthenticatedButMalformedBundleJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestFingerprintKnownVectors(t *testing.T) {
+	for in, want := range map[string]string{
+		"":    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		"abc": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+	} {
+		if got := Fingerprint([]byte(in)); got != want {
+			t.Fatalf("Fingerprint(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestAADRejectsBadBindingAndExpiryWindow(t *testing.T) {
+	_, tx, _ := fixture(t)
+	good, err := aad(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{tx.ID, tx.DonorHostID, tx.ReceiverHostID, tx.PublicKey, tx.ExpiresAt} {
+		if !strings.Contains(string(good), want) {
+			t.Fatalf("aad missing bound field %q", want)
+		}
+	}
+	cases := map[string]func(*client.Transfer){
+		"empty id":     func(v *client.Transfer) { v.ID = "" },
+		"bad donor id": func(v *client.Transfer) { v.DonorHostID = "bad id!" },
+		"bad receiver": func(v *client.Transfer) { v.ReceiverHostID = "" },
+		"same host":    func(v *client.Transfer) { v.ReceiverHostID = v.DonorHostID },
+		"unparseable":  func(v *client.Transfer) { v.ExpiresAt = "tomorrow" },
+		"already past": func(v *client.Transfer) { v.ExpiresAt = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano) },
+		"beyond 11 mins": func(v *client.Transfer) {
+			v.ExpiresAt = time.Now().Add(12 * time.Minute).UTC().Format(time.RFC3339Nano)
+		},
+	}
+	for name, mutate := range cases {
+		v := tx
+		mutate(&v)
+		if _, err := aad(v); err == nil {
+			t.Fatalf("%s: aad accepted invalid transfer", name)
+		}
+	}
+}

@@ -215,6 +215,10 @@ func TestMeasureUsesTheRequestSlot(t *testing.T) {
 
 // A port that never opens fails with the kind of failure and the request id, so the log says why.
 func TestMeasureNamesWhyThePortDidNotOpen(t *testing.T) {
+	// The slot range overlaps the ephemeral range, so another test binary may hold these ports.
+	if !slotPortFree(SlotPort("bw_nothing_listens")) || !slotPortFree(Port) {
+		t.Skip("a candidate port is in use by another process; cannot assert a refused dial")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	r := NewRunner(slog.New(slog.DiscardHandler))

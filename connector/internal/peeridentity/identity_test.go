@@ -384,3 +384,13 @@ func TestPutFailureIsPropagatedAndNothingIsReportedCreated(t *testing.T) {
 		t.Fatal("StoreIdentity accepted a nil secrets store")
 	}
 }
+
+func TestStoreIdentityRequiresASecretsStore(t *testing.T) {
+	id, err := pool.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := StoreIdentity(context.Background(), nil, id); err == nil {
+		t.Fatal("StoreIdentity accepted a nil secrets store")
+	}
+}

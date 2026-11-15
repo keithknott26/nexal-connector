@@ -47,6 +47,11 @@ func (c *fakeClock) NewTimer(d time.Duration) (<-chan time.Time, func()) {
 	c.timers = append(c.timers, timer)
 	return timer.ch, func() {}
 }
+func (c *fakeClock) pendingTimers() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.timers)
+}
 func (c *fakeClock) advance(d time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(d)
@@ -450,6 +455,14 @@ func TestRunSyncsImmediatelyThenOnSchedule(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not sync on entry")
+	}
+	// Run delivers the first allowance before it arms its interval timer; advancing the
+	// clock earlier would fire nothing and make this test flaky, so wait for the timer.
+	for deadline := time.Now().Add(2 * time.Second); clock.pendingTimers() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("Run never armed its interval timer")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	clock.advance(ReportInterval)
 	select {

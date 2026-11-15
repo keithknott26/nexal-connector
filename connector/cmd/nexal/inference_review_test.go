@@ -47,3 +47,26 @@ func TestReviewLatestRejectsBadArgsAndUnknownModel(t *testing.T) {
 		}
 	}
 }
+
+func TestReadReviewedRejectsDirectoryAndCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := readReviewed(dir); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("a directory must be refused as not a file: %v", err)
+	}
+	bad := filepath.Join(dir, "reviewed-pins.json")
+	if err := os.WriteFile(bad, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readReviewed(bad); err == nil {
+		t.Fatal("corrupt pins JSON must be refused")
+	}
+	// The review command reports the same failure as invalid_arguments and leaves the file alone.
+	cfg := filepath.Join(dir, "config.json")
+	err := inferenceReview(context.Background(), []string{"qwen3-4b-q4", "--revision", strings.Repeat("a", 40), "--out", bad, "--config", cfg})
+	if err == nil || errCode(err) != "invalid_arguments" {
+		t.Fatalf("want invalid_arguments, got %v", err)
+	}
+	if b, _ := os.ReadFile(bad); string(b) != "{not json" {
+		t.Fatal("the file was changed by a refused review")
+	}
+}

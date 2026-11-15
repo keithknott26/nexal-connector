@@ -70,3 +70,27 @@ func TestReadReviewedRejectsDirectoryAndCorruptFile(t *testing.T) {
 		t.Fatal("the file was changed by a refused review")
 	}
 }
+
+func TestReviewRefusesCorruptPinsFileAndMissingOut(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	corrupt := filepath.Join(dir, "reviewed-pins.json")
+	const junk = `{not json`
+	if err := os.WriteFile(corrupt, []byte(junk), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rev := strings.Repeat("a", 40)
+	for name, args := range map[string][]string{
+		"corrupt pins file": {"qwen3-4b-q4", "--revision", rev, "--out", corrupt, "--config", cfg},
+		"missing --out":     {"qwen3-4b-q4", "--revision", rev, "--config", cfg},
+		"missing revision":  {"qwen3-4b-q4", "--out", corrupt, "--config", cfg},
+	} {
+		err := inferenceReview(context.Background(), args)
+		if err == nil || errCode(err) != "invalid_arguments" {
+			t.Errorf("%s: want invalid_arguments, got %v", name, err)
+		}
+	}
+	if b, _ := os.ReadFile(corrupt); string(b) != junk {
+		t.Fatal("a refused review modified the pins file")
+	}
+}

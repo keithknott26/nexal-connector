@@ -325,3 +325,27 @@ func TestInspectWithMissingConfigIsOfflineAndBlocked(t *testing.T) {
 		t.Fatalf("mode = %q, want unknown", report.Mode)
 	}
 }
+
+// Inspect is the production entry point wiring real dependencies. With probe and
+// nat both off it must stay offline and, for a missing config file, report the
+// configuration as blocked without echoing the (private) path back.
+func TestInspectDefaultsStayOfflineAndDoNotEchoMissingConfigPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private-missing-dir", "config.json")
+	report := Inspect(context.Background(), path, false, false)
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration = %q, want blocked", got)
+	}
+	if report.NetworkContacted {
+		t.Fatal("report claims network contact without nat being requested")
+	}
+	if report.Mode != "unknown" {
+		t.Fatalf("mode = %q, want unknown", report.Mode)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-missing-dir") {
+		t.Fatalf("report leaked config path: %s", raw)
+	}
+}

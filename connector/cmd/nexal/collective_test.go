@@ -376,3 +376,36 @@ func TestCollectiveCommandRejectsUnsafeFlags(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectiveCommandRefusesBadFlagsBeforeTouchingIdentityOrRegistry pins the
+// order of collectiveCommand's validation: every flag error must surface before
+// the identity, configuration or membership registry is opened, so a typo never
+// costs a lock or a key read. The config path points at a directory that does
+// not exist; reaching identity loading would yield a different error.
+func TestCollectiveCommandRefusesBadFlagsBeforeTouchingIdentityOrRegistry(t *testing.T) {
+	missing := t.TempDir() + "/absent/config.json"
+	session := strings.Repeat("a", 64)
+	base := []string{"--config", missing, "--tenant", "t", "--listen", "127.0.0.1:8443", "--session", session, "--values", "1,2"}
+	with := func(extra ...string) []string { return append(append([]string{}, base...), extra...) }
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"missing required flags", []string{"--config", missing}, "usage: nexal collective"},
+		{"positional argument", with("stray"), "unexpected positional arguments"},
+		{"zero step timeout", with("--step-timeout", "0s"), "must be positive"},
+		{"peer wait above ceiling", with("--peer-wait", "11m"), "at most"},
+		{"unknown op", with("--op", "avg"), "--op must be"},
+		{"NaN value", append(append([]string{}, base[:len(base)-1]...), "NaN"), "finite"},
+		{"hostname listen", append(append([]string{}, base[:5]...), "localhost:8443", "--session", session, "--values", "1"), "literal IP"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := collectiveCommand(context.Background(), tc.args)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("collectiveCommand(%v) = %v, want error containing %q", tc.args, err, tc.want)
+			}
+		})
+	}
+}

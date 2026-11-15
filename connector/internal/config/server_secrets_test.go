@@ -42,3 +42,38 @@ func TestServerSecretsDir(t *testing.T) {
 		}
 	}
 }
+
+func TestNewSecretsDevelopmentFileStoreNeedsBothFlags(t *testing.T) {
+	t.Setenv(ServerSecretsDirEnv, "")
+	path := filepath.Join(t.TempDir(), "config.json")
+	s, err := NewSecrets(path, Config{DevSecrets: true, Development: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fs, ok := s.(FileSecrets); !ok || fs.Dir != filepath.Join(filepath.Dir(path), "dev-secrets") {
+		t.Fatalf("%T %+v", s, s)
+	}
+	if runtime.GOOS == "darwin" {
+		return
+	}
+	// Either flag alone must not select file secrets: production refuses them.
+	for name, c := range map[string]Config{"dev secrets only": {DevSecrets: true}, "development only": {Development: true}} {
+		if s, err := NewSecrets(path, c); err == nil {
+			t.Fatalf("%s: file secrets accepted outside explicit nonproduction mode: %T", name, s)
+		}
+	}
+}
+
+func TestNewSecretsRefusesUnconfiguredLinuxServer(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("only Linux consults " + ServerSecretsDirEnv)
+	}
+	t.Setenv(ServerSecretsDirEnv, "")
+	if s, err := NewSecrets(filepath.Join(t.TempDir(), "config.json"), Config{}); err == nil {
+		t.Fatalf("expected refusal without a secrets directory, got %T", s)
+	}
+	t.Setenv(ServerSecretsDirEnv, "relative/dir")
+	if s, err := NewSecrets(filepath.Join(t.TempDir(), "config.json"), Config{}); err == nil {
+		t.Fatalf("expected refusal for an unsafe secrets directory, got %T", s)
+	}
+}

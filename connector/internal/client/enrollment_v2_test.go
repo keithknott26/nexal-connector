@@ -200,3 +200,27 @@ func TestEnrollmentSessionStateRejectsMalformedStatus(t *testing.T) {
 		t.Error("accepted malformed session id")
 	}
 }
+
+func TestAcknowledgeEnrollmentCredentialsRejectsBadIDAndUnconfirmedAck(t *testing.T) {
+	const id = "123e4567-e89b-12d3-a456-426614174000"
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"acknowledged":false}`))
+	}))
+	defer server.Close()
+	c, err := New(server.URL, "poll-token", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AcknowledgeEnrollmentCredentials(context.Background(), "../escape"); err == nil || !strings.Contains(err.Error(), "invalid enrollment session id") {
+		t.Fatalf("malformed session id not refused: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("malformed id reached the network: %d requests", requests)
+	}
+	if err := c.AcknowledgeEnrollmentCredentials(context.Background(), id); err == nil || !strings.Contains(err.Error(), "did not acknowledge") {
+		t.Fatalf("unconfirmed acknowledgement treated as success: %v", err)
+	}
+}

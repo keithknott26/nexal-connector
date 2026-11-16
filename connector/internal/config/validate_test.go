@@ -74,3 +74,33 @@ func TestConfigValidateEnrollmentRequiredFields(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigValidateCoordinatorListenAndDevelopmentMode(t *testing.T) {
+	cases := map[string]func(*Config){
+		"plain-http coordinator in production": func(c *Config) { c.Coordinator = "http://127.0.0.1:8787" },
+		"coordinator with path":                func(c *Config) { c.Coordinator = "https://coordinator.example/api" },
+		"coordinator with credentials":         func(c *Config) { c.Coordinator = "https://user:pw@coordinator.example" },
+		"non-loopback listen":                  func(c *Config) { c.Listen = "0.0.0.0:8788" },
+		"hostname listen":                      func(c *Config) { c.Listen = "localhost:8788" },
+		"listen without port":                  func(c *Config) { c.Listen = "127.0.0.1" },
+		"http non-loopback in development": func(c *Config) {
+			c.Development = true
+			c.Coordinator = "http://coordinator.example"
+		},
+	}
+	for name, mutate := range cases {
+		c := validBaseConfig()
+		mutate(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: Validate accepted it", name)
+		}
+	}
+
+	c := validBaseConfig()
+	c.Development = true
+	c.DevSecrets = true
+	c.Coordinator = "http://127.0.0.1:8787"
+	if err := c.Validate(); err != nil {
+		t.Errorf("development mode must allow loopback http and file secrets: %v", err)
+	}
+}

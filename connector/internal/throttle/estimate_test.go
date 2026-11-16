@@ -309,3 +309,25 @@ func TestClampRateStaysWithinPolicyBounds(t *testing.T) {
 		}
 	}
 }
+
+// Sample.BytesPerSecond is the gate every passive observation passes through;
+// each rejection reason must stay a refusal, never a rate.
+func TestSampleBytesPerSecondValidation(t *testing.T) {
+	if r, err := (Sample{Bytes: 1 << 20, Elapsed: time.Second}).BytesPerSecond(); err != nil || r != float64(1<<20) {
+		t.Fatalf("valid sample = %v, %v; want %d, nil", r, err, 1<<20)
+	}
+	if r, err := (Sample{Bytes: 2 << 20, Elapsed: 500 * time.Millisecond}).BytesPerSecond(); err != nil || r != float64(4<<20) {
+		t.Fatalf("sub-second sample = %v, %v; want %d, nil", r, err, 4<<20)
+	}
+	bad := map[string]Sample{
+		"zero elapsed":     {Bytes: 1 << 20, Elapsed: 0},
+		"negative elapsed": {Bytes: 1 << 20, Elapsed: -time.Second},
+		"too few bytes":    {Bytes: minSampleBytes - 1, Elapsed: time.Second},
+		"implausibly fast": {Bytes: MaxBytesPerSecond + 1, Elapsed: time.Second},
+	}
+	for name, s := range bad {
+		if r, err := s.BytesPerSecond(); err == nil || r != 0 {
+			t.Errorf("%s: got %v, %v; want 0 and an error", name, r, err)
+		}
+	}
+}

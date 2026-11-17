@@ -364,3 +364,18 @@ func TestHashFileErrorsOnMissingFileAndDirectory(t *testing.T) {
 		t.Fatal("hashFile of a directory must fail")
 	}
 }
+
+// With no home directory the default-path helpers must report the error rather
+// than return a path rooted at the working directory.
+func TestDefaultPathsFailWithoutHomeDirectory(t *testing.T) {
+	t.Setenv("HOME", "")
+	for name, fn := range map[string]func() (string, error){
+		"DefaultImageDir":          DefaultImageDir,
+		"DefaultDevStateDir":       DefaultDevStateDir,
+		"DefaultHostingConfigPath": DefaultHostingConfigPath,
+	} {
+		if got, err := fn(); err == nil || got != "" {
+			t.Errorf("%s with no HOME = %q, %v; want empty path and an error", name, got, err)
+		}
+	}
+}

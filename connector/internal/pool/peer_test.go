@@ -451,3 +451,38 @@ func TestPeerClientDeviceIDIsExpectedRemoteAndCloseIsRepeatable(t *testing.T) {
 	client.Close()
 	client.Close()
 }
+
+func TestReplicateProtectedRejectsInvalidArgumentsAndSkipsNilOrDuplicatePeers(t *testing.T) {
+	registry := NewRegistry(nil)
+	a := enrolledIdentity(t, registry)
+	source := testStore(t, 1<<20, nil)
+	blob, err := source.PutBytes(Protected, []byte("replicate me"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now()
+	if _, err := ReplicateProtected(ctx, nil, a, registry, blob.Digest, nil, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("nil source: %v", err)
+	}
+	if _, err := ReplicateProtected(ctx, source, a, nil, blob.Digest, nil, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("nil registry: %v", err)
+	}
+	if _, err := ReplicateProtected(ctx, source, a, registry, "not-a-digest", nil, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("bad digest: %v", err)
+	}
+	if _, err := ReplicateProtected(ctx, source, a, registry, blob.Digest, make([]*PeerClient, 17), now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("too many peers: %v", err)
+	}
+	// Nil peers are skipped without a panic and leave only the local receipt.
+	receipts, err := ReplicateProtected(ctx, source, a, registry, blob.Digest, []*PeerClient{nil, nil}, now)
+	if !errors.Is(err, ErrDurability) || len(receipts) != 1 {
+		t.Fatalf("nil peers must not count as replicas: %+v %v", receipts, err)
+	}
+	// A peer that is this device itself is a duplicate identity and is skipped.
+	self := &PeerClient{device: DeviceID(a.PublicKey)}
+	receipts, err = ReplicateProtected(ctx, source, a, registry, blob.Digest, []*PeerClient{self}, now)
+	if !errors.Is(err, ErrDurability) || len(receipts) != 1 {
+		t.Fatalf("self peer must not count as a distinct replica: %+v %v", receipts, err)
+	}
+}

@@ -130,3 +130,30 @@ func TestPeerNamesCommandRequiresEnrolledHost(t *testing.T) {
 		t.Fatalf("unenrolled host: want not_enrolled, got %v", err)
 	}
 }
+
+type failingReader struct{ err error }
+
+func (f failingReader) Read([]byte) (int, error) { return 0, f.err }
+
+func TestPeerNamesSetEmptyInputRemovesName(t *testing.T) {
+	for _, input := range []string{"", "\n", "   \nignored"} {
+		api := &fakePeerNames{name: "stale"}
+		var out bytes.Buffer
+		if err := runPeerNames(context.Background(), api, "host_1", "set", "100.86.1.1", strings.NewReader(input), &out); err != nil {
+			t.Fatalf("%q: %v", input, err)
+		}
+		if api.address != "100.86.1.1" || api.name != "" {
+			t.Fatalf("%q: want empty name for 100.86.1.1, got %q %q", input, api.address, api.name)
+		}
+	}
+}
+
+func TestPeerNamesSetPropagatesStdinReadErrorWithoutCallingAPI(t *testing.T) {
+	boom := errors.New("stdin closed")
+	api := &fakePeerNames{address: "untouched"}
+	var out bytes.Buffer
+	err := runPeerNames(context.Background(), api, "host_1", "set", "100.86.1.1", failingReader{boom}, &out)
+	if !errors.Is(err, boom) || api.address != "untouched" || out.Len() != 0 {
+		t.Fatalf("err=%v api=%+v output=%q", err, api, out.String())
+	}
+}

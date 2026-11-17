@@ -49,3 +49,26 @@ func TestOwnerConditionBranches(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskConditionBranches(t *testing.T) {
+	floor := Policy{}.MinFreeDisk()
+	cases := []struct {
+		name         string
+		s            Signals
+		stale        bool
+		known, wh    bool
+		valueContain string
+	}{
+		{"unread statfs never withholds", Signals{FreeDiskBytes: 0}, false, false, false, "unknown"},
+		{"stale hides a low reading", Signals{DiskKnown: true, FreeDiskBytes: 0}, true, false, false, "unknown"},
+		{"below floor withholds", Signals{DiskKnown: true, FreeDiskBytes: floor - 1}, false, true, true, "floor"},
+		{"at floor does not withhold", Signals{DiskKnown: true, FreeDiskBytes: floor}, false, true, false, "floor"},
+		{"volume is named", Signals{DiskKnown: true, FreeDiskBytes: floor, DiskVolume: "/data"}, false, true, false, " on /data"},
+	}
+	for _, tc := range cases {
+		c := diskCondition(tc.s, Policy{}, tc.stale)
+		if c.Name != "free disk" || c.Known != tc.known || c.Withholding != tc.wh || !strings.Contains(c.Value, tc.valueContain) {
+			t.Errorf("%s: got %+v", tc.name, c)
+		}
+	}
+}

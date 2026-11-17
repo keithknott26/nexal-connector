@@ -349,3 +349,24 @@ func TestInspectDefaultsStayOfflineAndDoNotEchoMissingConfigPath(t *testing.T) {
 		t.Fatalf("report leaked config path: %s", raw)
 	}
 }
+
+func TestInspectPublicEntryPointStaysOfflineAndHidesPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "private-missing-config.json")
+	report := Inspect(context.Background(), missing, false, false)
+	if report.NetworkContacted {
+		t.Fatal("default Inspect must not contact the network")
+	}
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration status = %q, want blocked", got)
+	}
+	if got := status(t, report, "telemetry"); got != "not_checked" {
+		t.Fatalf("telemetry status = %q, want not_checked", got)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-missing-config") {
+		t.Fatal("report leaked the configuration path")
+	}
+}

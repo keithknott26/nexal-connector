@@ -147,3 +147,40 @@ func TestRestoreRegistryRejectsCorruptState(t *testing.T) {
 		t.Fatalf("expired malformed invitation should be skipped, got %v", err)
 	}
 }
+
+func TestInviteRejectsBadInputAndEnforcesQuotaAndPrunesExpired(t *testing.T) {
+	now := time.Now()
+	r := NewRegistry(func() time.Time { return now })
+	id, _ := NewIdentity()
+	dev := DeviceID(id.PublicKey)
+	for name, call := range map[string]func() error{
+		"bad device": func() error { _, err := r.Invite("nope", []Role{Contributor}, time.Minute); return err },
+		"bad roles":  func() error { _, err := r.Invite(dev, []Role{"root"}, time.Minute); return err },
+		"zero ttl":   func() error { _, err := r.Invite(dev, []Role{Contributor}, 0); return err },
+		"long ttl":   func() error { _, err := r.Invite(dev, []Role{Contributor}, 11*time.Minute); return err },
+	} {
+		if err := call(); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
+		}
+	}
+
+	// Fill the invitation table; the next invite must hit the quota.
+	for i := 0; i < 1024; i++ {
+		other, _ := NewIdentity()
+		if _, err := r.Invite(DeviceID(other.PublicKey), []Role{Contributor}, time.Minute); err != nil {
+			t.Fatalf("invite %d: %v", i, err)
+		}
+	}
+	if _, err := r.Invite(dev, []Role{Contributor}, time.Minute); !errors.Is(err, ErrQuota) {
+		t.Fatalf("over-quota invite err = %v, want ErrQuota", err)
+	}
+
+	// Once the old invitations expire they are pruned, freeing the quota.
+	now = now.Add(2 * time.Minute)
+	if _, err := r.Invite(dev, []Role{Contributor}, time.Minute); err != nil {
+		t.Fatalf("invite after expiry: %v", err)
+	}
+	if got := len(r.SnapshotState().Invitations); got != 1 {
+		t.Errorf("pending invitations = %d, want 1 after pruning", got)
+	}
+}

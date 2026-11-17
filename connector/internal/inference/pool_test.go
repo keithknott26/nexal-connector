@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func poolDir(t *testing.T) string {
@@ -180,5 +181,48 @@ func TestPoolPythonLivesInVenv(t *testing.T) {
 	d := t.TempDir()
 	if got, want := PoolPython(d), filepath.Join(d, "venv-pool", "bin", "python3"); got != want {
 		t.Fatalf("PoolPython = %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeSetupSelectsPoolOrSingleNodeLayout(t *testing.T) {
+	dir := t.TempDir()
+	single, pool := &RuntimeSetup{InferenceDir: dir}, &RuntimeSetup{InferenceDir: dir, Pool: true}
+	if single.python() != VenvPython(dir) || pool.python() != PoolPython(dir) {
+		t.Fatalf("python: single=%q pool=%q", single.python(), pool.python())
+	}
+	if single.venv() != VenvDir(dir) || pool.venv() != PoolVenvDir(dir) {
+		t.Fatalf("venv: single=%q pool=%q", single.venv(), pool.venv())
+	}
+	if single.markerPath() != runtimeMarker(dir) || pool.markerPath() != poolMarker(dir) {
+		t.Fatalf("marker: single=%q pool=%q", single.markerPath(), pool.markerPath())
+	}
+	if single.venv() == pool.venv() || single.markerPath() == pool.markerPath() {
+		t.Fatal("pool and single-node runtimes must not share a venv or marker")
+	}
+	if got := single.versions("3.12")["MLX"]; got != RuntimeMLXVersion {
+		t.Fatalf("single MLX version = %q", got)
+	}
+	pv := pool.versions("3.12")
+	if pv["MLX"] != PoolMLXVersion || pv["MLXLM"] != PoolMLXLMVersion || pv["Transformers"] != PoolTransformersVersion || pv["Python"] != "3.12" {
+		t.Fatalf("pool versions = %v", pv)
+	}
+	if len(pool.packages()) == 0 || len(single.packages()) == 0 {
+		t.Fatal("package lists must not be empty")
+	}
+	if single.status().Ready || pool.status().Ready {
+		t.Fatal("an empty directory must not report a ready runtime")
+	}
+}
+
+func TestInstallerNowUsesInjectedClockAndPrepareRootRejectsRelativeDir(t *testing.T) {
+	want := time.Unix(1700000000, 0)
+	if got := (&Installer{Now: func() time.Time { return want }}).now(); !got.Equal(want) {
+		t.Fatalf("now = %v, want %v", got, want)
+	}
+	if time.Since((&Installer{}).now()) > time.Minute {
+		t.Fatal("default clock should be the wall clock")
+	}
+	if _, err := prepareRoot("relative/dir"); err == nil {
+		t.Fatal("relative inference dir must be rejected")
 	}
 }

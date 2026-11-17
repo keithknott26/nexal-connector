@@ -777,3 +777,33 @@ func TestOnGoneDevcontainerNeverKillsVMAndAsksForKey(t *testing.T) {
 		}
 	}
 }
+
+func TestDriveWritableDecisionMatrix(t *testing.T) {
+	cases := []struct {
+		name string
+		task Task
+		want bool
+	}{
+		{"explicit rw on ephemeral", Task{DriveMode: "rw", Lifecycle: LifecycleEphemeral}, true},
+		{"explicit rw on persistent", Task{DriveMode: "rw", Lifecycle: LifecyclePersistent}, true},
+		{"explicit ro on ephemeral", Task{DriveMode: "ro", Lifecycle: LifecycleEphemeral}, false},
+		{"explicit ro on persistent", Task{DriveMode: "ro", Lifecycle: LifecyclePersistent}, false},
+		{"default persistent is writable", Task{Lifecycle: LifecyclePersistent}, true},
+		{"default ephemeral is read-only", Task{Lifecycle: LifecycleEphemeral}, false},
+		{"zero task is read-only", Task{}, false},
+		{"unknown mode falls back to lifecycle (persistent)", Task{DriveMode: "bogus", Lifecycle: LifecyclePersistent}, true},
+		{"unknown mode falls back to lifecycle (ephemeral)", Task{DriveMode: "bogus", Lifecycle: LifecycleEphemeral}, false},
+	}
+	for _, c := range cases {
+		if got := driveWritable(c.task); got != c.want {
+			t.Errorf("%s: driveWritable = %v, want %v", c.name, got, c.want)
+		}
+		wantMode := "ro"
+		if c.want {
+			wantMode = "rw"
+		}
+		if got := driveModeOf(c.task); got != wantMode {
+			t.Errorf("%s: driveModeOf = %q, want %q", c.name, got, wantMode)
+		}
+	}
+}

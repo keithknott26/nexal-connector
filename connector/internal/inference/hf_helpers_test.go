@@ -45,3 +45,68 @@ func TestRetryWaitDefaultsAndOverride(t *testing.T) {
 		t.Fatalf("override retryWait = %v", got)
 	}
 }
+
+func newURLTestClient() *HFClient {
+	return &HFClient{
+		base:  &url.URL{Scheme: "https", Host: "huggingface.co"},
+		allow: HFHostAllowed,
+	}
+}
+
+func TestCheckURLRefusesInsecureCredentialedAndForeignHosts(t *testing.T) {
+	c := newURLTestClient()
+	if e := c.checkURL(&url.URL{Scheme: "https", Host: "huggingface.co", Path: "/x"}); e != nil {
+		t.Fatalf("allowed host refused: %v", e)
+	}
+	cases := []struct {
+		name string
+		u    url.URL
+		code string
+	}{
+		{"http", url.URL{Scheme: "http", Host: "huggingface.co"}, "insecure_url"},
+		{"credentials", url.URL{Scheme: "https", Host: "huggingface.co", User: url.UserPassword("u", "p")}, "insecure_url"},
+		{"foreign host", url.URL{Scheme: "https", Host: "evil.example"}, "host_not_allowed"},
+	}
+	for _, tc := range cases {
+		u := tc.u
+		e := c.checkURL(&u)
+		if e == nil || e.Code != tc.code {
+			t.Errorf("%s: checkURL = %v, want code %q", tc.name, e, tc.code)
+		}
+	}
+}
+
+func TestAPIURLBuildsModelPathAndDropsQuery(t *testing.T) {
+	c := newURLTestClient()
+	c.base.RawQuery = "token=abc"
+	u, err := c.apiURL("mlx-community/Qwen3-4B-4bit", "/tree/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.String(); got != "https://huggingface.co/api/models/mlx-community/Qwen3-4B-4bit/tree/main" {
+		t.Fatalf("apiURL = %q", got)
+	}
+	if c.base.RawQuery != "token=abc" {
+		t.Fatal("apiURL mutated the client's base URL")
+	}
+	_, err = c.apiURL("../etc/passwd", "")
+	wantCode(t, err, "invalid_arguments")
+}
+
+func TestResolveURLRequiresPinnedRevisionAndSafeName(t *testing.T) {
+	c := newURLTestClient()
+	rev := "0123456789abcdef0123456789abcdef01234567"
+	u, err := c.resolveURL("owner/name", rev, "model.safetensors")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.String(); got != "https://huggingface.co/owner/name/resolve/"+rev+"/model.safetensors" {
+		t.Fatalf("resolveURL = %q", got)
+	}
+	_, err = c.resolveURL("owner/name", "main", "model.safetensors")
+	wantCode(t, err, "mutable_revision")
+	_, err = c.resolveURL("owner/name", rev, "../escape")
+	wantCode(t, err, "bad_file_name")
+	_, err = c.resolveURL("bad", rev, "f")
+	wantCode(t, err, "invalid_arguments")
+}

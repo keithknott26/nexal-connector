@@ -63,3 +63,18 @@ func TestSetAppLast(t *testing.T) {
 		t.Fatal("entry not forgotten")
 	}
 }
+
+// DevSSHDExecArgs passes the mesh IP, user hint and CA key as positional
+// parameters ($1..$3) to the script; their order is load-bearing.
+func TestDevSSHDExecArgs(t *testing.T) {
+	got := DevSSHDExecArgs("cid123", "100.64.0.9", "dev", "ssh-ed25519 AAAA ca")
+	want := []string{"exec", "-u", "0", "cid123", "sh", "-c", DevSSHDScript, "nexal-sshd", "100.64.0.9", "dev", "ssh-ed25519 AAAA ca"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %q", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("arg %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

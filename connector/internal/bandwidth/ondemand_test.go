@@ -385,3 +385,45 @@ func TestJitterLeavesTinyDurationsAlone(t *testing.T) {
 		}
 	}
 }
+
+// When the slot port cannot be opened, HandleRequest logs a warning that names the reason
+// (busy slot, address not assigned, or the generic listen failure) and holds nothing open.
+func TestHandleRequestLogsOpenFailureReason(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	run := func(t *testing.T, addr string, prepare func(r *Runner)) string {
+		t.Helper()
+		var buf strings.Builder
+		r := NewRunner(slog.New(slog.NewTextHandler(&buf, nil)))
+		r.ctx, r.provider = ctx, staticProvider{mesh.Status{SelfTunnelAddress: addr}}
+		defer r.server.Stop()
+		if prepare != nil {
+			prepare(r)
+		}
+		r.HandleRequest("fail-req", "peer-a")
+		return buf.String()
+	}
+
+	t.Run("slot port already held", func(t *testing.T) {
+		out := run(t, "127.0.0.1", func(r *Runner) {
+			if err := r.server.OpenSlot(ctx, "127.0.0.1", SlotPort("fail-req"), time.Minute); err != nil {
+				t.Skipf("could not pre-open slot port: %v", err)
+			}
+		})
+		if !strings.Contains(out, "bandwidth port open failed") || !strings.Contains(out, "another test holds this slot port") {
+			t.Fatalf("log = %q, want the busy-slot reason", out)
+		}
+	})
+
+	t.Run("address not assigned to this Mac", func(t *testing.T) {
+		// 192.0.2.0/24 is TEST-NET-1 and is never assigned to a local interface.
+		out := run(t, "192.0.2.1", nil)
+		if !strings.Contains(out, "bandwidth port open failed") {
+			t.Fatalf("log = %q, want an open-failure warning", out)
+		}
+		if strings.Contains(out, "bandwidth port opened") {
+			t.Fatalf("log = %q, port should not have opened", out)
+		}
+	})
+}

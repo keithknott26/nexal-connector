@@ -779,3 +779,28 @@ func TestUDPExchangerIgnoresDatagramsFromOtherSources(t *testing.T) {
 		t.Errorf("Exchange err = %v, want ErrNoMatch", err)
 	}
 }
+
+func TestRequestTransactionIDRejectsNonRequests(t *testing.T) {
+	req, txid, err := NewBindingRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := RequestTransactionID(req); !ok || got != txid {
+		t.Fatalf("valid request: got (%x, %v), want (%x, true)", got, ok, txid)
+	}
+
+	badCookie := append([]byte(nil), req...)
+	badCookie[4] ^= 0xff
+	wrongType := append([]byte(nil), req...)
+	binary.BigEndian.PutUint16(wrongType[0:2], 0x0101) // binding success response
+	for name, msg := range map[string][]byte{
+		"nil":           nil,
+		"short":         req[:headerBytes-1],
+		"bad cookie":    badCookie,
+		"not a request": wrongType,
+	} {
+		if _, ok := RequestTransactionID(msg); ok {
+			t.Errorf("%s: accepted as a STUN request", name)
+		}
+	}
+}

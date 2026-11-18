@@ -35,6 +35,22 @@ func TestProcHostFactsReadsThisLinuxHost(t *testing.T) {
 	}
 }
 
+func TestProcHostFactsReportsUnreadableDisk(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("reads /proc/meminfo")
+	}
+	if _, err := os.Stat("/proc/meminfo"); err != nil {
+		t.Skip("no /proc/meminfo")
+	}
+	f, err := ProcHost{}.Facts(context.Background(), "/nonexistent/nexal-disk-path")
+	if err == nil || err.Error() != "cannot read free disk space" {
+		t.Fatalf("err = %v, want cannot read free disk space", err)
+	}
+	if f.CPUs < 1 || f.MemoryMB == 0 || f.FreeDisk != 0 {
+		t.Fatalf("partial facts should keep CPU/memory only: %+v", f)
+	}
+}
+
 func TestNoVMHypervisorRefusesStart(t *testing.T) {
 	var h NoVMHypervisor
 	if _, err := h.Start(context.Background(), Spec{}); !errors.Is(err, errNoVMs) {

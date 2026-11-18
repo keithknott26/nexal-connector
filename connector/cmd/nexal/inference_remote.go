@@ -26,6 +26,7 @@ import (
 //
 // The coordinator only queues the request. The other Mac's connector installs and serves the model with its
 // own `nexal inference` commands, under its own owner policy, on its neXal address only.
+
 // validateOffloadFlags checks remote-offload's flags before any file or network access.
 func validateOffloadFlags(mode string, maxPrompt, maxWait int) error {
 	switch mode {

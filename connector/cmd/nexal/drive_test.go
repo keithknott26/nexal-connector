@@ -278,3 +278,19 @@ func TestDriveEndToEndAgainstFakeCoordinator(t *testing.T) {
 		t.Fatalf("usage over ceiling must clamp remaining to 0: %q", out)
 	}
 }
+
+// Every documented subcommand must be routed to its handler. A missing
+// configuration makes each handler fail fast, and none of those failures may be
+// the dispatcher's own "unknown drive subcommand" error.
+func TestDriveCommandRoutesEverySubcommandToItsHandler(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent", "config.json")
+	for _, sub := range []string{"put", "get", "list", "usage"} {
+		err := driveCommand(context.Background(), []string{sub, "--config", missing})
+		if err == nil {
+			t.Fatalf("drive %s with a missing config succeeded, want an error", sub)
+		}
+		if strings.Contains(err.Error(), "unknown drive subcommand") {
+			t.Fatalf("drive %s was not routed to a handler: %v", sub, err)
+		}
+	}
+}

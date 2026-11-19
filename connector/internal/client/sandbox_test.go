@@ -238,3 +238,44 @@ func TestSandboxManagementRejectsBadInput(t *testing.T) {
 		t.Fatalf("%d requests reached the server", hits)
 	}
 }
+
+func TestSandboxManagementRejectsBadHostIDAndSurfacesServerErrors(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Error(w, `{"error":"nope"}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := c.DeleteSandbox(ctx, "bad host", "sb1"); err == nil {
+		t.Error("DeleteSandbox accepted a bad host id")
+	}
+	if _, err := c.SetSandboxPower(ctx, "bad host", "sb1", "start"); err == nil {
+		t.Error("SetSandboxPower accepted a bad host id")
+	}
+	if _, err := c.SetSandboxPower(ctx, "h1", "../x", "start"); err == nil {
+		t.Error("SetSandboxPower accepted a bad sandbox id")
+	}
+	if _, err := c.CreateSandbox(ctx, "bad host", json.RawMessage(`{}`)); err == nil {
+		t.Error("CreateSandbox accepted a bad host id")
+	}
+	if hits != 0 {
+		t.Fatalf("%d requests reached the server for rejected input", hits)
+	}
+	if out, err := c.DeleteSandbox(ctx, "h1", "sb1"); err == nil || out != nil {
+		t.Errorf("DeleteSandbox server error = %q, %v; want nil, error", out, err)
+	}
+	if out, err := c.SetSandboxPower(ctx, "h1", "sb1", "start"); err == nil || out != nil {
+		t.Errorf("SetSandboxPower server error = %q, %v; want nil, error", out, err)
+	}
+	if out, err := c.CreateSandbox(ctx, "h1", json.RawMessage(`{"kind":"vm"}`)); err == nil || out != nil {
+		t.Errorf("CreateSandbox server error = %q, %v; want nil, error", out, err)
+	}
+	if hits != 3 {
+		t.Fatalf("hits = %d, want 3", hits)
+	}
+}

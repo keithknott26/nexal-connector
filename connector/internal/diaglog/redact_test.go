@@ -72,3 +72,29 @@ func TestRedactLongRun(t *testing.T) {
 		t.Errorf("letter-only run should be kept: %q", got)
 	}
 }
+
+func TestHarmlessValue(t *testing.T) {
+	for _, v := range []string{"", `""`, "true", "FALSE", "Null", "[redacted]", `"[REDACTED]"`, "12345", "1.2.3", `"42"`} {
+		if !harmlessValue(v) {
+			t.Errorf("harmlessValue(%q) = false, want true", v)
+		}
+	}
+	for _, v := range []string{"abc123", "hunter2", `"s3cr3t"`, "1.2.x", "yes"} {
+		if harmlessValue(v) {
+			t.Errorf("harmlessValue(%q) = true, want false", v)
+		}
+	}
+}
+
+func TestIsLetter(t *testing.T) {
+	for _, r := range "azAZmM" {
+		if !isLetter(r) {
+			t.Errorf("isLetter(%q) = false, want true", r)
+		}
+	}
+	for _, r := range "09_-+/=é@[`{" {
+		if isLetter(r) {
+			t.Errorf("isLetter(%q) = true, want false", r)
+		}
+	}
+}

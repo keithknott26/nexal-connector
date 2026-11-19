@@ -494,3 +494,50 @@ func TestCandidateSetFullStillRefreshesKnownPeers(t *testing.T) {
 		t.Fatalf("known peer was not refreshed while full: %+v", got)
 	}
 }
+
+// blockingPublisher holds every advertise open until its context ends, so a test
+// can cancel while one is in flight.
+type blockingPublisher struct {
+	started chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	calls   int
+}
+
+func (b *blockingPublisher) Advertise(ctx context.Context, _ string,
+	_ []client.LANAddress, _ *client.PeerCapabilities) (client.AdvertiseAck, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	b.once.Do(func() { close(b.started) })
+	<-ctx.Done()
+	return client.AdvertiseAck{}, ctx.Err()
+}
+
+// Cancelling while an advertise is in flight ends advertiseLoop without a retry:
+// shutdown is not a coordinator failure, so it must not spin up another publish.
+func TestAdvertiseLoopStopsOnShutdownWithoutRetry(t *testing.T) {
+	publisher := &blockingPublisher{started: make(chan struct{})}
+	a := discoveryAgent(t, DiscoveryOptions{Publisher: publisher,
+		Source: &fakeDirectory{directory: oneAuthorizedPeer()}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); a.advertiseLoop(ctx, selfFingerprint, 7443) }()
+	select {
+	case <-publisher.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("advertise never started")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("advertiseLoop kept running after shutdown")
+	}
+	publisher.mu.Lock()
+	defer publisher.mu.Unlock()
+	if publisher.calls != 1 {
+		t.Errorf("advertise calls = %d, want exactly 1 (no retry after shutdown)", publisher.calls)
+	}
+}

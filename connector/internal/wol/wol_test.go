@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -330,6 +331,30 @@ func TestPlaceholderMACIsNotWakeable(t *testing.T) {
 	}
 	if err := checkUnicast(net.HardwareAddr{0x02, 0, 0, 0, 0, 1}); err != nil {
 		t.Fatalf("a real locally administered address must stay valid: %v", err)
+	}
+}
+
+func TestCheckUnicastRejectsEachInvalidShape(t *testing.T) {
+	cases := []struct {
+		name string
+		mac  net.HardwareAddr
+		want string
+	}{
+		{"nil", nil, "six octets"},
+		{"too short", net.HardwareAddr{0x3c, 0x22, 0xfb, 0x0a, 0x0b}, "six octets"},
+		{"too long", net.HardwareAddr{0x3c, 0x22, 0xfb, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e}, "six octets"},
+		{"broadcast", net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, "multicast"},
+		{"multicast", net.HardwareAddr{0x01, 0x00, 0x5e, 0x00, 0x00, 0x01}, "multicast"},
+		{"all zero", net.HardwareAddr{0, 0, 0, 0, 0, 0}, "all-zero"},
+	}
+	for _, c := range cases {
+		err := checkUnicast(c.mac)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want error containing %q", c.name, err, c.want)
+		}
+	}
+	if err := checkUnicast(net.HardwareAddr{0x3c, 0x22, 0xfb, 0x0a, 0x0b, 0x0c}); err != nil {
+		t.Errorf("ordinary unicast MAC rejected: %v", err)
 	}
 }
 

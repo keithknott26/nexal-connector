@@ -379,3 +379,50 @@ func TestDefaultPathsFailWithoutHomeDirectory(t *testing.T) {
 		}
 	}
 }
+
+func TestDownloadRejectsBadResponsesAndLeavesNoPartFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok":
+			w.Write([]byte("payload"))
+		case "/huge":
+			w.Header().Set("Content-Length", "34359738369") // MaxImageBytes+1
+		default:
+			http.Error(w, "nope", http.StatusForbidden)
+		}
+	}))
+	want, err := ParseImageDigest("sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := NewImageStore(t.TempDir(), nil)
+	ctx := context.Background()
+	dest := filepath.Join(st.Dir, "img")
+
+	if err := st.download(ctx, srv.URL+"/missing", dest, want); err == nil || !strings.Contains(err.Error(), "HTTP 403") {
+		t.Errorf("non-200 err = %v", err)
+	}
+	if err := st.download(ctx, srv.URL+"/huge", dest, want); err == nil || !strings.Contains(err.Error(), "larger than the allowed maximum") {
+		t.Errorf("oversized err = %v", err)
+	}
+	if err := st.download(ctx, "://bad url", dest, want); err == nil || !strings.Contains(err.Error(), "cannot construct") {
+		t.Errorf("bad url err = %v", err)
+	}
+	// Digest mismatch must delete the partial file and not publish dest.
+	if err := st.download(ctx, srv.URL+"/ok", dest, want); err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Errorf("mismatch err = %v", err)
+	}
+	for _, p := range []string{dest, dest + ".part"} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("%s left behind", p)
+		}
+	}
+	// An unwritable destination directory is reported, not swallowed.
+	if err := st.download(ctx, srv.URL+"/ok", filepath.Join(st.Dir, "no-such-dir", "img"), want); err == nil {
+		t.Error("unwritable dest accepted")
+	}
+	srv.Close()
+	if err := st.download(ctx, srv.URL+"/ok", dest, want); err == nil || !strings.Contains(err.Error(), "download failed") {
+		t.Errorf("unreachable err = %v", err)
+	}
+}

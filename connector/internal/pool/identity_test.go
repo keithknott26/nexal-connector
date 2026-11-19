@@ -184,3 +184,16 @@ func TestInviteRejectsBadInputAndEnforcesQuotaAndPrunesExpired(t *testing.T) {
 		t.Errorf("pending invitations = %d, want 1 after pruning", got)
 	}
 }
+
+func TestHasRoleMatchesOnlyGrantedRoles(t *testing.T) {
+	m := Member{Roles: []Role{Contributor, ProjectMember}}
+	if !hasRole(m, Contributor) || !hasRole(m, ProjectMember) {
+		t.Fatal("granted roles must match")
+	}
+	if hasRole(m, Administrator) {
+		t.Fatal("ungranted role matched")
+	}
+	if hasRole(Member{}, Contributor) {
+		t.Fatal("member with no roles matched")
+	}
+}

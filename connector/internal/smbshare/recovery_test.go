@@ -117,11 +117,10 @@ func TestRecoveryModeIsTimeBoxedAndZeroesTheImageKey(t *testing.T) {
 	}
 }
 
-func TestRecoveryModeRefusesToStartWhenItCannotCleanUpOrKeyIsUnusable(t *testing.T) {
+func TestRecoveryModeRefusesToStartWhenItCannotCleanUp(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions, so a read-only directory cannot simulate a cleanup failure")
 	}
-	now := time.Now()
 	good := make([]byte, 32)
 	for i := range good {
 		good[i] = byte(i + 7)
@@ -131,10 +130,14 @@ func TestRecoveryModeRefusesToStartWhenItCannotCleanUpOrKeyIsUnusable(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(readOnly, 0700) })
-	if _, err := Begin(readOnly, "owner@example.test", "NexalRecovery", time.Hour, now, good); err == nil {
+	if _, err := Begin(readOnly, "owner@example.test", "NexalRecovery", time.Hour, time.Now(), good); err == nil {
 		t.Fatal("a session that could not clean up after itself was allowed to start")
 	}
+}
 
+// These refusals are independent of directory permissions, so they run as root too.
+func TestRecoveryModeRefusesUnusableKeyOrParameters(t *testing.T) {
+	now := time.Now()
 	writable := filepath.Join(t.TempDir(), "private")
 	for name, key := range map[string][]byte{
 		"short_key":    make([]byte, 16),

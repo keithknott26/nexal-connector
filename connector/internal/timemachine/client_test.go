@@ -82,6 +82,33 @@ func TestResolvesInsideMesh(t *testing.T) {
 	}
 }
 
+// A literal IP host is judged directly and must never trigger a DNS lookup; an
+// empty, unparsable or IPv6 answer is never treated as a mesh address.
+func TestResolvesInsideMeshLiteralHostsAndOddAnswers(t *testing.T) {
+	noLookup := func(string) ([]string, error) {
+		t.Fatal("literal IP must not be resolved")
+		return nil, nil
+	}
+	if err := ResolvesInsideMesh("100.100.1.2", noLookup); err != nil {
+		t.Fatalf("mesh literal rejected: %v", err)
+	}
+	for _, host := range []string{"51.81.1.1", "::1", "100.128.0.1"} {
+		if ResolvesInsideMesh(host, noLookup) == nil {
+			t.Fatalf("non-mesh literal %q accepted", host)
+		}
+	}
+	empty := func(string) ([]string, error) { return nil, nil }
+	if err := ResolvesInsideMesh("gw", empty); err == nil || !strings.HasPrefix(err.Error(), "mesh_not_connected") {
+		t.Fatalf("empty answer = %v, want mesh_not_connected", err)
+	}
+	for _, answer := range []string{"not-an-ip", "::1", "100.64.0.1%eth0"} {
+		a := answer
+		if ResolvesInsideMesh("gw", func(string) ([]string, error) { return []string{a}, nil }) == nil {
+			t.Fatalf("answer %q accepted", a)
+		}
+	}
+}
+
 func TestValidMeshHost(t *testing.T) {
 	for host, want := range map[string]bool{
 		"tm-gw-1.netbird.cloud":           true,

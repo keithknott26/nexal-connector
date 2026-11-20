@@ -157,3 +157,22 @@ func TestPeerNamesSetPropagatesStdinReadErrorWithoutCallingAPI(t *testing.T) {
 		t.Fatalf("err=%v api=%+v output=%q", err, api, out.String())
 	}
 }
+
+func TestPeerNamesSetHandlesCRLFAndOverlongInput(t *testing.T) {
+	api := &fakePeerNames{}
+	var out bytes.Buffer
+	if err := runPeerNames(context.Background(), api, "host_1", "set", "100.86.1.1", strings.NewReader("Build box\r\nignored"), &out); err != nil {
+		t.Fatal(err)
+	}
+	if api.name != "Build box" {
+		t.Fatalf("CRLF line should be trimmed to %q, got %q", "Build box", api.name)
+	}
+
+	api = &fakePeerNames{address: "untouched"}
+	out.Reset()
+	err := runPeerNames(context.Background(), api, "host_1", "set", "100.86.1.1", strings.NewReader(strings.Repeat("a", 5000)), &out)
+	var ce *codedError
+	if !errors.As(err, &ce) || ce.code != "invalid_name" || api.address != "untouched" || out.Len() != 0 {
+		t.Fatalf("overlong name: err=%v api=%+v output=%q", err, api, out.String())
+	}
+}

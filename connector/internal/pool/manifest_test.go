@@ -184,3 +184,32 @@ func TestBackupRestoreTombstoneAndCatalogIntegrity(t *testing.T) {
 		t.Fatal("corrupt catalog accepted")
 	}
 }
+
+func TestReceiptRefusesInvalidInputsClosedStoreAndMissingBlob(t *testing.T) {
+	now := time.Now()
+	registry := NewRegistry(func() time.Time { return now })
+	identity := enrolledIdentity(t, registry)
+	s := testStore(t, 1<<20, nil)
+	blob, err := s.PutBytes(Protected, []byte("receipt inputs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Receipt(Identity{}, Protected, blob.Digest, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("zero identity signed a receipt: %v", err)
+	}
+	if _, err := s.Receipt(identity, Protected, blob.Digest, time.Time{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("zero verification time signed a receipt: %v", err)
+	}
+	if _, err := s.Receipt(identity, Protected, digestOf([]byte("never stored")), now); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("receipt for a missing blob: %v", err)
+	}
+	if _, err := s.Receipt(identity, Protected, "not-a-digest", now); err == nil {
+		t.Fatal("receipt signed for a malformed digest")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Receipt(identity, Protected, blob.Digest, now); !errors.Is(err, ErrClosed) {
+		t.Fatalf("closed store signed a receipt: %v", err)
+	}
+}

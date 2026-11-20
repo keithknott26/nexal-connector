@@ -425,3 +425,32 @@ func TestAADRejectsBadBindingAndExpiryWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestAEADIsBoundToSecretAndBinding(t *testing.T) {
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	a, err := aead(secret, []byte("binding-one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.NonceSize() != 12 || a.Overhead() != 16 {
+		t.Fatalf("unexpected AES-GCM parameters: nonce=%d overhead=%d", a.NonceSize(), a.Overhead())
+	}
+	nonce := make([]byte, a.NonceSize())
+	sealed := a.Seal(nil, nonce, []byte("payload"), nil)
+
+	same, err := aead(secret, []byte("binding-one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := same.Open(nil, nonce, sealed, nil); err != nil || string(got) != "payload" {
+		t.Fatalf("same secret+binding must open: %q %v", got, err)
+	}
+	otherBinding, _ := aead(secret, []byte("binding-two"))
+	if _, err := otherBinding.Open(nil, nonce, sealed, nil); err == nil {
+		t.Fatal("a different binding must not open the ciphertext")
+	}
+	otherSecret, _ := aead([]byte("fedcba9876543210fedcba9876543210"), []byte("binding-one"))
+	if _, err := otherSecret.Open(nil, nonce, sealed, nil); err == nil {
+		t.Fatal("a different secret must not open the ciphertext")
+	}
+}

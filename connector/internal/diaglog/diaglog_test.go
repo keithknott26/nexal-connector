@@ -347,3 +347,23 @@ func TestRotatingFileOversizeWriteAndExistingSize(t *testing.T) {
 		t.Fatalf("current file should hold only the new write: %q %v", cur, err)
 	}
 }
+
+func TestControllerWithoutLogDirStillLogsAndDerivedLoggersDoNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	var stderr bytes.Buffer
+	c := New(&stderr, slog.LevelInfo, filepath.Join(dir, "config.json"), "")
+	c.Set(true) // diagnostic mode with no diagnostics file must not touch a nil file sink
+	logger := c.Logger().WithGroup("mesh").With("peer", "m4")
+	logger.Debug("no file sink", "state", "up")
+	if !strings.Contains(stderr.String(), `"mesh":{"peer":"m4","state":"up"}`) {
+		t.Fatalf("ordinary log lost the record: %q", stderr.String())
+	}
+	if !c.Set(false) { // turning off closes the file only when one exists
+		t.Fatal("Set(false) reported no change")
+	}
+	stderr.Reset()
+	logger.Debug("hidden again")
+	if stderr.Len() != 0 {
+		t.Fatalf("debug record leaked after diagnostic mode off: %q", stderr.String())
+	}
+}

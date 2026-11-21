@@ -63,6 +63,9 @@ func parseAvailable(out []byte, total uint64) *uint64 {
 	}
 	return &n
 }
+
+// parseBackup converts a `tmutil latestbackup` path into an RFC3339 UTC
+// timestamp, or "" when it is unparsable or in the future.
 func parseBackup(out []byte) string {
 	// Never transmit the backup volume, path or computer name.
 	name := filepath.Base(strings.TrimSpace(string(out)))

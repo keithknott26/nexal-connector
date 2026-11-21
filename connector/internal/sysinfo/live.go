@@ -76,6 +76,10 @@ func parseBackup(out []byte) string {
 	}
 	return at.UTC().Format(time.RFC3339)
 }
+
+// parseLoadAverage reads `sysctl -n vm.loadavg` ("{ 1.2 0.9 0.7 }") and returns
+// the 1, 5 and 15 minute averages, or three nils when the output is oversized,
+// malformed, negative, non-finite or implausibly large.
 func parseLoadAverage(out []byte) (*float64, *float64, *float64) {
 	fields := strings.Fields(string(out))
 	if len(out) > 256 || len(fields) != 5 || fields[0] != "{" || fields[4] != "}" {

@@ -391,3 +391,45 @@ func TestReadStaticAndThermalOffDarwinRunNothing(t *testing.T) {
 		t.Fatalf("thermal off darwin = %q, want empty", got)
 	}
 }
+
+func TestParseThermBranches(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"speed limit 100 is nominal", "CPU_Speed_Limit \t= 100\n", ThermalNominal},
+		{"thermal level 0 is nominal", "Thermal_Level = 0\n", ThermalNominal},
+		{"positive thermal level throttles", "Thermal_Level = 3\n", ThermalThrottled},
+		{"speed limit below 100 beats thermal level 0", "CPU_Speed_Limit = 50\nThermal_Level = 0\n", ThermalThrottled},
+		{"empty output is unknown", "", ThermalUnknown},
+		{"unparseable values are unknown", "CPU_Speed_Limit = abc\n", ThermalUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseTherm([]byte(tc.in)); got != tc.want {
+				t.Fatalf("parseTherm(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseSwVersEdges(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"missing version yields empty", "ProductName: macOS\n", ""},
+		{"missing name defaults to macOS", "ProductVersion: 27.0\nBuildVersion: 27A1\n", "macOS 27.0 (27A1)"},
+		{"missing build omits parentheses", "ProductName: macOS\nProductVersion: 27.0\n", "macOS 27.0"},
+		{"empty input", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseSwVers([]byte(tc.in)); got != tc.want {
+				t.Fatalf("parseSwVers(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

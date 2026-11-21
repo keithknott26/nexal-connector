@@ -121,3 +121,31 @@ func TestLiveBundleSourcesWiresEverySourceAndLogDir(t *testing.T) {
 		t.Fatalf("Now is not the wall clock: %v", d)
 	}
 }
+
+// --bundle with an absolute path writes an owner-only file even when no agent is
+// running (every live source degrades to a note instead of failing the command).
+func TestDiagnosticsBundleWritesOwnerOnlyFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := filepath.Join(home, "config.json")
+	out := filepath.Join(t.TempDir(), "bundle.txt")
+	if err := diagnosticsCommand(context.Background(), []string{"--bundle", out, "--config", cfg}); err != nil {
+		t.Fatalf("bundle command failed: %v", err)
+	}
+	info, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("bundle file not written: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Fatal("bundle file is empty")
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("bundle permissions = %o, want 600", perm)
+	}
+	// An unwritable destination is reported without echoing the path.
+	bad := filepath.Join(t.TempDir(), "missing-dir", "bundle.txt")
+	err = diagnosticsCommand(context.Background(), []string{"--bundle", bad, "--config", cfg})
+	if err == nil || strings.Contains(err.Error(), bad) {
+		t.Fatalf("unwritable bundle error = %v", err)
+	}
+}

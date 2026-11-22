@@ -69,3 +69,56 @@ func TestResetLocalPairV2MissingConfigErrors(t *testing.T) {
 		t.Fatal("reset with no config must error")
 	}
 }
+
+// A pending (not yet paired) enrollment is the one state a local reset is for:
+// it must drop the host id, enrollment and tunnel from the config and delete
+// the stored credentials, leaving other settings alone.
+func TestResetLocalPairV2ClearsPendingEnrollmentAndSecrets(t *testing.T) {
+	path := savedUnenrolledConfig(t)
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sid = "123e4567-e89b-12d3-a456-426614174000"
+	c.Development, c.DevSecrets = true, true
+	c.HostID = "host-1"
+	c.Tunnel = &config.Tunnel{}
+	c.Enrollment = &config.EnrollmentState{SchemaVersion: 2, SessionID: sid, Status: "provisioning"}
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	secrets, err := config.NewSecrets(path, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"host", "mesh-credential", "enrollment-session-" + sid}
+	for _, n := range names {
+		if err := secrets.Put(ctx, n, "0123456789abcdef0123456789abcdef"); err != nil {
+			t.Fatalf("put %s: %v", n, err)
+		}
+	}
+	var rerr error
+	out := captureStdout(t, func() { rerr = resetLocalPairV2(ctx, path) })
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !strings.Contains(out, `"localEnrollmentReset":true`) {
+		t.Fatalf("output = %q", out)
+	}
+	after, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Enrollment != nil || after.HostID != "" || after.Tunnel != nil {
+		t.Fatalf("reset left enrollment state: %#v", after)
+	}
+	if after.Name != "M2 mini" {
+		t.Fatalf("reset altered unrelated settings: name %q", after.Name)
+	}
+	for _, n := range names {
+		if v, gerr := secrets.Get(ctx, n); gerr == nil && v != "" {
+			t.Fatalf("secret %s survived reset", n)
+		}
+	}
+}

@@ -231,3 +231,35 @@ func TestValidateLocalFailsWhenWorkDirectoryIsMissing(t *testing.T) {
 		t.Fatalf("executed=%v reason=%q err=%v", executed, reason, err)
 	}
 }
+
+func TestValidationNetworkTargetAndDeadlineBoundaries(t *testing.T) {
+	now := time.Now()
+	net := func(ip string, ttl time.Duration) ValidationRun {
+		r := validationGrant()
+		r.Module, r.TargetIP, r.ExpiresAt = "network_canary", ip, now.Add(ttl)
+		return r
+	}
+	for _, ok := range []ValidationRun{net("100.64.0.1", time.Minute), net("100.127.255.254", 125*time.Second)} {
+		if err := ok.Validate(now); err != nil {
+			t.Fatalf("rejected valid grant %s: %v", ok.TargetIP, err)
+		}
+	}
+	for name, bad := range map[string]ValidationRun{
+		"below CGNAT":      net("100.63.255.255", time.Minute),
+		"above CGNAT":      net("100.128.0.0", time.Minute),
+		"private LAN":      net("192.168.1.10", time.Minute),
+		"empty target":     net("", time.Minute),
+		"not an address":   net("example.com", time.Minute),
+		"deadline passed":  net("100.64.0.1", 0),
+		"deadline too far": net("100.64.0.1", 126*time.Second),
+	} {
+		if bad.Validate(now) == nil {
+			t.Fatalf("%s: accepted invalid grant", name)
+		}
+	}
+	r := validationGrant()
+	r.Nonce = strings.ToUpper(r.Nonce)
+	if r.Validate(time.Now()) == nil {
+		t.Fatal("accepted non-canonical nonce")
+	}
+}

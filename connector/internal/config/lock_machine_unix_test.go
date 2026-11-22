@@ -263,3 +263,25 @@ func TestRunningAgentReportsOnlyALiveHolder(t *testing.T) {
 		t.Fatal("a released lock must not report a running agent")
 	}
 }
+
+// With no resolvable home directory the host lock cannot pick a path. LockMachine must
+// refuse with a plain message rather than lock somewhere relative to the working
+// directory, and RunningAgent must report "nobody running" instead of guessing.
+func TestMachineLockWithoutHomeDirectoryFailsClosed(t *testing.T) {
+	t.Setenv("HOME", "")
+
+	if _, err := machineStateDir(); err == nil {
+		t.Fatal("machineStateDir must fail when HOME is unset")
+	}
+	release, err := LockMachine("/irrelevant/config.json")
+	if err == nil {
+		release()
+		t.Fatal("LockMachine must refuse when the state directory cannot be resolved")
+	}
+	if !strings.Contains(err.Error(), "cannot resolve the connector state directory") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pid, cfg, ok := RunningAgent(); ok || pid != 0 || cfg != "" {
+		t.Fatalf("RunningAgent = %d %q %v, want none", pid, cfg, ok)
+	}
+}

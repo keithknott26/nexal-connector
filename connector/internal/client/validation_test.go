@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"nexal/connector/internal/cybersecurity"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -157,4 +158,19 @@ func TestValidationTickRefusals(t *testing.T) {
 			t.Fatalf("err=%v completes=%d", err, v.completes)
 		}
 	})
+}
+
+// A local exercise that cannot run must still be closed out with an honest
+// "not executed" result rather than being reported as completed or left open.
+func TestValidationTickReportsLocalExecutionFailureAsNotExecuted(t *testing.T) {
+	run := cybersecurity.ValidationRun{ID: uuid.NewString(), Nonce: uuid.NewString(), Module: "canary_integrity", ExpiresAt: time.Now().Add(time.Minute)}
+	v := &validationServer{run: run, tickVersion: 1, authorized: true, completeAck: map[string]any{"schemaVersion": 1, "accepted": true}}
+	c := v.start(t, run.ID)
+	missing := cybersecurity.Canary{Directory: filepath.Join(t.TempDir(), "does", "not", "exist")}
+	if err := c.ValidationTick(context.Background(), "host_1", missing); err != nil {
+		t.Fatalf("a failed local exercise is reported, not returned: %v", err)
+	}
+	if v.completes != 1 || v.completeBody.Executed || v.completeBody.Reason != "execution_failed" {
+		t.Fatalf("completes=%d body=%+v", v.completes, v.completeBody)
+	}
 }

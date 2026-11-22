@@ -149,6 +149,36 @@ func TestNewRejectsMissingCoordinator(t *testing.T) {
 	}
 }
 
+func TestNewDefaultsToSystemClock(t *testing.T) {
+	b, err := New(&fakeCoordinator{}, nil)
+	if err != nil {
+		t.Fatalf("New with a nil clock: %v", err)
+	}
+	if _, ok := b.clock.(throttle.SystemClock); !ok {
+		t.Fatalf("a nil clock should default to throttle.SystemClock, got %T", b.clock)
+	}
+}
+
+func TestRandomReportIDSatisfiesCoordinatorValidation(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		id := randomReportID()
+		if len(id) < 8 || len(id) > 80 {
+			t.Fatalf("report id %q length %d is outside the coordinator's 8..80 bound", id, len(id))
+		}
+		for _, r := range id {
+			ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-'
+			if !ok {
+				t.Fatalf("report id %q contains %q outside [A-Za-z0-9_-]", id, r)
+			}
+		}
+		if seen[id] {
+			t.Fatalf("report id %q repeated", id)
+		}
+		seen[id] = true
+	}
+}
+
 // THE POINT OF THE WHOLE FEATURE: a process that just started, holding no memory of any
 // previous one, enforces the bytes an earlier process already moved.
 func TestBudgetSurvivesRestart(t *testing.T) {

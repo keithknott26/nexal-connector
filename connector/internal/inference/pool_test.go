@@ -226,3 +226,45 @@ func TestInstallerNowUsesInjectedClockAndPrepareRootRejectsRelativeDir(t *testin
 		t.Fatal("relative inference dir must be rejected")
 	}
 }
+
+func TestSoloServeCommandBuildsOneServerWithoutARing(t *testing.T) {
+	d := poolDir(t)
+	name, args, _, err := SoloServeCommand(d, "m1", "100.64.0.1", 8001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != PoolPython(d) {
+		t.Fatalf("python = %q, want the pool runtime %q", name, PoolPython(d))
+	}
+	got := strings.Join(args, " ")
+	want := "-I -m mlx_lm server --model " + ModelDir(d, "m1") + " --host 100.64.0.1 --port 8001"
+	if got != want {
+		t.Fatalf("args = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "--pipeline") || strings.Contains(got, "distributed") {
+		t.Fatalf("solo server must not use ring options: %q", got)
+	}
+}
+
+func TestSoloServeCommandRefusesBadInputBeforeStarting(t *testing.T) {
+	d := poolDir(t)
+	cases := map[string]struct {
+		dir, id, host, code string
+	}{
+		"bad id":           {d, "../evil", "100.64.0.1", "invalid_arguments"},
+		"hostname":         {d, "m1", "example.com", "invalid_arguments"},
+		"unspecified host": {d, "m1", "0.0.0.0", "invalid_arguments"},
+		"runtime missing":  {t.TempDir(), "m1", "100.64.0.1", "runtime_not_set_up"},
+		"model missing":    {d, "m2", "100.64.0.1", "not_installed"},
+	}
+	for label, c := range cases {
+		cmd, args, env, err := SoloServeCommand(c.dir, c.id, c.host, 8001)
+		if err == nil || cmd != "" || args != nil || env != nil {
+			t.Errorf("%s: want refusal, got cmd=%q args=%v err=%v", label, cmd, args, err)
+			continue
+		}
+		if e := AsError(err); e.Code != c.code {
+			t.Errorf("%s: code = %q, want %q", label, e.Code, c.code)
+		}
+	}
+}

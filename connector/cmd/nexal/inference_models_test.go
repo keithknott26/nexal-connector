@@ -155,3 +155,14 @@ func TestIDFirstThenFlagsParsesForEveryCommand(t *testing.T) {
 		}
 	}
 }
+
+// --latest resolves the repository from the catalog; an id the catalog does not
+// know has no repository, so it must be refused as model_not_found before any
+// network call is attempted.
+func TestPinLatestRefusesUnknownModelBeforeAnyNetwork(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	err := inferenceCommand(context.Background(), []string{"pin", "no-such-model", "--latest", "--config", cfg})
+	if errCode(err) != "model_not_found" {
+		t.Fatalf("pin --latest unknown model: code %q err %v", errCode(err), err)
+	}
+}

@@ -665,3 +665,29 @@ func TestPairingStateRejectsMismatchedIDAndBadExpiry(t *testing.T) {
 		}
 	}
 }
+
+// CancelPairing must reject a malformed host id before any request, and must
+// translate coordinator statuses into actionable messages via pairingError.
+func TestCancelPairingRejectsBadHostIDAndMapsCoordinatorStatuses(t *testing.T) {
+	c, rec := pairingServer(t, func(w http.ResponseWriter, _ *http.Request, _ *recorded) {
+		w.WriteHeader(500)
+	})
+	if err := c.CancelPairing(context.Background(), "host id with spaces", testPairingID); err == nil {
+		t.Error("an invalid host id was sent to the coordinator")
+	}
+	if rec.method != "" {
+		t.Errorf("a request was made despite an invalid host id: %s %s", rec.method, rec.path)
+	}
+	for status, want := range map[int]string{
+		401: "HTTP 401", 403: "HTTP 403", 404: "HTTP 404", 503: "HTTP 503",
+	} {
+		status := status
+		cs, _ := pairingServer(t, func(w http.ResponseWriter, _ *http.Request, _ *recorded) {
+			w.WriteHeader(status)
+		})
+		err := cs.CancelPairing(context.Background(), testHostID, testPairingID)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("status %d: err = %v, want mention of %q", status, err, want)
+		}
+	}
+}

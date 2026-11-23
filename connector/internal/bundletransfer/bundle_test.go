@@ -289,6 +289,23 @@ func TestInstallAndReadRejectUnsafeLocations(t *testing.T) {
 		t.Fatalf("invalid bundle left files behind: %v", entries)
 	}
 }
+func TestInstallRejectsSymlinkedParent(t *testing.T) {
+	b, _, _ := fixture(t)
+	real := t.TempDir()
+	if err := os.Chmod(real, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := Install(link, b); err == nil {
+		t.Fatal("symlinked receive parent accepted")
+	}
+	if entries, _ := os.ReadDir(real); len(entries) != 0 {
+		t.Fatalf("rejected install wrote through symlink: %v", entries)
+	}
+}
 func TestSealRejectsBadBindingKeyAndOversizeBundle(t *testing.T) {
 	b, tx, key := fixture(t)
 	fp := Fingerprint(key.EncapsulationKey().Bytes())

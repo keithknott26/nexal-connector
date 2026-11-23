@@ -107,3 +107,25 @@ func TestJSONObjectsRejectAmbiguityWithoutEcho(t *testing.T) {
 		}
 	}
 }
+
+func TestReadPrivateLimitBoundaryIsInclusive(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file")
+	if err := os.WriteFile(path, []byte("12345"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadPrivate(path, 5)
+	if err != nil || string(got) != "12345" {
+		t.Fatalf("file exactly at the limit must be readable: %q %v", got, err)
+	}
+	if _, err := ReadPrivate(path, 4); err == nil {
+		t.Fatal("file one byte over the limit accepted")
+	}
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadPrivate(empty, 0); err != nil || len(got) != 0 {
+		t.Fatalf("empty file with zero limit: %q %v", got, err)
+	}
+}

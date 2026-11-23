@@ -486,3 +486,20 @@ func TestReplicateProtectedRejectsInvalidArgumentsAndSkipsNilOrDuplicatePeers(t 
 		t.Fatalf("self peer must not count as a distinct replica: %+v %v", receipts, err)
 	}
 }
+
+func TestNewPeerClientRejectsBadObjectLimit(t *testing.T) {
+	registry := NewRegistry(nil)
+	a := enrolledIdentity(t, registry)
+	b := enrolledIdentity(t, registry)
+	for _, limit := range []int64{0, -1, 1<<63 - 1} {
+		_, err := NewPeerClient(PeerClientOptions{Identity: a, Registry: registry,
+			ExpectedDeviceID: DeviceID(b.PublicKey), Endpoint: "https://127.0.0.1:1234", MaxObjectBytes: limit})
+		if err != ErrInvalid {
+			t.Fatalf("limit %d: got %v, want ErrInvalid", limit, err)
+		}
+	}
+	// An out-of-range port is reported as invalid, not as an unsafe path.
+	if err := ValidPeerEndpoint("https://127.0.0.1:70000"); err != ErrInvalid {
+		t.Fatalf("port 70000: got %v", err)
+	}
+}

@@ -79,4 +79,16 @@ func TestCLI(t *testing.T) {
 			t.Fatalf("exit %d stderr %q", code, errOut)
 		}
 	})
+	t.Run("empty input succeeds with no output", func(t *testing.T) {
+		out, errOut, code := run(t, bin, "", flags...)
+		if code != 0 || out != "" || errOut != "" {
+			t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+		}
+	})
+	t.Run("final line without newline is processed", func(t *testing.T) {
+		out, _, code := run(t, bin, alert, flags...)
+		if code != 0 || !strings.Contains(out, "suricata_2001") {
+			t.Fatalf("exit %d stdout %q", code, out)
+		}
+	})
 }

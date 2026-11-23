@@ -370,3 +370,23 @@ func TestInspectPublicEntryPointStaysOfflineAndHidesPath(t *testing.T) {
 		t.Fatal("report leaked the configuration path")
 	}
 }
+
+// The exported entry point must stay offline and must not echo the config path
+// when the file is missing and neither --probe nor --nat was requested.
+func TestInspectPublicEntryPointMissingConfigStaysOfflineAndHidesPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private-missing-config.json")
+	report := Inspect(context.Background(), path, false, false)
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration = %q, want blocked", got)
+	}
+	if report.NetworkContacted {
+		t.Fatal("offline inspection claimed network contact")
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-missing-config") {
+		t.Fatalf("report leaked config path: %s", raw)
+	}
+}

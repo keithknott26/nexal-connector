@@ -108,3 +108,47 @@ func TestHostingConfigManagedCapsRaisesBudget(t *testing.T) {
 		t.Fatalf("managed caps must keep the CPU budget strict: %+v", managed)
 	}
 }
+
+// Deleting the file after it was seen is a change back to the default (off)
+// config, reported once; an invalid file reports the error with hosting off.
+func TestConfigWatcherDeletedAndInvalidFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(p, []byte(`{"enabled":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := &configWatcher{path: p}
+	if c, ch, err := w.Changed(); !ch || err != nil || !c.Enabled {
+		t.Fatalf("first read: %+v %v %v", c, ch, err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	c, ch, err := w.Changed()
+	if !ch || err != nil || c.Enabled {
+		t.Fatalf("after delete: %+v changed=%v err=%v, want changed default-off config", c, ch, err)
+	}
+	if _, ch, _ := w.Changed(); ch {
+		t.Fatal("a still-missing file must not report a second change")
+	}
+	if err := os.WriteFile(p, []byte(`{not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, ch, err = w.Changed()
+	if !ch || err == nil || c.Enabled {
+		t.Fatalf("invalid file: %+v changed=%v err=%v, want changed, error, hosting off", c, ch, err)
+	}
+}
+
+// A stat failure other than "not exist" (here: a parent that is a regular
+// file) surfaces the error without claiming a change.
+func TestConfigWatcherStatErrorIsNotAChange(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(parent, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := &configWatcher{path: filepath.Join(parent, "c.json")}
+	c, ch, err := w.Changed()
+	if ch || err == nil || c.Enabled {
+		t.Fatalf("%+v changed=%v err=%v, want unchanged, error, hosting off", c, ch, err)
+	}
+}

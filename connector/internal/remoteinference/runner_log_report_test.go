@@ -1,7 +1,9 @@
 package remoteinference
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -52,5 +54,30 @@ func TestReportPSanitisesDetailAndCarriesProgress(t *testing.T) {
 	}
 	if strings.ContainsAny(got.Detail, "\n\t") || len(got.Detail) > 280 {
 		t.Fatalf("detail not cleaned: %q", got.Detail)
+	}
+}
+
+type failingReportCoord struct {
+	fakeCoord
+	calls int
+}
+
+func (f *failingReportCoord) ReportRemoteInference(context.Context, string, Report) error {
+	f.calls++
+	return errors.New("coordinator unreachable")
+}
+
+// A coordinator outage while reporting progress is logged at debug level and
+// swallowed: the task itself must keep running.
+func TestReportPSwallowsCoordinatorErrorAndLogsAtDebug(t *testing.T) {
+	var logs bytes.Buffer
+	c := &failingReportCoord{}
+	r := &Runner{Coord: c, HostID: "h", Logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))}
+	r.report(context.Background(), Task{ID: "t1"}, "running", "serve", "starting", "")
+	if c.calls != 1 {
+		t.Fatalf("ReportRemoteInference calls = %d, want 1", c.calls)
+	}
+	if out := logs.String(); !strings.Contains(out, "remote inference report failed") || !strings.Contains(out, "coordinator unreachable") {
+		t.Fatalf("expected debug log of the failure, got %q", out)
 	}
 }

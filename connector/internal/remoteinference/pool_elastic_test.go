@@ -258,3 +258,26 @@ func TestSameRingNeedsEqualNonEmptyRings(t *testing.T) {
 		}
 	}
 }
+
+func TestLeaderSoloTextDependsOnPoolSize(t *testing.T) {
+	l := &leader{t: Task{ModelID: "big", PoolSize: 3}}
+	if got := l.soloText(); !strings.Contains(got, "alone") {
+		t.Fatalf("pooled task text = %q, want it to say the Mac serves alone", got)
+	}
+	for _, size := range []int{0, 1} {
+		l = &leader{t: Task{ModelID: "big", PoolSize: size}}
+		if got := l.soloText(); got != "Serving big" {
+			t.Fatalf("PoolSize %d text = %q, want %q", size, got, "Serving big")
+		}
+	}
+}
+
+func TestWaitForRingStopsWhenContextIsCancelled(t *testing.T) {
+	r := &Runner{PoolPoll: time.Hour}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ring, lan, ok := r.waitForRing(ctx, Task{}, 0, "10.0.0.1:1", poolStatus{})
+	if ok || ring != nil || lan != nil {
+		t.Fatalf("waitForRing on cancelled ctx = %v %v %v, want nil nil false", ring, lan, ok)
+	}
+}

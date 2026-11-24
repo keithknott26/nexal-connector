@@ -249,3 +249,21 @@ func TestIdlePatternMatchesOnlyBareHIDIdleTimeLine(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCPUBoundariesAndMalformedIdle(t *testing.T) {
+	if got := parseCPU([]byte("CPU usage: 0.0% user, 0.0% sys, 100.0% idle")); got == nil || *got != 0 {
+		t.Fatalf("fully idle CPU should be 0%% usage, got %v", got)
+	}
+	if got := parseCPU([]byte("CPU usage: 50.0% user, 50.0% sys, 0.0% idle")); got == nil || *got != 100 {
+		t.Fatalf("fully busy CPU should be 100%% usage, got %v", got)
+	}
+	// The pattern accepts "1.2.3" as a number; ParseFloat must reject it
+	// rather than report a bogus reading.
+	if got := parseCPU([]byte("CPU usage: 1% user, 2% sys, 1.2.3% idle")); got != nil {
+		t.Fatalf("malformed idle value accepted: %v", *got)
+	}
+	// A negative idle cannot match the pattern at all.
+	if parseCPU([]byte("CPU usage: 1% user, 2% sys, -5% idle")) != nil {
+		t.Fatal("negative idle accepted")
+	}
+}

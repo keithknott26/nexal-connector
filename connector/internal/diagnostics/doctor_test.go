@@ -390,3 +390,27 @@ func TestInspectPublicEntryPointMissingConfigStaysOfflineAndHidesPath(t *testing
 		t.Fatalf("report leaked config path: %s", raw)
 	}
 }
+
+// Inspect is the production entry point; every other test goes through inspect
+// with injected dependencies. With probe and nat both off it must stay offline
+// and report a missing configuration as blocked without leaking the path.
+func TestInspectPublicEntryPointOfflineWithMissingConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private-missing-dir", "config.json")
+	report := Inspect(context.Background(), path, false, false)
+	if report.NetworkContacted {
+		t.Fatal("Inspect without nat must not claim network contact")
+	}
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration status = %q, want blocked", got)
+	}
+	if got := status(t, report, "telemetry"); got != "not_checked" {
+		t.Fatalf("telemetry status = %q, want not_checked", got)
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-missing-dir") {
+		t.Fatal("report leaked the configuration path")
+	}
+}

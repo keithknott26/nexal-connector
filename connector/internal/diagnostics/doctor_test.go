@@ -263,6 +263,32 @@ func TestDoctorReportsBlockedSTUN(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsSTUNStartFailureWithoutLeakingTheError(t *testing.T) {
+	failure := errors.New("listen udp 192.168.7.7:0: bind: private-detail")
+	report := inspect(context.Background(), "ignored", false, true, natDeps(validConfig(), stun.Result{}, failure))
+	if status(t, report, "nat_reflexive") != "warning" {
+		t.Fatal("a STUN start failure must be a warning, not a pass or an error")
+	}
+	if report.NAT != nil {
+		t.Fatalf("no NAT conclusion may be reported when the observation never ran: %+v", report.NAT)
+	}
+	if !report.NetworkContacted {
+		t.Fatal("--stun was requested, so the report must not claim an offline run")
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-detail") || strings.Contains(string(raw), "192.168.7.7") {
+		t.Fatalf("the underlying error text leaked into the report: %s", raw)
+	}
+	for _, check := range report.Checks {
+		if check.ID == "nat_mapping" {
+			t.Fatal("no mapping check may be emitted without an observation")
+		}
+	}
+}
+
 func TestDoctorReportsStaticPeerCountWithoutAddresses(t *testing.T) {
 	c := validConfig()
 	c.StaticPeers = []config.StaticPeer{{Endpoint: "https://10.20.0.5:8443",

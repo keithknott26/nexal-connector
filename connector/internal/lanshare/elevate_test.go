@@ -246,3 +246,14 @@ func TestShellQuoteStrictRejectsShellMetacharacters(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyRefusesAStepWithNoCommandInsteadOfPanicking(t *testing.T) {
+	runner := &fakeRunner{out: map[string]string{}}
+	done, err := Apply(context.Background(), Plan{Steps: []Step{{Name: "empty"}}}, runner, nil)
+	if err == nil || !strings.Contains(err.Error(), "no command") {
+		t.Fatalf("expected a no-command error, got %v", err)
+	}
+	if len(done) != 0 || len(runner.calls) != 0 {
+		t.Fatalf("nothing should have run: done=%v calls=%v", done, runner.calls)
+	}
+}

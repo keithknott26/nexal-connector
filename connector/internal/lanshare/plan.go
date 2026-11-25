@@ -147,6 +147,9 @@ func Apply(ctx context.Context, p Plan, runner Runner, elevator Elevator) ([]str
 	root := os.Geteuid() == 0
 	for _, step := range p.Steps {
 		var err error
+		if len(step.Argv) == 0 {
+			return done, fmt.Errorf("lanshare: %s has no command to run", step.Name)
+		}
 		switch {
 		case !step.NeedsRoot || root:
 			_, err = runner.Run(ctx, step.Argv[0], step.Argv[1:]...)

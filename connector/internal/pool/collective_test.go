@@ -849,3 +849,83 @@ func TestRingInboxJoinConflictsAndExpiredSessionReaping(t *testing.T) {
 		t.Fatalf("joined session was reaped: %v", err)
 	}
 }
+
+// wait has four exits besides the timeout: a frame delivered while blocked wakes
+// it, a second waiter on the same step is refused, a cancelled context ends it,
+// and an abort that lands while it is blocked ends it with ErrAborted.
+func TestRingSessionWaitWakeupConflictCancelAndAbort(t *testing.T) {
+	inbox := newRingInbox(time.Now)
+	frame := testChunkFrame()
+	session, err := inbox.join(frame.session, frame.total, frame.op)
+	if err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	type result struct {
+		frame collectiveFrame
+		err   error
+	}
+	blockOn := func(ctx context.Context, phase uint8, step int) <-chan result {
+		done := make(chan result, 1)
+		go func() {
+			f, err := session.wait(ctx, 5*time.Second, phase, step)
+			done <- result{f, err}
+		}()
+		return done
+	}
+	waitersContain := func(phase uint8, step int) bool {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		_, ok := session.waiters[slotKey(phase, step)]
+		return ok
+	}
+	registered := func(phase uint8, step int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for !waitersContain(phase, step) {
+			if time.Now().After(deadline) {
+				t.Fatal("waiter never registered")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	// A frame delivered while the rank is blocked wakes it directly.
+	woken := blockOn(context.Background(), frame.phase, frame.step)
+	registered(frame.phase, frame.step)
+	// A second waiter for the same step is refused instead of stealing the frame.
+	if _, err := session.wait(context.Background(), time.Second, frame.phase, frame.step); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate waiter returned %v, want ErrConflict", err)
+	}
+	if err := inbox.deliver(frame); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	if r := <-woken; r.err != nil || len(r.frame.values) != len(frame.values) {
+		t.Fatalf("blocked wait not woken by delivery: %+v", r)
+	}
+
+	// Cancelling the caller's context ends a blocked wait with that error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancelled := blockOn(ctx, collectivePhaseAllGather, 1)
+	registered(collectivePhaseAllGather, 1)
+	cancel()
+	if r := <-cancelled; !errors.Is(r.err, context.Canceled) {
+		t.Fatalf("cancelled wait returned %v, want context.Canceled", r.err)
+	}
+
+	// An abort closes the session's aborted channel and ends a blocked wait.
+	aborted := blockOn(context.Background(), collectivePhaseAllGather, 2)
+	registered(collectivePhaseAllGather, 2)
+	session.mu.Lock()
+	session.failure = &RingFailure{Rank: 1, Reason: reasonUnreachable, err: ErrAborted}
+	close(session.aborted)
+	session.mu.Unlock()
+	r := <-aborted
+	var failure *RingFailure
+	if !errors.As(r.err, &failure) || failure.Rank != 1 {
+		t.Fatalf("aborted wait returned %v, want the recorded RingFailure", r.err)
+	}
+	// Once failed, a fresh wait reports the failure immediately.
+	if _, err := session.wait(context.Background(), time.Second, collectivePhaseAllGather, 3); !errors.As(err, &failure) {
+		t.Fatalf("wait after failure returned %v", err)
+	}
+}

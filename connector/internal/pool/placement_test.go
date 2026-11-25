@@ -90,3 +90,67 @@ func TestMemoryOverflowSafetyAndUnsupportedModel(t *testing.T) {
 		t.Fatal("arbitrary model accepted")
 	}
 }
+
+func TestPlanMLXRefusesScopeDuplicatesAndNegativeMemory(t *testing.T) {
+	req := placementFixture()
+	req.AllowCloudFallback = true
+	if _, err := PlanMLX(req); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("cloud fallback accepted: %v", err)
+	}
+	req = placementFixture()
+	req.Scope = "wan"
+	if _, err := PlanMLX(req); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("non-private scope accepted: %v", err)
+	}
+	req = placementFixture()
+	req.Scope = "private-lan"
+	if _, err := PlanMLX(req); err != nil {
+		t.Fatalf("explicit private-lan scope refused: %v", err)
+	}
+	req = placementFixture()
+	req.Peers[1].DeviceID = req.Peers[0].DeviceID
+	if _, err := PlanMLX(req); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("duplicate device id accepted: %v", err)
+	}
+	req = placementFixture()
+	req.Peers[1].DeviceID = "not-a-digest"
+	if _, err := PlanMLX(req); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("malformed device id accepted: %v", err)
+	}
+	req = placementFixture()
+	req.Peers[0].MeasuredHeadroom = -1
+	if _, err := PlanMLX(req); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("negative headroom accepted: %v", err)
+	}
+}
+
+func TestPlanMLXSkipsIneligiblePeersAndBestFits(t *testing.T) {
+	req := placementFixture()
+	req.Peers[1].Trusted = false
+	if _, err := PlanMLX(req); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("untrusted peer counted: %v", err)
+	}
+	req = placementFixture()
+	req.Peers[1].Available = false
+	if _, err := PlanMLX(req); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("unavailable peer counted: %v", err)
+	}
+	// Largest rank (900) must land on the 1000-byte peer, the smaller (700) on
+	// the 800-byte peer, regardless of peer or rank order in the request.
+	req = placementFixture()
+	plan, err := PlanMLX(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Ranks[0].DeviceID != req.Peers[0].DeviceID || plan.Ranks[1].DeviceID != req.Peers[1].DeviceID {
+		t.Fatalf("unexpected placement %+v", plan.Ranks)
+	}
+	req.Peers[0], req.Peers[1] = req.Peers[1], req.Peers[0]
+	plan2, err := PlanMLX(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan2.Ranks[0].DeviceID != plan.Ranks[0].DeviceID || plan2.Ranks[1].DeviceID != plan.Ranks[1].DeviceID {
+		t.Fatalf("placement depends on peer order: %+v vs %+v", plan.Ranks, plan2.Ranks)
+	}
+}

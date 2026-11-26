@@ -524,6 +524,28 @@ func TestUDPExchangerRequiresDeadline(t *testing.T) {
 	}
 }
 
+// A server string that is not host:port, or whose port is out of range, must
+// be refused as ErrInvalid before any packet is sent. Numeric hosts keep this
+// offline.
+func TestUDPExchangerRejectsMalformedServer(t *testing.T) {
+	e, err := NewUDPExchanger()
+	if err != nil {
+		t.Skipf("UDP socket unavailable in this sandbox: %v", err)
+	}
+	defer e.Close()
+	request, _, err := NewBindingRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, server := range []string{"127.0.0.1", "127.0.0.1:0", "127.0.0.1:70000", "127.0.0.1:notaport"} {
+		if _, err := e.Exchange(ctx, server, request); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Exchange(%q) err = %v, want ErrInvalid", server, err)
+		}
+	}
+}
+
 func TestDefaultServersAreTwoDistinctFreeHosts(t *testing.T) {
 	if len(DefaultServers) < 2 {
 		t.Fatal("at least two servers are required or the mapping is always unknown")

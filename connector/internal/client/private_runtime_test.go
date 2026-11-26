@@ -125,3 +125,29 @@ func TestRuntimeLifecycleUsesExpectedRoutes(t *testing.T) {
 		t.Errorf("requests = %v, want %v", got, want)
 	}
 }
+
+func TestOpenRuntimePostsToHostRouteAndCloseRejectsBadIdentityBeforeNetwork(t *testing.T) {
+	var got []string
+	c := runtimeClient(t, func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+	ctx := context.Background()
+	if _, err := c.OpenRuntime(ctx, "h"); err != nil {
+		t.Errorf("open: %v", err)
+	}
+	if err := c.CloseRuntime(ctx, "h", "a/b"); err == nil {
+		t.Error("close accepted an invalid session")
+	}
+	if err := c.CloseRuntime(ctx, "bad/host", "s"); err == nil {
+		t.Error("close accepted an invalid host")
+	}
+	if _, err := c.RenewRuntime(ctx, "h", ""); err != nil {
+		t.Errorf("renew with empty session targets the open route: %v", err)
+	}
+	want := "POST /api/hosts/h/inference-runtime|POST /api/hosts/h/inference-runtime"
+	if strings.Join(got, "|") != want {
+		t.Errorf("requests = %v, want %s", got, want)
+	}
+}

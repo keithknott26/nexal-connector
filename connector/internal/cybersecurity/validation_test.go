@@ -263,3 +263,25 @@ func TestValidationNetworkTargetAndDeadlineBoundaries(t *testing.T) {
 		t.Fatal("accepted non-canonical nonce")
 	}
 }
+
+func TestValidateLocalSurfacesReportFailureAndStillCleansUp(t *testing.T) {
+	dir := t.TempDir()
+	reportErr := errors.New("evidence store down")
+	executed, reason, err := (Canary{Directory: dir}).ValidateLocal(context.Background(), validationGrant(),
+		func(context.Context, Event) error { return reportErr })
+	if !executed || reason != "completed" || !errors.Is(err, reportErr) {
+		t.Fatalf("executed=%v reason=%q err=%v, want executed completed with report error", executed, reason, err)
+	}
+	if files, _ := os.ReadDir(dir); len(files) != 0 {
+		t.Fatalf("artifact left behind after report failure: %d entries", len(files))
+	}
+}
+
+func TestValidateLocalFailsWhenDirectoryMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent")
+	executed, reason, err := (Canary{Directory: missing}).ValidateLocal(context.Background(), validationGrant(),
+		func(context.Context, Event) error { t.Fatal("must not report"); return nil })
+	if executed || reason != "execution_failed" || err == nil {
+		t.Fatalf("executed=%v reason=%q err=%v", executed, reason, err)
+	}
+}

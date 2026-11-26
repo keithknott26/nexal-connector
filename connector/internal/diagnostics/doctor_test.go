@@ -440,3 +440,20 @@ func TestInspectPublicEntryPointOfflineWithMissingConfig(t *testing.T) {
 		t.Fatal("report leaked the configuration path")
 	}
 }
+
+func TestInspectWithRealDependenciesStaysOfflineAndBlocksMissingConfig(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "absent.json")
+	report := Inspect(context.Background(), missing, false, false)
+	if got := status(t, report, "configuration"); got != "blocked" {
+		t.Fatalf("configuration = %q, want blocked", got)
+	}
+	if got := status(t, report, "telemetry"); got != "not_checked" {
+		t.Fatalf("telemetry = %q, want not_checked without --probe", got)
+	}
+	if report.NetworkContacted || report.CredentialsRead || report.ConfigurationModified || report.ProductionReady || report.NAT != nil {
+		t.Fatalf("offline inspect made claims it must not: %+v", report)
+	}
+	if _, err := os.Stat(missing); err == nil {
+		t.Fatal("Inspect created the config file")
+	}
+}

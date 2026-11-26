@@ -176,3 +176,15 @@ func TestPeerNamesSetHandlesCRLFAndOverlongInput(t *testing.T) {
 		t.Fatalf("overlong name: err=%v api=%+v output=%q", err, api, out.String())
 	}
 }
+
+type failingPeerNamesWriter struct{ err error }
+
+func (w failingPeerNamesWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestPeerNamesPropagatesOutputWriteError(t *testing.T) {
+	boom := errors.New("stdout closed")
+	err := runPeerNames(context.Background(), &fakePeerNames{}, "host_1", "list", "", strings.NewReader(""), failingPeerNamesWriter{err: boom})
+	if !errors.Is(err, boom) {
+		t.Fatalf("write failure must be returned, got %v", err)
+	}
+}

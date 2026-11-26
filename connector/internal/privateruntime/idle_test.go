@@ -72,3 +72,61 @@ func TestUnassignedRuntimeBacksOffAndLogsOnce(t *testing.T) {
 		t.Fatalf("logged %d times, want once:\n%s", got, logs.String())
 	}
 }
+
+// scriptedAPI answers OpenRuntime from a fixed list (nil delegates to the fake
+// session); an exhausted script returns "unassigned" so the loop keeps idling.
+type scriptedAPI struct {
+	fake
+	script []error
+}
+
+func (s *scriptedAPI) OpenRuntime(ctx context.Context, host string) (Session, error) {
+	if len(s.script) == 0 {
+		return Session{}, coded{"runtime_unassigned"}
+	}
+	next := s.script[0]
+	s.script = s.script[1:]
+	if next != nil {
+		return Session{}, next
+	}
+	return s.fake.OpenRuntime(ctx, host)
+}
+
+// stopOnRecovery records messages and cancels the loop once recovery is logged.
+type stopOnRecovery struct {
+	slog.Handler
+	cancel context.CancelFunc
+	msgs   *[]string
+}
+
+func (h stopOnRecovery) Handle(ctx context.Context, r slog.Record) error {
+	*h.msgs = append(*h.msgs, r.Message)
+	if strings.Contains(r.Message, "available again") {
+		h.cancel()
+	}
+	return nil
+}
+
+func TestRunLoopLogsIdleOnceThenRecovery(t *testing.T) {
+	f, m := fixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.API = &scriptedAPI{fake: *f, script: []error{coded{"runtime_unassigned"}, coded{"runtime_unassigned"}, nil}}
+	var msgs []string
+	m.IdleRetry = time.Millisecond
+	m.Run = func(context.Context, string, string) error { return nil }
+	m.Logger = slog.New(stopOnRecovery{Handler: slog.NewTextHandler(io.Discard, nil), cancel: cancel, msgs: &msgs})
+	done := make(chan error, 1)
+	go func() { done <- m.RunLoop(ctx) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunLoop = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunLoop did not stop after recovery was logged")
+	}
+	if len(msgs) != 2 || !strings.Contains(msgs[0], "no private runtime assigned") || !strings.Contains(msgs[1], "available again") {
+		t.Fatalf("log messages = %q, want one idle notice then one recovery", msgs)
+	}
+}

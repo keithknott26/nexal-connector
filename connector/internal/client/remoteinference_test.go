@@ -195,3 +195,26 @@ func TestRemoteInferenceListAndCreateRejectBadHostIDAndSurfaceServerErrors(t *te
 		t.Fatal("valid host id never reached the server")
 	}
 }
+
+func TestInferenceGatewayRejectsBadHostIDAndSurfacesServerErrors(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL, "tok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if st, err := c.InferenceGateway(ctx, "bad id/../x", true); err == nil || st != nil {
+		t.Fatalf("bad host ID accepted: %+v %v", st, err)
+	}
+	if hits != 0 {
+		t.Fatalf("request sent for a bad host ID (%d hits)", hits)
+	}
+	if st, err := c.InferenceGateway(ctx, "host_1", true); err == nil || st != nil {
+		t.Fatalf("server error not surfaced: %+v %v", st, err)
+	}
+}

@@ -285,3 +285,13 @@ func TestValidateLocalFailsWhenDirectoryMissing(t *testing.T) {
 		t.Fatalf("executed=%v reason=%q err=%v", executed, reason, err)
 	}
 }
+
+func TestValidateLocalReportsCancelledForCancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	executed, reason, err := Canary{Directory: t.TempDir()}.ValidateLocal(ctx, validationGrant(), func(context.Context, Event) error { called = true; return nil })
+	if executed || reason != "cancelled" || !errors.Is(err, context.Canceled) || called {
+		t.Fatalf("executed=%v reason=%q err=%v reported=%v", executed, reason, err, called)
+	}
+}

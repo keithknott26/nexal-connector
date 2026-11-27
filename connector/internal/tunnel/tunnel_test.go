@@ -152,3 +152,21 @@ func TestEffectiveConfigCatchall(t *testing.T) {
 		t.Fatal("token leaked to effective config")
 	}
 }
+
+func TestLimitWriterRejectsOverflowWithoutPartialWrite(t *testing.T) {
+	w := &limitWriter{limit: 5}
+	if n, err := w.Write([]byte("abc")); n != 3 || err != nil {
+		t.Fatalf("within limit: n=%d err=%v", n, err)
+	}
+	// 3 + 3 > 5: refuse the whole chunk rather than truncating it.
+	if n, err := w.Write([]byte("def")); n != 0 || err == nil {
+		t.Fatalf("over limit: n=%d err=%v, want 0 and an error", n, err)
+	}
+	if string(w.data) != "abc" {
+		t.Fatalf("buffer mutated by rejected write: %q", w.data)
+	}
+	// Exactly reaching the limit is allowed.
+	if n, err := w.Write([]byte("de")); n != 2 || err != nil {
+		t.Fatalf("at limit: n=%d err=%v", n, err)
+	}
+}

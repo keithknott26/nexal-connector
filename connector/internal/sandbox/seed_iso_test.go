@@ -73,3 +73,33 @@ func TestRemoveSeedEmptyArgsAreNoOpAndISOFailureIsReportedAfterDirRemoval(t *tes
 		t.Error("seed dir must still be removed when the image removal fails")
 	}
 }
+
+func TestWriteSeedDirFailsWhenTargetIsAFileAndOmitsNetworkConfigWithoutLAN(t *testing.T) {
+	base := t.TempDir()
+	blocker := filepath.Join(base, "seed")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSeedDir(blocker, testSeed()); err == nil {
+		t.Fatal("expected error when seed dir path is a regular file")
+	}
+	if b, err := os.ReadFile(blocker); err != nil || string(b) != "not a dir" {
+		t.Fatalf("existing file must be untouched: %q %v", b, err)
+	}
+
+	dir := filepath.Join(base, "plain")
+	p := testSeed()
+	p.LANMAC = ""
+	if err := WriteSeedDir(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "network-config")); !os.IsNotExist(err) {
+		t.Fatalf("network-config must not be written without a LAN MAC, stat err=%v", err)
+	}
+	for _, name := range []string{"user-data", "meta-data"} {
+		fi, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: err=%v mode=%v, want 0600", name, err, fi)
+		}
+	}
+}

@@ -278,3 +278,19 @@ func TestAPIRejectsNonloopbackEvenAuthenticated(t *testing.T) {
 		t.Fatal("remote API accepted")
 	}
 }
+
+// Run must refuse to start background loops for a host that is not enrolled:
+// without a coordinator client or with a malformed host ID it returns at once.
+func TestRunRefusesUnenrolledHost(t *testing.T) {
+	a, _ := testAgent(t)
+	a.api = nil
+	if err := a.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "enroll") {
+		t.Fatalf("nil API: want enroll error, got %v", err)
+	}
+	b, f := testAgent(t)
+	b.cfg.HostID = "not a valid id!"
+	b.api = f
+	if err := b.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "enroll") {
+		t.Fatalf("invalid host ID: want enroll error, got %v", err)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"os"
 	"strings"
 	"testing"
 
@@ -80,5 +81,23 @@ func TestLanShareStatusAndSetupReportMissingMacOSTools(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "requires macOS") {
 			t.Fatalf("%s: want a requires-macOS error, got %v", sub, err)
 		}
+	}
+}
+
+func TestLanShareDestinationDefaultsHostToThisMacLocalName(t *testing.T) {
+	name, err := os.Hostname()
+	if err != nil || name == "" {
+		t.Skip("no hostname available")
+	}
+	want := "smb://keith@" + hostLocal(name) + "/Backups"
+	var cmdErr error
+	out := captureStdout(t, func() {
+		cmdErr = lanShareCommand(context.Background(), []string{"destination", "--name", "Backups", "--user", "keith"})
+	})
+	if cmdErr != nil {
+		t.Skipf("hostname %q not usable in a destination URL: %v", name, cmdErr)
+	}
+	if !strings.Contains(out, `"destination":"`+want+`"`) {
+		t.Fatalf("destination did not default to this Mac's hostname: want %s in %s", want, out)
 	}
 }

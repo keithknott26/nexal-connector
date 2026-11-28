@@ -503,3 +503,28 @@ func TestNewPeerClientRejectsBadObjectLimit(t *testing.T) {
 		t.Fatalf("port 70000: got %v", err)
 	}
 }
+
+func TestPeerDownloadRejectsInvalidRequestsBeforeAnyNetworkCall(t *testing.T) {
+	registry := NewRegistry(nil)
+	a := enrolledIdentity(t, registry)
+	b := enrolledIdentity(t, registry)
+	// Nothing listens here: every case below must fail before a connection is attempted.
+	client := testPeerClient(t, a, registry, DeviceID(b.PublicKey), "https://127.0.0.1:1")
+	dest := testStore(t, 1<<20, nil)
+	good := digestOf([]byte("x"))
+	cases := map[string]struct {
+		dest *Store
+		blob Blob
+	}{
+		"nil destination":  {nil, Blob{good, 1, Protected}},
+		"unknown class":    {dest, Blob{good, 1, StorageClass("bogus")}},
+		"malformed digest": {dest, Blob{"not-a-digest", 1, Protected}},
+		"negative size":    {dest, Blob{good, -1, Protected}},
+		"over client max":  {dest, Blob{good, client.max + 1, Protected}},
+	}
+	for name, tc := range cases {
+		if err := client.Download(context.Background(), tc.dest, tc.blob); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%s: err = %v, want ErrInvalid", name, err)
+		}
+	}
+}

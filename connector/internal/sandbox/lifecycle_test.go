@@ -618,6 +618,43 @@ func TestRunPowerReportsAwakeAndStopsOnCancel(t *testing.T) {
 	}
 }
 
+// A closed lid on the first tick announces sleep: the first hosting report
+// must carry awake=false, not the optimistic default.
+func TestRunPowerReportsAsleepWhenLidIsClosed(t *testing.T) {
+	m := newTestManager(t, &fakeHyp{}, &fakeDev{}, &fakeGuest{})
+	m.opts.Lid = func(context.Context) (bool, bool) { return true, true }
+	pc := &powerCoord{}
+	m.mu.Lock()
+	m.coord = pc
+	m.hostID = "h1"
+	m.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.RunPower(ctx); close(done) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		pc.mu.Lock()
+		called, awake := pc.called, pc.awake
+		pc.mu.Unlock()
+		if called {
+			if awake {
+				t.Fatal("closed lid must be reported as awake=false")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("RunPower never reported hosting state")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func TestStopStartRefusalBranches(t *testing.T) {
 	m := newTestManager(t, &fakeHyp{}, nil, nil)
 	put(m, &record{ID: "dev1", State: StateRunning, Kind: SandboxDevcontainer, Lifecycle: LifecyclePersistent})

@@ -91,4 +91,22 @@ func TestCLI(t *testing.T) {
 			t.Fatalf("exit %d stdout %q", code, out)
 		}
 	})
+	t.Run("invalid source-id is rejected without echoing it", func(t *testing.T) {
+		out, errOut, code := run(t, bin, alert+"\n", "-source-id", "../secret/path", "-rules-version", "public_1")
+		if code != 1 || out != "" || strings.Contains(errOut, "secret") {
+			t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+		}
+	})
+	t.Run("invalid rules-version is rejected without echoing it", func(t *testing.T) {
+		out, errOut, code := run(t, bin, alert+"\n", "-source-id", "capture_1", "-rules-version", "bad version!")
+		if code != 1 || out != "" || strings.Contains(errOut, "bad version") {
+			t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+		}
+	})
+	t.Run("events before a bad line are still emitted", func(t *testing.T) {
+		out, errOut, code := run(t, bin, alert+"\nnot json\n", flags...)
+		if code != 1 || strings.Count(out, "\n") != 1 || !strings.Contains(errOut, "line 2") {
+			t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+		}
+	})
 }

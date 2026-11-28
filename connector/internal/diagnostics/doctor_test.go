@@ -457,3 +457,33 @@ func TestInspectWithRealDependenciesStaysOfflineAndBlocksMissingConfig(t *testin
 		t.Fatal("Inspect created the config file")
 	}
 }
+
+func TestDoctorTreatsTelemetryFromAnExpiredProbeAsUntrustworthy(t *testing.T) {
+	good := agent.Telemetry{Known: true, TotalMemoryBytes: 24 << 30, AvailableMemoryBytes: 8 << 30, IdleSeconds: 300}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := deps(validConfig(), good)
+	// The probe returns plausible readings but only after its deadline context
+	// is done; those readings must not be trusted.
+	d.probe = func(context.Context) agent.Telemetry {
+		cancel()
+		return good
+	}
+	report := inspect(ctx, "ignored", true, false, d)
+	if status(t, report, "telemetry") != "warning" {
+		t.Fatal("telemetry from an expired probe must be a warning")
+	}
+	for _, c := range report.Checks {
+		if c.ID == "memory_headroom" || c.ID == "owner_idle" {
+			t.Fatalf("admission check %s must not be emitted from expired telemetry", c.ID)
+		}
+	}
+}
+
+func TestDoctorRejectsTelemetryBelowMinimumMemory(t *testing.T) {
+	tiny := agent.Telemetry{Known: true, TotalMemoryBytes: 256<<20 - 1, AvailableMemoryBytes: 128 << 20, IdleSeconds: 300}
+	report := inspect(context.Background(), "ignored", true, false, deps(validConfig(), tiny))
+	if status(t, report, "telemetry") != "warning" {
+		t.Fatal("total memory below 256 MiB must not be trusted")
+	}
+}
